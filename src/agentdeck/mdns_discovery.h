@@ -21,7 +21,7 @@ struct BridgeInfo {
 };
 
 // Start the mDNS responder + begin browsing. Returns false if responder failed.
-bool mdnsInit();
+bool mdnsInit(const char* hostName);
 
 // Non-blocking poll. Returns true (and fills out) when a bridge is discovered.
 bool mdnsPoll(BridgeInfo& out);

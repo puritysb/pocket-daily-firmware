@@ -2,8 +2,8 @@
 //
 // AgentLog — AgentDeck integration diagnostic logger.
 //
-// This unit (XTeink X3) has dead USB-data, so there is NO serial console for
-// debugging the AgentDeck networking work. The only durable debug channel is a
+// Some XTeink units have unreliable USB data, so there may be no serial console
+// for debugging the AgentDeck networking work. The durable debug channel is a
 // file on the microSD card. AgentLog tees every line to BOTH the normal serial
 // LOG_INF (harmless, useful on units that do have USB) and to /agentdeck.log on
 // the SD card so post-mortem inspection is possible by pulling the card.

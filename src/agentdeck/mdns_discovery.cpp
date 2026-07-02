@@ -109,12 +109,14 @@ bool selectBridge(mdns_result_t* results) {
 }
 }  // namespace
 
-bool mdnsInit() {
-  if (!MDNS.begin("agentdeck-x3")) {
+bool mdnsInit(const char* hostName) {
+  const char* safeHostName = (hostName && hostName[0]) ? hostName : "agentdeck-xteink";
+  if (!MDNS.begin(safeHostName)) {
     AgentLog::line("MDNS", "responder failed to start");
     return false;
   }
-  AgentLog::line("MDNS", "browsing for %s%s", AgentDeckCfg::MDNS_SERVICE, AgentDeckCfg::MDNS_PROTO);
+  AgentLog::line("MDNS", "host=%s browsing for %s%s", safeHostName, AgentDeckCfg::MDNS_SERVICE,
+                 AgentDeckCfg::MDNS_PROTO);
   memset(&discovered, 0, sizeof(discovered));
   return true;
 }

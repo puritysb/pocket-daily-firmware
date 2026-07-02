@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "HalGPIO.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "agent/AgentLog.h"
@@ -170,6 +171,12 @@ const char* agentStateLabel(AgentState s) {
       return "Disconnected";
   }
 }
+
+const char* deviceModelName() { return gpio.deviceIsX3() ? "XTeink X3" : "XTeink X4"; }
+
+const char* deviceModelSlug() { return gpio.deviceIsX3() ? "xteink-x3" : "xteink-x4"; }
+
+const char* mdnsHostName() { return gpio.deviceIsX3() ? "agentdeck-x3" : "agentdeck-x4"; }
 }  // namespace
 
 void AgentDashboardActivity::onEnter() {
@@ -228,7 +235,7 @@ void AgentDashboardActivity::startNetworking() {
   // the system time in the background; until it lands, formatResetRemaining() just
   // omits the countdown. UTC offset 0 so mktime() reads the ISO "…Z" resetsAt right.
   configTime(0, 0, "pool.ntp.org", "time.google.com");
-  AgentDeck::Net::mdnsInit();
+  AgentDeck::Net::mdnsInit(mdnsHostName());
   // Bind the UDP discovery socket. WiFi may not be up yet on the first call —
   // udpInit() is idempotent, so the loop() also retries each tick while we
   // remain in Discovering. This handles the race where mdnsInit() runs before
@@ -239,18 +246,20 @@ void AgentDashboardActivity::startNetworking() {
 }
 
 void AgentDashboardActivity::sendClientRegister() {
-  // {"type":"client_register","clientType":"eink-device","clientLabel":"XTeink X3",
-  //  "devices":[{"id":"<mac>","name":"XTeink X3","family":"eink","columns":W,"rows":H}]}
+  // {"type":"client_register","clientType":"eink-device","clientLabel":"XTeink X4",
+  //  "devices":[{"id":"<mac>","name":"XTeink X4","family":"xteink-x4","columns":W,"rows":H}]}
   String mac = WiFi.macAddress();
+  const char* modelName = deviceModelName();
+  const char* modelSlug = deviceModelSlug();
   char buf[256];
   int n = snprintf(buf, sizeof(buf),
                    "{\"type\":\"client_register\",\"clientType\":\"eink-device\","
-                   "\"clientLabel\":\"XTeink X3\",\"devices\":[{\"id\":\"%s\","
-                   "\"name\":\"XTeink X3\",\"family\":\"eink\",\"columns\":%d,\"rows\":%d}]}",
-                   mac.c_str(), renderer.getScreenWidth(), renderer.getScreenHeight());
+                   "\"clientLabel\":\"%s\",\"devices\":[{\"id\":\"%s\","
+                   "\"name\":\"%s\",\"family\":\"%s\",\"columns\":%d,\"rows\":%d}]}",
+                   modelName, mac.c_str(), modelName, modelSlug, renderer.getScreenWidth(), renderer.getScreenHeight());
   if (n > 0 && (size_t)n < sizeof(buf)) {
     AgentDeck::Net::wsSend(buf);
-    AgentLog::line("AGENT", "client_register sent (mac=%s)", mac.c_str());
+    AgentLog::line("AGENT", "client_register sent model=%s family=%s mac=%s", modelName, modelSlug, mac.c_str());
   }
   // Ask for initial usage; the daemon pushes state_update/sessions_list on connect.
   AgentDeck::Net::wsSend("{\"type\":\"query_usage\"}");
