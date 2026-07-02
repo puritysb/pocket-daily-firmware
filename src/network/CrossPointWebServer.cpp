@@ -1103,10 +1103,11 @@ void CrossPointWebServer::handleSettingsPage() const {
 }
 
 void CrossPointWebServer::handleGetSettings() const {
-  // Pass the SD font registry so the fontFamily setting's enumStringValues
-  // includes SD-resident families — otherwise the web API only exposes the
-  // three built-in fonts.
-  const auto& settings = getSettingsList(&sdFontSystem.registry());
+  // Stream the static base settings list directly. Building the registry-aware
+  // copy allocates a large vector, which can collide with File Transfer upload
+  // buffers on no-PSRAM ESP32-C3 boards.
+  const auto& settings = getBaseSettingsList();
+  const auto& fontRegistry = sdFontSystem.registry();
 
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
@@ -1135,13 +1136,32 @@ void CrossPointWebServer::handleGetSettings() const {
       }
       case SettingType::ENUM: {
         doc["type"] = "enum";
-        if (s.valuePtr) {
+        const bool isFontFamily = s.key && strcmp(s.key, "fontFamily") == 0;
+        if (isFontFamily && fontRegistry.getFamilyCount() > 0) {
+          uint8_t value = SETTINGS.fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? SETTINGS.fontFamily : 0;
+          if (SETTINGS.sdFontFamilyName[0] != '\0') {
+            const auto& families = fontRegistry.getFamilies();
+            for (int i = 0; i < static_cast<int>(families.size()); i++) {
+              if (families[i].name == SETTINGS.sdFontFamilyName) {
+                value = static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i);
+                break;
+              }
+            }
+          }
+          doc["value"] = static_cast<int>(value);
+        } else if (s.valuePtr) {
           doc["value"] = static_cast<int>(SETTINGS.*(s.valuePtr));
         } else if (s.valueGetter) {
           doc["value"] = static_cast<int>(s.valueGetter());
         }
         JsonArray options = doc["options"].to<JsonArray>();
-        if (!s.enumStringValues.empty()) {
+        if (isFontFamily && fontRegistry.getFamilyCount() > 0) {
+          options.add(I18N.get(StrId::STR_NOTO_SERIF));
+          options.add(I18N.get(StrId::STR_NOTO_SANS));
+          for (const auto& family : fontRegistry.getFamilies()) {
+            options.add(family.name);
+          }
+        } else if (!s.enumStringValues.empty()) {
           for (const auto& opt : s.enumStringValues) {
             options.add(opt);
           }

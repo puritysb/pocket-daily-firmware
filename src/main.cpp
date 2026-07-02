@@ -25,6 +25,7 @@
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
+#include "SettingsList.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
@@ -352,6 +353,13 @@ void setup() {
   OPDS_STORE.loadFromFile();
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
+
+  // Prewarm the static settings metadata before the web server/File Transfer
+  // path starts. The first construction allocates many small vectors; doing it
+  // lazily inside GET /api/settings can collide with upload buffers on X4/C3.
+  const auto& baseSettings = getBaseSettingsList();
+  LOG_DBG("MAIN", "Prewarmed %u base settings (free heap: %u)", (unsigned)baseSettings.size(),
+          (unsigned)ESP.getFreeHeap());
 
   const auto wakeupReason = gpio.getWakeupReason();
   switch (wakeupReason) {

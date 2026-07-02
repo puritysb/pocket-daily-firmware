@@ -95,11 +95,10 @@ inline SettingInfo buildFontFamilySetting(const SdCardFontRegistry* registry) {
 // ACTION-type entries and entries without a key are device-only.
 //
 // The static list is constructed exactly once (master's optimization, #1086 +
-// #1636) so the per-entry SettingInfo cost is paid once. When an
-// SdCardFontRegistry is supplied AND has SD card fonts installed, the
-// font-family entry is replaced in a per-call copy with a registry-aware
-// version. Callers without SD fonts pay only a vector copy.
-inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* registry = nullptr) {
+// #1636) so the per-entry SettingInfo cost is paid once. GET /api/settings can
+// stream this base list directly to avoid allocating a large vector while the
+// file-transfer page is also holding upload buffers.
+inline const std::vector<SettingInfo>& getBaseSettingsList() {
   static const std::vector<SettingInfo> baseList = [] {
     std::vector<SettingInfo> v = {
         // --- Display ---
@@ -278,7 +277,15 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
     return v;
   }();
 
-  std::vector<SettingInfo> v = baseList;
+  return baseList;
+}
+
+// When an SdCardFontRegistry is supplied AND has SD card fonts installed, the
+// font-family entry is replaced in a per-call copy with a registry-aware
+// version. This is still used by device UI and POST /api/settings, where the
+// dynamic setter is needed.
+inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* registry = nullptr) {
+  std::vector<SettingInfo> v = getBaseSettingsList();
   if (registry && registry->getFamilyCount() > 0) {
     auto it = std::find_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_FONT_FAMILY; });
     if (it != v.end()) {
