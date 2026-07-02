@@ -28,8 +28,9 @@ AgentState parseState(const char* s) {
   return AgentState::DISCONNECTED;
 }
 
-// Reusable JSON document — sized elastically by ArduinoJson 7.
+// Reusable JSON documents — sized elastically by ArduinoJson 7.
 JsonDocument doc;
+JsonDocument filter;
 
 void copyStr(char* dst, size_t cap, const char* src) {
   if (!src) {
@@ -107,17 +108,14 @@ void handleUsageUpdate(JsonObject& obj) {
   g_state.dataReceived = true;
 
   // -1.0f sentinel for "no data" (0 is a valid value).
-  g_state.fiveHourPercent =
-      obj["fiveHourPercent"].is<float>() ? obj["fiveHourPercent"].as<float>() : -1.0f;
-  g_state.sevenDayPercent =
-      obj["sevenDayPercent"].is<float>() ? obj["sevenDayPercent"].as<float>() : -1.0f;
+  g_state.fiveHourPercent = obj["fiveHourPercent"].is<float>() ? obj["fiveHourPercent"].as<float>() : -1.0f;
+  g_state.sevenDayPercent = obj["sevenDayPercent"].is<float>() ? obj["sevenDayPercent"].as<float>() : -1.0f;
 
   g_state.inputTokens = obj["inputTokens"] | g_state.inputTokens;
   g_state.outputTokens = obj["outputTokens"] | g_state.outputTokens;
   g_state.toolCalls = obj["toolCalls"] | g_state.toolCalls;
   g_state.sessionDurationSec = obj["sessionDurationSec"] | g_state.sessionDurationSec;
-  g_state.estimatedCostUsd =
-      obj["estimatedCostUsd"].is<float>() ? obj["estimatedCostUsd"].as<float>() : -1.0f;
+  g_state.estimatedCostUsd = obj["estimatedCostUsd"].is<float>() ? obj["estimatedCostUsd"].as<float>() : -1.0f;
   g_state.usageStale = obj["usageStale"] | false;
 
   // Reset times: only the already-formatted "Xh Ym" form is kept. The original
@@ -245,6 +243,79 @@ void handleTimelineHistory(JsonObject& obj) {
   unlockState();
 }
 
+void configureJsonFilter() {
+  filter.clear();
+
+  filter["type"] = true;
+
+  // state_update
+  filter["state"] = true;
+  filter["projectName"] = true;
+  filter["modelName"] = true;
+  filter["agentType"] = true;
+  filter["effortLevel"] = true;
+  filter["sessionId"] = true;
+  filter["focusedSessionId"] = true;
+  filter["requestId"] = true;
+  filter["navigable"] = true;
+  filter["cursorIndex"] = true;
+  filter["currentTool"] = true;
+  filter["toolInput"] = true;
+  filter["question"] = true;
+  filter["promptType"] = true;
+  filter["options"][0]["label"] = true;
+  filter["options"][0]["index"] = true;
+  filter["options"][0]["recommended"] = true;
+  filter["options"][0]["selected"] = true;
+  filter["options"][0]["shortcut"] = true;
+
+  // usage_update
+  filter["fiveHourPercent"] = true;
+  filter["sevenDayPercent"] = true;
+  filter["inputTokens"] = true;
+  filter["outputTokens"] = true;
+  filter["toolCalls"] = true;
+  filter["sessionDurationSec"] = true;
+  filter["estimatedCostUsd"] = true;
+  filter["usageStale"] = true;
+  filter["fiveHourResetsAt"] = true;
+  filter["sevenDayResetsAt"] = true;
+  filter["codexPlanType"] = true;
+  filter["codexSubscriptionActiveUntil"] = true;
+  filter["antigravityStatus"]["planName"] = true;
+  filter["antigravityStatus"]["availableCredits"] = true;
+  filter["codexRateLimits"]["primary"]["usedPercent"] = true;
+  filter["codexRateLimits"]["primary"]["resetsAt"] = true;
+  filter["codexRateLimits"]["secondary"]["usedPercent"] = true;
+  filter["codexRateLimits"]["secondary"]["resetsAt"] = true;
+  filter["codexRateLimits"]["planType"] = true;
+
+  // sessions_list
+  filter["sessions"][0]["id"] = true;
+  filter["sessions"][0]["projectName"] = true;
+  filter["sessions"][0]["modelName"] = true;
+  filter["sessions"][0]["agentType"] = true;
+  filter["sessions"][0]["state"] = true;
+  filter["sessions"][0]["port"] = true;
+  filter["sessions"][0]["alive"] = true;
+  filter["sessions"][0]["currentTool"] = true;
+  filter["sessions"][0]["elapsedSec"] = true;
+  filter["sessions"][0]["question"] = true;
+  filter["sessions"][0]["promptType"] = true;
+  filter["sessions"][0]["requestId"] = true;
+  filter["sessions"][0]["activity"] = true;
+  filter["sessions"][0]["currentTask"] = true;
+  filter["sessions"][0]["goal"] = true;
+
+  // timeline_event / timeline_history
+  filter["entry"]["sessionId"] = true;
+  filter["entry"]["raw"] = true;
+  filter["entry"]["type"] = true;
+  filter["entries"][0]["sessionId"] = true;
+  filter["entries"][0]["raw"] = true;
+  filter["entries"][0]["type"] = true;
+}
+
 }  // namespace
 
 namespace Protocol {
@@ -254,13 +325,14 @@ void parseMessage(const char* json, size_t length) {
   // unbounded sessions_list would otherwise grow the doc until it
   // fragments/exhausts the heap on this no-PSRAM C3.
   if (length > AgentDeckCfg::PROTOCOL_MAX_MSG_BYTES) {
-    AgentLog::line("PROTO", "frame too large: %u bytes (max %u) — dropped",
-                   (unsigned)length, (unsigned)AgentDeckCfg::PROTOCOL_MAX_MSG_BYTES);
+    AgentLog::line("PROTO", "frame too large: %u bytes (max %u) — dropped", (unsigned)length,
+                   (unsigned)AgentDeckCfg::PROTOCOL_MAX_MSG_BYTES);
     return;
   }
 
+  configureJsonFilter();
   doc.clear();
-  DeserializationError err = deserializeJson(doc, json, length);
+  DeserializationError err = deserializeJson(doc, json, length, DeserializationOption::Filter(filter));
   if (err) {
     AgentLog::line("PROTO", "JSON error: %s", err.c_str());
     return;

@@ -40,11 +40,11 @@ constexpr uint32_t WS_PONG_TIMEOUT_MS = 30000;
 // ===== mDNS discovery cadence =====
 constexpr uint32_t MDNS_QUERY_INTERVAL_MS = 5000;
 
-// Upper bound on an inbound bridge frame fed to the elastic ArduinoJson
-// JsonDocument. A frame past this is dropped before parsing so a malformed or
-// oversized sessions_list can't grow the doc until it fragments/exhausts the
-// heap. The ESP32-C3 has no PSRAM, so use the tight no-PSRAM cap.
-constexpr size_t PROTOCOL_MAX_MSG_BYTES = 8192;
+// Upper bound on an inbound bridge frame. The protocol parser uses an
+// ArduinoJson filter so large daemon snapshots can be scanned without retaining
+// unused fields (modelCatalog, moduleHealth, long timeline extras), but this cap
+// still rejects malformed/unbounded frames before they churn the no-PSRAM C3.
+constexpr size_t PROTOCOL_MAX_MSG_BYTES = 32768;
 
 // Session cap — matches the trimmed DashboardState::sessions[] size and the
 // daemon's SERIAL_SESSIONS_CAP. Keep in sync with agent_state.h.
