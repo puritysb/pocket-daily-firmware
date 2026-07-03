@@ -168,8 +168,56 @@ const char* agentStateLabel(AgentState s) {
       return "Reviewing diff";
     case AgentState::DISCONNECTED:
     default:
-      return "Disconnected";
+      // Same vocabulary as stateBadge()'s "OFFLINE" — the Overview badge and
+      // the Detail meta line describe the same wire state with one word.
+      return "Offline";
   }
+}
+
+// Prose form of a raw wire state for the Detail meta line — same vocabulary as
+// stateBadge() so Overview ("WORKING") and Detail ("Working") never diverge.
+// Unknown strings pass through unchanged (already-pretty fallback labels).
+const char* wireStateLabel(const char* s) {
+  if (!s || !s[0]) return "";
+  if (strcmp(s, "processing") == 0) return "Working";
+  if (strcmp(s, "idle") == 0) return "Idle";
+  if (strcmp(s, "awaiting_permission") == 0) return "Awaiting permission";
+  if (strcmp(s, "awaiting_option") == 0) return "Choosing option";
+  if (strcmp(s, "awaiting_diff") == 0) return "Reviewing diff";
+  if (strcmp(s, "disconnected") == 0) return "Offline";
+  return s;
+}
+
+// E-ink timeline marker per entry type. Vocabulary is the shared SSOT
+// EINK_ICON_GLYPHS in AgentDeck shared/src/timeline-icons.ts (mirrored on the
+// Android e-ink surface) — keep in lockstep when the icon-key mapping changes.
+const char* timelineGlyph(const char* type) {
+  if (!type || !type[0]) return "[..]";
+  if (strcmp(type, "chat_start") == 0) return "[..]";
+  if (strcmp(type, "chat_end") == 0 || strcmp(type, "chat_response") == 0 || strcmp(type, "model_response") == 0 ||
+      strcmp(type, "tool_resolved") == 0 || strcmp(type, "task_milestone") == 0 || strcmp(type, "eval_result") == 0)
+    return "[OK]";
+  if (strcmp(type, "task_start") == 0 || strcmp(type, "task_end") == 0) return "[==]";
+  if (strcmp(type, "error") == 0) return "[!!]";
+  if (strcmp(type, "tool_request") == 0) return "[??]";
+  if (strcmp(type, "tool_exec") == 0) return "[T ]";
+  if (strcmp(type, "model_call") == 0) return "[M ]";
+  if (strcmp(type, "user_action") == 0) return "[U ]";
+  if (strcmp(type, "scheduled") == 0) return "[S ]";
+  if (strcmp(type, "memory_recall") == 0) return "[~ ]";
+  return "[..]";
+}
+
+// Compact age ("now" / "5m" / "2h" / "3d") from seconds. Buffer >= 6 bytes.
+void formatAge(uint32_t ageSec, char* out, size_t n) {
+  if (ageSec < 60)
+    snprintf(out, n, "now");
+  else if (ageSec < 3600)
+    snprintf(out, n, "%um", (unsigned)(ageSec / 60));
+  else if (ageSec < 86400)
+    snprintf(out, n, "%uh", (unsigned)(ageSec / 3600));
+  else
+    snprintf(out, n, "%ud", (unsigned)(ageSec / 86400));
 }
 
 const char* deviceModelName() { return gpio.deviceIsX3() ? "XTeink X3" : "XTeink X4"; }
@@ -932,6 +980,9 @@ void AgentDashboardActivity::renderDetail() {
   uint32_t elapsed = 0;
   bool found = false;
   char tlText[AgentDeck::DashboardState::TIMELINE_CAP][96];
+  char tlType[AgentDeck::DashboardState::TIMELINE_CAP][20];
+  uint32_t tlTs[AgentDeck::DashboardState::TIMELINE_CAP];
+  uint32_t epochSec = 0, epochAtMs = 0;
   int tlCount = 0;
   AgentDeck::lockState();
   const auto& s = AgentDeck::g_state;
@@ -957,19 +1008,44 @@ void AgentDashboardActivity::renderDetail() {
     found = s.dataReceived;
   }
   // Matching timeline entries, oldest → newest (ring: head is oldest when full).
+  // Unattributed rows (empty sid) are global error/scheduled signals — show them
+  // in every session's Detail, matching the other dashboard surfaces.
   const int cnt = s.timelineCount;
   for (int k = 0; k < cnt; k++) {
     int idx = (s.timelineCount < AgentDeck::DashboardState::TIMELINE_CAP)
                   ? k
                   : (s.timelineHead + k) % AgentDeck::DashboardState::TIMELINE_CAP;
     const AgentDeck::TimelineItem& t = s.timeline[idx];
-    if (selectedSid[0] && strcmp(rawSid(t.sid), rawSid(selectedSid)) != 0) continue;
+    if (t.sid[0] != '\0' && selectedSid[0] && strcmp(rawSid(t.sid), rawSid(selectedSid)) != 0) continue;
     if (t.text[0] == '\0') continue;
     strncpy(tlText[tlCount], t.text, sizeof(tlText[0]) - 1);
     tlText[tlCount][sizeof(tlText[0]) - 1] = '\0';
+    strncpy(tlType[tlCount], t.type, sizeof(tlType[0]) - 1);
+    tlType[tlCount][sizeof(tlType[0]) - 1] = '\0';
+    tlTs[tlCount] = t.tsSec;
     if (++tlCount >= AgentDeck::DashboardState::TIMELINE_CAP) break;
   }
+  epochSec = s.daemonEpochSec;
+  epochAtMs = s.daemonEpochAtMs;
   AgentDeck::unlockState();
+
+  // Turn grouping (mirrors the Apple/Android projection): a chat_start whose
+  // turn has already completed is redundant with its chat_end/chat_response
+  // row — showing both renders every turn twice. Keep only in-flight starts.
+  bool tlShow[AgentDeck::DashboardState::TIMELINE_CAP];
+  for (int k = 0; k < tlCount; k++) {
+    tlShow[k] = true;
+    if (strcmp(tlType[k], "chat_start") != 0) continue;
+    for (int j = k + 1; j < tlCount; j++) {
+      if (strcmp(tlType[j], "chat_end") == 0 || strcmp(tlType[j], "chat_response") == 0) {
+        tlShow[k] = false;
+        break;
+      }
+    }
+  }
+
+  // Estimated "daemon now" for per-entry ages (no RTC on this device).
+  const uint32_t daemonNowSec = epochSec ? epochSec + (millis() - epochAtMs) / 1000UL : 0;
 
   renderer.clearScreen();
   drawBrandedHeader("Session", nullptr);
@@ -1001,7 +1077,7 @@ void AgentDashboardActivity::renderDetail() {
   char meta[140];
   int mo = snprintf(meta, sizeof(meta), "%s", agentType[0] ? agentType : "agent");
   if (model[0]) mo += snprintf(meta + mo, sizeof(meta) - mo, " \xC2\xB7 %s", model);
-  if (state[0]) mo += snprintf(meta + mo, sizeof(meta) - mo, " \xC2\xB7 %s", state);
+  if (state[0]) mo += snprintf(meta + mo, sizeof(meta) - mo, " \xC2\xB7 %s", wireStateLabel(state));
   if (elapsed > 0) {
     if (elapsed >= 60)
       mo += snprintf(meta + mo, sizeof(meta) - mo, " \xC2\xB7 %um", (unsigned)(elapsed / 60));
@@ -1068,16 +1144,31 @@ void AgentDashboardActivity::renderDetail() {
   lines.reserve(maxLines);
   lineFonts.reserve(maxLines);
   lineOpt.reserve(maxLines);
+  int tlShown = 0;
   for (int k = 0; k < tlCount; k++) {  // chronological
+    if (!tlShow[k]) continue;
+    // Row prefix: "[OK] 5m " — type marker (shared EINK_ICON_GLYPHS vocabulary)
+    // plus the entry age from the daemon-clock estimate. Continuation lines
+    // indent under the text.
+    char pfx[16];
+    if (daemonNowSec && tlTs[k] && daemonNowSec >= tlTs[k]) {
+      char age[8];
+      formatAge(daemonNowSec - tlTs[k], age, sizeof(age));
+      snprintf(pfx, sizeof(pfx), "%s %s ", timelineGlyph(tlType[k]), age);
+    } else {
+      snprintf(pfx, sizeof(pfx), "%s ", timelineGlyph(tlType[k]));
+    }
     const int fid = fontForText(SMALL_FONT_ID, tlText[k]);
-    auto wrapped = renderer.wrappedText(fid, tlText[k], w - pad * 2 - 10, 3);
+    const int pfxW = renderer.getTextWidth(SMALL_FONT_ID, pfx);
+    auto wrapped = renderer.wrappedText(fid, tlText[k], w - pad * 2 - pfxW, 3);
     for (size_t li = 0; li < wrapped.size(); li++) {
-      lines.push_back((li == 0 ? "\xE2\x80\xA2 " : "  ") + wrapped[li]);
+      lines.push_back((li == 0 ? std::string(pfx) : std::string("   ")) + wrapped[li]);
       lineFonts.push_back(fid);
       lineOpt.push_back(-1);
     }
+    tlShown++;
   }
-  if (tlCount == 0) {
+  if (tlShown == 0) {
     lines.push_back("No recent activity yet\xE2\x80\xA6");
     lineFonts.push_back(SMALL_FONT_ID);
     lineOpt.push_back(-1);

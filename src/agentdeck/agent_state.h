@@ -17,10 +17,11 @@
 // g_state is read on the render task and written on the main (loop) task, so it
 // is still guarded by g_stateMutex exactly like the original.
 //
-#include <cstdint>
-#include <cstring>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+
+#include <cstdint>
+#include <cstring>
 
 #include "agentdeck_config.h"
 
@@ -54,7 +55,7 @@ struct SessionInfo {
   char id[64];
   char projectName[40];
   char modelName[32];
-  char agentType[16];   // "claude-code" / "openclaw" / "codex-cli" / "codex-app" / "opencode"
+  char agentType[16];  // "claude-code" / "openclaw" / "codex-cli" / "codex-app" / "opencode"
   char state[20];
   uint16_t port;
   bool alive;
@@ -64,16 +65,17 @@ struct SessionInfo {
   uint32_t elapsedSec;
   char question[160];
   char promptType[20];
-  char requestId[40];   // gated PreToolUse request id → reply permission_decision (M3)
-  char activity[80];    // daemon-synthesized "what it's doing" one-liner (falls back to currentTool)
+  char requestId[40];  // gated PreToolUse request id → reply permission_decision (M3)
+  char activity[80];   // daemon-synthesized "what it's doing" one-liner (falls back to currentTool)
 };
 
 // One timeline event for the per-session Detail view. Populated from the daemon's
 // `timeline_event` broadcast (live, forward-only). Bounded ring on a no-PSRAM C3.
 struct TimelineItem {
-  char sid[64];   // entry.sessionId
-  char text[96];  // entry.raw (human line)
-  char type[20];  // entry.type (chat_start / tool_request / …)
+  char sid[64];    // entry.sessionId ("" = unattributed error/scheduled row)
+  char text[96];   // entry.raw (human line)
+  char type[20];   // entry.type (chat_start / tool_request / …)
+  uint32_t tsSec;  // entry.ts / 1000 (daemon epoch seconds); 0 = unknown
 };
 
 // ===== Main dashboard state (trimmed) =====
@@ -83,7 +85,7 @@ struct DashboardState {
   char bridgeIp[16];
   uint16_t bridgePort;
   char authToken[40];
-  uint32_t lastMessageMs;   // millis() of last JSON received; 0 = never
+  uint32_t lastMessageMs;  // millis() of last JSON received; 0 = never
 
   // Agent (from state_update)
   AgentState state;
@@ -91,9 +93,9 @@ struct DashboardState {
   char modelName[32];
   char agentType[16];
   char effortLevel[8];
-  char sessionId[64];        // focused session id (M3 routing) — full/prefixed UUID
+  char sessionId[64];  // focused session id (M3 routing) — full/prefixed UUID
   char focusedSessionId[64];
-  char requestId[40];        // gated request id for the focused awaiting prompt (M3)
+  char requestId[40];  // gated request id for the focused awaiting prompt (M3)
   bool navigable;
   int cursorIndex;
 
@@ -108,9 +110,9 @@ struct DashboardState {
   uint8_t optionCount;
 
   // Usage (from usage_update)
-  float fiveHourPercent;     // 0-100, -1 = no data
-  float sevenDayPercent;     // 0-100, -1 = no data
-  char fiveHourReset[32];    // ISO-8601 resetsAt (verbatim; firmware formats remaining)
+  float fiveHourPercent;   // 0-100, -1 = no data
+  float sevenDayPercent;   // 0-100, -1 = no data
+  char fiveHourReset[32];  // ISO-8601 resetsAt (verbatim; firmware formats remaining)
   char sevenDayReset[32];
   uint32_t inputTokens;
   uint32_t outputTokens;
@@ -121,10 +123,10 @@ struct DashboardState {
 
   // Other-agent subscription / limit summary (best-effort; only present when the
   // hub supplies it). Empty string / -1 = no data.
-  char codexPlan[16];          // ChatGPT/Codex plan ("plus", "pro", …)
-  char codexActiveUntil[32];   // ISO date the ChatGPT subscription is active until
-  char antigravityPlan[24];    // Antigravity plan name
-  float antigravityCredits;    // Antigravity available credits, -1 = no data
+  char codexPlan[16];         // ChatGPT/Codex plan ("plus", "pro", …)
+  char codexActiveUntil[32];  // ISO date the ChatGPT subscription is active until
+  char antigravityPlan[24];   // Antigravity plan name
+  float antigravityCredits;   // Antigravity available credits, -1 = no data
   // Codex rate-limit windows (usage_update.codexRateLimits). primary ≈ 5h,
   // secondary ≈ 7d. -1 = no data.
   float codexFivePercent;
@@ -138,12 +140,18 @@ struct DashboardState {
   uint8_t timelineCount;  // number of valid entries (<= TIMELINE_CAP)
   uint8_t timelineHead;   // next write index (oldest = head when full)
 
+  // Daemon wall-clock estimate (the C3 has no RTC/NTP). Newest entry.ts seen
+  // and the local millis() at which it arrived; render derives per-entry age as
+  // (daemonEpochSec + elapsed-since-arrival) - entry.tsSec. 0 = no sample yet.
+  uint32_t daemonEpochSec;
+  uint32_t daemonEpochAtMs;
+
   // Sessions (multi-agent). Cap matches AgentDeckCfg::SESSIONS_CAP.
   SessionInfo sessions[AgentDeckCfg::SESSIONS_CAP];
   uint8_t sessionCount;
 
   // Data reception tracking
-  bool dataReceived;         // true after first state_update / sessions_list
+  bool dataReceived;  // true after first state_update / sessions_list
 
   void reset() {
     memset(this, 0, sizeof(DashboardState));
@@ -193,6 +201,8 @@ struct DashboardState {
     codexSevenReset[0] = '\0';
     timelineCount = 0;
     timelineHead = 0;
+    daemonEpochSec = 0;
+    daemonEpochAtMs = 0;
     usageStale = true;
     dataReceived = false;
   }

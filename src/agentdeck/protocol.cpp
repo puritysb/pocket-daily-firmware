@@ -199,24 +199,45 @@ void handleSessionsList(JsonObject& obj) {
   unlockState();
 }
 
+// Unattributed rows (no sessionId) are kept only when they carry a global
+// signal every surface shows: errors and scheduled work. Everything else
+// belongs to a session detail and is meaningless without one.
+bool keepUnattributedTimelineType(const char* etype) {
+  return strcmp(etype, "error") == 0 || strcmp(etype, "scheduled") == 0;
+}
+
+// Append one entry into the bounded ring + refresh the daemon-clock estimate.
+// Caller holds g_stateMutex.
+void appendTimelineLocked(const char* sid, const char* raw, const char* etype, uint32_t tsSec) {
+  TimelineItem& it = g_state.timeline[g_state.timelineHead];
+  copyStr(it.sid, sizeof(it.sid), sid);
+  copyStr(it.text, sizeof(it.text), raw);
+  copyStr(it.type, sizeof(it.type), etype);
+  it.tsSec = tsSec;
+  g_state.timelineHead = (g_state.timelineHead + 1) % DashboardState::TIMELINE_CAP;
+  if (g_state.timelineCount < DashboardState::TIMELINE_CAP) g_state.timelineCount++;
+  // The device has no RTC/NTP: track the newest daemon timestamp and when it
+  // arrived so the render task can derive per-entry ages.
+  if (tsSec > g_state.daemonEpochSec) {
+    g_state.daemonEpochSec = tsSec;
+    g_state.daemonEpochAtMs = millis();
+  }
+}
+
 // Live, forward-only timeline ring (per-session Detail view). Appends entry.raw
 // keyed by sessionId; the ring overwrites oldest when full.
 void handleTimelineEvent(JsonObject& obj) {
   JsonObject e = obj["entry"].as<JsonObject>();
   if (e.isNull()) return;
   const char* sid = e["sessionId"] | "";
-  if (sid[0] == '\0') return;  // unattributed → nothing to show in a session detail
   const char* raw = e["raw"] | "";
   const char* etype = e["type"] | "";
   if (raw[0] == '\0' && etype[0] == '\0') return;
+  if (sid[0] == '\0' && !keepUnattributedTimelineType(etype)) return;
+  const uint32_t tsSec = static_cast<uint32_t>((e["ts"] | (uint64_t)0) / 1000ULL);
 
   lockState();
-  TimelineItem& it = g_state.timeline[g_state.timelineHead];
-  copyStr(it.sid, sizeof(it.sid), sid);
-  copyStr(it.text, sizeof(it.text), raw);
-  copyStr(it.type, sizeof(it.type), etype);
-  g_state.timelineHead = (g_state.timelineHead + 1) % DashboardState::TIMELINE_CAP;
-  if (g_state.timelineCount < DashboardState::TIMELINE_CAP) g_state.timelineCount++;
+  appendTimelineLocked(sid, raw, etype, tsSec);
   unlockState();
 }
 
@@ -231,14 +252,10 @@ void handleTimelineHistory(JsonObject& obj) {
     const char* sid = e["sessionId"] | "";
     const char* raw = e["raw"] | "";
     const char* etype = e["type"] | "";
-    if (sid[0] == '\0') continue;
     if (raw[0] == '\0' && etype[0] == '\0') continue;
-    TimelineItem& it = g_state.timeline[g_state.timelineHead];
-    copyStr(it.sid, sizeof(it.sid), sid);
-    copyStr(it.text, sizeof(it.text), raw);
-    copyStr(it.type, sizeof(it.type), etype);
-    g_state.timelineHead = (g_state.timelineHead + 1) % DashboardState::TIMELINE_CAP;
-    if (g_state.timelineCount < DashboardState::TIMELINE_CAP) g_state.timelineCount++;
+    if (sid[0] == '\0' && !keepUnattributedTimelineType(etype)) continue;
+    const uint32_t tsSec = static_cast<uint32_t>((e["ts"] | (uint64_t)0) / 1000ULL);
+    appendTimelineLocked(sid, raw, etype, tsSec);
   }
   unlockState();
 }
@@ -311,9 +328,11 @@ void configureJsonFilter() {
   filter["entry"]["sessionId"] = true;
   filter["entry"]["raw"] = true;
   filter["entry"]["type"] = true;
+  filter["entry"]["ts"] = true;
   filter["entries"][0]["sessionId"] = true;
   filter["entries"][0]["raw"] = true;
   filter["entries"][0]["type"] = true;
+  filter["entries"][0]["ts"] = true;
 }
 
 }  // namespace
