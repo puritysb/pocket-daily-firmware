@@ -13,6 +13,39 @@
 #include "Epub/parsers/TocNavParser.h"
 #include "Epub/parsers/TocNcxParser.h"
 
+namespace {
+
+bool containsReplacementChar(const std::string& text) {
+  return text.find("\xEF\xBF\xBD") != std::string::npos;
+}
+
+std::string titleFromPath(const std::string& path) {
+  const size_t slash = path.find_last_of('/');
+  std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+  const size_t dot = name.find_last_of('.');
+  if (dot != std::string::npos) {
+    name.erase(dot);
+  }
+  return name;
+}
+
+void sanitizeMetadataStrings(BookMetadataCache::BookMetadata& metadata, const std::string& path) {
+  if (metadata.title.empty() || containsReplacementChar(metadata.title)) {
+    const std::string fallback = titleFromPath(path);
+    if (!fallback.empty()) {
+      LOG_DBG("EBP", "Replacing invalid metadata title \"%s\" with filename \"%s\"", metadata.title.c_str(),
+              fallback.c_str());
+      metadata.title = fallback;
+    }
+  }
+  if (containsReplacementChar(metadata.author)) {
+    LOG_DBG("EBP", "Clearing invalid metadata author \"%s\"", metadata.author.c_str());
+    metadata.author.clear();
+  }
+}
+
+}  // namespace
+
 bool Epub::findContentOpfFile(std::string* contentOpfFile) const {
   const auto containerPath = "META-INF/container.xml";
   size_t containerSize;
@@ -80,6 +113,7 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, const 
   bookMetadata.author = opfParser.author;
   bookMetadata.language = opfParser.language;
   bookMetadata.coverItemHref = opfParser.coverItemHref;
+  sanitizeMetadataStrings(bookMetadata, filepath);
 
   // Guide-based cover fallback: if no cover found via metadata/properties,
   // try extracting the image reference from the guide's cover page XHTML
@@ -372,6 +406,7 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
 
   // Try to load existing cache first
   if (bookMetadataCache->load()) {
+    sanitizeMetadataStrings(bookMetadataCache->coreMetadata, filepath);
     if (!skipLoadingCss) {
       // Rebuild CSS cache when missing or when cache version changed (loadFromCache removes stale file)
       if (!cssParser->hasCache() || !cssParser->loadFromCache()) {

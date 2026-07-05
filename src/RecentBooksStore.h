@@ -68,6 +68,7 @@ class RecentBooksStore {
 
  private:
   bool loadFromBinaryFile();
+  bool sanitizeLoadedBooks();
 };
 
 // Helper macro to access recent books store

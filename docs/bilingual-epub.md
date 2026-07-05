@@ -5,6 +5,15 @@ in-reader toggle that swaps between **Both**, **Original only**, and **Translati
 without leaving the page. This document defines the marker classes the parser looks for
 and how the book_translator pipeline (or any other producer) should emit them.
 
+> **This is a two-sided producer↔consumer contract.** This doc is the **SSOT** for the
+> bilingual-EPUB format. The **consumer** is this firmware's reader/parser
+> (`ChapterHtmlSlimParser`, `Section`); the **producer** is the `book_translator` pipeline
+> (its own repo, split out of OpenClaw), whose `assemble.py` emits `cp-original`/`cp-translation`
+> EPUBs against this spec. A change here is **breaking on both sides** — update the parser and
+> the pipeline together, and bump `SECTION_FILE_VERSION` (kept in this fork's reserved
+> **128–255** range, never onto upstream's line) so stale section caches invalidate. The
+> upstream-contribution branch `bilingual-toggle-upstream` uses `upstream + 1` instead.
+
 ## Marker classes
 
 The parser (`lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp`) inspects the `class`

@@ -51,7 +51,9 @@ class FontCacheManager {
 
   enum class ScanMode : uint8_t { None, Scanning };
   ScanMode scanMode_ = ScanMode::None;
-  std::string scanText_;
-  uint32_t scanStyleCounts_[4] = {};
-  int scanFontId_ = -1;
+  struct ScanBucket {
+    std::string text;
+    uint32_t styleCounts[4] = {};
+  };
+  std::map<int, ScanBucket> scanBuckets_;
 };

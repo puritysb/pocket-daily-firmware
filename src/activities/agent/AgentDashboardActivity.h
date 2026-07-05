@@ -106,6 +106,10 @@ class AgentDashboardActivity final : public Activity {
   // is a flaky/duplicate daemon — re-resolve via mDNS to try a different advertiser
   // instead of hammering it (multiple daemons on the LAN round-robin otherwise).
   static constexpr uint32_t kHealthyUptimeMs = 8000;
+  // Discovery normally resolves quickly via UDP beacons or mDNS. After this
+  // window, keep scanning but switch the screen from generic "searching" to an
+  // actionable "AgentDeck not running" state.
+  static constexpr uint32_t kDiscoveryNotFoundMs = 12000;
   // Interval between state-signature checks; caps repaints at ≤2/sec and keeps the
   // skipLoopDelay() loop from re-hashing all shared state under g_stateMutex every spin.
   static constexpr uint32_t kSigCheckIntervalMs = 500;
@@ -117,6 +121,8 @@ class AgentDashboardActivity final : public Activity {
   uint32_t lastSignature = 0;
   uint32_t lastSigCheckMs = 0;
   uint32_t connectStartMs = 0;
+  uint32_t discoveryStartMs = 0;
+  bool discoveryNoticeShown = false;
   uint32_t lastConnectedMs = 0;  // when we last reached Connected (for healthy-vs-flaky drop)
 
   // Screen navigation

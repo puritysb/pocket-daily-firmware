@@ -656,6 +656,33 @@ AgentDeck): split it cleanly so the PR contains **zero AgentDeck files**:
      --base master --head <your-user>:feature/<name>-upstream --draft
    ```
 
+### Downstream: AgentDeck-integration port sync
+
+There is a **second** sync axis, symmetric to the upstream one above. `src/agentdeck/*` is
+a **hand-port of AgentDeck's ESP32 wire contract**, not first-party AgentDeck code — the
+files carry a *"TRIMMED port of AgentDeck esp32/src/net/protocol"* header. The contract they
+port from is the SSOT in the **AgentDeck** repo:
+- Human-readable client subset: `AgentDeck/docs/esp32-client-contract.md`
+- Machine-readable source: `AgentDeck/shared/src/protocol.ts`
+  (`DISPLAY_FORWARDED_EVENTS` / `SERIAL_FORWARDED_EVENTS`) and the `sendDeviceInfo` field
+  list in `AgentDeck/esp32/src/net/protocol.cpp`.
+
+There is **no C/C++ codegen** for this contract (quicktype emits Swift/Kotlin only; unusable
+on the no-PSRAM C3 with ArduinoJson). So drift is a discipline, not a build gate:
+
+**When AgentDeck bumps the contract** (adds/renames a forwarded event, or changes a
+`device_info` field), re-port the affected files here:
+`src/agentdeck/{ws_client,protocol,mdns_discovery,udp_discovery,agent_state,agent_commands}.*`.
+Keep the port minimal — a display-only client may accept-and-ignore any inbound `type` it
+doesn't render.
+
+**Known M3 gap:** the port stubs `device_info` (and `display_state` / `set_orientation`).
+Because the X3 never emits `device_info`, the daemon can't register it and it stays
+dashboard-invisible. **Implementing `device_info` emission** (with a canonical `board` wire
+string registered in AgentDeck's `ESP32_OTA_BOARDS`) is the single change that promotes the
+X3 to a first-class device. This is the fork-side half; the AgentDeck side of this discipline
+lives in `AgentDeck/docs/esp32.md § Downstream client port sync`.
+
 ### Git Operation Rules
 
 1. **Never assume branch names**:

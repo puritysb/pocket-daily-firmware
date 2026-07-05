@@ -14,6 +14,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookCacheUtils.h"
+#include "util/UiCjkFont.h"
 
 namespace {
 constexpr unsigned long GO_HOME_MS = 1000;
@@ -397,7 +398,8 @@ void FileBrowserActivity::render(RenderLock&&) {
       snprintf(leftTruncBuf, sizeof(leftTruncBuf), "%s%s", ellipsis, p);
       pathDisplay = leftTruncBuf;
     }
-    renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, pathY, pathDisplay);
+    const int pathFont = UiCjkFont::fontForText(renderer, pathDisplay, SMALL_FONT_ID);
+    renderer.drawText(pathFont, metrics.contentSidePadding, pathY, pathDisplay);
   }
 
   // Help text

@@ -15,6 +15,7 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <builtinFonts/all.h>
+#include <esp_ota_ops.h>
 
 #include <cstring>
 
@@ -333,6 +334,9 @@ void setup() {
   halClock.begin();
 
   LOG_INF("MAIN", "Hardware detect: %s", gpio.deviceIsX3() ? "X3" : "X4");
+  if (const esp_partition_t* runningPartition = esp_ota_get_running_partition()) {
+    LOG_INF("MAIN", "Running partition: %s @ 0x%06x", runningPartition->label, runningPartition->address);
+  }
 
   // SD Card Initialization
   // We need 6 open files concurrently when parsing a new chapter

@@ -8,6 +8,7 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/UiCjkFont.h"
 
 void EpubReaderFootnotesActivity::onEnter() {
   Activity::onEnter();
@@ -101,7 +102,9 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
     if (label.empty()) {
       label = tr(STR_LINK);
     }
-    renderer.drawText(UI_10_FONT_ID, marginLeft, y + 4, label.c_str(), !isSelected);
+    const int labelFont = UiCjkFont::fontForText(renderer, label.c_str(), UI_10_FONT_ID);
+    const auto truncatedLabel = renderer.truncatedText(labelFont, label.c_str(), contentWidth - 40);
+    renderer.drawText(labelFont, marginLeft, y + 4, truncatedLabel.c_str(), !isSelected);
   }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "", "");

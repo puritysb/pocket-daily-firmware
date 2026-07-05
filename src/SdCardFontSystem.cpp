@@ -103,6 +103,39 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {
   }
 }
 
+void SdCardFontSystem::releaseLoaded(GfxRenderer& renderer) {
+  if (!manager_.currentFamilyName().empty()) {
+    LOG_DBG("SDFS", "Releasing loaded SD font family: %s", manager_.currentFamilyName().c_str());
+    manager_.unloadAll(renderer);
+  }
+}
+
+int SdCardFontSystem::ensureUiFamilyLoaded(GfxRenderer& renderer, const char* familyName) {
+  if (!familyName || !familyName[0]) return 0;
+
+  refreshIfDirty();
+
+  static constexpr uint8_t uiFontSizeEnum = CrossPointSettings::SMALL;
+  const auto* family = registry_.findFamily(familyName);
+  if (!family) return 0;
+
+  const auto* selected = family->findClosestReaderSize(uiFontSizeEnum);
+  const uint8_t wantedPt = selected ? selected->pointSize : 0;
+  if (manager_.currentFamilyName() == familyName && manager_.currentPointSize() == wantedPt) {
+    return manager_.getFontId(familyName);
+  }
+
+  if (!manager_.currentFamilyName().empty()) {
+    manager_.unloadAll(renderer);
+  }
+
+  if (!manager_.loadFamily(*family, renderer, uiFontSizeEnum)) {
+    LOG_ERR("SDFS", "Failed to load UI SD font family: %s", familyName);
+    return 0;
+  }
+  return manager_.getFontId(familyName);
+}
+
 int SdCardFontSystem::resolveFontId(const char* familyName, uint8_t /*fontSizeEnum*/) const {
   // The manager loads exactly one size (closest to SETTINGS.fontSize), so the
   // enum is implicit — always return the single loaded font ID for this family.

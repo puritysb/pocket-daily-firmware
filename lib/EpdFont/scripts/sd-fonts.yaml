@@ -42,6 +42,49 @@ families:
     # bold/italic not distributed by RIDI; reader falls back to regular for
     # those styles (typical for Korean body text anyway).
 
+  - name: NotoSansKR
+    description: "Noto Sans KR - readable Korean sans-serif with Hangul and Hanja coverage (Google, OFL)"
+    intervals: reading,hangul,cjk
+    sizes: [12, 14, 16, 18]
+    styles:
+      regular: {url: "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf", variable: {wght: 500}}
+      bold:    {url: "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf", variable: {wght: 700}}
+
+  - name: Pretendard
+    description: "Pretendard - compact Korean UI/body sans-serif (OFL)"
+    intervals: reading,hangul
+    sizes: [12, 14, 16, 18]
+    styles:
+      regular: {url: "https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/public/static/Pretendard-Medium.otf"}
+      bold:    {url: "https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/public/static/Pretendard-Bold.otf"}
+
+  # ── Japanese ────────────────────────────────────────────────────────────
+
+  - name: BIZUDGothic
+    description: "BIZ UD Gothic - Japanese universal-design gothic for small displays (Morisawa/Google, OFL)"
+    intervals: reading,cjk
+    sizes: [12, 14, 16, 18]
+    styles:
+      regular: {url: "https://raw.githubusercontent.com/google/fonts/main/ofl/bizudgothic/BIZUDGothic-Regular.ttf"}
+      bold:    {url: "https://raw.githubusercontent.com/google/fonts/main/ofl/bizudgothic/BIZUDGothic-Bold.ttf"}
+
+  - name: IPAexMincho
+    description: "IPAex Mincho — readable Japanese Mincho font (IPA, IPA Font License)"
+    intervals: reading,cjk
+    sizes: [12, 14, 16, 18]
+    styles:
+      regular:
+        url: "https://moji.or.jp/wp-content/ipafont/IPAexfont/ipaexm00401.zip"
+        archive_path: "ipaexm00401/ipaexm.ttf"
+
+  - name: NotoSansJP
+    description: "Noto Sans JP - broad Japanese gothic fallback with Kanji coverage (Google, OFL)"
+    intervals: reading,cjk
+    sizes: [12, 14, 16, 18]
+    styles:
+      regular: {url: "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf", variable: {wght: 500}}
+      bold:    {url: "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf", variable: {wght: 700}}
+
   # ── Serif ──────────────────────────────────────────────────────────────
 
   - name: Literata
@@ -176,6 +219,16 @@ families:
       italic:     {url: "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter-Italic%5Bopsz%2Cwght%5D.ttf", variable: {wght: 400, opsz: 14}}
       bolditalic: {url: "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter-Italic%5Bopsz%2Cwght%5D.ttf", variable: {wght: 700, opsz: 14}}
 
+  - name: Chivo
+    description: "Chivo - sturdy sans-serif for high-contrast small-screen Latin reading (OFL)"
+    intervals: latin-ext,greek,cyrillic
+    sizes: [12, 14, 16, 18]
+    styles:
+      regular:    {url: "https://raw.githubusercontent.com/google/fonts/main/ofl/chivo/Chivo%5Bwght%5D.ttf", variable: {wght: 500}}
+      bold:       {url: "https://raw.githubusercontent.com/google/fonts/main/ofl/chivo/Chivo%5Bwght%5D.ttf", variable: {wght: 700}}
+      italic:     {url: "https://raw.githubusercontent.com/google/fonts/main/ofl/chivo/Chivo-Italic%5Bwght%5D.ttf", variable: {wght: 500}}
+      bolditalic: {url: "https://raw.githubusercontent.com/google/fonts/main/ofl/chivo/Chivo-Italic%5Bwght%5D.ttf", variable: {wght: 700}}
+
   - name: SourceSans3
     description: "Adobe humanist sans-serif (Latin, Greek, Cyrillic)"
     intervals: latin-ext,greek,cyrillic
@@ -261,4 +314,3 @@ families:
       bold:       {url: "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/main/fonts/ttf/LexicaUltralegible-Bold.ttf"}
       italic:     {url: "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/main/fonts/ttf/LexicaUltralegible-Italic.ttf"}
       bolditalic: {url: "https://raw.githubusercontent.com/jacobxperez/lexica-ultralegible/main/fonts/ttf/LexicaUltralegible-BoldItalic.ttf"}
-

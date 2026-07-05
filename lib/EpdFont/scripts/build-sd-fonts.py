@@ -34,6 +34,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+import zipfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -62,6 +63,30 @@ def download_font(url: str, dest: Path) -> Path:
         raise RuntimeError(f"Failed to download {url}: {e}") from e
     size_kb = dest.stat().st_size / 1024
     print(f"  Downloaded {dest.name} ({size_kb:.0f} KB)")
+    return dest
+
+
+def extract_archive_font(archive_path: Path, member_name: str, dest: Path) -> Path:
+    """Extract a font file from a downloaded zip archive into the cache."""
+    if dest.exists():
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(archive_path) as zf:
+            if member_name not in zf.namelist():
+                raise RuntimeError(f"{member_name} not found in {archive_path.name}")
+            tmp_fd, tmp_name = tempfile.mkstemp(suffix=dest.suffix, dir=dest.parent)
+            os.close(tmp_fd)
+            tmp_path = Path(tmp_name)
+            try:
+                with zf.open(member_name) as src, tmp_path.open("wb") as out:
+                    shutil.copyfileobj(src, out)
+                tmp_path.replace(dest)
+            except Exception:
+                tmp_path.unlink(missing_ok=True)
+                raise
+    except zipfile.BadZipFile as e:
+        raise RuntimeError(f"Failed to read archive {archive_path}: {e}") from e
     return dest
 
 
@@ -138,6 +163,10 @@ def resolve_font_path(style_spec: dict, family_name: str, style_name: str) -> Pa
         filename = url.rsplit("/", 1)[-1]
         dest = DOWNLOAD_DIR / family_name / filename
         resolved = download_font(url, dest)
+        if "archive_path" in style_spec:
+            archive_member = style_spec["archive_path"]
+            archive_filename = Path(archive_member).name
+            resolved = extract_archive_font(resolved, archive_member, DOWNLOAD_DIR / family_name / archive_filename)
     else:
         raise ValueError(f"{family_name}/{style_name}: must have 'path' or 'url'")
 
@@ -379,13 +408,9 @@ def main():
     print(f"\n=== Building {len(families)} families ({max_workers} parallel jobs, timeout {timeout}s) ===\n")
 
     failed = []
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(build_family, family, output_base, verbose, timeout): family["name"]
-            for family in families
-        }
-        for future in as_completed(futures):
-            name, success, message = future.result()
+    if max_workers <= 1 or len(families) <= 1:
+        results = [build_family(family, output_base, verbose, timeout) for family in families]
+        for name, success, message in results:
             if success:
                 # Count output files
                 family_dir = output_base / name
@@ -395,6 +420,23 @@ def main():
             else:
                 print(f"  FAILED: {name}: {message}", file=sys.stderr)
                 failed.append(name)
+    else:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(build_family, family, output_base, verbose, timeout): family["name"]
+                for family in families
+            }
+            for future in as_completed(futures):
+                name, success, message = future.result()
+                if success:
+                    # Count output files
+                    family_dir = output_base / name
+                    count = len(list(family_dir.glob("*.cpfont")))
+                    size = sum(f.stat().st_size for f in family_dir.glob("*.cpfont"))
+                    print(f"  OK: {name} ({count} files, {size / 1024 / 1024:.1f} MB)")
+                else:
+                    print(f"  FAILED: {name}: {message}", file=sys.stderr)
+                    failed.append(name)
 
     # Summary
     print("\n=== Summary ===\n")

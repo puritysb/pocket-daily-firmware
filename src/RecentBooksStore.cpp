@@ -17,6 +17,36 @@ constexpr char RECENT_BOOKS_FILE_BIN[] = "/.crosspoint/recent.bin";
 constexpr char RECENT_BOOKS_FILE_JSON[] = "/.crosspoint/recent.json";
 constexpr char RECENT_BOOKS_FILE_BAK[] = "/.crosspoint/recent.bin.bak";
 constexpr int MAX_RECENT_BOOKS = 10;
+
+bool containsReplacementChar(const std::string& text) {
+  return text.find("\xEF\xBF\xBD") != std::string::npos;
+}
+
+std::string titleFromPath(const std::string& path) {
+  const size_t slash = path.find_last_of('/');
+  std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+  const size_t dot = name.find_last_of('.');
+  if (dot != std::string::npos) {
+    name.erase(dot);
+  }
+  return name;
+}
+
+RecentBook sanitizeBook(RecentBook book) {
+  if (book.title.empty() || containsReplacementChar(book.title)) {
+    const std::string fallback = titleFromPath(book.path);
+    if (!fallback.empty()) {
+      LOG_DBG("RBS", "Replacing invalid recent title \"%s\" with filename \"%s\"", book.title.c_str(),
+              fallback.c_str());
+      book.title = fallback;
+    }
+  }
+  if (containsReplacementChar(book.author)) {
+    LOG_DBG("RBS", "Clearing invalid recent author \"%s\"", book.author.c_str());
+    book.author.clear();
+  }
+  return book;
+}
 }  // namespace
 
 RecentBooksStore RecentBooksStore::instance;
@@ -34,7 +64,7 @@ void RecentBooksStore::addBook(const std::string& path, const std::string& title
   }
 
   // Add to front
-  recentBooks.insert(recentBooks.begin(), {path, title, author, coverBmpPath});
+  recentBooks.insert(recentBooks.begin(), sanitizeBook({path, title, author, coverBmpPath}));
 
   // Trim to max size
   if (recentBooks.size() > MAX_RECENT_BOOKS) {
@@ -50,9 +80,7 @@ void RecentBooksStore::updateBook(const std::string& path, const std::string& ti
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
   if (it != recentBooks.end()) {
     RecentBook& book = *it;
-    book.title = title;
-    book.author = author;
-    book.coverBmpPath = coverBmpPath;
+    book = sanitizeBook({path, title, author, coverBmpPath});
     saveToFile();
   }
 }
@@ -112,15 +140,15 @@ RecentBook RecentBooksStore::getDataFromBook(std::string path) const {
   if (FsHelpers::hasEpubExtension(lastBookFileName)) {
     Epub epub(path, "/.crosspoint");
     epub.load(false, true);
-    return RecentBook{path, epub.getTitle(), epub.getAuthor(), epub.getThumbBmpPath()};
+    return sanitizeBook({path, epub.getTitle(), epub.getAuthor(), epub.getThumbBmpPath()});
   } else if (FsHelpers::hasXtcExtension(lastBookFileName)) {
     // Handle XTC file
     Xtc xtc(path, "/.crosspoint");
     if (xtc.load()) {
-      return RecentBook{path, xtc.getTitle(), xtc.getAuthor(), xtc.getThumbBmpPath()};
+      return sanitizeBook({path, xtc.getTitle(), xtc.getAuthor(), xtc.getThumbBmpPath()});
     }
   } else if (FsHelpers::hasTxtExtension(lastBookFileName) || FsHelpers::hasMarkdownExtension(lastBookFileName)) {
-    return RecentBook{path, lastBookFileName, "", ""};
+    return sanitizeBook({path, lastBookFileName, "", ""});
   }
   return RecentBook{path, "", "", ""};
 }
@@ -130,7 +158,11 @@ bool RecentBooksStore::loadFromFile() {
   if (Storage.exists(RECENT_BOOKS_FILE_JSON)) {
     String json = Storage.readFile(RECENT_BOOKS_FILE_JSON);
     if (!json.isEmpty()) {
-      return JsonSettingsIO::loadRecentBooks(*this, json.c_str());
+      const bool loaded = JsonSettingsIO::loadRecentBooks(*this, json.c_str());
+      if (loaded && sanitizeLoadedBooks()) {
+        saveToFile();
+      }
+      return loaded;
     }
   }
 
@@ -172,9 +204,9 @@ bool RecentBooksStore::loadFromBinaryFile() {
         std::string title, author;
         serialization::readString(inputFile, title);
         serialization::readString(inputFile, author);
-        recentBooks.push_back({path, title, author, ""});
+        recentBooks.push_back(sanitizeBook({path, title, author, ""}));
       } else {
-        recentBooks.push_back(book);
+        recentBooks.push_back(sanitizeBook(book));
       }
     }
   } else if (version == 3) {
@@ -198,7 +230,7 @@ bool RecentBooksStore::loadFromBinaryFile() {
         continue;
       }
 
-      recentBooks.push_back({path, title, author, coverBmpPath});
+      recentBooks.push_back(sanitizeBook({path, title, author, coverBmpPath}));
     }
 
     if (omitted > 0) {
@@ -215,4 +247,16 @@ bool RecentBooksStore::loadFromBinaryFile() {
 
   LOG_DBG("RBS", "Recent books loaded from binary file (%d entries)", static_cast<int>(recentBooks.size()));
   return true;
+}
+
+bool RecentBooksStore::sanitizeLoadedBooks() {
+  bool changed = false;
+  for (auto& book : recentBooks) {
+    RecentBook sanitized = sanitizeBook(book);
+    if (sanitized.title != book.title || sanitized.author != book.author) {
+      book = std::move(sanitized);
+      changed = true;
+    }
+  }
+  return changed;
 }

@@ -290,6 +290,8 @@ void AgentDashboardActivity::startNetworking() {
   // WiFi STA completes its handshake.
   AgentDeck::Net::udpInit();
   dashState = DashState::Discovering;
+  discoveryStartMs = millis();
+  discoveryNoticeShown = false;
   requestUpdate();
 }
 
@@ -385,6 +387,10 @@ void AgentDashboardActivity::loop() {
       AgentDeck::Net::wsConnect(bridge.ip, bridge.port, bridge.token);
       dashState = DashState::Connecting;
       connectStartMs = millis();
+      discoveryNoticeShown = false;
+      requestUpdate();
+    } else if (!discoveryNoticeShown && millis() - discoveryStartMs >= kDiscoveryNotFoundMs) {
+      discoveryNoticeShown = true;
       requestUpdate();
     }
   } else if (dashState == DashState::Connecting || dashState == DashState::Connected) {
@@ -409,6 +415,8 @@ void AgentDashboardActivity::loop() {
         AgentDeck::Net::wsDisconnect();  // clears saved ip:port, stops stale auto-reconnect
         AgentDeck::Net::mdnsRefresh();   // force an immediate fresh query
         dashState = DashState::Discovering;
+        discoveryStartMs = millis();
+        discoveryNoticeShown = false;
         registered = false;
         requestUpdate();
       }
@@ -430,6 +438,8 @@ void AgentDashboardActivity::loop() {
         AgentDeck::Net::wsDisconnect();
         AgentDeck::Net::mdnsRefresh();
         dashState = DashState::Discovering;
+        discoveryStartMs = millis();
+        discoveryNoticeShown = false;
       }
       requestUpdate();
     }
@@ -1253,6 +1263,7 @@ void AgentDashboardActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int w = renderer.getScreenWidth();
   const int line10 = renderer.getLineHeight(UI_10_FONT_ID);
+  const int lineS = renderer.getLineHeight(SMALL_FONT_ID);
   const int pad = metrics.contentSidePadding;
 
   renderer.clearScreen();
@@ -1265,9 +1276,24 @@ void AgentDashboardActivity::render(RenderLock&&) {
       break;
 
     case DashState::Discovering:
-      renderer.drawText(UI_10_FONT_ID, pad, y, "Discovering daemon\xE2\x80\xA6", true, EpdFontFamily::BOLD);
-      y += line10 + 6;
-      renderer.drawText(SMALL_FONT_ID, pad, y, ("Wi-Fi: " + localIp).c_str(), true);
+      if (discoveryNoticeShown) {
+        renderer.drawText(UI_10_FONT_ID, pad, y, "AgentDeck not running", true, EpdFontFamily::BOLD);
+        y += line10 + 8;
+        renderer.drawText(SMALL_FONT_ID, pad, y, ("Wi-Fi: " + localIp).c_str(), true);
+        y += lineS + 8;
+        auto lines =
+            renderer.wrappedText(SMALL_FONT_ID, "Start AgentDeck on a computer on this Wi-Fi.", w - pad * 2, 3);
+        for (const auto& line : lines) {
+          renderer.drawText(SMALL_FONT_ID, pad, y, line.c_str(), true);
+          y += lineS;
+        }
+        y += 4;
+        renderer.drawText(SMALL_FONT_ID, pad, y, "Still scanning for the daemon...", true);
+      } else {
+        renderer.drawText(UI_10_FONT_ID, pad, y, "Discovering daemon\xE2\x80\xA6", true, EpdFontFamily::BOLD);
+        y += line10 + 6;
+        renderer.drawText(SMALL_FONT_ID, pad, y, ("Wi-Fi: " + localIp).c_str(), true);
+      }
       break;
 
     case DashState::Connecting: {
