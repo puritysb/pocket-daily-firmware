@@ -76,6 +76,7 @@ class AgentDashboardActivity final : public Activity {
   void onWifiSelectionComplete(bool connected);
   void startNetworking();
   void sendClientRegister();
+  void sendDeviceInfo();
   uint32_t computeStateSignature() const;
 
   // Fill out[] with the currently-awaiting sessions; returns the count. Const +

@@ -315,6 +315,39 @@ void AgentDashboardActivity::sendClientRegister() {
   AgentDeck::Net::wsSend("{\"type\":\"query_usage\"}");
 }
 
+void AgentDashboardActivity::sendDeviceInfo() {
+  // Announce as a first-class AgentDeck ESP32 device so the daemon registers it
+  // in its device registry (Node daemon: type "esp32-wifi"; see AgentDeck
+  // docs/esp32-client-contract.md). This is complementary to sendClientRegister():
+  // the eink-device roster drives the macOS Dashboard E-ink rail, while device_info
+  // drives the ESP32 device registry + OTA identity across all daemons. The board
+  // wire string uses the underscore convention (ips_10, ulanzi_tc001, …), distinct
+  // from the hyphen family slug in client_register.
+  //
+  // X3/X4 flash only via SD update.bin (no WiFi OTA), so otaSupported=false.
+  const char* board = gpio.deviceIsX3() ? "xteink_x3" : "xteink_x4";
+  String ip = WiFi.localIP().toString();
+  uint8_t timelineCount = 0, sessionCount = 0;
+  AgentDeck::lockState();
+  timelineCount = AgentDeck::g_state.timelineCount;
+  sessionCount = AgentDeck::g_state.sessionCount;
+  AgentDeck::unlockState();
+  char buf[384];
+  int n = snprintf(buf, sizeof(buf),
+                   "{\"type\":\"device_info\",\"board\":\"%s\",\"version\":\"%s\","
+                   "\"protocolRevision\":%u,\"wifiConfigured\":true,\"wifiConnected\":true,"
+                   "\"ip\":\"%s\",\"otaSupported\":false,\"otaReason\":\"sd-update-bin\","
+                   "\"timelineCount\":%u,\"sessionCount\":%u}",
+                   board, CROSSPOINT_VERSION,
+                   (unsigned)AgentDeckCfg::PROTOCOL_REVISION, ip.c_str(),
+                   (unsigned)timelineCount, (unsigned)sessionCount);
+  if (n > 0 && (size_t)n < sizeof(buf)) {
+    AgentDeck::Net::wsSend(buf);
+    AgentLog::line("AGENT", "device_info sent board=%s ver=%s ip=%s", board,
+                   CROSSPOINT_VERSION, ip.c_str());
+  }
+}
+
 uint32_t AgentDashboardActivity::computeStateSignature() const {
   uint32_t h = 2166136261u;
   AgentDeck::lockState();
@@ -403,6 +436,7 @@ void AgentDashboardActivity::loop() {
       lastConnectedMs = millis();
       if (!registered) {
         sendClientRegister();
+        sendDeviceInfo();
         registered = true;
       }
       requestUpdate();
