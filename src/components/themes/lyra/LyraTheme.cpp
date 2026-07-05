@@ -5,6 +5,7 @@
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <Logging.h>
 
 #include <cstdint>
 #include <string>
@@ -283,6 +284,9 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     }
 
     auto itemName = rowTitle(i);
+    if (itemName.find("\xEF\xBF\xBD") != std::string::npos) {
+      LOG_DBG("LISTDBG", "LyraList[%d] title contains U+FFFD at render: [%s]", i, itemName.c_str());
+    }
     const int titleFont = UiCjkFont::fontForText(renderer, itemName.c_str(), UI_10_FONT_ID);
     auto item = renderer.truncatedText(titleFont, itemName.c_str(), rowTextWidth);
     renderer.drawText(titleFont, textX, itemY + 7, item.c_str(), true);
@@ -542,8 +546,12 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
 
     std::string labelStr = buttonLabel(i);
     const char* label = labelStr.c_str();
+    if (labelStr.find("\xEF\xBF\xBD") != std::string::npos) {
+      LOG_DBG("MENUDBG", "LyraMenu[%d] label contains U+FFFD at render: [%s]", i, label);
+    }
+    const int menuFont = UiCjkFont::fontForText(renderer, label, UI_12_FONT_ID, EpdFontFamily::REGULAR);
     int textX = tileRect.x + 16;
-    const int lineHeight = renderer.getLineHeight(UI_12_FONT_ID);
+    const int lineHeight = renderer.getLineHeight(menuFont);
     const int textY = tileRect.y + (LyraMetrics::values.menuRowHeight - lineHeight) / 2;
 
     if (rowIcon != nullptr) {
@@ -555,6 +563,6 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
       }
     }
 
-    renderer.drawText(UI_12_FONT_ID, textX, textY, label, true);
+    renderer.drawText(menuFont, textX, textY, label, true);
   }
 }

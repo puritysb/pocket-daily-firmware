@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <Logging.h>
 
 #include <algorithm>
 #include <string>
@@ -211,21 +212,25 @@ void RoundedRaffTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int butt
 
   for (int i = pageStartIndex; i < buttonCount && i < pageStartIndex + pageItems; ++i) {
     const std::string label = buttonLabel(i);
+    if (label.find("\xEF\xBF\xBD") != std::string::npos) {
+      LOG_DBG("MENUDBG", "RRMenu[%d] label contains U+FFFD at render: [%s]", i, label.c_str());
+    }
+    const int menuFont = UiCjkFont::fontForText(renderer, label.c_str(), kTitleFontId, EpdFontFamily::BOLD);
     const int rowY = menuTop + (i - pageStartIndex) * rowStep;
     constexpr int kRowPaddingX = 40;  // 20px L/R
     const int maxLabelWidth = std::max(0, menuMaxWidth - kRowPaddingX);
     const std::string truncatedLabel =
-        renderer.truncatedText(kTitleFontId, label.c_str(), maxLabelWidth, EpdFontFamily::BOLD);
+        renderer.truncatedText(menuFont, label.c_str(), maxLabelWidth, EpdFontFamily::BOLD);
     const int rowWidth = std::min(
-        menuMaxWidth, renderer.getTextWidth(kTitleFontId, truncatedLabel.c_str(), EpdFontFamily::BOLD) + kRowPaddingX);
+        menuMaxWidth, renderer.getTextWidth(menuFont, truncatedLabel.c_str(), EpdFontFamily::BOLD) + kRowPaddingX);
     const bool isSelected = selectedIndex == i;
     renderer.fillRoundedRect(rowX, rowY, rowWidth, rowHeight, kMenuRadius, isSelected ? Color::Black : Color::White);
     const int textY = rowY + (rowHeight - textLineHeight) / 2;
     const int textX = rowX + kInteractiveInsetX;
     if (selectedIndex == i) {
-      renderer.drawText(kTitleFontId, textX, textY, truncatedLabel.c_str(), false, EpdFontFamily::BOLD);
+      renderer.drawText(menuFont, textX, textY, truncatedLabel.c_str(), false, EpdFontFamily::BOLD);
     } else {
-      renderer.drawText(kTitleFontId, textX, textY, truncatedLabel.c_str(), true, EpdFontFamily::BOLD);
+      renderer.drawText(menuFont, textX, textY, truncatedLabel.c_str(), true, EpdFontFamily::BOLD);
     }
   }
 
@@ -357,6 +362,9 @@ void RoundedRaffTheme::drawList(const GfxRenderer& renderer, Rect rect, int item
     if (hasSubtitle) {
       const std::string subtitleRaw = rowSubtitle(i);
       const std::string titleRaw = rowTitle(i);
+      if (titleRaw.find("\xEF\xBF\xBD") != std::string::npos) {
+        LOG_DBG("LISTDBG", "RRList[%d] title contains U+FFFD at render: [%s]", i, titleRaw.c_str());
+      }
       const int titleFont = UiCjkFont::fontForText(renderer, titleRaw.c_str(), kTitleFontId, EpdFontFamily::BOLD);
       auto title = renderer.truncatedText(titleFont, titleRaw.c_str(), textAreaWidth, EpdFontFamily::BOLD);
       const int titleLineH = renderer.getLineHeight(titleFont);
@@ -379,6 +387,9 @@ void RoundedRaffTheme::drawList(const GfxRenderer& renderer, Rect rect, int item
       }
     } else {
       const std::string titleRaw = rowTitle(i);
+      if (titleRaw.find("\xEF\xBF\xBD") != std::string::npos) {
+        LOG_DBG("LISTDBG", "RRList[%d] title (no-sub) contains U+FFFD at render: [%s]", i, titleRaw.c_str());
+      }
       const int titleFont = UiCjkFont::fontForText(renderer, titleRaw.c_str(), kTitleFontId, EpdFontFamily::BOLD);
       auto title = renderer.truncatedText(titleFont, titleRaw.c_str(), textAreaWidth, EpdFontFamily::BOLD);
       renderer.drawText(titleFont, rowX + kInteractiveInsetX,

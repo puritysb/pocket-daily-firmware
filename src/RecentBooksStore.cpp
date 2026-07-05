@@ -41,10 +41,14 @@ RecentBook sanitizeBook(RecentBook book) {
       book.title = fallback;
     }
   }
+  if (containsReplacementChar(book.title)) {
+    LOG_DBG("RBS", "WARNING: title still contains U+FFFD after fallback (path: %s)", book.path.c_str());
+  }
   if (containsReplacementChar(book.author)) {
     LOG_DBG("RBS", "Clearing invalid recent author \"%s\"", book.author.c_str());
     book.author.clear();
   }
+  LOG_DBG("RBS", "sanitizeBook result: title=[%s] path=[%s]", book.title.c_str(), book.path.c_str());
   return book;
 }
 }  // namespace

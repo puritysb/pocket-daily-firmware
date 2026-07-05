@@ -318,6 +318,9 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     }
 
     auto itemName = rowTitle(i);
+    if (itemName.find("\xEF\xBF\xBD") != std::string::npos) {
+      LOG_DBG("LISTDBG", "Row[%d] title contains U+FFFD at render: [%s]", i, itemName.c_str());
+    }
     auto font = UiCjkFont::fontForText(renderer, itemName.c_str(), UI_10_FONT_ID);
     auto item = renderer.truncatedText(font, itemName.c_str(), rowTextWidth);
     renderer.drawText(font, rect.x + BaseMetrics::values.contentSidePadding, itemY, item.c_str(), i != selectedIndex);
@@ -691,13 +694,17 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
 
     std::string labelStr = buttonLabel(i);
     const char* label = labelStr.c_str();
-    const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, label);
+    if (labelStr.find("\xEF\xBF\xBD") != std::string::npos) {
+      LOG_DBG("MENUDBG", "ButtonMenu[%d] label contains U+FFFD at render: [%s]", i, label);
+    }
+    const int menuFont = UiCjkFont::fontForText(renderer, label, UI_10_FONT_ID);
+    const int textWidth = renderer.getTextWidth(menuFont, label);
     const int textX = rect.x + (rect.width - textWidth) / 2;
-    const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+    const int lineHeight = renderer.getLineHeight(menuFont);
     const int textY =
         tileY + (BaseMetrics::values.menuRowHeight - lineHeight) / 2;  // vertically centered assuming y is top of text
     // Invert text when the tile is selected, to contrast with the filled background
-    renderer.drawText(UI_10_FONT_ID, textX, textY, label, selectedIndex != i);
+    renderer.drawText(menuFont, textX, textY, label, selectedIndex != i);
   }
 }
 

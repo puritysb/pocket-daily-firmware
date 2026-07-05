@@ -352,6 +352,13 @@ bool JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const char* json) 
     book.title = obj["title"] | std::string("");
     book.author = obj["author"] | std::string("");
     book.coverBmpPath = obj["coverBmpPath"] | std::string("");
+    const bool hasBadTitle = book.title.find("\xEF\xBF\xBD") != std::string::npos;
+    const bool hasBadAuthor = book.author.find("\xEF\xBF\xBD") != std::string::npos;
+    LOG_DBG("RBS", "JSON load: title=[%s]%s path=[%s]", book.title.c_str(),
+            hasBadTitle ? " (FFFD!)"
+            : hasBadAuthor ? " author(FFFD!)"
+            : "",
+            book.path.c_str());
     store.recentBooks.push_back(book);
   }
 
