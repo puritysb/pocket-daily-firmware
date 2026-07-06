@@ -127,6 +127,28 @@ int fontForText(const GfxRenderer& renderer, const char* text, int fallbackFontI
   const char* partialFamily = nullptr;
   int bestMissed = 0x7FFFFFFF;
 
+  // 0) Prefer the currently-loaded SD font if it already covers the text.
+  //    SdCardFontManager is single-slot — loading a different family unloads
+  //    the resident one. When a screen renders several CJK strings of mixed
+  //    script in quick succession (e.g. a kana book title + a kanji author),
+  //    different script classifications map to different priority lists whose
+  //    first choices differ (Kana→BIZUDGothic, Han→NotoSansJP). Without this
+  //    reuse check, the second fontForText() call unloads the font the first
+  //    call selected and returned, so by the time drawText() runs with that
+  //    earlier font ID the family has been unloaded and every glyph is
+  //    dropped — the "Japanese title looks garbled while the body is fine"
+  //    symptom on devices that have more than one JP font installed.
+  const int loadedFontId = sdFontSystem.currentLoadedFontId();
+  if (loadedFontId != 0) {
+    const int missed = renderer.ensureSdCardFontReady(loadedFontId, text, styleMask);
+    if (missed == 0) {
+      renderer.prewarmSdCardFont(loadedFontId, text, styleMask);
+      LOG_DBG("UICJK", "Reusing loaded fontId=%d for \"%s\"", loadedFontId, text);
+      return loadedFontId;
+    }
+    LOG_DBG("UICJK", "Loaded fontId=%d missed=%d for \"%s\", trying priorities", loadedFontId, missed, text);
+  }
+
   // 1) Script-specific priority families (gothic before serif for small UI sizes).
   for (int i = 0; priorities[i]; i++) {
     const int fontId = sdFontSystem.ensureUiFamilyLoaded(mutableRenderer, priorities[i]);

@@ -31,6 +31,11 @@ class SdCardFontSystem {
   /// saved reader selection. Returns the loaded font ID, or 0 if unavailable.
   int ensureUiFamilyLoaded(GfxRenderer& renderer, const char* familyName);
 
+  /// Font ID of the currently-loaded SD family (0 if none). Lets callers that
+  /// want to avoid single-slot unload/reload churn test the resident font
+  /// against their text before requesting a swap via ensureUiFamilyLoaded().
+  int currentLoadedFontId() const;
+
   /// Resolve an SD card font ID from family name + fontSize enum.
   /// Returns 0 if not found. Used by CrossPointSettings::getReaderFontId().
   int resolveFontId(const char* familyName, uint8_t fontSizeEnum) const;
