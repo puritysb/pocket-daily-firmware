@@ -510,6 +510,32 @@ pio run -t uploadfs
 * Use PlatformIO toolbar: Build (✓), Upload (→), Clean (🗑️)
 * Or Command Palette: `PlatformIO: Build`, `PlatformIO: Upload`, etc.
 
+### Firmware Staging (USB-free iteration)
+
+Every successful `pio run` auto-stages the built binary to `firmware/` (gitignored) via
+`scripts/stage_firmware.py`:
+
+```
+firmware/
+  update.bin                                # always latest — copy this to SD card
+  crosspoint-<version>-<env>-<sha>-<date>.bin  # versioned archive (keeps last 5)
+  LATEST_BUILD.txt                          # version, commit, size, install steps
+```
+
+**Install on-device without USB:**
+1. Copy `firmware/update.bin` to the root of the SD card.
+2. Hold **UP + POWER** to boot into recovery firmware mode.
+3. Pick `update.bin` from the file browser and confirm.
+
+**Optional auto-copy to a mounted SD card reader:** set `FIRMWARE_STAGING_DIR` (env var)
+or add `firmware_staging_dir` in `platformio.local.ini`:
+
+```ini
+# platformio.local.ini
+[env:default]
+firmware_staging_dir = /Volumes/SDCARD
+```
+
 ### Monitoring and Debugging
 
 ```bash
