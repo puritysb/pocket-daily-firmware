@@ -12,10 +12,13 @@
 #include <string>
 #include <vector>
 
+#include <esp_ota_ops.h>
+
 #include "CrossPointSettings.h"
 #include "HalGPIO.h"
 #include "SilentRestart.h"
 #include "WifiCredentialStore.h"
+#include "agentdeck/ota_ws_receiver.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "agent/AgentLog.h"
 #include "agentdeck/agent_commands.h"
@@ -448,7 +451,10 @@ void AgentDashboardActivity::sendDeviceInfo() {
   // wire string uses the underscore convention (ips_10, ulanzi_tc001, …), distinct
   // from the hyphen family slug in client_register.
   //
-  // X3/X4 flash only via SD update.bin (no WiFi OTA), so otaSupported=false.
+  // AgentDeck WiFi OTA v1 supported (src/agentdeck/ota_ws_receiver.*): chunks
+  // stream to an SD cache, then flash via the raw-partition path (NOT the
+  // Arduino Update class — X4 silicon rejects the patched image through
+  // esp_image_verify). Slot capability comes from the live partition table.
   const char* board = gpio.deviceIsX3() ? "xteink_x3" : "xteink_x4";
   String ip = WiFi.localIP().toString();
   uint8_t timelineCount = 0, sessionCount = 0;
@@ -456,14 +462,21 @@ void AgentDashboardActivity::sendDeviceInfo() {
   timelineCount = AgentDeck::g_state.timelineCount;
   sessionCount = AgentDeck::g_state.sessionCount;
   AgentDeck::unlockState();
-  char buf[384];
+  const esp_partition_t* otaDest = esp_ota_get_next_update_partition(nullptr);
+  const unsigned otaSlotSize = otaDest ? (unsigned)otaDest->size : 0;
+  // buildHash = trailing token of CROSSPOINT_VERSION ("1.4.1-dev-master-<sha>").
+  const char* buildHash = strrchr(CROSSPOINT_VERSION, '-');
+  buildHash = buildHash ? buildHash + 1 : CROSSPOINT_VERSION;
+  char buf[512];
   int n = snprintf(buf, sizeof(buf),
-                   "{\"type\":\"device_info\",\"board\":\"%s\",\"version\":\"%s\","
+                   "{\"type\":\"device_info\",\"board\":\"%s\",\"version\":\"%s\",\"buildHash\":\"%s\","
                    "\"protocolRevision\":%u,\"wifiConfigured\":true,\"wifiConnected\":true,"
-                   "\"ip\":\"%s\",\"otaSupported\":false,\"otaReason\":\"sd-update-bin\","
+                   "\"ip\":\"%s\",\"otaSupported\":%s,\"otaSlotCount\":2,\"otaSlotSize\":%u,"
+                   "\"otaFreeSketchSpace\":%u,"
                    "\"timelineCount\":%u,\"sessionCount\":%u}",
-                   board, CROSSPOINT_VERSION, (unsigned)AgentDeckCfg::PROTOCOL_REVISION, ip.c_str(),
-                   (unsigned)timelineCount, (unsigned)sessionCount);
+                   board, CROSSPOINT_VERSION, buildHash, (unsigned)AgentDeckCfg::PROTOCOL_REVISION, ip.c_str(),
+                   otaDest ? "true" : "false", otaSlotSize, otaSlotSize, (unsigned)timelineCount,
+                   (unsigned)sessionCount);
   if (n > 0 && (size_t)n < sizeof(buf)) {
     AgentDeck::Net::wsSend(buf);
     AgentLog::line("AGENT", "device_info sent board=%s ver=%s ip=%s", board, CROSSPOINT_VERSION, ip.c_str());
@@ -526,6 +539,29 @@ uint32_t AgentDashboardActivity::computeStateSignature() const {
 }
 
 void AgentDashboardActivity::loop() {
+  // OTA: a fully-received, validated image is waiting. Paint the blocking
+  // notice, then flash + restart from this (main) task — never from the WS
+  // callback. serviceFlash() only returns on failure.
+  if (AgentDeck::OtaWs::flashPending()) {
+    otaFlashNotice = true;
+    requestUpdateAndWait();
+    AgentDeck::OtaWs::serviceFlash();
+    otaFlashNotice = false;
+    requestUpdate();
+    return;
+  }
+  // Receive-phase progress: repaint the Face status line in 5% steps (e-ink).
+  if (AgentDeck::OtaWs::receiving()) {
+    const uint32_t total = AgentDeck::OtaWs::totalBytes();
+    const int bucket = total ? (int)((uint64_t)AgentDeck::OtaWs::receivedBytes() * 20 / total) : 0;
+    if (bucket != otaPctBucket) {
+      otaPctBucket = bucket;
+      requestUpdate();
+    }
+  } else {
+    otaPctBucket = -1;
+  }
+
   // Handle input FIRST so Back stays responsive: the discovery/connect steps
   // below can block (mDNS queryService ~1s, WS connect) and would otherwise
   // starve the button poll, making "go back" feel dead while not yet connected.
@@ -749,6 +785,7 @@ bool AgentDashboardActivity::firstCardCandidate(AwaitingItem& out) const {
 
 void AgentDashboardActivity::serviceCard() {
   if (dashState != DashState::Connected) return;
+  if (AgentDeck::OtaWs::receiving() || AgentDeck::OtaWs::flashPending()) return;  // no card takeovers mid-OTA
 
   if (viewMode == ViewMode::Card) {
     AwaitingItem item = {};
@@ -837,6 +874,10 @@ void AgentDashboardActivity::handleButtons() {
 
   // Stamp any press: auto-surface must not steal the screen mid-navigation.
   if (mappedInput.wasAnyPressed()) lastUserInputMs = millis();
+
+  // A WiFi OTA transfer rides this activity's WS socket — exiting (or any other
+  // action) mid-transfer would tear it down. Swallow input until it resolves.
+  if (AgentDeck::OtaWs::receiving() || AgentDeck::OtaWs::flashPending()) return;
 
   // Stamp Back press so release can tell short from long-hold.
   if (mappedInput.wasPressed(Btn::Back)) backPressMs = millis();
@@ -1364,9 +1405,18 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
   int lastShown = overviewTop + capacity;
   if (lastShown > n) lastShown = n;
 
-  // Connection is a status line on the Face, never a screen of its own.
+  // Connection is a status line on the Face, never a screen of its own. An
+  // in-flight firmware transfer takes over the line (bold) — the most useful
+  // truth of the moment.
   char cl[96];
-  switch (dashState) {
+  bool statusBold = false;
+  if (AgentDeck::OtaWs::receiving()) {
+    const uint32_t total = AgentDeck::OtaWs::totalBytes();
+    const unsigned pct = total ? (unsigned)((uint64_t)AgentDeck::OtaWs::receivedBytes() * 100 / total) : 0;
+    snprintf(cl, sizeof(cl), "Receiving firmware update \xC2\xB7 %u%%", pct);
+    statusBold = true;
+  } else {
+    switch (dashState) {
     case DashState::Connected:
       if (n > capacity)
         snprintf(cl, sizeof(cl), "Live \xC2\xB7 %s \xC2\xB7 %d-%d/%d", AgentDeck::Net::wsBridgeIp(), firstShown,
@@ -1390,9 +1440,10 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
     case DashState::WifiSelection:
       snprintf(cl, sizeof(cl), "Wi-Fi setup\xE2\x80\xA6");
       break;
+    }
   }
   renderer.drawText(SMALL_FONT_ID, layout.pad, y, renderer.truncatedText(SMALL_FONT_ID, cl, w - layout.pad * 2).c_str(),
-                    true);
+                    true, statusBold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
   y += lineS + 8;
 
   if (awaitingCount > 0) {
@@ -1915,6 +1966,24 @@ void AgentDashboardActivity::renderCard() {
 }
 
 void AgentDashboardActivity::render(RenderLock&&) {
+  // Blocking OTA flash notice: painted once via requestUpdateAndWait() right
+  // before the raw-partition write starts, so the panel holds this frame for
+  // the ~1 minute of flashing and through the restart.
+  if (otaFlashNotice) {
+    const auto& mm = UITheme::getInstance().getMetrics();
+    const int pad = mm.contentSidePadding;
+    renderer.clearScreen();
+    drawBrandedHeader("Firmware Update", nullptr);
+    int y = mm.topPadding + mm.headerHeight + mm.verticalSpacing * 2;
+    renderer.drawText(UI_12_FONT_ID, pad, y, "Installing update\xE2\x80\xA6", true, EpdFontFamily::BOLD);
+    y += renderer.getLineHeight(UI_12_FONT_ID) + 10;
+    renderer.drawText(UI_10_FONT_ID, pad, y, "Do not power off.", true, EpdFontFamily::BOLD);
+    y += renderer.getLineHeight(UI_10_FONT_ID) + 6;
+    renderer.drawText(SMALL_FONT_ID, pad, y, "The device restarts automatically when done.", true);
+    renderer.displayBuffer();
+    return;
+  }
+
   // Card (decision) / Detail (timeline) exist only while Connected.
   if (dashState == DashState::Connected) {
     if (viewMode == ViewMode::Card) {

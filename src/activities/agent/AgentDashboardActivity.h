@@ -143,6 +143,10 @@ class AgentDashboardActivity final : public Activity {
   std::string localIp;
   uint32_t wifiJoinStartMs = 0;
   char joiningSsid[33] = {0};  // SSID of the in-progress background join (status line)
+
+  // ── WiFi OTA (AgentDeck daemon → device) ──
+  bool otaFlashNotice = false;  // render paints the full-screen "do not power off" notice
+  int otaPctBucket = -1;        // last painted receive-progress bucket (5% steps)
   bool exitRequested = false;
   bool registered = false;
   uint32_t lastSignature = 0;

@@ -101,11 +101,27 @@ existing upstream commands (`permission_decision`, `select_option`, `respond`,
 discipline. Pull-mode sync should be plain HTTP (`GET` feed / `POST` outbox) —
 wake-sync-sleep needs no persistent socket; WS remains the docked live mode.
 
+## Firmware delivery
+
+The device implements **AgentDeck WiFi OTA v1** (`src/agentdeck/ota_ws_receiver.*`):
+`agentdeck esp32-ota xteink_x4 --firmware firmware/update.bin` (or `xteink_x3`,
+or the device IP) pushes an update over the live dashboard WS — no SD pull, no
+File Transfer mode. Chunks stream to an SD cache
+(`/.crosspoint/agentdeck-ota.bin`), the image is MD5- and structure-validated,
+the end-ack is sent inside the daemon's 30 s budget, and only then does the raw
+partition flash + otadata switch + restart run (the Arduino `Update` class is
+never used — X4 silicon rejects the patched image through `esp_image_verify`).
+A flash failure leaves the running firmware bootable. `device_info` reports
+`otaSupported` from the live partition table plus `buildHash` (the version's
+trailing git sha) for post-OTA deploy verification. The SD update flow
+(Settings → System, and boot recovery) remains as the fallback path.
+
 ## Roadmap
 
 1. **M4 (done)** — Card view + direct softkey grammar, fed by session attention.
 2. **M5 (done)** — Face shell: boot-to-card setting, background Wi-Fi join,
    connection demoted to a status line; the Face renders in every state.
+   **M5.6 (done)** — AgentDeck WiFi OTA v1 client (see "Firmware delivery").
 3. **M5.5 — Deck persistence**: card records on SD, render-from-cache at boot,
    "as of" sync age on the Face.
 4. **M6 — Outbox + power ladder**: `actionClass` contract, HTTP pull sync,
