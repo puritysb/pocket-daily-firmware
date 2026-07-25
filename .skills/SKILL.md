@@ -702,12 +702,24 @@ on the no-PSRAM C3 with ArduinoJson). So drift is a discipline, not a build gate
 Keep the port minimal — a display-only client may accept-and-ignore any inbound `type` it
 doesn't render.
 
-**Known M3 gap:** the port stubs `device_info` (and `display_state` / `set_orientation`).
-Because the X3 never emits `device_info`, the daemon can't register it and it stays
-dashboard-invisible. **Implementing `device_info` emission** (with a canonical `board` wire
-string registered in AgentDeck's `ESP32_OTA_BOARDS`) is the single change that promotes the
-X3 to a first-class device. This is the fork-side half; the AgentDeck side of this discipline
-lives in `AgentDeck/docs/esp32.md § Downstream client port sync`.
+The fork emits both `client_register` and `device_info` on connect, with runtime board strings
+`xteink_x3` / `xteink_x4`; `display_state` / `set_orientation` may remain accept-and-ignore for
+the reader activity. This is the fork-side half; the AgentDeck side of this discipline lives
+in `AgentDeck/docs/esp32.md § Downstream client port sync`.
+
+**E-ink dashboard layout sync:** the allocation-free geometry SSOT lives in the AgentDeck repo
+at `esp32/src/ui/eink/eink_dashboard_layout.h`. AgentDeck's
+`scripts/sync-xteink-eink-dashboard.sh` mirrors it byte-for-byte to
+`src/agentdeck/eink_dashboard_layout.h`; run the script with `--check` after layout changes.
+CrossPoint keeps its own GfxRenderer, font loading, button hints, and detail interaction — only
+header/card/usage/activity/control geometry and status classification are common.
+
+**Attention steering invariant:** an `awaiting_*` label alone never creates buttons. A real
+`requestId` creates the binary Allow/Deny `permission_decision` gate. Otherwise, only options
+whose `sessionId`/stamped `focusedSessionId` matches the selected managed session are actionable
+(`navigable` → `select_option`, non-navigable → `respond(shortcut)`). An observed session without
+`requestId` is display-only and must say to respond in the terminal; never synthesize options or
+map Deny to `escape`. The wire-level SSOT is AgentDeck `docs/esp32-client-contract.md`.
 
 ### Git Operation Rules
 

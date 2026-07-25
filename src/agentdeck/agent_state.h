@@ -27,6 +27,10 @@
 
 namespace AgentDeck {
 
+// Rich enough for a 2–3 line E-ink card summary while remaining strictly
+// bounded on the no-PSRAM X3/X4. Ten sessions consume 1,920 bytes total.
+static constexpr size_t SESSION_ACTIVITY_CAP = 192;
+
 // ===== Agent state enum =====
 // Wire strings: disconnected|idle|processing|awaiting_permission|awaiting_option|awaiting_diff
 enum class AgentState : uint8_t {
@@ -55,7 +59,8 @@ struct SessionInfo {
   char id[64];
   char projectName[40];
   char modelName[32];
-  char agentType[16];  // "claude-code" / "openclaw" / "codex-cli" / "codex-app" / "opencode"
+  char agentType[16];    // "claude-code" / "openclaw" / "codex-cli" / "codex-app" / "opencode"
+  char controlMode[12];  // "managed" / "observed"; required for honest remote actions
   char state[20];
   uint16_t port;
   bool alive;
@@ -65,8 +70,8 @@ struct SessionInfo {
   uint32_t elapsedSec;
   char question[160];
   char promptType[20];
-  char requestId[40];  // gated PreToolUse request id → reply permission_decision (M3)
-  char activity[80];   // daemon-synthesized "what it's doing" one-liner (falls back to currentTool)
+  char requestId[40];                   // gated PreToolUse request id → reply permission_decision (M3)
+  char activity[SESSION_ACTIVITY_CAP];  // bounded current task + goal / latest-event summary
 };
 
 // One timeline event for the per-session Detail view. Populated from the daemon's
@@ -108,6 +113,7 @@ struct DashboardState {
   char promptType[20];
   PromptOption options[8];
   uint8_t optionCount;
+  char optionSessionId[64];  // sessionId whose state_update/prompt_options owns options[]
 
   // Usage (from usage_update)
   float fiveHourPercent;   // 0-100, -1 = no data
@@ -137,8 +143,9 @@ struct DashboardState {
   // Per-session timeline ring (forward-only, from timeline_event). Detail view.
   static constexpr int TIMELINE_CAP = 16;
   TimelineItem timeline[TIMELINE_CAP];
-  uint8_t timelineCount;  // number of valid entries (<= TIMELINE_CAP)
-  uint8_t timelineHead;   // next write index (oldest = head when full)
+  uint8_t timelineCount;      // number of valid entries (<= TIMELINE_CAP)
+  uint8_t timelineHead;       // next write index (oldest = head when full)
+  uint32_t timelineRevision;  // increments on event append and queried-history replacement
 
   // Daemon wall-clock estimate (the C3 has no RTC/NTP). Newest entry.ts seen
   // and the local millis() at which it arrived; render derives per-entry age as
@@ -186,6 +193,7 @@ struct DashboardState {
     question[0] = '\0';
     promptType[0] = '\0';
     optionCount = 0;
+    optionSessionId[0] = '\0';
     sessionCount = 0;
     fiveHourPercent = -1.0f;
     sevenDayPercent = -1.0f;
@@ -201,6 +209,7 @@ struct DashboardState {
     codexSevenReset[0] = '\0';
     timelineCount = 0;
     timelineHead = 0;
+    timelineRevision = 0;
     daemonEpochSec = 0;
     daemonEpochAtMs = 0;
     usageStale = true;

@@ -9,6 +9,12 @@
 //   agent state. Display-only — button approve/deny lands in M3 (the outbound
 //   builders are already ported in agentdeck/agent_commands.*).
 // M3: render awaiting Decision Cards + approve/deny via the physical buttons.
+// M4 (this commit): full-screen Decision Card view — the product grammar is
+//   "one screen, one question, ≤4 choices, one physical press". When any
+//   session needs a decision, the card auto-surfaces from Overview and maps
+//   the four front buttons directly to [Later][…choices…]; long prompts and
+//   >3-option prompts degrade to the cursor grammar. Dismissed prompts are
+//   remembered by content signature so a card never re-surfaces unchanged.
 //
 // Concurrency: net is serviced cooperatively from loop() on the main task — no
 // FreeRTOS network task. render() runs on the separate render task and reads the
@@ -17,6 +23,8 @@
 #include <string>
 
 #include "activities/Activity.h"
+#include "agentdeck/agent_state.h"
+#include "agentdeck/attention_contract.h"
 
 class AgentDashboardActivity final : public Activity {
  public:
@@ -35,43 +43,35 @@ class AgentDashboardActivity final : public Activity {
  private:
   enum class DashState : uint8_t { WifiSelection, Discovering, Connecting, Connected };
 
-  // Bounded below SESSIONS_CAP(10): two AwaitingItem[] arrays live on task stacks
-  // (render + main loop) on a no-PSRAM C3, so cap the realistic triage depth.
-  static constexpr int kAwaitingCap = 6;
-
-  // One awaiting decision pending a human go/no-go. Collected from the
-  // sessions_list (or synthesized from the focused state_update). M3 triages a
-  // stack of these and drives approve/deny per item.
+  // One session needing attention. Collected from sessions_list (or the focused
+  // state_update fallback) and classified by the shared attention contract;
+  // observed sessions without a requestId are deliberately display-only.
   struct AwaitingItem {
     char sid[64];  // full/prefixed session UUID — see SessionInfo::id sizing
-    char project[40];
-    char agentType[16];
     char question[200];
-    char requestId[40];  // present → observed gate (permission_decision)
-    char promptType[20];
-    bool isFocused;       // == g_state.sessionId → has the rich options[] array
-    bool isOption;        // awaiting_option / multi_select → Up/Down picks an option
-    uint8_t optionCount;  // meaningful only when isFocused
+    char requestId[40];   // present → observed gate (permission_decision)
+    uint8_t optionCount;  // meaningful only when optionSessionId == sid
+    AgentDeck::AttentionMode attentionMode;
   };
 
-  // Compact per-session row for the Overview / Mission Control list. Deliberately
-  // lighter than AwaitingItem (no question/tool/options) — an array of these lives
-  // on a no-PSRAM C3 task stack, so keep it small.
+  // Compact per-session row for the Overview / Mission Control list. The bounded
+  // activity copy is intentionally large enough for 2–3 visible lines; at the
+  // 10-session cap this array adds 1,920 bytes to the render-task stack.
   struct OverviewRow {
     char sid[64];
     char project[40];
     char agentType[16];
+    char controlMode[12];
     char state[20];
-    char activity[80];  // compact "what it's doing" line
+    char activity[AgentDeck::SESSION_ACTIVITY_CAP];
     bool awaiting;
   };
 
   // Which screen the Connected dashboard is showing. Overview is home; OK opens a
-  // session's Decision Card (awaiting) or read-only Detail (everything else).
-  // Overview is home; opening a session goes to Detail. Detail shows the session
-  // timeline AND, when the session is awaiting, the decision options inline at the
-  // bottom (scroll down to reach them) — no separate decision card.
-  enum class ViewMode : uint8_t { Overview, Detail };
+  // session's read-only Detail (timeline + inline options as a fallback grammar).
+  // Card is the primary decision surface: it auto-surfaces from Overview when any
+  // session needs attention, and maps the front buttons to the choices directly.
+  enum class ViewMode : uint8_t { Overview, Detail, Card };
 
   void onWifiSelectionComplete(bool connected);
   void startNetworking();
@@ -79,15 +79,32 @@ class AgentDashboardActivity final : public Activity {
   void sendDeviceInfo();
   uint32_t computeStateSignature() const;
 
-  // Fill out[] with the currently-awaiting sessions; returns the count. Const +
-  // takes the state lock internally.
-  int collectAwaiting(AwaitingItem* out, int cap) const;
+  // Snapshot one selected awaiting session. Detail never needs the old triage
+  // array, so this avoids placing six large question buffers on the C3 stack.
+  bool findAwaiting(const char* sid, AwaitingItem& out) const;
+  // First session (overview order) whose attention state warrants a card and
+  // whose content signature hasn't been dismissed. Returns false when quiet.
+  bool firstCardCandidate(AwaitingItem& out) const;
+  // Content signature of a prompt (sid + question + requestId + option shape).
+  // A dismissed card only re-surfaces when this changes — same honesty rule as
+  // the state signature: content decides, not time.
+  static uint32_t awaitingSignature(const AwaitingItem& it);
+  bool isDismissed(uint32_t sig) const;
+  // Auto-surface / auto-resolve the Card view. Runs from loop() while Connected.
+  void serviceCard();
+  // True when the card can bind choices directly to front buttons (softkey
+  // grammar); false falls back to the cursor grammar inside the card.
+  static bool cardUsesSoftkeys(AgentDeck::AttentionMode mode, uint8_t optionCount);
   // Fill out[] with all alive sessions (overview order); returns the count.
   int collectOverview(OverviewRow* out, int cap) const;
+  // Shared responsive paper-card component used by X3 portrait and X4
+  // landscape overview grids. Geometry comes from eink_dashboard_layout.h.
+  void drawOverviewCard(const OverviewRow& row, int x, int y, int w, int h, bool selected) const;
   void handleButtons();
-  void applyDecision(const AwaitingItem& it, bool approve, int optionIndex);
+  bool applyDecision(const AwaitingItem& it, int optionCursor);
   void renderOverview(const OverviewRow* rows, int n, int awaitingCount);
   void renderDetail();
+  void renderCard();
   // Branded header (AgentDeck mark + title) shared by every Connected screen.
   void drawBrandedHeader(const char* title, const char* subtitle) const;
   // LIMITS footer — 5H/7D quota gauges. Renders only when the hub supplies usage
@@ -151,4 +168,21 @@ class AgentDashboardActivity final : public Activity {
   int optionCursor = 0;      // which option is highlighted (option prompts)
   uint32_t backPressMs = 0;  // Back press timestamp for short(deny)/long(exit/back)
   uint32_t lastDecisionMs = 0;
+
+  // ── Card view state ──
+  char cardSid[64] = {0};          // session the Card is showing
+  uint32_t cardSig = 0;            // signature of the prompt the Card is showing
+  bool cardFocusSent = false;      // focus_session sent for this card (WaitingForOptions)
+  // Card→Detail transitions consume a raw front-button PRESS; the mapped RELEASE
+  // of that same press would otherwise land in Detail's Confirm handler and could
+  // fire an inline decision (cooldown only covers short presses). Swallow it.
+  bool swallowConfirmRelease = false;
+  uint32_t lastUserInputMs = 0;    // any button press — suppresses auto-surface mid-navigation
+  // Recently dismissed prompt signatures (ring). Multiple sessions can be
+  // awaiting at once; a single slot would resurrect A when B is dismissed.
+  static constexpr int kDismissedCap = 8;
+  uint32_t dismissedSigs[kDismissedCap] = {0};
+  uint8_t dismissedHead = 0;
+  // Don't auto-surface while the user is actively pressing buttons.
+  static constexpr uint32_t kAutoSurfaceQuietMs = 2500;
 };

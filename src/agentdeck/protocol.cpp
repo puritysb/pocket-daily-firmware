@@ -41,6 +41,41 @@ void copyStr(char* dst, size_t cap, const char* src) {
   dst[cap - 1] = '\0';
 }
 
+// Append a distinct summary fragment without ever growing a heap string. The
+// sessions payload may provide a terse `activity` plus a richer `goal`; keeping
+// both gives the card enough material for its 2–3 line layout.
+void appendSummary(char* dst, size_t cap, const char* text) {
+  if (!dst || cap == 0 || !text || !text[0] || strcmp(dst, text) == 0) return;
+  const size_t used = strlen(dst);
+  if (used >= cap - 1) return;
+  snprintf(dst + used, cap - used, "%s%s", used ? " - " : "", text);
+}
+
+// Copy a prompt option snapshot into the fixed DashboardState arrays. Caller
+// holds g_stateMutex. `ownerSid` is mandatory for actions: source-less options
+// may be displayed nowhere, preventing a late previous-focus event from
+// becoming buttons for the newly selected session.
+void storeOptionsLocked(JsonObject& obj, const char* ownerSid, bool clearWhenMissing) {
+  if (!obj["options"].is<JsonArray>()) {
+    if (clearWhenMissing) {
+      g_state.optionCount = 0;
+      g_state.optionSessionId[0] = '\0';
+    }
+    return;
+  }
+  JsonArray opts = obj["options"].as<JsonArray>();
+  g_state.optionCount = static_cast<uint8_t>(std::min(static_cast<int>(opts.size()), 8));
+  for (uint8_t i = 0; i < g_state.optionCount; i++) {
+    JsonObject o = opts[i].as<JsonObject>();
+    copyStr(g_state.options[i].label, sizeof(g_state.options[i].label), o["label"] | "");
+    copyStr(g_state.options[i].action, sizeof(g_state.options[i].action), o["shortcut"] | "");
+    g_state.options[i].index = o["index"] | i;
+    g_state.options[i].recommended = o["recommended"] | false;
+    g_state.options[i].selected = o["selected"] | false;
+  }
+  copyStr(g_state.optionSessionId, sizeof(g_state.optionSessionId), ownerSid ? ownerSid : "");
+}
+
 void handleStateUpdate(JsonObject& obj) {
   lockState();
 
@@ -81,24 +116,23 @@ void handleStateUpdate(JsonObject& obj) {
     g_state.question[0] = '\0';
   copyStr(g_state.promptType, sizeof(g_state.promptType), obj["promptType"] | "");
 
-  if (obj["options"].is<JsonArray>()) {
-    JsonArray opts = obj["options"].as<JsonArray>();
-    g_state.optionCount = (uint8_t)std::min((int)opts.size(), 8);
-    for (uint8_t i = 0; i < g_state.optionCount; i++) {
-      JsonObject o = opts[i].as<JsonObject>();
-      copyStr(g_state.options[i].label, sizeof(g_state.options[i].label), o["label"] | "");
-      g_state.options[i].index = o["index"] | i;
-      g_state.options[i].recommended = o["recommended"] | false;
-      g_state.options[i].selected = o["selected"] | false;
-      if (o["shortcut"].is<const char*>())
-        copyStr(g_state.options[i].action, sizeof(g_state.options[i].action), o["shortcut"].as<const char*>());
-      else
-        g_state.options[i].action[0] = '\0';
-    }
-  } else {
-    g_state.optionCount = 0;
-  }
+  // Only sessionId owns an option snapshot. focusedSessionId on an aggregate
+  // daemon/OpenClaw state can name an observed row while carrying unrelated
+  // aggregate options, so it must never be used as the owner.
+  storeOptionsLocked(obj, obj["sessionId"] | "", true);
 
+  g_state.dataReceived = true;
+  unlockState();
+}
+
+void handlePromptOptions(JsonObject& obj) {
+  const char* sid = obj["sessionId"] | (obj["focusedSessionId"] | "");
+  lockState();
+  if (obj["question"].is<const char*>())
+    copyStr(g_state.question, sizeof(g_state.question), obj["question"].as<const char*>());
+  if (obj["promptType"].is<const char*>())
+    copyStr(g_state.promptType, sizeof(g_state.promptType), obj["promptType"].as<const char*>());
+  storeOptionsLocked(obj, sid, false);
   g_state.dataReceived = true;
   unlockState();
 }
@@ -182,6 +216,7 @@ void handleSessionsList(JsonObject& obj) {
     copyStr(si.projectName, sizeof(si.projectName), s["projectName"] | "");
     copyStr(si.modelName, sizeof(si.modelName), s["modelName"] | "");
     copyStr(si.agentType, sizeof(si.agentType), s["agentType"] | "");
+    copyStr(si.controlMode, sizeof(si.controlMode), s["controlMode"] | "");
     copyStr(si.state, sizeof(si.state), s["state"] | "");
     si.port = s["port"] | 0;
     si.alive = s["alive"] | false;
@@ -190,10 +225,18 @@ void handleSessionsList(JsonObject& obj) {
     copyStr(si.question, sizeof(si.question), s["question"] | "");
     copyStr(si.promptType, sizeof(si.promptType), s["promptType"] | "");
     copyStr(si.requestId, sizeof(si.requestId), s["requestId"] | "");
-    // Daemon-synthesized activity one-liner; fall back to currentTool / goal.
-    const char* act = s["activity"] | (s["currentTask"] | (s["goal"] | ""));
-    copyStr(si.activity, sizeof(si.activity), act);
-    if (si.activity[0] == '\0') copyStr(si.activity, sizeof(si.activity), si.currentTool);
+    // Prefer the daemon's concise current action, then retain the richer goal
+    // (or latest event) so Overview and Detail can use the available 2–3 lines.
+    // All composition stays inside SessionInfo's fixed 192-byte buffer.
+    si.activity[0] = '\0';
+    const char* activity = s["activity"] | "";
+    const char* currentTask = s["currentTask"] | "";
+    const char* goal = s["goal"] | "";
+    const char* lastEvent = s["lastEventText"] | "";
+    appendSummary(si.activity, sizeof(si.activity), activity[0] ? activity : currentTask);
+    appendSummary(si.activity, sizeof(si.activity), goal);
+    if (si.activity[0] == '\0') appendSummary(si.activity, sizeof(si.activity), lastEvent);
+    if (si.activity[0] == '\0') appendSummary(si.activity, sizeof(si.activity), si.currentTool);
   }
 
   unlockState();
@@ -216,6 +259,7 @@ void appendTimelineLocked(const char* sid, const char* raw, const char* etype, u
   it.tsSec = tsSec;
   g_state.timelineHead = (g_state.timelineHead + 1) % DashboardState::TIMELINE_CAP;
   if (g_state.timelineCount < DashboardState::TIMELINE_CAP) g_state.timelineCount++;
+  g_state.timelineRevision++;
   // The device has no RTC/NTP: track the newest daemon timestamp and when it
   // arrived so the render task can derive per-entry ages.
   if (tsSec > g_state.daemonEpochSec) {
@@ -248,6 +292,15 @@ void handleTimelineHistory(JsonObject& obj) {
   JsonArray entries = obj["entries"].as<JsonArray>();
   if (entries.isNull()) return;
   lockState();
+  // A query_session_timeline reply carries the requested sessionId. Replace the
+  // mixed live ring with that authoritative history so entries from other busy
+  // sessions cannot evict the selected session before Detail renders.
+  const char* requestedSid = obj["sessionId"] | "";
+  if (requestedSid[0]) {
+    g_state.timelineCount = 0;
+    g_state.timelineHead = 0;
+    g_state.timelineRevision++;
+  }
   for (JsonObject e : entries) {
     const char* sid = e["sessionId"] | "";
     const char* raw = e["raw"] | "";
@@ -312,6 +365,7 @@ void configureJsonFilter() {
   filter["sessions"][0]["projectName"] = true;
   filter["sessions"][0]["modelName"] = true;
   filter["sessions"][0]["agentType"] = true;
+  filter["sessions"][0]["controlMode"] = true;
   filter["sessions"][0]["state"] = true;
   filter["sessions"][0]["port"] = true;
   filter["sessions"][0]["alive"] = true;
@@ -323,6 +377,7 @@ void configureJsonFilter() {
   filter["sessions"][0]["activity"] = true;
   filter["sessions"][0]["currentTask"] = true;
   filter["sessions"][0]["goal"] = true;
+  filter["sessions"][0]["lastEventText"] = true;
 
   // timeline_event / timeline_history
   filter["entry"]["sessionId"] = true;
@@ -362,6 +417,8 @@ void parseMessage(const char* json, size_t length) {
 
   if (strcmp(type, "state_update") == 0) {
     handleStateUpdate(obj);
+  } else if (strcmp(type, "prompt_options") == 0) {
+    handlePromptOptions(obj);
   } else if (strcmp(type, "sessions_list") == 0) {
     handleSessionsList(obj);
   } else if (strcmp(type, "usage_update") == 0) {

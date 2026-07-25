@@ -23,6 +23,13 @@ bool buildPermissionDecision(char* out, size_t cap, const char* requestId, const
 // {"type":"select_option","index":<i>[,"sessionId":"<sid>"]}
 bool buildSelectOption(char* out, size_t cap, const char* sid, int index);
 
+// {"type":"respond","value":"<shortcut>"} for non-navigable prompts.
+bool buildRespond(char* out, size_t cap, const char* value);
+
+// {"type":"focus_session","sessionId":"<sid>"} — required before a
+// managed session's state_update/options can be safely correlated.
+bool buildFocusSession(char* out, size_t cap, const char* sid);
+
 // {"type":"session_command","sessionId":"<sid>","command":{"type":"escape"}}
 bool buildSessionEscape(char* out, size_t cap, const char* sid);
 
@@ -34,13 +41,14 @@ bool buildQuerySessionTimeline(char* out, size_t cap, const char* sid);
 // ── queue wrappers (enqueue on the ws_client outbox) ───────────────────────
 void sendPermissionDecision(const char* requestId, const char* decision);
 void sendSelectOption(const char* sid, int index);
+void sendRespond(const char* value);
+void sendFocusSession(const char* sid);
 void sendSessionEscape(const char* sid);
 void sendQuerySessionTimeline(const char* sid);
 
-// Approve/deny that works against both daemons AND both prompt shapes:
-//   • Observed gate (requestId present) → permission_decision allow/deny.
-//   • Managed PTY prompt (no requestId, sid present) → approve = select_option(0),
-//     deny = session escape (Claude maps Esc to "No, tell Claude…").
+// Legacy compatibility wrapper. It is intentionally actionable ONLY when a
+// real requestId exists; missing options/requestId must never fabricate a
+// select_option or turn "Deny" into a delayed session escape.
 void sendApprove(const char* requestId, const char* sid, bool approve);
 
 }  // namespace Commands

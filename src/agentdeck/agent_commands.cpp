@@ -14,9 +14,8 @@ bool buildPermissionDecision(char* out, size_t cap, const char* requestId, const
     if (cap) out[0] = '\0';
     return false;
   }
-  int n = snprintf(out, cap,
-                   "{\"type\":\"permission_decision\",\"requestId\":\"%s\",\"decision\":\"%s\"}",
-                   requestId, decision);
+  int n = snprintf(out, cap, "{\"type\":\"permission_decision\",\"requestId\":\"%s\",\"decision\":\"%s\"}", requestId,
+                   decision);
   return n > 0 && (size_t)n < cap;
 }
 
@@ -30,15 +29,42 @@ bool buildSelectOption(char* out, size_t cap, const char* sid, int index) {
   return n > 0 && (size_t)n < cap;
 }
 
+bool buildRespond(char* out, size_t cap, const char* value) {
+  if (!out || cap == 0) return false;
+  if (!value || !value[0]) {
+    out[0] = '\0';
+    return false;
+  }
+  // Shortcuts originate in PromptOption.shortcut. Reject anything requiring
+  // JSON escaping rather than allocating a temporary encoded string.
+  for (const unsigned char* p = reinterpret_cast<const unsigned char*>(value); *p; p++) {
+    if (*p < 0x20 || *p == '"' || *p == '\\') {
+      out[0] = '\0';
+      return false;
+    }
+  }
+  const int n = snprintf(out, cap, "{\"type\":\"respond\",\"value\":\"%s\"}", value);
+  return n > 0 && static_cast<size_t>(n) < cap;
+}
+
+bool buildFocusSession(char* out, size_t cap, const char* sid) {
+  if (!out || cap == 0) return false;
+  if (!sid || !sid[0]) {
+    out[0] = '\0';
+    return false;
+  }
+  const int n = snprintf(out, cap, "{\"type\":\"focus_session\",\"sessionId\":\"%s\"}", sid);
+  return n > 0 && static_cast<size_t>(n) < cap;
+}
+
 bool buildSessionEscape(char* out, size_t cap, const char* sid) {
   if (!out || cap == 0) return false;
   if (!sid || !sid[0]) {
     out[0] = '\0';
     return false;
   }
-  int n = snprintf(out, cap,
-                   "{\"type\":\"session_command\",\"sessionId\":\"%s\",\"command\":{\"type\":\"escape\"}}",
-                   sid);
+  int n =
+      snprintf(out, cap, "{\"type\":\"session_command\",\"sessionId\":\"%s\",\"command\":{\"type\":\"escape\"}}", sid);
   return n > 0 && (size_t)n < cap;
 }
 
@@ -62,6 +88,16 @@ void sendSelectOption(const char* sid, int index) {
   if (buildSelectOption(buf, sizeof(buf), sid, index)) Net::queueOutbound(buf);
 }
 
+void sendRespond(const char* value) {
+  char buf[96];
+  if (buildRespond(buf, sizeof(buf), value)) Net::queueOutbound(buf);
+}
+
+void sendFocusSession(const char* sid) {
+  char buf[128];
+  if (buildFocusSession(buf, sizeof(buf), sid)) Net::queueOutbound(buf);
+}
+
 void sendQuerySessionTimeline(const char* sid) {
   char buf[160];
   if (buildQuerySessionTimeline(buf, sizeof(buf), sid)) Net::queueOutbound(buf);
@@ -73,18 +109,9 @@ void sendSessionEscape(const char* sid) {
 }
 
 void sendApprove(const char* requestId, const char* sid, bool approve) {
+  (void)sid;
   if (requestId && requestId[0]) {
     sendPermissionDecision(requestId, approve ? "allow" : "deny");
-  } else if (sid && sid[0]) {
-    if (approve)
-      sendSelectOption(sid, 0);
-    else
-      sendSessionEscape(sid);
-  } else if (approve) {
-    // No routable id at all — emit a sessionId-less select_option so the daemon
-    // applies it to its focused session. (Deny needs a target session to escape,
-    // so it cannot be expressed without an id and is intentionally dropped.)
-    sendSelectOption(nullptr, 0);
   }
 }
 
