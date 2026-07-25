@@ -456,6 +456,12 @@ void setup() {
     // through to the sleep-wake "resume reader" logic, which fires on stale
     // openEpubPath + lastSleepFromReader from a prior session.
     activityManager.goHome();
+  } else if (SETTINGS.startupApp == CrossPointSettings::STARTUP_AGENTDECK &&
+             !mappedInputManager.isPressed(MappedInputManager::Button::Back)) {
+    // Boot-to-card: AgentDeck's card face is this device's home. Holding Back
+    // during boot is the escape hatch to the reader home; exiting the dashboard
+    // also lands there (its onExit silentRestart targets home).
+    activityManager.goToAgent();
   } else if (APP_STATE.openEpubPath.empty() || !APP_STATE.lastSleepFromReader ||
              mappedInputManager.isPressed(MappedInputManager::Button::Back) || APP_STATE.readerActivityLoadCount > 0) {
     // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity

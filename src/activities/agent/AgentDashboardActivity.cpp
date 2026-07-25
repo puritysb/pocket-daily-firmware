@@ -15,6 +15,7 @@
 #include "CrossPointSettings.h"
 #include "HalGPIO.h"
 #include "SilentRestart.h"
+#include "WifiCredentialStore.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "agent/AgentLog.h"
 #include "agentdeck/agent_commands.h"
@@ -345,22 +346,49 @@ void AgentDashboardActivity::onEnter() {
   cjkFontId = loadKoreanFont();
   if (cjkFontId == 0 && SETTINGS.sdFontFamilyName[0] != '\0') cjkFontId = SETTINGS.getReaderFontId();
 
-  AgentLog::line("AGENT", "AgentDashboardActivity onEnter (M2 network)");
+  AgentLog::line("AGENT", "AgentDashboardActivity onEnter (Face shell)");
+  // Paint the Face immediately — content first, connection is a status line.
   requestUpdate();
 
-  if (WiFi.status() != WL_CONNECTED) {
-    startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                           [this](const ActivityResult& result) {
-                             if (!result.isCancelled) {
-                               const auto& wifi = std::get<WifiResult>(result.data);
-                               localIp = wifi.ip;
-                             }
-                             onWifiSelectionComplete(!result.isCancelled);
-                           });
-  } else {
+  if (WiFi.status() == WL_CONNECTED) {
     localIp = WiFi.localIP().toString().c_str();
     onWifiSelectionComplete(true);
+    return;
   }
+
+  // Saved credentials → background STA join, no blocking picker. The Face is
+  // already on screen; loop() promotes the state when the join lands.
+  const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
+  const WifiCredential* cred = lastSsid.empty() ? nullptr : WIFI_STORE.findCredential(lastSsid);
+  if (cred) {
+    strncpy(joiningSsid, cred->ssid.c_str(), sizeof(joiningSsid) - 1);
+    joiningSsid[sizeof(joiningSsid) - 1] = '\0';
+    AgentLog::line("AGENT", "background wifi join: %s", joiningSsid);
+    WiFi.mode(WIFI_STA);
+    if (cred->password.empty())
+      WiFi.begin(cred->ssid.c_str());
+    else
+      WiFi.begin(cred->ssid.c_str(), cred->password.c_str());
+    dashState = DashState::WifiJoining;
+    wifiJoinStartMs = millis();
+    return;
+  }
+
+  // First run (no saved network): the picker genuinely needs the screen.
+  launchWifiPicker();
+}
+
+void AgentDashboardActivity::launchWifiPicker() {
+  dashState = DashState::WifiSelection;
+  requestUpdate();
+  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                         [this](const ActivityResult& result) {
+                           if (!result.isCancelled) {
+                             const auto& wifi = std::get<WifiResult>(result.data);
+                             localIp = wifi.ip;
+                           }
+                           onWifiSelectionComplete(!result.isCancelled);
+                         });
 }
 
 void AgentDashboardActivity::onWifiSelectionComplete(const bool connected) {
@@ -504,6 +532,23 @@ void AgentDashboardActivity::loop() {
   handleButtons();
   if (exitRequested) {
     finish();
+    return;
+  }
+
+  if (dashState == DashState::WifiJoining) {
+    // Background STA join in progress. The Face is already on screen; promote
+    // to daemon discovery when the join lands, or fall back to the interactive
+    // picker after the budget (wrong password, AP gone, …).
+    if (WiFi.status() == WL_CONNECTED) {
+      localIp = WiFi.localIP().toString().c_str();
+      WIFI_STORE.setLastConnectedSsid(joiningSsid);
+      AgentLog::line("AGENT", "wifi joined %s (%s)", joiningSsid, localIp.c_str());
+      startNetworking();
+    } else if (millis() - wifiJoinStartMs > kWifiJoinTimeoutMs) {
+      AgentLog::line("AGENT", "wifi join timeout (%s) — opening picker", joiningSsid);
+      WiFi.disconnect(true);
+      launchWifiPicker();
+    }
     return;
   }
 
@@ -1319,13 +1364,35 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
   int lastShown = overviewTop + capacity;
   if (lastShown > n) lastShown = n;
 
+  // Connection is a status line on the Face, never a screen of its own.
   char cl[96];
-  if (n > capacity)
-    snprintf(cl, sizeof(cl), "Connected \xC2\xB7 %s \xC2\xB7 %d-%d/%d", AgentDeck::Net::wsBridgeIp(), firstShown,
-             lastShown, n);
-  else
-    snprintf(cl, sizeof(cl), "Connected \xC2\xB7 %s \xC2\xB7 %d", AgentDeck::Net::wsBridgeIp(), n);
-  renderer.drawText(SMALL_FONT_ID, layout.pad, y, cl, true);
+  switch (dashState) {
+    case DashState::Connected:
+      if (n > capacity)
+        snprintf(cl, sizeof(cl), "Live \xC2\xB7 %s \xC2\xB7 %d-%d/%d", AgentDeck::Net::wsBridgeIp(), firstShown,
+                 lastShown, n);
+      else
+        snprintf(cl, sizeof(cl), "Live \xC2\xB7 %s \xC2\xB7 %d", AgentDeck::Net::wsBridgeIp(), n);
+      break;
+    case DashState::Connecting:
+      snprintf(cl, sizeof(cl), "Connecting \xC2\xB7 %s:%u\xE2\x80\xA6", AgentDeck::Net::wsBridgeIp(),
+               (unsigned)AgentDeck::Net::wsBridgePort());
+      break;
+    case DashState::Discovering:
+      if (discoveryNoticeShown)
+        snprintf(cl, sizeof(cl), "AgentDeck not found \xC2\xB7 still scanning\xE2\x80\xA6");
+      else
+        snprintf(cl, sizeof(cl), "Searching for AgentDeck\xE2\x80\xA6 \xC2\xB7 Wi-Fi %s", localIp.c_str());
+      break;
+    case DashState::WifiJoining:
+      snprintf(cl, sizeof(cl), "Joining Wi-Fi \"%s\"\xE2\x80\xA6", joiningSsid);
+      break;
+    case DashState::WifiSelection:
+      snprintf(cl, sizeof(cl), "Wi-Fi setup\xE2\x80\xA6");
+      break;
+  }
+  renderer.drawText(SMALL_FONT_ID, layout.pad, y, renderer.truncatedText(SMALL_FONT_ID, cl, w - layout.pad * 2).c_str(),
+                    true);
   y += lineS + 8;
 
   if (awaitingCount > 0) {
@@ -1338,8 +1405,14 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
 
   if (n == 0) {
     const int emptyY = layout.cards.y + layout.cards.h / 2 - line10;
-    renderer.drawText(UI_10_FONT_ID, layout.pad, emptyY,
-                      dataReceived ? "No active sessions" : "Waiting for agent state\xE2\x80\xA6", true);
+    const char* empty;
+    if (dashState == DashState::Connected)
+      empty = dataReceived ? "No active sessions" : "Waiting for agent state\xE2\x80\xA6";
+    else if (dashState == DashState::Discovering && discoveryNoticeShown)
+      empty = "Start AgentDeck on a computer on this Wi-Fi.";
+    else
+      empty = "Cards appear when AgentDeck connects.";
+    renderer.drawText(UI_10_FONT_ID, layout.pad, emptyY, empty, true);
   } else {
     for (int i = overviewTop; i < n && i < overviewTop + capacity; i++) {
       const AgentDeckEink::Rect card = layout.card((uint8_t)(i - overviewTop));
@@ -1842,7 +1915,7 @@ void AgentDashboardActivity::renderCard() {
 }
 
 void AgentDashboardActivity::render(RenderLock&&) {
-  // ── Connected: Overview (home) / Card (decision) / Detail (timeline) ──
+  // Card (decision) / Detail (timeline) exist only while Connected.
   if (dashState == DashState::Connected) {
     if (viewMode == ViewMode::Card) {
       renderCard();
@@ -1852,67 +1925,16 @@ void AgentDashboardActivity::render(RenderLock&&) {
       renderDetail();
       return;
     }
-
-    OverviewRow rows[AgentDeckCfg::SESSIONS_CAP];
-    const int n = collectOverview(rows, AgentDeckCfg::SESSIONS_CAP);
-    int awaiting = 0;
-    for (int i = 0; i < n; i++)
-      if (rows[i].awaiting) awaiting++;
-    renderOverview(rows, n, awaiting);
-    return;
   }
 
-  // ── Pre-Connected: WiFi select / discovering / connecting. Always show Back. ──
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int w = renderer.getScreenWidth();
-  const int line10 = renderer.getLineHeight(UI_10_FONT_ID);
-  const int lineS = renderer.getLineHeight(SMALL_FONT_ID);
-  const int pad = metrics.contentSidePadding;
-
-  renderer.clearScreen();
-  drawBrandedHeader("AgentDeck", nullptr);
-  int y = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-
-  switch (dashState) {
-    case DashState::WifiSelection:
-      renderer.drawText(UI_10_FONT_ID, pad, y, "Selecting Wi-Fi\xE2\x80\xA6", true, EpdFontFamily::BOLD);
-      break;
-
-    case DashState::Discovering:
-      if (discoveryNoticeShown) {
-        renderer.drawText(UI_10_FONT_ID, pad, y, "AgentDeck not running", true, EpdFontFamily::BOLD);
-        y += line10 + 8;
-        renderer.drawText(SMALL_FONT_ID, pad, y, ("Wi-Fi: " + localIp).c_str(), true);
-        y += lineS + 8;
-        auto lines =
-            renderer.wrappedText(SMALL_FONT_ID, "Start AgentDeck on a computer on this Wi-Fi.", w - pad * 2, 3);
-        for (const auto& line : lines) {
-          renderer.drawText(SMALL_FONT_ID, pad, y, line.c_str(), true);
-          y += lineS;
-        }
-        y += 4;
-        renderer.drawText(SMALL_FONT_ID, pad, y, "Still scanning for the daemon...", true);
-      } else {
-        renderer.drawText(UI_10_FONT_ID, pad, y, "Discovering daemon\xE2\x80\xA6", true, EpdFontFamily::BOLD);
-        y += line10 + 6;
-        renderer.drawText(SMALL_FONT_ID, pad, y, ("Wi-Fi: " + localIp).c_str(), true);
-      }
-      break;
-
-    case DashState::Connecting: {
-      char l[64];
-      snprintf(l, sizeof(l), "Connecting\xE2\x80\xA6 %s:%u", AgentDeck::Net::wsBridgeIp(),
-               (unsigned)AgentDeck::Net::wsBridgePort());
-      renderer.drawText(UI_10_FONT_ID, pad, y, l, true, EpdFontFamily::BOLD);
-      break;
-    }
-
-    case DashState::Connected:
-      break;  // handled above
-  }
-
-  // Persistent, physically-aligned hint bar — Back always leaves the dashboard.
-  const auto labels = mappedInput.mapLabels("Exit", "", "", "");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  renderer.displayBuffer();
+  // ── Face: content-first shell in EVERY connection state. The Face renders
+  // whatever is known (or an honest empty state); joining/discovering/connecting
+  // progress is a status line inside renderOverview, never a screen that
+  // replaces the content. ──
+  OverviewRow rows[AgentDeckCfg::SESSIONS_CAP];
+  const int n = collectOverview(rows, AgentDeckCfg::SESSIONS_CAP);
+  int awaiting = 0;
+  for (int i = 0; i < n; i++)
+    if (rows[i].awaiting) awaiting++;
+  renderOverview(rows, n, awaiting);
 }

@@ -4,7 +4,7 @@ This fork is evolving the X3/X4 from "an e-reader with an AgentDeck dashboard
 tab" into a complete single-purpose device: a **decision interface**. The
 CrossPoint core (HAL, e-ink driver, input mapping, WiFi/AP provisioning, SD,
 fonts, i18n, OTA) is kept as the OS layer; the AgentDeck activity owns the
-product grammar.
+product grammar. One firmware serves both devices (runtime X3/X4 detection).
 
 ## The grammar
 
@@ -22,15 +22,52 @@ The ≤4-choice rule is enforced structurally: when a prompt carries more than
 three options (slot 1 is always **Later**), the card degrades to the cursor
 grammar rather than growing more buttons.
 
-## Current state (M4)
+## The shell: Face / Deck / Outbox
 
-- **Overview** (home): mission-control list of live sessions.
-- **Card**: full-screen decision surface. Auto-surfaces from Overview when any
-  session needs attention (never hijacks Detail, and waits for a
-  2.5 s input-quiet window). Auto-resolves back to Overview when the prompt is
-  answered anywhere.
+E-ink retains its image at zero power, so the device's natural mode of being is
+**"a surface that always shows something"**, not "an app you open". Three
+layers:
+
+- **Face** — the home surface. Boot lands here and it renders *immediately*
+  from whatever is known; joining Wi-Fi, discovering the daemon, and connecting
+  are a **status line inside the Face**, never a screen that replaces content.
+  The Wi-Fi picker appears only on first run (no saved credentials) or when the
+  background join times out.
+- **Deck** — the bounded set of active cards. Today the deck is fed live from
+  daemon state (sessions needing attention); M5.5 persists it to SD so the Face
+  can show the last-synced deck offline with an honest "as of" timestamp.
+- **Outbox** — (M6) decisions are recorded locally first and pushed when a
+  connection exists, so being offline never blocks pressing a button.
+
+### Card validity classes (`actionClass`, M6 contract)
+
+Offline behaviour is decided per card, extending the attention contract's
+honesty rule:
+
+| Class | Examples | Offline behaviour |
+| --- | --- | --- |
+| `live` | PASS approval, PermissionGate | greys out + "reconnect to act"; TTL-expires. Never lets the user press an approval that cannot be delivered |
+| `day` | NUDGE, QUEST, INTERVAL, FORK | valid all day; answers queue in the Outbox |
+| `info` | THREAD checkpoint, PULSE digest | read-only; always valid; shows sync age |
+
+"Personalised assistant while offline" therefore means: the daemon (the brain)
+precomputes the day's cards and the device carries them as a cache of prepared
+decisions. No on-device LLM is implied, ever.
+
+## Current state
+
+- **Face** (home): mission-control list of live sessions, rendered in every
+  connection state with a status line (`Live · ip · n` / `Joining Wi-Fi …` /
+  `Searching for AgentDeck…` / `Connecting …`). Background STA join with saved
+  credentials — no blocking picker after first run.
+- **Card**: full-screen decision surface. Auto-surfaces from the Face when any
+  session needs attention (never hijacks Detail; waits for a 2.5 s input-quiet
+  window). Auto-resolves back to the Face when the prompt is answered anywhere.
 - **Detail**: per-session timeline with the inline decision block as the
   fallback grammar (reachable from a card via the Detail softkey).
+- **Boot-to-card**: Settings → System → "Start on power-on" = Home / Agent
+  Dashboard (`startupApp`). Holding **Back during boot** is the escape hatch to
+  the reader home; exiting the dashboard also lands on Home.
 
 Softkey binding is **raw physical order** (left→right: `BTN_BACK`,
 `BTN_CONFIRM`, `BTN_LEFT`, `BTN_RIGHT`) so the hint bar and the input can never
@@ -54,24 +91,28 @@ content actually changes. The honesty rules of the attention contract
 
 ## Wire contract
 
-Deliberately **zero new protocol**. The card is fed by what the daemon already
-broadcasts (`sessions_list` per-session `question`/`promptType`/`options`/
-`requestId`, plus the focused `state_update`), and answers with the existing
-upstream commands (`permission_decision`, `select_option`, `respond`,
-`focus_session`). A generalized `card_show` / `card_action` frame pair for
-daemon-side card modules (THREAD, PULSE, …) is a future AgentDeck-side protocol
-extension and must land there first (`shared/src/protocol.ts`), then be
-re-ported here per the client-contract discipline.
+Deliberately **zero new protocol** so far. The card is fed by what the daemon
+already broadcasts (`sessions_list` per-session `question`/`promptType`/
+`options`/`requestId`, plus the focused `state_update`), and answers with the
+existing upstream commands (`permission_decision`, `select_option`, `respond`,
+`focus_session`). The M7 card-feed protocol (generalized cards with
+`actionClass`, pull sync + outbox push) must land in AgentDeck's
+`shared/src/protocol.ts` first, then be re-ported here per the client-contract
+discipline. Pull-mode sync should be plain HTTP (`GET` feed / `POST` outbox) —
+wake-sync-sleep needs no persistent socket; WS remains the docked live mode.
 
 ## Roadmap
 
 1. **M4 (done)** — Card view + direct softkey grammar, fed by session attention.
-2. **M5 — boot-to-card**: a setting that makes the AgentDeck activity the home
-   activity; the reader remains available as a library feature.
-3. **M6 — power ladder**: today the card mode holds WiFi+WS (desk-class,
-   `preventAutoSleep`). Pull-class cards (daily/slow content) need deep-sleep +
-   periodic sync + the panel's zero-power static image. Push-class cards keep
-   requiring live WS — do not promise phone-free real-time on battery.
-4. **M7 (AgentDeck-side) — card protocol**: `card_show`/`card_action` with the
-   ≤4-choice rule in the schema, shared with InkDeck (always-USB, same panel
-   class — the natural first surface for push cards).
+2. **M5 (done)** — Face shell: boot-to-card setting, background Wi-Fi join,
+   connection demoted to a status line; the Face renders in every state.
+3. **M5.5 — Deck persistence**: card records on SD, render-from-cache at boot,
+   "as of" sync age on the Face.
+4. **M6 — Outbox + power ladder**: `actionClass` contract, HTTP pull sync,
+   deep-sleep wake cadence (X3 has DS3231; X4's drifty RTC is fine for hourly
+   pulls). Battery-class portability is earned here — do not promise phone-free
+   real-time push on battery.
+5. **M7 (AgentDeck-side) — card feed protocol**: daemon card modules (THREAD,
+   PULSE, NUDGE, QUEST) with the ≤4-choice rule in the schema, shared with
+   InkDeck (always-USB, same panel class — the natural first surface for push
+   cards).

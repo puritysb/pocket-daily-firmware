@@ -41,7 +41,11 @@ class AgentDashboardActivity final : public Activity {
   bool preventAutoSleep() override { return dashState != DashState::WifiSelection; }
 
  private:
-  enum class DashState : uint8_t { WifiSelection, Discovering, Connecting, Connected };
+  // WifiJoining = background STA join with saved credentials (no picker UI —
+  // the Face renders immediately and the join is just a status line). The
+  // interactive WifiSelection picker is only pushed when there are no saved
+  // credentials or the background join times out.
+  enum class DashState : uint8_t { WifiSelection, WifiJoining, Discovering, Connecting, Connected };
 
   // One session needing attention. Collected from sessions_list (or the focused
   // state_update fallback) and classified by the shared attention contract;
@@ -74,6 +78,7 @@ class AgentDashboardActivity final : public Activity {
   enum class ViewMode : uint8_t { Overview, Detail, Card };
 
   void onWifiSelectionComplete(bool connected);
+  void launchWifiPicker();
   void startNetworking();
   void sendClientRegister();
   void sendDeviceInfo();
@@ -117,6 +122,8 @@ class AgentDashboardActivity final : public Activity {
   // succeed within this window, drop back to Discovering and re-resolve via mDNS
   // instead of hammering the old port. See feedback_daemon_port_flexibility.
   static constexpr uint32_t kConnectTimeoutMs = 10000;
+  // Background STA join budget before falling back to the interactive picker.
+  static constexpr uint32_t kWifiJoinTimeoutMs = 20000;
   static constexpr uint32_t kExitHoldMs = 700;          // hold Back this long = exit while a card is up
   static constexpr uint32_t kDecisionCooldownMs = 400;  // debounce a sent decision
   // A connection that survives longer than this is "healthy": on drop we retry the
@@ -134,6 +141,8 @@ class AgentDashboardActivity final : public Activity {
 
   DashState dashState = DashState::WifiSelection;
   std::string localIp;
+  uint32_t wifiJoinStartMs = 0;
+  char joiningSsid[33] = {0};  // SSID of the in-progress background join (status line)
   bool exitRequested = false;
   bool registered = false;
   uint32_t lastSignature = 0;

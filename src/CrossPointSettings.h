@@ -186,6 +186,11 @@ class CrossPointSettings {
     QUICK_RESUME_SLEEP_SCREEN_COUNT
   };
 
+  // What the device boots into on a normal (non-silent, non-recovery) power-on.
+  // STARTUP_AGENTDECK makes the AgentDeck card face the device's home; the
+  // reader home stays reachable by exiting the dashboard or holding Back at boot.
+  enum STARTUP_APP { STARTUP_HOME = 0, STARTUP_AGENTDECK = 1, STARTUP_APP_COUNT };
+
   // Sleep screen settings
   uint8_t sleepScreen = DARK;
   // Sleep screen cover mode settings
@@ -237,6 +242,8 @@ class CrossPointSettings {
   uint8_t paragraphAlignment = JUSTIFIED;
   // Auto-sleep timeout setting (default 10 minutes). Legacy sleepTimeout enum values are migration-only.
   uint8_t sleepTimeoutMinutes = 10;
+  // Boot destination (STARTUP_APP). Persisted via SettingsList key "startupApp".
+  uint8_t startupApp = STARTUP_HOME;
   // E-ink refresh frequency (default 15 pages)
   uint8_t refreshFrequency = REFRESH_15;
   uint8_t hyphenationEnabled = 0;

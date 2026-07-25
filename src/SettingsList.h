@@ -187,6 +187,9 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
                             "pwrBtnFootnoteBack", StrId::STR_CAT_CONTROLS),
 
         // --- System ---
+        SettingInfo::Enum(StrId::STR_STARTUP_APP, &CrossPointSettings::startupApp,
+                          {StrId::STR_STARTUP_HOME, StrId::STR_AGENT_DASHBOARD}, "startupApp",
+                          StrId::STR_CAT_SYSTEM),
         SettingInfo::Value(
             StrId::STR_TIME_TO_SLEEP, &CrossPointSettings::sleepTimeoutMinutes,
             {CrossPointSettings::MIN_SLEEP_TIMEOUT_MINUTES, CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES, 1},
