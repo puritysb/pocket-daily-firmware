@@ -1784,8 +1784,9 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
   // Hint bar. Up/Down only meaningful with more than one row. Cached decks
   // offer no actions (handleButtons sees the live n == 0 and no-ops anyway).
   // Pull-synced rows are live data but NOT interactive (no WS session behind
-  // them) — advertising "Open" there would be a lie, same honesty rule.
-  const bool interactive = !fromCache && dashState == DashState::Connected;
+  // them) — advertising "Open" there would be a lie, same honesty rule. The
+  // frame frozen through a timed sleep only answers the power button.
+  const bool interactive = !fromCache && dashState == DashState::Connected && !timedSleepImminent;
   const auto labels = mappedInput.mapLabels("Exit", (n > 0 && interactive) ? "Open" : "",
                                             (n > 1 && interactive) ? "Up" : "", (n > 1 && interactive) ? "Down" : "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
