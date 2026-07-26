@@ -143,6 +143,16 @@ A flash failure leaves the running firmware bootable. `device_info` reports
 trailing git sha) for post-OTA deploy verification. The SD update flow
 (Settings → System, and boot recovery) remains as the fallback path.
 
+**When the link is too lossy for OTA**, deliver over the File Transfer web
+server instead: `scripts/push-firmware-http.sh <device-ip>` POSTs the image to
+the SD root as `update.bin` and verifies the landed size before anyone flashes
+it. A single HTTP POST rides TCP retransmits, so it survives packet loss that
+makes the chunk/ack OTA protocol time out — which is the state one X3 unit is
+in (same room, same AP, X4 fine: unit-specific RF loss, handshakes stalling in
+`SYN_RCVD`). The device must be put into File Transfer mode by hand first
+(Home → File Transfer → Join a Network, or Create Hotspot for a direct link
+that bypasses the router entirely); the script cannot press its buttons.
+
 ## Roadmap
 
 1. **M4 (done)** — Card view + direct softkey grammar, fed by session attention.
@@ -166,7 +176,42 @@ trailing git sha) for post-OTA deploy verification. The SD update flow
    hardware: actual latch-held sleep current and a real timer wake.
    Battery-class portability is earned here — do not promise phone-free
    real-time push on battery.
-5. **M7 (AgentDeck-side) — card feed protocol**: daemon card modules (THREAD,
-   PULSE, NUDGE, QUEST) with the ≤4-choice rule in the schema, shared with
-   InkDeck (always-USB, same panel class — the natural first surface for push
-   cards).
+
+   **Verifying the wake is now possible from the daemon side.** A woken client
+   with an empty outbox sends exactly one request and identifies itself in
+   none of it, so the cadence used to leave no trace at all. The daemon now
+   logs every `GET /feed` with the gap since that client's previous pull,
+   compared against the `nextPullSec` it handed out last time (`agentdeck
+   devices` → `Card feed`). A gap of ~3600 s after a sleep *is* the timer-wake
+   proof, and its signed error is the internal timer's drift. Sleep current
+   still needs a meter — that half has no software substitute.
+5. **M7 (AgentDeck-side) — card feed protocol (contract + framework landed)**:
+   `FeedCard.module` (`ModuleCard`) is the non-session card body — title,
+   question, ≤4 context lines, ≤3 choices, because slot 1 of the four buttons
+   is always the device's own *Later*. The rule is a clamp at the daemon's
+   build chokepoint (`sealModuleCard`), not a convention, and all text is
+   trimmed to UTF-8 byte budgets there. `cardId` is `module:<moduleId>:<key>`,
+   which is how an outbox `card_choice` recorded hours offline routes back to
+   its author.
+
+   **THREAD** ships as the reference producer — `info` class, no choices,
+   derived entirely from the live roster (no new state, no persistence, no
+   product policy): *"1 of 3 threads need you"* plus a line per thread, with an
+   honest `(+n more)` instead of a silent truncation.
+
+   **PULSE / NUDGE / QUEST are deliberately not guessed at.** They are the
+   `day` class — answerable offline — and each needs a decision this fork has
+   not made yet:
+
+   - what a *nudge* is allowed to ask, and who authored the promise it is
+     holding the user to;
+   - where a *quest* lives across days, and what closes one;
+   - what a *pulse* summarizes, and on whose clock it fires.
+
+   The device grammar is ready for all three; the daemon side needs those
+   answers before it grows a producer.
+
+   Shared with InkDeck (always-USB, same panel class — the natural first
+   surface for push cards). The X3/X4 re-port is pending: today's firmware
+   skips module cards (`applyCardFeed` continues on a null `session`), so the
+   contract can land ahead of the client without breaking the deployed X4.
