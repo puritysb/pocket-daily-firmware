@@ -151,9 +151,20 @@ trailing git sha) for post-OTA deploy verification. The SD update flow
    **M5.6 (done)** — AgentDeck WiFi OTA v1 client (see "Firmware delivery").
 3. **M5.5 (done)** — Deck persistence: card records on SD, render-from-cache at
    boot and on daemon loss, "as of" sync age on the Face.
-4. **M6 — Outbox + power ladder**: `actionClass` contract, HTTP pull sync,
-   deep-sleep wake cadence (X3 has DS3231; X4's drifty RTC is fine for hourly
-   pulls). Battery-class portability is earned here — do not promise phone-free
+4. **M6 — Outbox + power ladder (implemented, hardware verification pending)**:
+   `actionClass` contract (AgentDeck-side first, then `card_class.h` here),
+   HTTP pull sync (`feed_client` + `outbox_store` + endpoint cache), timed
+   deep-sleep cadence behind the "AgentDeck battery sync" setting (default
+   OFF). Hardware reality checks that reshaped the plan: both boards are
+   ESP32-C3 (one binary); the front buttons are ADC ladders so the only wake
+   sources are the timer and the power button; the stock sleep path cuts the
+   battery latch (GPIO13) and kills the RTC domain, so the cadence uses
+   `startTimedDeepSleep` which holds the latch HIGH (higher sleep current —
+   hence opt-in). The X3's DS3231 has no alarm wiring and only hour/minute
+   registers — it cannot wake the MCU; both boards use the drifty internal
+   timer, re-anchored by `serverTime` on every pull. Still to verify on
+   hardware: actual latch-held sleep current and a real timer wake.
+   Battery-class portability is earned here — do not promise phone-free
    real-time push on battery.
 5. **M7 (AgentDeck-side) — card feed protocol**: daemon card modules (THREAD,
    PULSE, NUDGE, QUEST) with the ≤4-choice rule in the schema, shared with
