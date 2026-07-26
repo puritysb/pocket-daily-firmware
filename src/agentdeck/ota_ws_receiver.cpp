@@ -37,7 +37,15 @@ struct RxState {
   uint32_t expectedSize = 0;
   uint32_t written = 0;
   uint32_t nextSeq = 0;
+  uint32_t lastRxMs = 0;  // millis() of the last begin/chunk — drives the stall abort
 };
+
+// A receive with no traffic for this long is dead (daemon crashed/quit mid-push,
+// network partition). Without this, rx.active stays set forever and the activity
+// keeps swallowing all input "until the transfer resolves" — a soft brick until
+// reboot. The daemon's own per-chunk ack timeout is ~10 s, so 30 s of silence
+// can only mean the sender is gone; a later retry starts fresh via handleBegin.
+constexpr uint32_t kRxStallTimeoutMs = 30000;
 
 RxState rx;
 HalFile cacheFile;
@@ -111,6 +119,7 @@ void handleBegin(JsonObjectConst obj) {
   rx.expectedSize = size;
   rx.written = 0;
   rx.nextSeq = 0;
+  rx.lastRxMs = millis();
   md5Builder.begin();
   AgentLog::line("OTA", "begin id=%s size=%u md5=%s", rx.otaId, (unsigned)size, rx.md5);
   sendAck(rx.otaId, "begin", UINT32_MAX, 0, 0);
@@ -125,6 +134,7 @@ void handleChunk(JsonObjectConst obj) {
     sendError(otaId, "chunk", "no_active_update");
     return;
   }
+  rx.lastRxMs = millis();  // any chunk traffic (even a dup) proves the sender lives
   // The daemon may resend the last chunk after a WS reconnect when the ack was
   // lost after the write completed. Idempotent re-ack, no rewrite.
   if (seq + 1 == rx.nextSeq && offset < rx.written) {
@@ -253,6 +263,15 @@ bool receiving() { return rx.active; }
 bool flashPending() { return rx.flashPending; }
 uint32_t receivedBytes() { return rx.written; }
 uint32_t totalBytes() { return rx.expectedSize; }
+
+void service() {
+  if (!rx.active || rx.flashPending) return;
+  if (millis() - rx.lastRxMs < kRxStallTimeoutMs) return;
+  AgentLog::line("OTA", "receive stalled %us at %u/%u bytes — aborting", (unsigned)(kRxStallTimeoutMs / 1000),
+                 (unsigned)rx.written, (unsigned)rx.expectedSize);
+  sendError(rx.otaId, "chunk", "rx_stall_timeout");  // best-effort; the WS is likely gone
+  resetRx(true);
+}
 
 void serviceFlash() {
   if (!rx.flashPending) return;

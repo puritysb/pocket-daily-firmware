@@ -548,6 +548,10 @@ uint32_t AgentDashboardActivity::computeStateSignature() const {
 }
 
 void AgentDashboardActivity::loop() {
+  // Abort a stalled OTA receive (sender died mid-push) so `receiving()` can't
+  // swallow input forever. Runs before the receive/flash checks below.
+  AgentDeck::OtaWs::service();
+
   // OTA: a fully-received, validated image is waiting. Paint the blocking
   // notice, then flash + restart from this (main) task — never from the WS
   // callback. serviceFlash() only returns on failure.

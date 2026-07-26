@@ -38,6 +38,12 @@ bool maybeHandleFrame(const char* json, size_t length);
 // not exit (leaving the activity tears down the WS mid-transfer).
 bool receiving();
 
+// Call every loop tick: aborts a stalled receive (30 s without a chunk — the
+// sender died mid-push). Without this, `receiving()` would stay true forever
+// and the activity would swallow input until a reboot. A daemon retry always
+// restarts cleanly via esp32_ota_begin regardless.
+void service();
+
 // end received + image validated + ack sent: the heavy flash must now run on
 // the main loop task, outside the WS event callback.
 bool flashPending();
