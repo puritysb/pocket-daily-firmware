@@ -349,6 +349,15 @@ void AgentDashboardActivity::onEnter() {
   cjkFontId = loadKoreanFont();
   if (cjkFontId == 0 && SETTINGS.sdFontFamilyName[0] != '\0') cjkFontId = SETTINGS.getReaderFontId();
 
+  // M5.5: load the persisted deck BEFORE the first paint so boot lands on the
+  // last-synced cards (with an "as of" age), not an empty screen. Display-only —
+  // cached rows never gain buttons; decisions require the live daemon.
+  cachedDeck.reset(new (std::nothrow) AgentDeck::DeckStore::Snapshot());
+  if (cachedDeck && !AgentDeck::DeckStore::load(*cachedDeck)) cachedDeck->count = 0;
+  lastDeckSig = 0;
+  lastDeckSaveMs = 0;
+  clockSynced = time(nullptr) >= 1700000000;
+
   AgentLog::line("AGENT", "AgentDashboardActivity onEnter (Face shell)");
   // Paint the Face immediately — content first, connection is a status line.
   requestUpdate();
@@ -672,12 +681,21 @@ void AgentDashboardActivity::loop() {
       lastSigCheckMs = millis();
       serviceCard();  // auto-surface / auto-resolve the Decision Card first, so
                       // the signature check below repaints the flip in this tick
+      serviceDeckPersist();  // M5.5: keep the SD deck cache in sync (throttled)
       uint32_t sig = computeStateSignature();
       if (sig != lastSignature) {
         lastSignature = sig;
         requestUpdate();
       }
     }
+  }
+
+  // SNTP landing upgrades the cached Face's "as of" line from bare to an actual
+  // age — repaint once on that transition (it happens at most once per boot).
+  const bool nowSynced = time(nullptr) >= 1700000000;
+  if (nowSynced != clockSynced) {
+    clockSynced = nowSynced;
+    requestUpdate();
   }
 }
 
@@ -864,6 +882,111 @@ int AgentDashboardActivity::collectOverview(OverviewRow* out, int cap) const {
     cp(o.state, sizeof(o.state), aw ? "awaiting" : (s.state == AgentState::PROCESSING ? "processing" : "idle"));
     cp(o.activity, sizeof(o.activity), s.currentTool);
     o.awaiting = aw;
+  }
+  AgentDeck::unlockState();
+  return n;
+}
+
+uint32_t AgentDashboardActivity::bestEpochNow() {
+  // NTP system clock first; else the daemon-clock estimate carried by timeline
+  // events (works before SNTP lands). 0 = genuinely no clock source this boot.
+  const time_t t = time(nullptr);
+  if (t >= 1700000000) return (uint32_t)t;
+  uint32_t epochSec = 0, epochAtMs = 0;
+  AgentDeck::lockState();
+  epochSec = AgentDeck::g_state.daemonEpochSec;
+  epochAtMs = AgentDeck::g_state.daemonEpochAtMs;
+  AgentDeck::unlockState();
+  if (epochSec) return epochSec + (millis() - epochAtMs) / 1000UL;
+  return 0;
+}
+
+void AgentDashboardActivity::serviceDeckPersist() {
+  if (!cachedDeck) return;
+  // Never compete with a firmware transfer for SD bandwidth / the WS socket.
+  if (AgentDeck::OtaWs::receiving() || AgentDeck::OtaWs::flashPending()) return;
+  if (lastDeckSaveMs != 0 && millis() - lastDeckSaveMs < kDeckSaveIntervalMs) return;
+
+  // Content signature of the live deck (alive sessions only, display fields
+  // only). Cheap FNV pass under the lock; the 3.5 KB snapshot copy + SD write
+  // run only when this actually changed.
+  auto cp = [](char* d, size_t n, const char* s) {
+    strncpy(d, s, n - 1);
+    d[n - 1] = '\0';
+  };
+  uint32_t sig = 2166136261u;
+  bool dataReceived = false;
+  AgentDeck::lockState();
+  {
+    const auto& s = AgentDeck::g_state;
+    dataReceived = s.dataReceived;
+    for (uint8_t i = 0; i < s.sessionCount; i++) {
+      const auto& se = s.sessions[i];
+      if (!se.alive) continue;
+      sig = fnvUpdate(sig, se.id, strlen(se.id));
+      sig = fnvUpdate(sig, se.projectName, strlen(se.projectName));
+      sig = fnvUpdate(sig, se.agentType, strlen(se.agentType));
+      sig = fnvUpdate(sig, se.state, strlen(se.state));
+      sig = fnvUpdate(sig, se.activity, strlen(se.activity));
+    }
+  }
+  AgentDeck::unlockState();
+  if (!dataReceived) return;  // nothing real to persist yet
+  if (sig == lastDeckSig) return;
+
+  // Build the snapshot into a scratch heap buffer (never the C3 stack), write it
+  // to SD without holding the state lock, then swap it in as the RAM fallback
+  // under the lock (the render task reads cachedDeck through g_stateMutex).
+  std::unique_ptr<AgentDeck::DeckStore::Snapshot> snap(new (std::nothrow) AgentDeck::DeckStore::Snapshot());
+  if (!snap) return;
+  memset(snap.get(), 0, sizeof(*snap));
+  AgentDeck::lockState();
+  {
+    const auto& s = AgentDeck::g_state;
+    for (uint8_t i = 0; i < s.sessionCount && snap->count < AgentDeckCfg::SESSIONS_CAP; i++) {
+      const auto& se = s.sessions[i];
+      if (!se.alive) continue;
+      auto& r = snap->records[snap->count++];
+      cp(r.sid, sizeof(r.sid), se.id);
+      cp(r.project, sizeof(r.project), se.projectName[0] ? se.projectName : "session");
+      cp(r.agentType, sizeof(r.agentType), se.agentType);
+      cp(r.state, sizeof(r.state), se.state);
+      cp(r.activity, sizeof(r.activity), se.activity);
+      r.awaiting = strncmp(se.state, "awaiting", 8) == 0 ? 1 : 0;
+    }
+  }
+  AgentDeck::unlockState();
+  snap->savedEpoch = bestEpochNow();
+
+  lastDeckSaveMs = millis();
+  if (!AgentDeck::DeckStore::save(*snap)) return;  // SD hiccup — retry on next change
+  lastDeckSig = sig;
+  const unsigned savedCount = snap->count;
+  AgentDeck::lockState();
+  cachedDeck.swap(snap);
+  AgentDeck::unlockState();
+  AgentLog::line("DECK", "deck persisted: %u cards", savedCount);
+}
+
+int AgentDashboardActivity::buildRowsFromCache(OverviewRow* out, int cap) const {
+  auto cp = [](char* d, size_t n, const char* s) {
+    strncpy(d, s, n - 1);
+    d[n - 1] = '\0';
+  };
+  int n = 0;
+  AgentDeck::lockState();
+  if (cachedDeck) {
+    for (uint8_t i = 0; i < cachedDeck->count && n < cap; i++) {
+      const auto& r = cachedDeck->records[i];
+      OverviewRow& o = out[n++];
+      cp(o.sid, sizeof(o.sid), r.sid);
+      cp(o.project, sizeof(o.project), r.project);
+      cp(o.agentType, sizeof(o.agentType), r.agentType);
+      o.controlMode[0] = '\0';  // display-only: a cached card is never actionable
+      cp(o.state, sizeof(o.state), r.state);
+      cp(o.activity, sizeof(o.activity), r.activity);
+      o.awaiting = r.awaiting != 0;
+    }
   }
   AgentDeck::unlockState();
   return n;
@@ -1363,7 +1486,8 @@ void AgentDashboardActivity::drawOverviewCard(const OverviewRow& row, int x, int
   }
 }
 
-void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int awaitingCount) {
+void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int awaitingCount, bool fromCache,
+                                            uint32_t asOfEpoch) {
   const auto& m = UITheme::getInstance().getMetrics();
   const int w = renderer.getScreenWidth();
   const int pageH = renderer.getScreenHeight();
@@ -1382,7 +1506,8 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
   // Footer first so the shared layout can reserve its exact dynamic height.
   const int footTop = drawLimitsFooter();
   const int bannerH = awaitingCount > 0 ? line10 + 22 : 0;
-  const int chromeH = y + lineS + 8 + bannerH;
+  const int asOfH = fromCache ? lineS + 6 : 0;  // "as of" sync-age line (M5.5)
+  const int chromeH = y + lineS + 8 + asOfH + bannerH;
   const int reservedBottom = pageH - footTop;
   const AgentDeckEink::Layout layout = AgentDeckEink::makeLayout(AgentDeckEink::LayoutInput{
       (int16_t)w,
@@ -1418,7 +1543,10 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
   } else {
     switch (dashState) {
     case DashState::Connected:
-      if (n > capacity)
+      if (fromCache)  // connected but first live state hasn't landed — the rows
+                      // on screen are the persisted deck, so don't count them as live
+        snprintf(cl, sizeof(cl), "Live \xC2\xB7 %s \xC2\xB7 syncing\xE2\x80\xA6", AgentDeck::Net::wsBridgeIp());
+      else if (n > capacity)
         snprintf(cl, sizeof(cl), "Live \xC2\xB7 %s \xC2\xB7 %d-%d/%d", AgentDeck::Net::wsBridgeIp(), firstShown,
                  lastShown, n);
       else
@@ -1446,6 +1574,30 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
                     true, statusBold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
   y += lineS + 8;
 
+  // M5.5 "as of" line: the deck on screen is the persisted snapshot, and honesty
+  // requires saying when it was true. Age needs a clock (SNTP after Wi-Fi); until
+  // then the line states the fact without inventing a number.
+  if (fromCache) {
+    char asOf[64];
+    const time_t nowT = time(nullptr);
+    if (asOfEpoch && nowT >= 1700000000 && (uint32_t)nowT >= asOfEpoch) {
+      const uint32_t age = (uint32_t)nowT - asOfEpoch;
+      if (age < 60) {
+        snprintf(asOf, sizeof(asOf), "Last synced deck \xC2\xB7 just now");
+      } else {
+        char a[8];
+        formatAge(age, a, sizeof(a));
+        snprintf(asOf, sizeof(asOf), "Last synced deck \xC2\xB7 as of %s ago", a);
+      }
+    } else {
+      snprintf(asOf, sizeof(asOf), "Last synced deck");
+    }
+    renderer.drawText(SMALL_FONT_ID, layout.pad, y,
+                      renderer.truncatedText(SMALL_FONT_ID, asOf, w - layout.pad * 2, EpdFontFamily::BOLD).c_str(),
+                      true, EpdFontFamily::BOLD);
+    y += lineS + 6;
+  }
+
   if (awaitingCount > 0) {
     const int bh = line10 + 12;
     renderer.fillRect(layout.pad, y, w - layout.pad * 2, bh, true);
@@ -1467,12 +1619,15 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
   } else {
     for (int i = overviewTop; i < n && i < overviewTop + capacity; i++) {
       const AgentDeckEink::Rect card = layout.card((uint8_t)(i - overviewTop));
-      drawOverviewCard(rows[i], card.x, card.y, card.w, card.h, i == overviewCursor);
+      // Cached cards are display-only — no keyboard focus, nothing to open.
+      drawOverviewCard(rows[i], card.x, card.y, card.w, card.h, !fromCache && i == overviewCursor);
     }
   }
 
-  // Hint bar. Up/Down only meaningful with more than one row.
-  const auto labels = mappedInput.mapLabels("Exit", n > 0 ? "Open" : "", n > 1 ? "Up" : "", n > 1 ? "Down" : "");
+  // Hint bar. Up/Down only meaningful with more than one row. Cached decks
+  // offer no actions (handleButtons sees the live n == 0 and no-ops anyway).
+  const auto labels = mappedInput.mapLabels("Exit", (n > 0 && !fromCache) ? "Open" : "",
+                                            (n > 1 && !fromCache) ? "Up" : "", (n > 1 && !fromCache) ? "Down" : "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }
@@ -2001,9 +2156,31 @@ void AgentDashboardActivity::render(RenderLock&&) {
   // progress is a status line inside renderOverview, never a screen that
   // replaces the content. ──
   OverviewRow rows[AgentDeckCfg::SESSIONS_CAP];
-  const int n = collectOverview(rows, AgentDeckCfg::SESSIONS_CAP);
+  int n = collectOverview(rows, AgentDeckCfg::SESSIONS_CAP);
+
+  // M5.5: no live data yet (boot / daemon lost) → render the persisted deck.
+  // dataReceived is the chokepoint: once any live state arrives, live wins even
+  // when it says "no sessions" — the cache must never mask fresher truth.
+  bool fromCache = false;
+  uint32_t asOfEpoch = 0;
+  if (n == 0) {
+    bool dataReceived;
+    AgentDeck::lockState();
+    dataReceived = AgentDeck::g_state.dataReceived;
+    asOfEpoch = cachedDeck ? cachedDeck->savedEpoch : 0;
+    AgentDeck::unlockState();
+    if (!dataReceived) {
+      n = buildRowsFromCache(rows, AgentDeckCfg::SESSIONS_CAP);
+      fromCache = n > 0;
+    }
+  }
+
   int awaiting = 0;
-  for (int i = 0; i < n; i++)
-    if (rows[i].awaiting) awaiting++;
-  renderOverview(rows, n, awaiting);
+  if (!fromCache) {
+    // Live only: a cached "awaiting" is a snapshot of the past, and the banner
+    // is a call to action the user cannot take offline.
+    for (int i = 0; i < n; i++)
+      if (rows[i].awaiting) awaiting++;
+  }
+  renderOverview(rows, n, awaiting, fromCache, fromCache ? asOfEpoch : 0);
 }

@@ -33,9 +33,11 @@ layers:
   are a **status line inside the Face**, never a screen that replaces content.
   The Wi-Fi picker appears only on first run (no saved credentials) or when the
   background join times out.
-- **Deck** — the bounded set of active cards. Today the deck is fed live from
-  daemon state (sessions needing attention); M5.5 persists it to SD so the Face
-  can show the last-synced deck offline with an honest "as of" timestamp.
+- **Deck** — the bounded set of active cards. Fed live from daemon state and
+  persisted to SD (M5.5, `src/agentdeck/deck_store.*`): the Face renders the
+  last-synced deck at boot and whenever the daemon is unreachable, with an
+  honest "as of" sync age. Cached cards are display-only — they never gain
+  buttons (acting offline is the M6 Outbox).
 - **Outbox** — (M6) decisions are recorded locally first and pushed when a
   connection exists, so being offline never blocks pressing a button.
 
@@ -60,6 +62,14 @@ decisions. No on-device LLM is implied, ever.
   connection state with a status line (`Live · ip · n` / `Joining Wi-Fi …` /
   `Searching for AgentDeck…` / `Connecting …`). Background STA join with saved
   credentials — no blocking picker after first run.
+- **Deck persistence (M5.5)**: while connected, the deck (alive sessions'
+  display fields) is written to `/.crosspoint/agentdeck-deck.bin` whenever its
+  content signature changes (throttled, tmp+rename). At boot — and after a
+  daemon loss — the Face renders the cached deck with a bold
+  `Last synced deck · as of Xh ago` line (age appears once a clock source
+  exists: NTP after Wi-Fi, or the daemon-clock estimate at save time). Cached
+  rows suppress the attention banner, keyboard focus, and the Open hint; live
+  data always wins the moment it arrives (`dataReceived` chokepoint).
 - **Card**: full-screen decision surface. Auto-surfaces from the Face when any
   session needs attention (never hijacks Detail; waits for a 2.5 s input-quiet
   window). Auto-resolves back to the Face when the prompt is answered anywhere.
@@ -122,8 +132,8 @@ trailing git sha) for post-OTA deploy verification. The SD update flow
 2. **M5 (done)** — Face shell: boot-to-card setting, background Wi-Fi join,
    connection demoted to a status line; the Face renders in every state.
    **M5.6 (done)** — AgentDeck WiFi OTA v1 client (see "Firmware delivery").
-3. **M5.5 — Deck persistence**: card records on SD, render-from-cache at boot,
-   "as of" sync age on the Face.
+3. **M5.5 (done)** — Deck persistence: card records on SD, render-from-cache at
+   boot and on daemon loss, "as of" sync age on the Face.
 4. **M6 — Outbox + power ladder**: `actionClass` contract, HTTP pull sync,
    deep-sleep wake cadence (X3 has DS3231; X4's drifty RTC is fine for hourly
    pulls). Battery-class portability is earned here — do not promise phone-free

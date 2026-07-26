@@ -20,11 +20,13 @@
 // FreeRTOS network task. render() runs on the separate render task and reads the
 // mutex-guarded g_state.
 //
+#include <memory>
 #include <string>
 
 #include "activities/Activity.h"
 #include "agentdeck/agent_state.h"
 #include "agentdeck/attention_contract.h"
+#include "agentdeck/deck_store.h"
 
 class AgentDashboardActivity final : public Activity {
  public:
@@ -107,7 +109,9 @@ class AgentDashboardActivity final : public Activity {
   void drawOverviewCard(const OverviewRow& row, int x, int y, int w, int h, bool selected) const;
   void handleButtons();
   bool applyDecision(const AwaitingItem& it, int optionCursor);
-  void renderOverview(const OverviewRow* rows, int n, int awaitingCount);
+  // fromCache renders the persisted deck (display-only, no selection/Open) with
+  // an "as of" sync-age line derived from asOfEpoch. Live renders pass false/0.
+  void renderOverview(const OverviewRow* rows, int n, int awaitingCount, bool fromCache, uint32_t asOfEpoch);
   void renderDetail();
   void renderCard();
   // Branded header (AgentDeck mark + title) shared by every Connected screen.
@@ -198,4 +202,23 @@ class AgentDashboardActivity final : public Activity {
   uint8_t dismissedHead = 0;
   // Don't auto-surface while the user is actively pressing buttons.
   static constexpr uint32_t kAutoSurfaceQuietMs = 2500;
+
+  // ── M5.5 Deck persistence ──
+  // The persisted deck doubles as the offline fallback: loaded from SD in
+  // onEnter (so boot renders the last-synced deck before any connection) and
+  // refreshed in place whenever the live deck's content signature changes.
+  // Guarded by g_stateMutex: written on the loop task, read on the render task.
+  // Heap (unique_ptr), not a member array — ~3.5 KB must not sit on the C3 stack.
+  std::unique_ptr<AgentDeck::DeckStore::Snapshot> cachedDeck;
+  uint32_t lastDeckSig = 0;      // content signature of the last persisted deck
+  uint32_t lastDeckSaveMs = 0;   // SD-write throttle
+  bool clockSynced = false;      // SNTP landed — repaint once so "as of" gains an age
+  static constexpr uint32_t kDeckSaveIntervalMs = 5000;
+
+  // Persist the live deck to SD when its content changed (throttled; loop task).
+  void serviceDeckPersist();
+  // Copy the cached deck into overview rows for the offline Face. Returns count.
+  int buildRowsFromCache(OverviewRow* out, int cap) const;
+  // Current unix-seconds estimate: NTP clock first, daemon-clock estimate else 0.
+  static uint32_t bestEpochNow();
 };
