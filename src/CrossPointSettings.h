@@ -244,6 +244,11 @@ class CrossPointSettings {
   uint8_t sleepTimeoutMinutes = 10;
   // Boot destination (STARTUP_APP). Persisted via SettingsList key "startupApp".
   uint8_t startupApp = STARTUP_HOME;
+  // AgentDeck M6 battery pull-sync cadence: when on (and the dashboard is the
+  // startup app), the idle dashboard deep-sleeps between HTTP feed pulls
+  // instead of holding a live WS connection. Off by default — the timed sleep
+  // holds the battery latch (higher sleep current than the power-off gesture).
+  uint8_t agentPullSyncEnabled = 0;
   // E-ink refresh frequency (default 15 pages)
   uint8_t refreshFrequency = REFRESH_15;
   uint8_t hyphenationEnabled = 0;

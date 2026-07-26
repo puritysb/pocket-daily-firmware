@@ -26,6 +26,11 @@ struct Record {
   char state[20];
   char activity[SESSION_ACTIVITY_CAP];
   uint8_t awaiting;
+  // M6 card validity class ("live"/"day"/"info", card_class.h). A cached
+  // `live` card is rendered greyed with a "reconnect to act" hint — it must
+  // never look answerable offline. Changing Record's shape bumps recordSize,
+  // which invalidates pre-M6 cache files by design.
+  char actionClass[6];
 };
 
 struct Snapshot {

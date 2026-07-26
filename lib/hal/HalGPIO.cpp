@@ -290,6 +290,12 @@ HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
   const auto wakeupCause = esp_sleep_get_wakeup_cause();
   const auto resetReason = esp_reset_reason();
 
+  // AgentDeck pull-sync timer (startTimedDeepSleep). Checked first: the
+  // USB-power heuristics below all assume ESP_SLEEP_WAKEUP_UNDEFINED/GPIO.
+  if (wakeupCause == ESP_SLEEP_WAKEUP_TIMER) {
+    return WakeupReason::Timer;
+  }
+
   const bool usbConnected = isUsbConnected();
 
   if ((wakeupCause == ESP_SLEEP_WAKEUP_UNDEFINED && resetReason == ESP_RST_POWERON && !usbConnected) ||

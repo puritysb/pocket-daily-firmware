@@ -44,4 +44,12 @@ class HttpDownloader {
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
                                       ProgressCallback progress = nullptr, bool* cancelFlag = nullptr,
                                       const std::string& username = "", const std::string& password = "");
+
+  /**
+   * POST a JSON body and collect the (bounded) JSON response. Plain-http local
+   * daemons and verified https both work (transport picked from the scheme).
+   * No redirect handling — intended for the AgentDeck daemon's LAN endpoints.
+   */
+  static bool postJson(const std::string& url, const char* body, size_t bodyLen, std::string& outResponse,
+                       size_t maxResponseBytes = 16384);
 };

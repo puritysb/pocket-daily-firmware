@@ -77,6 +77,7 @@ bool load(Snapshot& out) {
     r.agentType[sizeof(r.agentType) - 1] = '\0';
     r.state[sizeof(r.state) - 1] = '\0';
     r.activity[sizeof(r.activity) - 1] = '\0';
+    r.actionClass[sizeof(r.actionClass) - 1] = '\0';
   }
   out.count = h.count;
   out.savedEpoch = h.savedEpoch;

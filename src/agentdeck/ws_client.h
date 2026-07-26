@@ -37,9 +37,10 @@ void queueOutbound(const char* json);
 // Drain the outbox (WS when connected). Call every loop.
 void pumpOutbound();
 
-// Last-known bridge endpoint (for render / diagnostics).
+// Last-known bridge endpoint (for render / diagnostics / endpoint cache).
 const char* wsBridgeIp();
 uint16_t wsBridgePort();
+const char* wsBridgeToken();
 
 }  // namespace Net
 }  // namespace AgentDeck

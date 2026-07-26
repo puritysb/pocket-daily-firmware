@@ -202,6 +202,37 @@ void handleUsageUpdate(JsonObject& obj) {
   unlockState();
 }
 
+// Land one wire session object into a SessionInfo slot. Shared by the WS
+// sessions_list handler and the M6 card_feed pull path so both transports
+// produce byte-identical state. Caller holds g_stateMutex.
+void parseSessionLocked(JsonObject& s, SessionInfo& si) {
+  copyStr(si.id, sizeof(si.id), s["id"] | "");
+  copyStr(si.projectName, sizeof(si.projectName), s["projectName"] | "");
+  copyStr(si.modelName, sizeof(si.modelName), s["modelName"] | "");
+  copyStr(si.agentType, sizeof(si.agentType), s["agentType"] | "");
+  copyStr(si.controlMode, sizeof(si.controlMode), s["controlMode"] | "");
+  copyStr(si.state, sizeof(si.state), s["state"] | "");
+  si.port = s["port"] | 0;
+  si.alive = s["alive"] | false;
+  copyStr(si.currentTool, sizeof(si.currentTool), s["currentTool"] | "");
+  si.elapsedSec = s["elapsedSec"] | 0;
+  copyStr(si.question, sizeof(si.question), s["question"] | "");
+  copyStr(si.promptType, sizeof(si.promptType), s["promptType"] | "");
+  copyStr(si.requestId, sizeof(si.requestId), s["requestId"] | "");
+  // Prefer the daemon's concise current action, then retain the richer goal
+  // (or latest event) so Overview and Detail can use the available 2–3 lines.
+  // All composition stays inside SessionInfo's fixed 192-byte buffer.
+  si.activity[0] = '\0';
+  const char* activity = s["activity"] | "";
+  const char* currentTask = s["currentTask"] | "";
+  const char* goal = s["goal"] | "";
+  const char* lastEvent = s["lastEventText"] | "";
+  appendSummary(si.activity, sizeof(si.activity), activity[0] ? activity : currentTask);
+  appendSummary(si.activity, sizeof(si.activity), goal);
+  if (si.activity[0] == '\0') appendSummary(si.activity, sizeof(si.activity), lastEvent);
+  if (si.activity[0] == '\0') appendSummary(si.activity, sizeof(si.activity), si.currentTool);
+}
+
 void handleSessionsList(JsonObject& obj) {
   lockState();
   g_state.dataReceived = true;
@@ -211,32 +242,7 @@ void handleSessionsList(JsonObject& obj) {
 
   for (uint8_t i = 0; i < g_state.sessionCount; i++) {
     JsonObject s = sessions[i].as<JsonObject>();
-    SessionInfo& si = g_state.sessions[i];
-    copyStr(si.id, sizeof(si.id), s["id"] | "");
-    copyStr(si.projectName, sizeof(si.projectName), s["projectName"] | "");
-    copyStr(si.modelName, sizeof(si.modelName), s["modelName"] | "");
-    copyStr(si.agentType, sizeof(si.agentType), s["agentType"] | "");
-    copyStr(si.controlMode, sizeof(si.controlMode), s["controlMode"] | "");
-    copyStr(si.state, sizeof(si.state), s["state"] | "");
-    si.port = s["port"] | 0;
-    si.alive = s["alive"] | false;
-    copyStr(si.currentTool, sizeof(si.currentTool), s["currentTool"] | "");
-    si.elapsedSec = s["elapsedSec"] | 0;
-    copyStr(si.question, sizeof(si.question), s["question"] | "");
-    copyStr(si.promptType, sizeof(si.promptType), s["promptType"] | "");
-    copyStr(si.requestId, sizeof(si.requestId), s["requestId"] | "");
-    // Prefer the daemon's concise current action, then retain the richer goal
-    // (or latest event) so Overview and Detail can use the available 2–3 lines.
-    // All composition stays inside SessionInfo's fixed 192-byte buffer.
-    si.activity[0] = '\0';
-    const char* activity = s["activity"] | "";
-    const char* currentTask = s["currentTask"] | "";
-    const char* goal = s["goal"] | "";
-    const char* lastEvent = s["lastEventText"] | "";
-    appendSummary(si.activity, sizeof(si.activity), activity[0] ? activity : currentTask);
-    appendSummary(si.activity, sizeof(si.activity), goal);
-    if (si.activity[0] == '\0') appendSummary(si.activity, sizeof(si.activity), lastEvent);
-    if (si.activity[0] == '\0') appendSummary(si.activity, sizeof(si.activity), si.currentTool);
+    parseSessionLocked(s, g_state.sessions[i]);
   }
 
   unlockState();
@@ -439,6 +445,64 @@ void parseMessage(const char* json, size_t length) {
     // deliberately stubbed out here. TODO(M3): wire device_info_request reply
     // if the daemon starts gating on it.
   }
+}
+
+bool applyCardFeed(const char* json, size_t length, uint32_t* nextPullSecOut) {
+  if (nextPullSecOut) *nextPullSecOut = 0;
+  if (length > AgentDeckCfg::PROTOCOL_MAX_MSG_BYTES) {
+    AgentLog::line("PROTO", "card_feed too large: %u bytes — dropped", (unsigned)length);
+    return false;
+  }
+
+  // The feed nests each session under cards[i].session; reuse the same field
+  // subset the sessions_list filter retains so both transports stay in parity.
+  filter.clear();
+  filter["type"] = true;
+  filter["serverTime"] = true;
+  filter["nextPullSec"] = true;
+  filter["cards"][0]["actionClass"] = true;
+  static constexpr const char* kSessionFields[] = {
+      "id",         "projectName", "modelName",  "agentType", "controlMode", "state",
+      "port",       "alive",       "currentTool", "elapsedSec", "question",  "promptType",
+      "requestId",  "activity",    "currentTask", "goal",      "lastEventText",
+  };
+  for (const char* f : kSessionFields) filter["cards"][0]["session"][f] = true;
+
+  doc.clear();
+  DeserializationError err = deserializeJson(doc, json, length, DeserializationOption::Filter(filter));
+  if (err) {
+    AgentLog::line("PROTO", "card_feed JSON error: %s", err.c_str());
+    return false;
+  }
+  JsonObject obj = doc.as<JsonObject>();
+  if (strcmp(obj["type"] | "", "card_feed") != 0) {
+    AgentLog::line("PROTO", "card_feed rejected: wrong type '%s'", obj["type"] | "");
+    return false;
+  }
+
+  lockState();
+  g_state.dataReceived = true;
+  g_state.sessionCount = 0;
+  for (JsonObject card : obj["cards"].as<JsonArray>()) {
+    if (g_state.sessionCount >= AgentDeckCfg::SESSIONS_CAP) break;
+    JsonObject s = card["session"].as<JsonObject>();
+    if (s.isNull()) continue;  // M7 module cards carry no session body yet
+    parseSessionLocked(s, g_state.sessions[g_state.sessionCount++]);
+  }
+  // serverTime re-anchors the daemon-clock estimate exactly like a timeline
+  // event's ts would — the drifty-RTC "as of" age heals on every pull.
+  const uint64_t serverTime = obj["serverTime"] | (uint64_t)0;
+  if (serverTime > 1700000000000ULL) {
+    g_state.daemonEpochSec = (uint32_t)(serverTime / 1000ULL);
+    g_state.daemonEpochAtMs = millis();
+  }
+  const uint8_t count = g_state.sessionCount;
+  unlockState();
+
+  if (nextPullSecOut) *nextPullSecOut = obj["nextPullSec"] | 0;
+  AgentLog::line("PROTO", "card_feed applied: %u cards nextPull=%us", (unsigned)count,
+                 (unsigned)(obj["nextPullSec"] | 0));
+  return true;
 }
 
 }  // namespace Protocol

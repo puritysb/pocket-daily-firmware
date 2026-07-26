@@ -101,15 +101,32 @@ content actually changes. The honesty rules of the attention contract
 
 ## Wire contract
 
-Deliberately **zero new protocol** so far. The card is fed by what the daemon
-already broadcasts (`sessions_list` per-session `question`/`promptType`/
+The docked live mode remains **zero new protocol**: the card is fed by what the
+daemon already broadcasts (`sessions_list` per-session `question`/`promptType`/
 `options`/`requestId`, plus the focused `state_update`), and answers with the
 existing upstream commands (`permission_decision`, `select_option`, `respond`,
-`focus_session`). The M7 card-feed protocol (generalized cards with
-`actionClass`, pull sync + outbox push) must land in AgentDeck's
-`shared/src/protocol.ts` first, then be re-ported here per the client-contract
-discipline. Pull-mode sync should be plain HTTP (`GET` feed / `POST` outbox) —
-wake-sync-sleep needs no persistent socket; WS remains the docked live mode.
+`focus_session`).
+
+**M6 pull sync landed in AgentDeck first** (client-contract discipline —
+AgentDeck commit 89f538c5, `shared/src/protocol.ts` § Card Feed Pull Sync,
+served by the Node daemon):
+
+- `GET /feed` → `card_feed` — one card per session (`cardId:
+  "session:<sid>"`, body = the same `SessionInfo` shape as `sessions_list`),
+  each stamped with `actionClass` + `expiresAt`, plus `serverTime`/`serverHm`
+  (clock re-anchor) and `nextPullSec` (the daemon's half of the power ladder:
+  3600 idle / 900 when any session is mid-turn or awaiting).
+- `POST /outbox` `{board, decisions[]}` → per-decision results in request
+  order; every acknowledged decision is deleted on-device regardless of status
+  (`expired`/`rejected`/`unknown_card` are terminal). The daemon validates
+  against **live** state: a `permission_decision` applies only while its gate
+  is still held; an option decision only while the session is still awaiting
+  and the echoed `question` matches its current one.
+- Auth: LAN requests carry the pairing token as `?token=` (the same token the
+  WS path uses; `/health` exposes it).
+
+The M7 protocol adds daemon card modules (THREAD / PULSE / NUDGE / QUEST)
+producing `day`-class cards — schema already reserved.
 
 ## Firmware delivery
 

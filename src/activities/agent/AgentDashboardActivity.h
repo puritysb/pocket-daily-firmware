@@ -221,4 +221,31 @@ class AgentDashboardActivity final : public Activity {
   int buildRowsFromCache(OverviewRow* out, int cap) const;
   // Current unix-seconds estimate: NTP clock first, daemon-clock estimate else 0.
   static uint32_t bestEpochNow();
+
+  // ── M6 pull-sync power ladder ──
+  // Timer wake with the battery cadence enabled: join Wi-Fi, sync once over
+  // HTTP (GET /feed + outbox push), repaint the Face, then deep-sleep again
+  // with the timer armed. Any button press cancels into the interactive WS
+  // flow; USB power disables the cadence entirely (docked = live mode).
+  bool pullMode = false;
+  bool pullSynced = false;
+  bool pullEndpointTried = false;   // cached-endpoint fast path attempted
+  bool timedSleepImminent = false;  // final Face paint says "sleeping"
+  uint32_t pullSyncedAtMs = 0;
+  uint32_t pullNextSec = 0;  // daemon's nextPullSec hint (0 → default)
+  uint32_t enterMs = 0;      // onEnter millis — pull budget / idle anchor
+  static constexpr uint32_t kPullLingerMs = 20000;   // user-presence window after a sync
+  static constexpr uint32_t kPullBudgetMs = 60000;   // whole wake budget before sleeping unsynced
+  static constexpr uint32_t kPullDefaultSec = 3600;  // no daemon hint → hourly
+  static constexpr uint32_t kPullActiveSec = 900;    // sessions mid-turn → 15 min cadence
+  static constexpr uint32_t kPullMinSec = 300;       // clamp against a degenerate hint
+  static constexpr uint32_t kIdleToCadenceMs = 5 * 60 * 1000;  // interactive → cadence handoff
+  // One HTTP sync against the given endpoint; updates the pull state on success.
+  bool attemptPullSync(const char* ip, uint16_t port, const char* token);
+  // Pull-mode step, run from loop(): cached-endpoint fast path + sleep decisions.
+  void servicePullSync();
+  // Interactive-mode idle → timed sleep handoff (cadence setting on, on battery).
+  void serviceIdleCadence();
+  // Final deck persist + honest "sleeping" paint, then timed deep sleep.
+  void beginTimedSleep(uint32_t seconds);
 };

@@ -16,7 +16,10 @@
 
 #include "CrossPointSettings.h"
 #include "HalGPIO.h"
+#include "PowerCycle.h"
 #include "SilentRestart.h"
+#include "agentdeck/card_class.h"
+#include "agentdeck/feed_client.h"
 #include "WifiCredentialStore.h"
 #include "agentdeck/ota_ws_receiver.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -358,6 +361,20 @@ void AgentDashboardActivity::onEnter() {
   lastDeckSaveMs = 0;
   clockSynced = time(nullptr) >= 1700000000;
 
+  // M6 battery cadence: a timer wake with the setting enabled syncs once over
+  // HTTP and deep-sleeps again; any button press cancels into interactive mode.
+  // USB power means docked — stay in the live WS mode regardless of the timer.
+  enterMs = millis();
+  pullMode = SETTINGS.agentPullSyncEnabled != 0 &&
+             SETTINGS.startupApp == CrossPointSettings::STARTUP_AGENTDECK &&
+             gpio.getWakeupReason() == HalGPIO::WakeupReason::Timer && !gpio.isUsbConnected();
+  pullSynced = false;
+  pullEndpointTried = false;
+  timedSleepImminent = false;
+  pullSyncedAtMs = 0;
+  pullNextSec = 0;
+  if (pullMode) AgentLog::line("AGENT", "pull-sync wake (battery cadence)");
+
   AgentLog::line("AGENT", "AgentDashboardActivity onEnter (Face shell)");
   // Paint the Face immediately — content first, connection is a status line.
   requestUpdate();
@@ -583,6 +600,13 @@ void AgentDashboardActivity::loop() {
     finish();
     return;
   }
+  // Presence cancels the cadence pass: the user pressed something, so this
+  // wake continues into the normal interactive WS flow instead of sleeping.
+  if (pullMode && lastUserInputMs != 0) {
+    AgentLog::line("AGENT", "pull-sync cancelled by input — interactive mode");
+    pullMode = false;
+    requestUpdate();
+  }
 
   if (dashState == DashState::WifiJoining) {
     // Background STA join in progress. The Face is already on screen; promote
@@ -594,6 +618,13 @@ void AgentDashboardActivity::loop() {
       AgentLog::line("AGENT", "wifi joined %s (%s)", joiningSsid, localIp.c_str());
       startNetworking();
     } else if (millis() - wifiJoinStartMs > kWifiJoinTimeoutMs) {
+      if (pullMode) {
+        // Unattended wake must never end on an interactive picker: give up
+        // this cycle and retry on the next timer wake.
+        AgentLog::line("AGENT", "wifi join timeout in pull mode — sleeping");
+        beginTimedSleep(kPullDefaultSec);
+        return;
+      }
       AgentLog::line("AGENT", "wifi join timeout (%s) — opening picker", joiningSsid);
       WiFi.disconnect(true);
       launchWifiPicker();
@@ -605,20 +636,39 @@ void AgentDashboardActivity::loop() {
     // Retry UDP socket bind if WiFi came up after startNetworking(). Idempotent.
     AgentDeck::Net::udpInit();
 
+    // M6 pull mode: cached-endpoint fast path — don't spend the battery window
+    // on mDNS when the daemon rarely moves. Failure (daemon restarted onto a
+    // different port) falls through to normal discovery below.
+    if (pullMode && !pullSynced && !pullEndpointTried) {
+      pullEndpointTried = true;
+      char ip[16] = {0};
+      char token[40] = {0};
+      uint16_t port = 0;
+      if (AgentDeck::Feed::loadEndpoint(ip, sizeof(ip), port, token, sizeof(token))) {
+        attemptPullSync(ip, port, token);
+      }
+    }
+
     AgentDeck::Net::BridgeInfo bridge;
     // mDNS first (canonical TXT-derived ip, daemon/canonical-port priority),
     // then fall back to the UDP beacon — same BridgeInfo shape, lower trust
     // because anyone on the subnet can broadcast, but the remoteIP/subnet
     // guards in udpPoll() keep it safe.
-    bool found = AgentDeck::Net::mdnsPoll(bridge);
-    if (!found) found = AgentDeck::Net::udpPoll(bridge);
+    bool found = !pullSynced && AgentDeck::Net::mdnsPoll(bridge);
+    if (!found && !pullSynced) found = AgentDeck::Net::udpPoll(bridge);
     if (found && bridge.found) {
-      AgentLog::line("AGENT", "daemon @ %s:%u (agent=%s) — connecting", bridge.ip, (unsigned)bridge.port, bridge.agent);
-      AgentDeck::Net::wsConnect(bridge.ip, bridge.port, bridge.token);
-      dashState = DashState::Connecting;
-      connectStartMs = millis();
-      discoveryNoticeShown = false;
-      requestUpdate();
+      if (pullMode) {
+        // Pull mode answers discovery with one HTTP sync, not a WS connect.
+        attemptPullSync(bridge.ip, bridge.port, bridge.token);
+      } else {
+        AgentLog::line("AGENT", "daemon @ %s:%u (agent=%s) — connecting", bridge.ip, (unsigned)bridge.port,
+                       bridge.agent);
+        AgentDeck::Net::wsConnect(bridge.ip, bridge.port, bridge.token);
+        dashState = DashState::Connecting;
+        connectStartMs = millis();
+        discoveryNoticeShown = false;
+        requestUpdate();
+      }
     } else if (!discoveryNoticeShown && millis() - discoveryStartMs >= kDiscoveryNotFoundMs) {
       discoveryNoticeShown = true;
       requestUpdate();
@@ -636,6 +686,10 @@ void AgentDashboardActivity::loop() {
         sendDeviceInfo();
         registered = true;
       }
+      // Cache the live endpoint for the M6 pull cadence: a later timer wake
+      // syncs against it over HTTP without re-running discovery.
+      AgentDeck::Feed::saveEndpoint(AgentDeck::Net::wsBridgeIp(), AgentDeck::Net::wsBridgePort(),
+                                    AgentDeck::Net::wsBridgeToken());
       requestUpdate();
     } else if (!nowConnected && dashState == DashState::Connecting) {
       // The cached ip:port isn't accepting — most likely the daemon moved to a
@@ -701,6 +755,89 @@ void AgentDashboardActivity::loop() {
     clockSynced = nowSynced;
     requestUpdate();
   }
+
+  // ── M6 power ladder: decide whether this wake goes back to sleep ──
+  if (pullMode) {
+    servicePullSync();
+  } else {
+    serviceIdleCadence();
+  }
+}
+
+bool AgentDashboardActivity::attemptPullSync(const char* ip, uint16_t port, const char* token) {
+  const char* board = gpio.deviceIsX3() ? "xteink_x3" : "xteink_x4";
+  const auto r = AgentDeck::Feed::syncOnce(ip, port, token, board);
+  if (!r.ok) return false;
+  pullSynced = true;
+  pullSyncedAtMs = millis();
+  pullNextSec = r.nextPullSec;
+  // Persist immediately (unthrottled): the frozen Face and the wake-time cache
+  // must agree on what was just pulled.
+  lastDeckSaveMs = 0;
+  serviceDeckPersist();
+  requestUpdate();
+  return true;
+}
+
+void AgentDashboardActivity::servicePullSync() {
+  // Never sleep out from under a firmware transfer.
+  if (AgentDeck::OtaWs::receiving() || AgentDeck::OtaWs::flashPending()) return;
+  const uint32_t now = millis();
+  if (pullSynced) {
+    // Linger briefly so a present user can grab the device (any press cancels
+    // pull mode above); then freeze the Face and sleep until the next pull.
+    if (now - pullSyncedAtMs >= kPullLingerMs) {
+      beginTimedSleep(pullNextSec ? pullNextSec : kPullDefaultSec);
+    }
+    return;
+  }
+  // Unsynced: Wi-Fi joined but the daemon never answered within the budget —
+  // don't burn the battery scanning; retry on the next cadence tick.
+  if (now - enterMs >= kPullBudgetMs) {
+    AgentLog::line("AGENT", "pull-sync budget exhausted — sleeping unsynced");
+    beginTimedSleep(kPullDefaultSec);
+  }
+}
+
+void AgentDashboardActivity::serviceIdleCadence() {
+  if (SETTINGS.agentPullSyncEnabled == 0 || SETTINGS.startupApp != CrossPointSettings::STARTUP_AGENTDECK) return;
+  if (gpio.isUsbConnected()) return;              // docked → stay in the live WS mode
+  if (dashState != DashState::Connected) return;  // pre-connected states keep their own budgets
+  if (viewMode != ViewMode::Overview) return;     // never sleep under a Card/Detail
+  if (AgentDeck::OtaWs::receiving() || AgentDeck::OtaWs::flashPending()) return;
+  const uint32_t idleAnchor = lastUserInputMs ? lastUserInputMs : enterMs;
+  if (millis() - idleAnchor < kIdleToCadenceMs) return;
+  // A session that needs the user keeps the Face live — a frozen prompt the
+  // buttons can't answer would violate the attention contract's honesty rule.
+  AwaitingItem pending;
+  if (firstCardCandidate(pending)) return;
+  // Mid-turn sessions shorten the cadence (the daemon's nextPullSec hint uses
+  // the same rule server-side; mirrored here because WS mode has no hint).
+  bool anyActive = false;
+  AgentDeck::lockState();
+  for (uint8_t i = 0; i < AgentDeck::g_state.sessionCount; i++) {
+    const auto& s = AgentDeck::g_state.sessions[i];
+    if (s.alive && (strcmp(s.state, "processing") == 0 || strncmp(s.state, "awaiting", 8) == 0)) {
+      anyActive = true;
+      break;
+    }
+  }
+  AgentDeck::unlockState();
+  AgentLog::line("AGENT", "idle on battery — entering pull cadence");
+  beginTimedSleep(anyActive ? kPullActiveSec : kPullDefaultSec);
+}
+
+void AgentDashboardActivity::beginTimedSleep(uint32_t seconds) {
+  if (seconds < kPullMinSec) seconds = kPullMinSec;
+  // Final deck persist (unthrottled) so the frozen Face and the cache agree.
+  lastDeckSaveMs = 0;
+  serviceDeckPersist();
+  // Paint the Face one last time with the sleeping status so the retained
+  // frame is honest about being a snapshot.
+  timedSleepImminent = true;
+  requestUpdateAndWait();
+  AgentLog::line("AGENT", "timed deep sleep: %us", (unsigned)seconds);
+  enterTimedDeepSleep(seconds, bestEpochNow());
 }
 
 void AgentDashboardActivity::onExit() {
@@ -957,6 +1094,9 @@ void AgentDashboardActivity::serviceDeckPersist() {
       cp(r.state, sizeof(r.state), se.state);
       cp(r.activity, sizeof(r.activity), se.activity);
       r.awaiting = strncmp(se.state, "awaiting", 8) == 0 ? 1 : 0;
+      // M6 validity class — same rule as the daemon's card feed, so WS-cached
+      // and pull-cached decks grey out identically offline (card_class.h).
+      cp(r.actionClass, sizeof(r.actionClass), AgentDeck::classifyCardActionClass(se.requestId[0] != '\0', se.state));
     }
   }
   AgentDeck::unlockState();
@@ -988,7 +1128,13 @@ int AgentDashboardActivity::buildRowsFromCache(OverviewRow* out, int cap) const 
       cp(o.agentType, sizeof(o.agentType), r.agentType);
       o.controlMode[0] = '\0';  // display-only: a cached card is never actionable
       cp(o.state, sizeof(o.state), r.state);
-      cp(o.activity, sizeof(o.activity), r.activity);
+      // A cached live-class card (permission gate / prompt) must read as
+      // unanswerable — say so instead of showing the stale prompt as pressable.
+      if (AgentDeck::actionClassIsLive(r.actionClass)) {
+        snprintf(o.activity, sizeof(o.activity), "Reconnect to act \xC2\xB7 %s", r.activity);
+      } else {
+        cp(o.activity, sizeof(o.activity), r.activity);
+      }
       o.awaiting = r.awaiting != 0;
     }
   }
@@ -1544,6 +1690,13 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
     const unsigned pct = total ? (unsigned)((uint64_t)AgentDeck::OtaWs::receivedBytes() * 100 / total) : 0;
     snprintf(cl, sizeof(cl), "Receiving firmware update \xC2\xB7 %u%%", pct);
     statusBold = true;
+  } else if (timedSleepImminent || (pullMode && pullSynced)) {
+    // M6 battery cadence: this frame may be the one the panel holds through the
+    // whole sleep — it must say what it is. The "as of" line carries the age.
+    snprintf(cl, sizeof(cl), "Synced \xC2\xB7 sleeping until next pull \xC2\xB7 power btn wakes");
+    statusBold = true;
+  } else if (pullMode) {
+    snprintf(cl, sizeof(cl), "Pull sync\xE2\x80\xA6 \xC2\xB7 Wi-Fi %s", localIp.c_str());
   } else {
     switch (dashState) {
     case DashState::Connected:
@@ -1630,8 +1783,11 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
 
   // Hint bar. Up/Down only meaningful with more than one row. Cached decks
   // offer no actions (handleButtons sees the live n == 0 and no-ops anyway).
-  const auto labels = mappedInput.mapLabels("Exit", (n > 0 && !fromCache) ? "Open" : "",
-                                            (n > 1 && !fromCache) ? "Up" : "", (n > 1 && !fromCache) ? "Down" : "");
+  // Pull-synced rows are live data but NOT interactive (no WS session behind
+  // them) — advertising "Open" there would be a lie, same honesty rule.
+  const bool interactive = !fromCache && dashState == DashState::Connected;
+  const auto labels = mappedInput.mapLabels("Exit", (n > 0 && interactive) ? "Open" : "",
+                                            (n > 1 && interactive) ? "Up" : "", (n > 1 && interactive) ? "Down" : "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }

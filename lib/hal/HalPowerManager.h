@@ -41,6 +41,13 @@ class HalPowerManager {
   // Should be called inside main loop() to handle the currentLockMode
   void startDeepSleep(HalGPIO& gpio) const;
 
+  // Timed deep sleep for the AgentDeck pull-sync cadence (M6). Unlike
+  // startDeepSleep(), the battery latch (GPIO13) is HELD HIGH so the RTC
+  // domain stays powered and the timer can fire on battery — sleep current is
+  // therefore higher than the fully-off power gesture. Wakes on the timer or
+  // the power button. Does not return.
+  void startTimedDeepSleep(HalGPIO& gpio, uint32_t seconds) const;
+
   // Get battery percentage (range 0-100)
   uint16_t getBatteryPercentage() const;
 

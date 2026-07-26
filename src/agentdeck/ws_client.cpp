@@ -179,6 +179,7 @@ void wsSend(const char* json) {
 
 const char* wsBridgeIp() { return savedIp; }
 uint16_t wsBridgePort() { return savedPort; }
+const char* wsBridgeToken() { return savedToken; }
 
 }  // namespace Net
 }  // namespace AgentDeck

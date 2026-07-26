@@ -86,7 +86,9 @@ class HalGPIO {
   // Returns true once per edge (plug or unplug) since the last update()
   bool wasUsbStateChanged() const;
 
-  enum class WakeupReason { PowerButton, AfterFlash, AfterUSBPower, Other };
+  // Timer = the AgentDeck pull-sync cadence woke us (esp timer wakeup); boot
+  // proceeds like a normal wake but the dashboard runs a sync-then-sleep pass.
+  enum class WakeupReason { PowerButton, AfterFlash, AfterUSBPower, Timer, Other };
 
   WakeupReason getWakeupReason() const;
 

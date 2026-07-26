@@ -302,3 +302,71 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   LOG_DBG("HTTP", "Downloaded %zu bytes", sink.downloaded);
   return OK;
 }
+
+bool HttpDownloader::postJson(const std::string& url, const char* body, size_t bodyLen, std::string& outResponse,
+                              size_t maxResponseBytes) {
+  LOG_DBG("HTTP", "POST: %s (%u bytes)", url.c_str(), (unsigned)bodyLen);
+  outResponse.clear();
+
+  esp_http_client_config_t config = {};
+  config.url = url.c_str();
+  config.method = HTTP_METHOD_POST;
+  config.buffer_size = HTTP_RX_BUF;
+  config.buffer_size_tx = HTTP_TX_BUF;
+  config.timeout_ms = HTTP_TIMEOUT_MS;
+  config.crt_bundle_attach = esp_crt_bundle_attach;
+  config.keep_alive_enable = false;
+  config.disable_auto_redirect = true;
+
+  esp_http_client_handle_t client = esp_http_client_init(&config);
+  if (!client) {
+    LOG_ERR("HTTP", "client init failed");
+    return false;
+  }
+
+  esp_http_client_set_header(client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
+  esp_http_client_set_header(client, "Content-Type", "application/json");
+
+  esp_err_t err = esp_http_client_open(client, bodyLen);
+  if (err != ESP_OK) {
+    LOG_ERR("HTTP", "open failed: %s", esp_err_to_name(err));
+    esp_http_client_cleanup(client);
+    return false;
+  }
+  if (bodyLen && esp_http_client_write(client, body, bodyLen) != (int)bodyLen) {
+    LOG_ERR("HTTP", "body write failed");
+    esp_http_client_cleanup(client);
+    return false;
+  }
+
+  if (esp_http_client_fetch_headers(client) < 0) {
+    LOG_ERR("HTTP", "fetch headers failed");
+    esp_http_client_cleanup(client);
+    return false;
+  }
+  const int status = esp_http_client_get_status_code(client);
+
+  char buf[512];
+  while (true) {
+    const int read = esp_http_client_read(client, buf, sizeof(buf));
+    if (read < 0) {
+      LOG_ERR("HTTP", "read error after %u bytes", (unsigned)outResponse.size());
+      esp_http_client_cleanup(client);
+      return false;
+    }
+    if (read == 0) break;
+    if (outResponse.size() + read > maxResponseBytes) {
+      LOG_ERR("HTTP", "response exceeds %u bytes — aborted", (unsigned)maxResponseBytes);
+      esp_http_client_cleanup(client);
+      return false;
+    }
+    outResponse.append(buf, read);
+  }
+  esp_http_client_cleanup(client);
+
+  if (status != 200) {
+    LOG_ERR("HTTP", "POST status %d: %.120s", status, outResponse.c_str());
+    return false;
+  }
+  return true;
+}

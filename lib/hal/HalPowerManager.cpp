@@ -94,6 +94,37 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   esp_deep_sleep_start();
 }
 
+void HalPowerManager::startTimedDeepSleep(HalGPIO& gpio, uint32_t seconds) const {
+  // Same release-wait as startDeepSleep(): don't wake straight back up on a
+  // still-held power button.
+  while (gpio.isPressed(HalGPIO::BTN_POWER)) {
+    delay(50);
+    gpio.update();
+  }
+
+#ifdef ENABLE_SERIAL_LOG
+  logSerial.end();
+#endif
+
+  // KEY DIFFERENCE from startDeepSleep(): the battery latch (GPIO13) is held
+  // HIGH, keeping the MCU's RTC domain powered on battery so the sleep timer
+  // can fire. The fully-off gesture drops the latch and can only be revived by
+  // the hard-wired power button. Costs standing sleep current — this path is
+  // only entered when the user enabled the AgentDeck pull-sync cadence.
+  constexpr gpio_num_t GPIO_SPIWP = GPIO_NUM_13;
+  gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
+  gpio_set_level(GPIO_SPIWP, 1);
+  gpio_deep_sleep_hold_en();
+  gpio_hold_en(GPIO_SPIWP);
+
+  pinMode(InputManager::POWER_BUTTON_PIN, INPUT_PULLUP);
+  // Power button remains the manual wake; the four front buttons are ADC
+  // ladders and cannot be armed as GPIO wake sources.
+  esp_deep_sleep_enable_gpio_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
+  esp_sleep_enable_timer_wakeup((uint64_t)seconds * 1000000ULL);
+  esp_deep_sleep_start();
+}
+
 uint16_t HalPowerManager::getBatteryPercentage() const {
   if (_batteryUseI2C) {
     const unsigned long now = millis();
