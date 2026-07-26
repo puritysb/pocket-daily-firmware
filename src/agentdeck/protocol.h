@@ -7,6 +7,10 @@
 // the connection/connected acknowledgements. Other message types are accepted
 // and ignored (see protocol.cpp for the M3-stubbed list).
 //
+// NOTE: esp32_ota_* frames never reach this parser — ws_client.cpp routes them
+// to OtaWs::maybeHandleFrame() first, because this parser's ArduinoJson filter
+// would silently drop the base64 chunk payload (`data`) and kill the transfer.
+//
 #include <cstddef>
 
 namespace AgentDeck {
