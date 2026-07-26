@@ -132,11 +132,15 @@ void wsConnect(const char* ip, uint16_t port, const char* token) {
   strncpy(savedToken, token ? token : "", sizeof(savedToken) - 1);
   savedToken[sizeof(savedToken) - 1] = '\0';
 
+  // `clientType=esp32` marks this socket as board-class on the daemon so the
+  // initial burst honours the ≤4096B board-frame invariant (the untagged path
+  // got the full 12KB dashboard history — enough to OOM a no-PSRAM C3 right
+  // after connect and start a flap loop). Same tag as esp32/src/net/ws_client.
   char path[80];
   if (savedToken[0] != '\0')
-    snprintf(path, sizeof(path), "/?token=%s", savedToken);
+    snprintf(path, sizeof(path), "/?token=%s&clientType=esp32", savedToken);
   else
-    strcpy(path, "/");
+    strcpy(path, "/?clientType=esp32");
 
   ws.begin(ip, port, path);
   ws.onEvent(onWsEvent);

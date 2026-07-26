@@ -143,6 +143,17 @@ class AgentDashboardActivity final : public Activity {
   // skipLoopDelay() loop from re-hashing all shared state under g_stateMutex every spin.
   static constexpr uint32_t kSigCheckIntervalMs = 500;
 
+  // ── Link-flap cool-down ──
+  // Consecutive short-lived connections (< kHealthyUptimeMs). At the
+  // threshold, connecting pauses for kFlapCooldownMs while the Face keeps
+  // rendering the last-known deck: a marginal-RF link must not hammer
+  // discovery+connect every second (it churns the radio AND resonates with
+  // the daemon's per-connect burst cost).
+  int flapShortLived = 0;
+  uint32_t nextConnectAllowedMs = 0;
+  static constexpr int kFlapThreshold = 3;
+  static constexpr uint32_t kFlapCooldownMs = 30000;
+
   DashState dashState = DashState::WifiSelection;
   std::string localIp;
   uint32_t wifiJoinStartMs = 0;

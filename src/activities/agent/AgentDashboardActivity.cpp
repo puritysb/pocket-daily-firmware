@@ -633,6 +633,18 @@ void AgentDashboardActivity::loop() {
   }
 
   if (dashState == DashState::Discovering) {
+    // Flap cool-down: after kFlapThreshold short-lived connections, stop
+    // touching the radio for a while. The Face keeps rendering the last-known
+    // deck; the status line says the link is unstable instead of pretending a
+    // scan is about to succeed.
+    if (nextConnectAllowedMs != 0 && (int32_t)(millis() - nextConnectAllowedMs) < 0) {
+      return;
+    }
+    if (nextConnectAllowedMs != 0) {
+      nextConnectAllowedMs = 0;
+      flapShortLived = 0;  // fresh chances after the cool-down
+      requestUpdate();
+    }
     // Retry UDP socket bind if WiFi came up after startNetworking(). Idempotent.
     AgentDeck::Net::udpInit();
 
@@ -681,6 +693,9 @@ void AgentDashboardActivity::loop() {
     if (nowConnected && dashState == DashState::Connecting) {
       dashState = DashState::Connected;
       lastConnectedMs = millis();
+      // Note: flapShortLived resets only after this connection PROVES healthy
+      // (survives kHealthyUptimeMs) — see the drop branch. Resetting here
+      // would let a connect-then-die-in-2s loop bypass the cool-down forever.
       if (!registered) {
         sendClientRegister();
         sendDeviceInfo();
@@ -705,9 +720,26 @@ void AgentDashboardActivity::loop() {
         registered = false;
         requestUpdate();
       }
-    } else if (!nowConnected && dashState == DashState::Connected) {
+    }
+    // A connection that survives the healthy window clears the flap ladder.
+    if (nowConnected && dashState == DashState::Connected && flapShortLived != 0 &&
+        millis() - lastConnectedMs >= kHealthyUptimeMs) {
+      flapShortLived = 0;
+    }
+    if (!nowConnected && dashState == DashState::Connected) {
       const uint32_t uptime = millis() - lastConnectedMs;
       registered = false;
+      // Flap ladder: consecutive short-lived connections pause reconnection
+      // entirely for a cool-down instead of hammering discovery+connect —
+      // the cached Face stays up, which is exactly what it is for.
+      if (uptime < kHealthyUptimeMs) {
+        flapShortLived++;
+        if (flapShortLived >= kFlapThreshold) {
+          nextConnectAllowedMs = millis() + kFlapCooldownMs;
+          AgentLog::line("AGENT", "link flapping (%d short-lived) — cooling down %us", flapShortLived,
+                         (unsigned)(kFlapCooldownMs / 1000));
+        }
+      }
       if (uptime >= kHealthyUptimeMs) {
         // Was a healthy connection that dropped (transient / daemon restart on the
         // same port): retry the SAME endpoint — the ws_client library auto-reconnects
@@ -1714,7 +1746,9 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
                (unsigned)AgentDeck::Net::wsBridgePort());
       break;
     case DashState::Discovering:
-      if (discoveryNoticeShown)
+      if (nextConnectAllowedMs != 0 && (int32_t)(millis() - nextConnectAllowedMs) < 0)
+        snprintf(cl, sizeof(cl), "Link unstable \xC2\xB7 pausing before retry\xE2\x80\xA6");
+      else if (discoveryNoticeShown)
         snprintf(cl, sizeof(cl), "AgentDeck not found \xC2\xB7 still scanning\xE2\x80\xA6");
       else
         snprintf(cl, sizeof(cl), "Searching for AgentDeck\xE2\x80\xA6 \xC2\xB7 Wi-Fi %s", localIp.c_str());
