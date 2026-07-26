@@ -26,6 +26,16 @@ constexpr size_t SHA_TRAILER = 32;
 constexpr uint8_t CHECKSUM_SEED = 0xEF;
 constexpr size_t HEADER_SIZE = 24;
 constexpr size_t SEG_HEADER_SIZE = 8;
+
+// Static staging buffer shared by validateImageFile and flashFromSdPath (both
+// run on the main task only — SD update activity or the OTA serviceFlash).
+// This used to be a per-call heap allocation, and it is exactly where WiFi OTA
+// died on real hardware: after ~90 min of dashboard uptime (SD-font glyph
+// cache + WS churn) the no-PSRAM C3 heap could not produce 4 KiB contiguous,
+// so the flash stage failed with OOM after a completed 5 MB transfer — and
+// because a failed flash does not reboot, every retry hit the same fragmented
+// heap. 4 KiB of static RAM buys a flash path with no runtime allocation.
+uint8_t g_stagingBuf[CHUNK];
 }  // namespace
 
 const char* resultName(Result r) {
@@ -120,11 +130,7 @@ Result validateImageFile(const char* sdPath, size_t partitionSize) {
   const uint8_t segCount = header[1];
   const bool hashAppended = header[23] != 0;
 
-  auto buf = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[CHUNK]);
-  if (!buf) {
-    file.close();
-    return Result::OOM;
-  }
+  uint8_t* buf = g_stagingBuf;
 
   mbedtls_sha256_context shaCtx;
   mbedtls_sha256_init(&shaCtx);
@@ -160,7 +166,7 @@ Result validateImageFile(const char* sdPath, size_t partitionSize) {
       return Result::BAD_SEGMENTS;
     }
 
-    const Result feedRes = feedHashAndChecksum(file, dataLen, &xorAccum, &shaCtx, buf.get());
+    const Result feedRes = feedHashAndChecksum(file, dataLen, &xorAccum, &shaCtx, buf);
     if (feedRes != Result::OK) {
       mbedtls_sha256_free(&shaCtx);
       file.close();
@@ -258,12 +264,7 @@ Result flashFromSdPath(const char* sdPath, ProgressCb onProgress, void* ctx, boo
   LOG_INF("FLASH", "src=%s size=%u dest=%s @0x%x partsize=%u", sdPath, static_cast<unsigned>(firmwareSize), dest->label,
           static_cast<unsigned>(dest->address), static_cast<unsigned>(dest->size));
 
-  auto buffer = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[CHUNK]);
-  if (!buffer) {
-    LOG_ERR("FLASH", "OOM");
-    file.close();
-    return Result::OOM;
-  }
+  uint8_t* buffer = g_stagingBuf;  // static — the flash path must never depend on heap state
 
   // Interleave erase + write so the progress bar advances 0→100% smoothly
   // rather than stalling for several seconds during a single up-front erase.
@@ -284,13 +285,13 @@ Result flashFromSdPath(const char* sdPath, ProgressCb onProgress, void* ctx, boo
     }
 
     const size_t want = std::min<size_t>(CHUNK, firmwareSize - streamPos);
-    const int read = file.read(buffer.get(), want);
+    const int read = file.read(buffer, want);
     if (read <= 0 || static_cast<size_t>(read) != want) {
       LOG_ERR("FLASH", "read @%u: got=%d want=%u", static_cast<unsigned>(streamPos), read, static_cast<unsigned>(want));
       file.close();
       return Result::READ_FAIL;
     }
-    if (esp_partition_write(dest, streamPos, buffer.get(), want) != ESP_OK) {
+    if (esp_partition_write(dest, streamPos, buffer, want) != ESP_OK) {
       LOG_ERR("FLASH", "write @%u failed", static_cast<unsigned>(streamPos));
       file.close();
       return Result::WRITE_FAIL;
