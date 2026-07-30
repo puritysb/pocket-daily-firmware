@@ -101,6 +101,8 @@ class ActivityManager {
   void popActivity();
 
   bool preventAutoSleep() const;
+  // Let the current activity own the retained sleep frame (Activity::paintSleepFrame).
+  bool paintSleepFrame();
   bool isReaderActivity() const;
   bool skipLoopDelay() const;
   ScreenshotInfo getScreenshotInfo() const;

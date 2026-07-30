@@ -263,7 +263,15 @@ void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
 
+  // An information surface keeps informing while it sleeps: give the current
+  // activity the chance to own the retained frame instead of the sleep screen.
+  // The AgentDeck dashboard paints its glance here, so powering the device down
+  // leaves weather / quota / work summary on the panel for as long as it sits
+  // there. Runs BEFORE deepSleepInProgress so the render task is still normal.
+  const bool ownSleepFrame = activityManager.paintSleepFrame();
+
   const bool isQuickResumeSleep =
+      ownSleepFrame ||  // the frame we just painted is the one to resume onto
       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
       (fromTimeout &&
        SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
@@ -274,7 +282,11 @@ void enterDeepSleep(bool fromTimeout = false) {
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
-  activityManager.goToSleep(fromTimeout);
+  // Skip the sleep-screen swap entirely when the activity owns the frame —
+  // replaceActivity() would paint SleepActivity straight over it.
+  if (!ownSleepFrame) {
+    activityManager.goToSleep(fromTimeout);
+  }
 
   if (isQuickResumeSleep) {
     saveSleepFrameBuffer();

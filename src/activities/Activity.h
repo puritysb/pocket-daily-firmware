@@ -44,6 +44,12 @@ class Activity {
   virtual bool skipLoopDelay() { return false; }
   virtual bool preventAutoSleep() { return false; }
   virtual bool isReaderActivity() const { return false; }
+  // The activity owns the frame the panel holds through sleep. Paint it now
+  // (synchronously — requestUpdateAndWait) and return true to keep it; return
+  // false to get the standard sleep screen. E-ink retains the last frame with
+  // no power, so what is on screen at sleep is what the user sees for hours —
+  // an information surface should keep showing information, not a logo.
+  virtual bool paintSleepFrame() { return false; }
   virtual ScreenshotInfo getScreenshotInfo() const { return {}; }
 
   // Start a new activity without destroying the current one

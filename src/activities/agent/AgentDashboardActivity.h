@@ -37,6 +37,9 @@ class AgentDashboardActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // Powering the device down from the dashboard leaves the glance on the panel
+  // instead of the generic sleep screen — the retained frame stays useful.
+  bool paintSleepFrame() override;
 
   // Keep the main loop tight + the radio awake while we're servicing the daemon.
   bool skipLoopDelay() override { return dashState != DashState::WifiSelection; }
@@ -114,12 +117,20 @@ class AgentDashboardActivity final : public Activity {
   void renderOverview(const OverviewRow* rows, int n, int awaitingCount, bool fromCache, uint32_t asOfEpoch);
   void renderDetail();
   void renderCard();
-  // The frame the panel holds through a timed deep sleep: weather + provider
-  // quota + work wrap-up from the feed's glance block, with ABSOLUTE times only
-  // ("Synced HH:MM · next ~HH:MM") — a frozen frame must stay true without a
-  // repaint. Every kGlanceFullRefreshEvery-th paint uses FULL_REFRESH to clear
-  // accumulated fast-refresh ghosting.
-  void renderSleepGlance();
+  // Why the glance is being painted. It is not a sleep-only screen: the same
+  // layout is the dashboard's ambient face whenever there are no live session
+  // cards to show (offline, booting, or simply nothing running), which is what
+  // makes the device useful without a daemon or a network.
+  enum class GlanceReason : uint8_t {
+    Ambient,     // live Face: no session cards — show information, not an apology
+    TimedSleep,  // battery cadence: "next ~HH:MM"
+    PoweredOff,  // user held power: no next sync to promise
+  };
+  // Weather + provider quota + work wrap-up from the feed's glance block. Times
+  // are ABSOLUTE ("Synced HH:MM · next ~HH:MM") because a retained e-ink frame
+  // must stay true without a repaint. Sleep paints use FULL_REFRESH every
+  // kGlanceFullRefreshEvery-th frame to clear accumulated ghosting.
+  void renderGlance(GlanceReason reason);
   // Branded header (AgentDeck mark + title) shared by every Connected screen.
   void drawBrandedHeader(const char* title, const char* subtitle) const;
   // LIMITS footer — 5H/7D quota gauges. Renders only when the hub supplies usage
@@ -246,17 +257,20 @@ class AgentDashboardActivity final : public Activity {
   // flow; USB power disables the cadence entirely (docked = live mode).
   bool pullMode = false;
   bool pullSynced = false;
-  bool pullEndpointTried = false;   // cached-endpoint fast path attempted
-  bool timedSleepImminent = false;  // final Face paint says "sleeping"
+  bool pullEndpointTried = false;  // cached-endpoint fast path attempted
+  // Which glance variant render() should paint. Non-Ambient means this frame is
+  // the one the panel keeps through sleep.
+  GlanceReason glanceReason = GlanceReason::Ambient;
+  bool sleepFramePending = false;  // render() must paint the sleep glance
   uint32_t pullSyncedAtMs = 0;
   uint32_t pullNextSec = 0;  // daemon's nextPullSec hint (0 → default)
   // Conditional pull: deckSig of the last applied feed (seeded from the SD deck
   // cache at onEnter, refreshed on every full feed). Echoed as `?sig=` so an
   // unchanged deck costs one tiny response. Empty = always pull the full feed.
   char lastFeedSig[12] = {0};
-  // Sleep-frame wall times (daemon-local "HH:MM"), computed in beginTimedSleep
-  // from the feed's serverHm; empty when no pull has anchored wall time yet.
-  char sleepSyncHm[6] = {0};
+  // Next-pull wall time (daemon-local "HH:MM"), precomputed in beginTimedSleep
+  // because only it knows the sleep length; empty when no pull has anchored
+  // wall time yet. The *synced* time is computed at paint, not stored.
   char sleepNextHm[6] = {0};
   uint32_t sleepForSec = 0;  // fallback "sleeping ~Nm" when no wall time known
   static constexpr uint32_t kGlanceFullRefreshEvery = 8;  // ghost-clearing cadence

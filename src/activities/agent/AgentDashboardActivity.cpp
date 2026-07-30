@@ -379,7 +379,8 @@ void AgentDashboardActivity::onEnter() {
              gpio.getWakeupReason() == HalGPIO::WakeupReason::Timer && !gpio.isUsbConnected();
   pullSynced = false;
   pullEndpointTried = false;
-  timedSleepImminent = false;
+  glanceReason = GlanceReason::Ambient;
+  sleepFramePending = false;
   pullSyncedAtMs = 0;
   pullNextSec = 0;
   if (pullMode) AgentLog::line("AGENT", "pull-sync wake (battery cadence)");
@@ -893,7 +894,6 @@ void AgentDashboardActivity::beginTimedSleep(uint32_t seconds) {
   // this device has (no timezone). Empty when no pull anchored it this boot;
   // the glance then falls back to a plain sleep-duration line.
   sleepForSec = seconds;
-  sleepSyncHm[0] = '\0';
   sleepNextHm[0] = '\0';
   {
     char baseHm[6] = {0};
@@ -902,16 +902,15 @@ void AgentDashboardActivity::beginTimedSleep(uint32_t seconds) {
     memcpy(baseHm, AgentDeck::g_state.serverHm, sizeof(baseHm));
     baseAtMs = AgentDeck::g_state.serverHmAtMs;
     AgentDeck::unlockState();
-    if (baseHm[0]) {
-      const uint32_t sinceSec = (millis() - baseAtMs) / 1000UL;
-      AgentDeck::GlanceFormat::addToHm(sleepSyncHm, sizeof(sleepSyncHm), baseHm, sinceSec);
-      AgentDeck::GlanceFormat::addToHm(sleepNextHm, sizeof(sleepNextHm), baseHm, sinceSec + seconds);
-    }
+    if (baseHm[0])
+      AgentDeck::GlanceFormat::addToHm(sleepNextHm, sizeof(sleepNextHm), baseHm,
+                                       (millis() - baseAtMs) / 1000UL + seconds);
   }
   // Paint the sleep glance one last time so the retained frame is honest about
   // being a snapshot. The paint serial drives the ghost-clearing FULL_REFRESH.
   bumpTimedSleepPaintSerial();
-  timedSleepImminent = true;
+  glanceReason = GlanceReason::TimedSleep;
+  sleepFramePending = true;
   requestUpdateAndWait();
   AgentLog::line("AGENT", "timed deep sleep: %us", (unsigned)seconds);
   enterTimedDeepSleep(seconds, bestEpochNow());
@@ -1775,7 +1774,7 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
     const unsigned pct = total ? (unsigned)((uint64_t)AgentDeck::OtaWs::receivedBytes() * 100 / total) : 0;
     snprintf(cl, sizeof(cl), "Receiving firmware update \xC2\xB7 %u%%", pct);
     statusBold = true;
-  } else if (timedSleepImminent || (pullMode && pullSynced)) {
+  } else if (pullMode && pullSynced) {
     // M6 battery cadence: this frame may be the one the panel holds through the
     // whole sleep — it must say what it is. The "as of" line carries the age.
     snprintf(cl, sizeof(cl), "Synced \xC2\xB7 sleeping until next pull \xC2\xB7 power btn wakes");
@@ -1873,7 +1872,7 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
   // Pull-synced rows are live data but NOT interactive (no WS session behind
   // them) — advertising "Open" there would be a lie, same honesty rule. The
   // frame frozen through a timed sleep only answers the power button.
-  const bool interactive = !fromCache && dashState == DashState::Connected && !timedSleepImminent;
+  const bool interactive = !fromCache && dashState == DashState::Connected;
   const auto labels = mappedInput.mapLabels("Exit", (n > 0 && interactive) ? "Open" : "",
                                             (n > 1 && interactive) ? "Up" : "", (n > 1 && interactive) ? "Down" : "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -2368,7 +2367,8 @@ void AgentDashboardActivity::renderCard() {
   renderer.displayBuffer();
 }
 
-void AgentDashboardActivity::renderSleepGlance() {
+void AgentDashboardActivity::renderGlance(GlanceReason reason) {
+  const bool isSleep = reason != GlanceReason::Ambient;
   const auto& m = UITheme::getInstance().getMetrics();
   const int w = renderer.getScreenWidth();
   const int pageH = renderer.getScreenHeight();
@@ -2382,12 +2382,22 @@ void AgentDashboardActivity::renderSleepGlance() {
   // whose whole point was not re-sending it).
   AgentDeck::GlanceInfo g;
   g.clear();
+  char baseHm[6] = {0};
+  uint32_t baseAtMs = 0;
   AgentDeck::lockState();
   if (AgentDeck::g_state.glance.valid)
     g = AgentDeck::g_state.glance;
   else if (cachedDeck)
     g = cachedDeck->glance;
+  memcpy(baseHm, AgentDeck::g_state.serverHm, sizeof(baseHm));
+  baseAtMs = AgentDeck::g_state.serverHmAtMs;
   AgentDeck::unlockState();
+
+  // Wall time is the daemon's local clock advanced by however long ago its last
+  // frame arrived — the device has no timezone of its own. Computed at paint
+  // time so the ambient face stays current between syncs.
+  char syncedHm[6] = {0};
+  if (baseHm[0]) AgentDeck::GlanceFormat::addToHm(syncedHm, sizeof(syncedHm), baseHm, (millis() - baseAtMs) / 1000UL);
 
   renderer.clearScreen();
   drawBrandedHeader("AgentDeck", "Glance");
@@ -2399,8 +2409,10 @@ void AgentDashboardActivity::renderSleepGlance() {
     if (AgentDeck::GlanceFormat::formatWeatherNow(buf, sizeof(buf), g.weather) > 0) {
       renderer.drawText(UI_12_FONT_ID, pad, y, buf, true, EpdFontFamily::BOLD);
       if (g.weather.place[0]) {
-        const int pw = renderer.getTextWidth(SMALL_FONT_ID, g.weather.place);
-        renderer.drawText(SMALL_FONT_ID, w - pad - pw, y + (line12 - lineS), g.weather.place, true);
+        // User-supplied label — may be CJK, so measure and draw with the same font.
+        const int pf = fontForText(SMALL_FONT_ID, g.weather.place);
+        const int pw = renderer.getTextWidth(pf, g.weather.place);
+        renderer.drawText(pf, w - pad - pw, y + (line12 - lineS), g.weather.place, true);
       }
       y += line12 + 6;
     }
@@ -2474,26 +2486,74 @@ void AgentDashboardActivity::renderSleepGlance() {
     renderer.drawText(UI_10_FONT_ID, pad, y, "No active sessions", true);
   }
 
-  // ── Bottom status: absolute times only — this frame must stay true through
-  // the whole sleep without a repaint. ──
-  char status[96];
-  if (sleepSyncHm[0] && sleepNextHm[0]) {
-    snprintf(status, sizeof(status), "Synced %s \xC2\xB7 next ~%s \xC2\xB7 power btn wakes", sleepSyncHm, sleepNextHm);
-  } else if (pullSynced) {
-    snprintf(status, sizeof(status), "Synced \xC2\xB7 sleeping ~%um \xC2\xB7 power btn wakes",
-             (unsigned)(sleepForSec / 60));
-  } else {
-    snprintf(status, sizeof(status), "No daemon reached \xC2\xB7 sleeping ~%um \xC2\xB7 power btn wakes",
-             (unsigned)(sleepForSec / 60));
+  // ── Bottom status: absolute times only — a retained frame must stay true
+  // without a repaint, so never a relative age here. ──
+  char status[112];
+  switch (reason) {
+  case GlanceReason::TimedSleep:
+    if (syncedHm[0] && sleepNextHm[0])
+      snprintf(status, sizeof(status), "Synced %s \xC2\xB7 next ~%s \xC2\xB7 power btn wakes", syncedHm, sleepNextHm);
+    else if (pullSynced)
+      snprintf(status, sizeof(status), "Synced \xC2\xB7 sleeping ~%um \xC2\xB7 power btn wakes",
+               (unsigned)(sleepForSec / 60));
+    else
+      snprintf(status, sizeof(status), "No daemon reached \xC2\xB7 sleeping ~%um \xC2\xB7 power btn wakes",
+               (unsigned)(sleepForSec / 60));
+    break;
+  case GlanceReason::PoweredOff:
+    // Powered off by hand: there is no next sync to promise, and saying one
+    // would be the exact dishonesty the absolute-times rule exists to prevent.
+    if (syncedHm[0])
+      snprintf(status, sizeof(status), "Synced %s \xC2\xB7 powered off \xC2\xB7 press power to wake", syncedHm);
+    else
+      snprintf(status, sizeof(status), "Powered off \xC2\xB7 press power to wake");
+    break;
+  case GlanceReason::Ambient:
+  default: {
+    // Live face with nothing running: say where the data came from and how the
+    // link stands, so the panel is honest without being an apology.
+    const char* link = dashState == DashState::Connected      ? "Live"
+                       : dashState == DashState::Connecting   ? "Connecting\xE2\x80\xA6"
+                       : dashState == DashState::WifiJoining  ? "Joining Wi-Fi\xE2\x80\xA6"
+                       : dashState == DashState::Discovering  ? "Offline \xC2\xB7 searching\xE2\x80\xA6"
+                                                              : "Offline";
+    if (syncedHm[0])
+      snprintf(status, sizeof(status), "%s \xC2\xB7 synced %s", link, syncedHm);
+    else
+      snprintf(status, sizeof(status), "%s", link);
+    break;
+  }
   }
   renderer.drawText(SMALL_FONT_ID, pad, statusY,
                     renderer.truncatedText(SMALL_FONT_ID, status, w - pad * 2, EpdFontFamily::BOLD).c_str(), true,
                     EpdFontFamily::BOLD);
 
-  // Ghost management: fast refreshes accumulate residue on a frame the panel
-  // will hold for an hour — insert a full waveform every Nth sleep paint.
-  const bool fullClean = (timedSleepPaintSerial() % kGlanceFullRefreshEvery) == 0;
-  renderer.displayBuffer(fullClean ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
+  if (isSleep) {
+    // Ghost management: fast refreshes accumulate residue on a frame the panel
+    // will hold for hours — insert a full waveform every Nth sleep paint.
+    const bool fullClean = (timedSleepPaintSerial() % kGlanceFullRefreshEvery) == 0;
+    renderer.displayBuffer(fullClean ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
+  } else {
+    const auto labels = mappedInput.mapLabels("Exit", "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+  }
+}
+
+bool AgentDashboardActivity::paintSleepFrame() {
+  // Only own the frame once the dashboard is really the surface on screen —
+  // during the Wi-Fi picker the user is mid-task and expects the normal
+  // sleep screen.
+  if (dashState == DashState::WifiSelection) return false;
+  // No next sync to promise on this path — renderGlance computes the synced
+  // wall time itself at paint.
+  sleepNextHm[0] = '\0';
+  bumpTimedSleepPaintSerial();
+  glanceReason = GlanceReason::PoweredOff;
+  sleepFramePending = true;
+  requestUpdateAndWait();
+  AgentLog::line("AGENT", "sleep frame: glance retained (powered off)");
+  return true;
 }
 
 void AgentDashboardActivity::render(RenderLock&&) {
@@ -2501,8 +2561,8 @@ void AgentDashboardActivity::render(RenderLock&&) {
   // wrap-up), painted once by beginTimedSleep() right before the timed deep
   // sleep. Takes priority over every other view — this is the frame the panel
   // holds until the next wake.
-  if (timedSleepImminent) {
-    renderSleepGlance();
+  if (sleepFramePending) {
+    renderGlance(glanceReason);
     return;
   }
 
@@ -2542,6 +2602,22 @@ void AgentDashboardActivity::render(RenderLock&&) {
   // replaces the content. ──
   OverviewRow rows[AgentDeckCfg::SESSIONS_CAP];
   int n = collectOverview(rows, AgentDeckCfg::SESSIONS_CAP);
+
+  // Nothing running (offline, booting, or simply an idle desk): the panel is an
+  // information surface first and an agent controller second, so show the
+  // glance — weather, remaining AI budget, what was last being worked on —
+  // instead of an empty deck or a "connect me" apology. The glance survives
+  // reboots in the deck cache, so this works with no daemon and no network.
+  if (n == 0) {
+    bool haveGlance = false;
+    AgentDeck::lockState();
+    haveGlance = AgentDeck::g_state.glance.valid || (cachedDeck && cachedDeck->glance.valid);
+    AgentDeck::unlockState();
+    if (haveGlance) {
+      renderGlance(GlanceReason::Ambient);
+      return;
+    }
+  }
 
   // M5.5: no live data yet (boot / daemon lost) → render the persisted deck.
   // dataReceived is the chokepoint: once any live state arrives, live wins even
