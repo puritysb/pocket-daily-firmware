@@ -24,6 +24,7 @@
 #include <cstring>
 
 #include "agentdeck_config.h"
+#include "glance_state.h"
 
 namespace AgentDeck {
 
@@ -153,6 +154,18 @@ struct DashboardState {
   uint32_t daemonEpochSec;
   uint32_t daemonEpochAtMs;
 
+  // Daemon-local wall time ("HH:MM") from the last card-feed pull + the local
+  // millis() it arrived. The device has no timezone, so daemon-local HH:MM is
+  // the ONLY honest wall-clock face it can show — the sleep glance derives
+  // "Synced HH:MM · next ~HH:MM" from this. Empty = no pull yet this boot.
+  char serverHm[6];
+  uint32_t serverHmAtMs;
+
+  // Sleep-glance content from the card feed (weather / provider quota /
+  // work wrap-up). Survives markBridgeDisconnected() like the deck cache does:
+  // it is a snapshot with its own staleness semantics, not live state.
+  GlanceInfo glance;
+
   // Sessions (multi-agent). Cap matches AgentDeckCfg::SESSIONS_CAP.
   SessionInfo sessions[AgentDeckCfg::SESSIONS_CAP];
   uint8_t sessionCount;
@@ -172,6 +185,7 @@ struct DashboardState {
     antigravityCredits = -1.0f;
     codexFivePercent = -1.0f;
     codexSevenPercent = -1.0f;
+    glance.clear();  // restores the non-zero "no data" sentinels
   }
 
   // Called while g_stateMutex is held. Clears volatile bridge data so every

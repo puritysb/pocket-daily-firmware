@@ -17,15 +17,33 @@ namespace Feed {
 
 struct SyncResult {
   bool ok = false;
+  // Conditional pull: the daemon confirmed the cached deck is still current —
+  // nothing was parsed or persisted, re-sleep immediately.
+  bool unchanged = false;
   // Daemon-suggested seconds until the next pull (its half of the power
   // ladder); 0 when the daemon didn't say — callers apply their default.
   uint32_t nextPullSec = 0;
+  // Content signature of the applied feed (echo on the next pull). Empty on
+  // failure; on `unchanged` it repeats the echoed sig.
+  char deckSig[12] = {0};
+};
+
+// Telemetry appended to the `GET /feed` query string — the only battery/link
+// observability a wake-sync-sleep device has. Negative/zero fields are omitted
+// from the request (rssi is dBm, so "none" is 0, not -1).
+struct SyncTelemetry {
+  int battPct = -1;   // 0-100
+  int rssiDbm = 0;    // negative when known
 };
 
 // Push pending outbox records (if any), then GET /feed and apply it to
-// g_state. `board` is the wire identity ("xteink_x3"/"xteink_x4").
-// Blocking (HTTP on the loop task) — callers budget for a few seconds.
-SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char* board);
+// g_state. `board` is the wire identity ("xteink_x3"/"xteink_x4"); `echoSig`
+// (nullable) is the deckSig persisted with the deck cache — when the daemon's
+// current signature matches, it answers `unchanged` and the whole visit costs
+// one tiny response. Blocking (HTTP on the loop task) — callers budget for a
+// few seconds.
+SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char* board,
+                    const char* echoSig, const SyncTelemetry& telemetry);
 
 // ── Endpoint cache ──
 // The daemon endpoint is otherwise RAM-only (rediscovered every boot); a pull

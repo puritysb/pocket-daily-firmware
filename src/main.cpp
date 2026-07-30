@@ -123,6 +123,22 @@ RTC_NOINIT_ATTR uint32_t silentRebootTarget;
 RTC_NOINIT_ATTR uint32_t timedSleepWakeEpoch;
 RTC_NOINIT_ATTR uint32_t timedSleepMagic;
 constexpr uint32_t TIMED_SLEEP_MAGIC = 0xADC0FFEE;
+// Sleep-glance paint counter (PowerCycle.h). Counts consecutive timed-sleep
+// frames so the renderer can insert a ghost-clearing FULL_REFRESH every Nth
+// paint; self-validating (RTC memory is garbage on cold boot).
+RTC_NOINIT_ATTR uint32_t timedSleepPaintCount;
+RTC_NOINIT_ATTR uint32_t timedSleepPaintMagic;
+constexpr uint32_t TIMED_PAINT_MAGIC = 0xADC0FFEF;
+
+uint32_t timedSleepPaintSerial() {
+  if (timedSleepPaintMagic != TIMED_PAINT_MAGIC) {
+    timedSleepPaintMagic = TIMED_PAINT_MAGIC;
+    timedSleepPaintCount = 0;
+  }
+  return timedSleepPaintCount;
+}
+
+void bumpTimedSleepPaintSerial() { timedSleepPaintCount = timedSleepPaintSerial() + 1; }
 constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;

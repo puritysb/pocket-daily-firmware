@@ -215,3 +215,36 @@ that bypasses the router entirely); the script cannot press its buttons.
    surface for push cards). The X3/X4 re-port is pending: today's firmware
    skips module cards (`applyCardFeed` continues on a null `session`), so the
    contract can land ahead of the client without breaking the deployed X4.
+
+6. **M6.5 — conditional pull + sleep glance (2026-07-31, this slice).** Three
+   tesserae-inspired ideas, clean-room (tesserae is AGPL; concepts only):
+
+   - **Conditional pull (`deckSig`)**: every full feed carries a content
+     signature (volatile `expiresAt` excluded); the device persists it with
+     the deck cache (`DeckStore` v2) and echoes it as `GET /feed?sig=…`. On a
+     match the daemon answers `unchanged: true` with empty cards — nothing to
+     parse, nothing to persist, re-sleep immediately. An idle night now costs
+     a WiFi join and one tiny response per wake. `dataReceived` is deliberately
+     NOT set on the unchanged path so the render keeps falling back to the
+     persisted deck.
+   - **Pull telemetry**: `batt` (percent) and `rssi` (dBm) ride the `GET
+     /feed` query string — the daemon logs them per client (`agentdeck
+     devices` → `Card feed`), which is the software half of the sleep-current
+     verification the roadmap still owes.
+   - **Sleep glance (`renderSleepGlance`)**: the frame frozen through a timed
+     sleep is no longer the interactive Face but a dedicated away-from-desk
+     layout: weather (current + today's rain window + tomorrow, from the
+     daemon's Open-Meteo module — configure `weather: {lat, lon, place}` in
+     the host's settings.json), provider quota gauges (Claude/Codex 5h/7d
+     with absolute reset HH:MM), the daemon-authored work wrap-up lines, and
+     a status line built from ABSOLUTE daemon-local times ("Synced 14:32 ·
+     next ~15:32 · power btn wakes") — a frame that must stay true for an
+     hour can never show a relative age. Wall time derives from the feed's
+     `serverHm` (the device has no timezone); with no anchor the line falls
+     back to a duration ("sleeping ~60m"). Every 8th sleep paint uses
+     FULL_REFRESH (RTC-held paint serial, `PowerCycle.h`) to clear
+     fast-refresh ghosting on the held frame.
+
+   Host tests: `test/agentdeck_glance` (HH:MM arithmetic + line formats +
+   sentinel hygiene). Hardware verification of the whole ladder (sleep
+   current, timer wake, unchanged-path battery win) remains open.

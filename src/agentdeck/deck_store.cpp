@@ -27,7 +27,10 @@ struct Header {
 static_assert(sizeof(Header) == 12, "header layout must stay stable on disk");
 
 constexpr uint32_t kMagic = 0x314B4441;  // "ADK1" (LE)
-constexpr uint8_t kVersion = 1;
+// v2 (2026-07-31): deckSig + GlanceInfo ride between the header and the
+// records. v1 files are simply invalidated — the deck cache is a convenience,
+// not data worth migrating.
+constexpr uint8_t kVersion = 2;
 
 }  // namespace
 
@@ -41,6 +44,9 @@ bool save(const Snapshot& snap) {
     if (!f) return false;
     const Header h{kMagic, kVersion, snap.count, (uint16_t)sizeof(Record), snap.savedEpoch};
     if (f.write(&h, sizeof(h)) != sizeof(h)) return false;
+    // v2 payload between header and records: sig echo + glance snapshot.
+    if (f.write(snap.deckSig, sizeof(snap.deckSig)) != sizeof(snap.deckSig)) return false;
+    if (f.write(&snap.glance, sizeof(snap.glance)) != (int)sizeof(snap.glance)) return false;
     const size_t bytes = sizeof(Record) * snap.count;
     if (bytes && f.write(snap.records, bytes) != bytes) return false;
   }  // HalFile destructor closes under the mutex
@@ -54,6 +60,7 @@ bool save(const Snapshot& snap) {
 
 bool load(Snapshot& out) {
   memset(&out, 0, sizeof(out));
+  out.glance.clear();
   if (!Storage.ready() || !Storage.exists(kPath)) return false;
   HalFile f = Storage.open(kPath, O_RDONLY);
   if (!f) return false;
@@ -64,9 +71,17 @@ bool load(Snapshot& out) {
     AgentLog::line("DECK", "deck cache rejected (magic/version/shape mismatch)");
     return false;
   }
+  if (f.read(out.deckSig, sizeof(out.deckSig)) != (int)sizeof(out.deckSig) ||
+      f.read(&out.glance, sizeof(out.glance)) != (int)sizeof(out.glance)) {
+    memset(&out, 0, sizeof(out));
+    out.glance.clear();
+    return false;
+  }
+  out.deckSig[sizeof(out.deckSig) - 1] = '\0';
   const size_t bytes = sizeof(Record) * h.count;
   if (bytes && f.read(out.records, bytes) != (int)bytes) {
     memset(&out, 0, sizeof(out));
+    out.glance.clear();
     return false;
   }
   // Defensive termination: the file is external input to this boot.

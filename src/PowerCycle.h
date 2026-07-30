@@ -16,3 +16,10 @@
 // the wake boot seed the system clock so "as of" ages stay honest before any
 // network sync.
 void enterTimedDeepSleep(uint32_t seconds, uint32_t epochNowSec);
+
+// Ghost management for the frozen sleep frame: a monotonically increasing
+// serial of timed-sleep paints, held in RTC memory across timed sleeps
+// (self-validating — cold boot resets it to 0). The sleep-glance renderer
+// inserts a FULL_REFRESH every Nth paint; bump on each timed sleep.
+uint32_t timedSleepPaintSerial();
+void bumpTimedSleepPaintSerial();

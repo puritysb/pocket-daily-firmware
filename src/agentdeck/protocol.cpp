@@ -447,11 +447,72 @@ void parseMessage(const char* json, size_t length) {
   }
 }
 
-bool applyCardFeed(const char* json, size_t length, uint32_t* nextPullSecOut) {
-  if (nextPullSecOut) *nextPullSecOut = 0;
+namespace {
+
+// Land the feed's glance block (weather / usage / wrap-up) in g_state.glance.
+// Caller holds the state lock. Absent fields keep their clear() sentinels.
+void parseGlanceLocked(JsonObject glance) {
+  GlanceInfo& g = g_state.glance;
+  g.clear();
+  if (glance.isNull()) return;
+  g.valid = true;
+
+  auto cp = [](char* d, size_t n, const char* s) {
+    strncpy(d, s ? s : "", n - 1);
+    d[n - 1] = '\0';
+  };
+  auto temp = [](JsonVariant v) -> int8_t {
+    if (v.isNull()) return GLANCE_TEMP_NONE;
+    return (int8_t)(int)v.as<int>();
+  };
+
+  JsonObject w = glance["weather"].as<JsonObject>();
+  if (!w.isNull()) {
+    g.weather.valid = true;
+    cp(g.weather.place, sizeof(g.weather.place), w["place"] | "");
+    g.weather.tempC = temp(w["tempC"]);
+    cp(g.weather.summary, sizeof(g.weather.summary), w["summary"] | "");
+    g.weather.todayMinC = temp(w["todayMinC"]);
+    g.weather.todayMaxC = temp(w["todayMaxC"]);
+    JsonObject rain = w["rain"].as<JsonObject>();
+    if (!rain.isNull()) {
+      cp(g.weather.rainStartHm, sizeof(g.weather.rainStartHm), rain["startHm"] | "");
+      cp(g.weather.rainEndHm, sizeof(g.weather.rainEndHm), rain["endHm"] | "");
+      g.weather.rainProbability = (int8_t)(rain["probability"] | -1);
+    }
+    JsonObject tm = w["tomorrow"].as<JsonObject>();
+    if (!tm.isNull()) {
+      cp(g.weather.tomorrow.summary, sizeof(g.weather.tomorrow.summary), tm["summary"] | "");
+      g.weather.tomorrow.minC = temp(tm["minC"]);
+      g.weather.tomorrow.maxC = temp(tm["maxC"]);
+      g.weather.tomorrow.rainProbability = (int8_t)(tm["rainProbability"] | -1);
+    }
+  }
+
+  for (JsonObject u : glance["usage"].as<JsonArray>()) {
+    if (g.usageCount >= GlanceInfo::USAGE_CAP) break;
+    GlanceUsageRow& row = g.usage[g.usageCount++];
+    cp(row.provider, sizeof(row.provider), u["provider"] | "");
+    cp(row.label, sizeof(row.label), u["label"] | "");
+    row.primaryPercent = (int8_t)(u["primaryPercent"] | -1);
+    row.secondaryPercent = (int8_t)(u["secondaryPercent"] | -1);
+    cp(row.primaryResetHm, sizeof(row.primaryResetHm), u["primaryResetHm"] | "");
+    row.stale = u["stale"] | false;
+  }
+
+  for (JsonVariant line : glance["wrapup"].as<JsonArray>()) {
+    if (g.wrapupCount >= GlanceInfo::WRAPUP_CAP) break;
+    cp(g.wrapup[g.wrapupCount++], GlanceInfo::WRAPUP_BYTES, line | "");
+  }
+}
+
+}  // namespace
+
+FeedApply applyCardFeed(const char* json, size_t length) {
+  FeedApply out;
   if (length > AgentDeckCfg::PROTOCOL_MAX_MSG_BYTES) {
     AgentLog::line("PROTO", "card_feed too large: %u bytes — dropped", (unsigned)length);
-    return false;
+    return out;
   }
 
   // The feed nests each session under cards[i].session; reuse the same field
@@ -459,7 +520,10 @@ bool applyCardFeed(const char* json, size_t length, uint32_t* nextPullSecOut) {
   filter.clear();
   filter["type"] = true;
   filter["serverTime"] = true;
+  filter["serverHm"] = true;
   filter["nextPullSec"] = true;
+  filter["deckSig"] = true;
+  filter["unchanged"] = true;
   filter["cards"][0]["actionClass"] = true;
   static constexpr const char* kSessionFields[] = {
       "id",         "projectName", "modelName",  "agentType", "controlMode", "state",
@@ -467,42 +531,71 @@ bool applyCardFeed(const char* json, size_t length, uint32_t* nextPullSecOut) {
       "requestId",  "activity",    "currentTask", "goal",      "lastEventText",
   };
   for (const char* f : kSessionFields) filter["cards"][0]["session"][f] = true;
+  // Glance (sleep dashboard) block — daemon-rendered, byte-trimmed strings.
+  {
+    JsonObject gw = filter["glance"]["weather"].to<JsonObject>();
+    for (const char* f : {"place", "tempC", "summary", "todayMinC", "todayMaxC"}) gw[f] = true;
+    for (const char* f : {"startHm", "endHm", "probability"}) gw["rain"][f] = true;
+    for (const char* f : {"summary", "minC", "maxC", "rainProbability"}) gw["tomorrow"][f] = true;
+    JsonObject gu = filter["glance"]["usage"][0].to<JsonObject>();
+    for (const char* f : {"provider", "label", "primaryPercent", "secondaryPercent", "primaryResetHm", "stale"})
+      gu[f] = true;
+    filter["glance"]["wrapup"][0] = true;
+  }
 
   doc.clear();
   DeserializationError err = deserializeJson(doc, json, length, DeserializationOption::Filter(filter));
   if (err) {
     AgentLog::line("PROTO", "card_feed JSON error: %s", err.c_str());
-    return false;
+    return out;
   }
   JsonObject obj = doc.as<JsonObject>();
   if (strcmp(obj["type"] | "", "card_feed") != 0) {
     AgentLog::line("PROTO", "card_feed rejected: wrong type '%s'", obj["type"] | "");
-    return false;
+    return out;
   }
 
+  out.unchanged = obj["unchanged"] | false;
+  strncpy(out.deckSig, obj["deckSig"] | "", sizeof(out.deckSig) - 1);
+
   lockState();
-  g_state.dataReceived = true;
-  g_state.sessionCount = 0;
-  for (JsonObject card : obj["cards"].as<JsonArray>()) {
-    if (g_state.sessionCount >= AgentDeckCfg::SESSIONS_CAP) break;
-    JsonObject s = card["session"].as<JsonObject>();
-    if (s.isNull()) continue;  // M7 module cards carry no session body yet
-    parseSessionLocked(s, g_state.sessions[g_state.sessionCount++]);
+  if (!out.unchanged) {
+    // Full feed: replace the deck + glance. The unchanged short-circuit must
+    // NOT set dataReceived — its empty cards[] means "keep your cache", and
+    // dataReceived=true would let that emptiness mask the persisted deck.
+    g_state.dataReceived = true;
+    g_state.sessionCount = 0;
+    for (JsonObject card : obj["cards"].as<JsonArray>()) {
+      if (g_state.sessionCount >= AgentDeckCfg::SESSIONS_CAP) break;
+      JsonObject s = card["session"].as<JsonObject>();
+      if (s.isNull()) continue;  // M7 module cards carry no session body yet
+      parseSessionLocked(s, g_state.sessions[g_state.sessionCount++]);
+    }
+    parseGlanceLocked(obj["glance"].as<JsonObject>());
   }
   // serverTime re-anchors the daemon-clock estimate exactly like a timeline
-  // event's ts would — the drifty-RTC "as of" age heals on every pull.
+  // event's ts would — the drifty-RTC "as of" age heals on every pull, even an
+  // unchanged one (clock and cadence are per-pull, not per-content).
   const uint64_t serverTime = obj["serverTime"] | (uint64_t)0;
   if (serverTime > 1700000000000ULL) {
     g_state.daemonEpochSec = (uint32_t)(serverTime / 1000ULL);
     g_state.daemonEpochAtMs = millis();
   }
+  const char* serverHm = obj["serverHm"] | "";
+  if (strlen(serverHm) == 5) {
+    strncpy(g_state.serverHm, serverHm, sizeof(g_state.serverHm) - 1);
+    g_state.serverHm[sizeof(g_state.serverHm) - 1] = '\0';
+    g_state.serverHmAtMs = millis();
+  }
   const uint8_t count = g_state.sessionCount;
   unlockState();
 
-  if (nextPullSecOut) *nextPullSecOut = obj["nextPullSec"] | 0;
-  AgentLog::line("PROTO", "card_feed applied: %u cards nextPull=%us", (unsigned)count,
-                 (unsigned)(obj["nextPullSec"] | 0));
-  return true;
+  out.ok = true;
+  out.nextPullSec = obj["nextPullSec"] | 0;
+  AgentLog::line("PROTO", "card_feed %s: %u cards nextPull=%us sig=%s",
+                 out.unchanged ? "unchanged" : "applied", (unsigned)count,
+                 (unsigned)out.nextPullSec, out.deckSig);
+  return out;
 }
 
 }  // namespace Protocol

@@ -14,6 +14,7 @@
 
 #include "agent_state.h"
 #include "agentdeck_config.h"
+#include "glance_state.h"
 
 namespace AgentDeck {
 namespace DeckStore {
@@ -36,6 +37,13 @@ struct Record {
 struct Snapshot {
   uint32_t savedEpoch;  // unix seconds at save; 0 = no clock source was available
   uint8_t count;
+  // Card-feed content signature at save time — echoed as `GET /feed?sig=` on
+  // the next pull so an unchanged night costs one tiny response (v2). Empty
+  // when the deck was cached from the WS live mode (no sig on that path).
+  char deckSig[12];
+  // Sleep-glance block (weather / usage / wrap-up) as of the save, so the
+  // offline/unchanged sleep frame can render it without a fresh feed (v2).
+  GlanceInfo glance;
   Record records[AgentDeckCfg::SESSIONS_CAP];
 };
 

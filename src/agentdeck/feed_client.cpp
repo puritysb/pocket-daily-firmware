@@ -97,7 +97,8 @@ bool pushOutbox(const char* ip, uint16_t port, const char* token, const char* bo
 
 }  // namespace
 
-SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char* board) {
+SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char* board,
+                    const char* echoSig, const SyncTelemetry& telemetry) {
   SyncResult out;
   if (!ip || !ip[0] || !port) return out;
 
@@ -105,18 +106,34 @@ SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char
   // and the feed we pull next should already reflect its effect.
   pushOutbox(ip, port, token, board);
 
-  char url[160];
+  char url[224];
   buildUrl(url, sizeof(url), ip, port, "/feed", token);
+  // Conditional pull + telemetry ride the query string (the GET is bodyless).
+  // buildUrl already appended ?token=… when a token exists.
+  size_t o = strlen(url);
+  const char sep0 = strchr(url, '?') ? '&' : '?';
+  bool first = true;
+  auto app = [&](const char* fmt, auto value) {
+    o += snprintf(url + o, sizeof(url) - o, "%c", first ? sep0 : '&');
+    o += snprintf(url + o, sizeof(url) - o, fmt, value);
+    first = false;
+  };
+  if (echoSig && echoSig[0]) app("sig=%s", echoSig);
+  if (telemetry.battPct >= 0) app("batt=%d", telemetry.battPct);
+  if (telemetry.rssiDbm < 0) app("rssi=%d", telemetry.rssiDbm);
+
   std::string bodyStr;
   if (!HttpDownloader::fetchUrl(url, bodyStr)) {
     AgentLog::line("FEED", "feed pull failed: %s:%u", ip, (unsigned)port);
     return out;
   }
-  uint32_t nextPullSec = 0;
-  if (!Protocol::applyCardFeed(bodyStr.c_str(), bodyStr.size(), &nextPullSec)) return out;
+  const Protocol::FeedApply applied = Protocol::applyCardFeed(bodyStr.c_str(), bodyStr.size());
+  if (!applied.ok) return out;
 
   out.ok = true;
-  out.nextPullSec = nextPullSec;
+  out.unchanged = applied.unchanged;
+  out.nextPullSec = applied.nextPullSec;
+  strncpy(out.deckSig, applied.deckSig, sizeof(out.deckSig) - 1);
   saveEndpoint(ip, port, token);
   return out;
 }

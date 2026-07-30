@@ -16,6 +16,7 @@
 
 #include "CrossPointSettings.h"
 #include "HalGPIO.h"
+#include "HalPowerManager.h"
 #include "PowerCycle.h"
 #include "SilentRestart.h"
 #include "agentdeck/card_class.h"
@@ -27,6 +28,7 @@
 #include "agentdeck/agent_commands.h"
 #include "agentdeck/agent_state.h"
 #include "agentdeck/eink_dashboard_layout.h"
+#include "agentdeck/glance_format.h"
 #include "agentdeck/mdns_discovery.h"
 #include "agentdeck/udp_discovery.h"
 #include "agentdeck/ws_client.h"
@@ -357,6 +359,13 @@ void AgentDashboardActivity::onEnter() {
   // cached rows never gain buttons; decisions require the live daemon.
   cachedDeck.reset(new (std::nothrow) AgentDeck::DeckStore::Snapshot());
   if (cachedDeck && !AgentDeck::DeckStore::load(*cachedDeck)) cachedDeck->count = 0;
+  // Conditional pull: echo the sig persisted with the deck cache so a wake
+  // against an unchanged deck costs one tiny response.
+  lastFeedSig[0] = '\0';
+  if (cachedDeck && cachedDeck->count > 0) {
+    strncpy(lastFeedSig, cachedDeck->deckSig, sizeof(lastFeedSig) - 1);
+    lastFeedSig[sizeof(lastFeedSig) - 1] = '\0';
+  }
   lastDeckSig = 0;
   lastDeckSaveMs = 0;
   clockSynced = time(nullptr) >= 1700000000;
@@ -798,11 +807,26 @@ void AgentDashboardActivity::loop() {
 
 bool AgentDashboardActivity::attemptPullSync(const char* ip, uint16_t port, const char* token) {
   const char* board = gpio.deviceIsX3() ? "xteink_x3" : "xteink_x4";
-  const auto r = AgentDeck::Feed::syncOnce(ip, port, token, board);
+  // Telemetry rides the pull — the only battery/link observability a sleeping
+  // device has (the daemon logs it per client).
+  AgentDeck::Feed::SyncTelemetry tel;
+  tel.battPct = (int)powerManager.getBatteryPercentage();
+  tel.rssiDbm = (WiFi.status() == WL_CONNECTED) ? (int)WiFi.RSSI() : 0;
+  const auto r = AgentDeck::Feed::syncOnce(ip, port, token, board, lastFeedSig, tel);
   if (!r.ok) return false;
   pullSynced = true;
   pullSyncedAtMs = millis();
   pullNextSec = r.nextPullSec;
+  if (r.unchanged) {
+    // Deck unchanged since the last sync: the persisted cache is already
+    // exactly what the daemon would have sent. Nothing to parse or persist —
+    // this wake's remaining job is repainting the times and sleeping.
+    AgentLog::line("AGENT", "pull sync: deck unchanged (sig %s)", lastFeedSig);
+    requestUpdate();
+    return true;
+  }
+  strncpy(lastFeedSig, r.deckSig, sizeof(lastFeedSig) - 1);
+  lastFeedSig[sizeof(lastFeedSig) - 1] = '\0';
   // Persist immediately (unthrottled): the frozen Face and the wake-time cache
   // must agree on what was just pulled.
   lastDeckSaveMs = 0;
@@ -864,8 +888,29 @@ void AgentDashboardActivity::beginTimedSleep(uint32_t seconds) {
   // Final deck persist (unthrottled) so the frozen Face and the cache agree.
   lastDeckSaveMs = 0;
   serviceDeckPersist();
-  // Paint the Face one last time with the sleeping status so the retained
-  // frame is honest about being a snapshot.
+  // Absolute wall times for the frozen frame ("Synced HH:MM · next ~HH:MM").
+  // Derived from the feed's daemon-local serverHm — the only honest wall clock
+  // this device has (no timezone). Empty when no pull anchored it this boot;
+  // the glance then falls back to a plain sleep-duration line.
+  sleepForSec = seconds;
+  sleepSyncHm[0] = '\0';
+  sleepNextHm[0] = '\0';
+  {
+    char baseHm[6] = {0};
+    uint32_t baseAtMs = 0;
+    AgentDeck::lockState();
+    memcpy(baseHm, AgentDeck::g_state.serverHm, sizeof(baseHm));
+    baseAtMs = AgentDeck::g_state.serverHmAtMs;
+    AgentDeck::unlockState();
+    if (baseHm[0]) {
+      const uint32_t sinceSec = (millis() - baseAtMs) / 1000UL;
+      AgentDeck::GlanceFormat::addToHm(sleepSyncHm, sizeof(sleepSyncHm), baseHm, sinceSec);
+      AgentDeck::GlanceFormat::addToHm(sleepNextHm, sizeof(sleepNextHm), baseHm, sinceSec + seconds);
+    }
+  }
+  // Paint the sleep glance one last time so the retained frame is honest about
+  // being a snapshot. The paint serial drives the ghost-clearing FULL_REFRESH.
+  bumpTimedSleepPaintSerial();
   timedSleepImminent = true;
   requestUpdateAndWait();
   AgentLog::line("AGENT", "timed deep sleep: %us", (unsigned)seconds);
@@ -1102,8 +1147,13 @@ void AgentDashboardActivity::serviceDeckPersist() {
       sig = fnvUpdate(sig, se.state, strlen(se.state));
       sig = fnvUpdate(sig, se.activity, strlen(se.activity));
     }
+    // The glance block (weather / quota / wrap-up) is part of the persisted
+    // snapshot: a weather-only change must still refresh the cache. POD bytes,
+    // clear()-normalized, so the raw-memory hash is stable.
+    sig = fnvUpdate(sig, (const char*)&s.glance, sizeof(s.glance));
   }
   AgentDeck::unlockState();
+  sig = fnvUpdate(sig, lastFeedSig, strlen(lastFeedSig));
   if (!dataReceived) return;  // nothing real to persist yet
   if (sig == lastDeckSig) return;
 
@@ -1113,9 +1163,12 @@ void AgentDashboardActivity::serviceDeckPersist() {
   std::unique_ptr<AgentDeck::DeckStore::Snapshot> snap(new (std::nothrow) AgentDeck::DeckStore::Snapshot());
   if (!snap) return;
   memset(snap.get(), 0, sizeof(*snap));
+  snap->glance.clear();
+  strncpy(snap->deckSig, lastFeedSig, sizeof(snap->deckSig) - 1);
   AgentDeck::lockState();
   {
     const auto& s = AgentDeck::g_state;
+    snap->glance = s.glance;  // sleep-glance content rides the deck cache (v2)
     for (uint8_t i = 0; i < s.sessionCount && snap->count < AgentDeckCfg::SESSIONS_CAP; i++) {
       const auto& se = s.sessions[i];
       if (!se.alive) continue;
@@ -2315,7 +2368,144 @@ void AgentDashboardActivity::renderCard() {
   renderer.displayBuffer();
 }
 
+void AgentDashboardActivity::renderSleepGlance() {
+  const auto& m = UITheme::getInstance().getMetrics();
+  const int w = renderer.getScreenWidth();
+  const int pageH = renderer.getScreenHeight();
+  const int pad = m.contentSidePadding;
+  const int line12 = renderer.getLineHeight(UI_12_FONT_ID);
+  const int line10 = renderer.getLineHeight(UI_10_FONT_ID);
+  const int lineS = renderer.getLineHeight(SMALL_FONT_ID);
+
+  // Snapshot the glance under the lock: live when a feed landed this boot,
+  // else the persisted copy (offline wake, or an `unchanged` conditional pull
+  // whose whole point was not re-sending it).
+  AgentDeck::GlanceInfo g;
+  g.clear();
+  AgentDeck::lockState();
+  if (AgentDeck::g_state.glance.valid)
+    g = AgentDeck::g_state.glance;
+  else if (cachedDeck)
+    g = cachedDeck->glance;
+  AgentDeck::unlockState();
+
+  renderer.clearScreen();
+  drawBrandedHeader("AgentDeck", "Glance");
+  int y = m.topPadding + m.headerHeight + m.verticalSpacing;
+  char buf[96];
+
+  // ── Weather (top block: the walking-out-the-door read) ──
+  if (g.weather.valid) {
+    if (AgentDeck::GlanceFormat::formatWeatherNow(buf, sizeof(buf), g.weather) > 0) {
+      renderer.drawText(UI_12_FONT_ID, pad, y, buf, true, EpdFontFamily::BOLD);
+      if (g.weather.place[0]) {
+        const int pw = renderer.getTextWidth(SMALL_FONT_ID, g.weather.place);
+        renderer.drawText(SMALL_FONT_ID, w - pad - pw, y + (line12 - lineS), g.weather.place, true);
+      }
+      y += line12 + 6;
+    }
+    if (AgentDeck::GlanceFormat::formatRainLine(buf, sizeof(buf), g.weather) > 0) {
+      renderer.drawText(UI_10_FONT_ID, pad, y, buf, true, EpdFontFamily::BOLD);
+      y += line10 + 4;
+    }
+    if (AgentDeck::GlanceFormat::formatTomorrowLine(buf, sizeof(buf), g.weather.tomorrow) > 0) {
+      renderer.drawText(SMALL_FONT_ID, pad, y, buf, true);
+      y += lineS + 4;
+    }
+    y += 6;
+    renderer.drawLine(pad, y, w - pad, y);
+    y += 12;
+  }
+
+  // ── Provider quota (subscription budget left while away) ──
+  if (g.usageCount > 0) {
+    constexpr int iconPx = 16;
+    const int iconColW = iconPx + 8;
+    const int rowH = (lineS > 16 ? lineS : 16) + 8;
+    const int colW = (w - pad * 2 - iconColW - 12) / 2;
+    for (uint8_t i = 0; i < g.usageCount; i++) {
+      const auto& u = g.usage[i];
+      const uint8_t* icon = nullptr;
+      if (strcmp(u.provider, "claude") == 0) icon = GlyphClaude16;
+      else if (strcmp(u.provider, "codex") == 0) icon = GlyphCodex16;
+      if (icon)
+        renderer.drawIcon(icon, pad, y + (lineS - iconPx) / 2, iconPx, iconPx);
+      else
+        renderer.drawText(SMALL_FONT_ID, pad, y, u.label, true, EpdFontFamily::BOLD);
+      const int x0 = pad + iconColW;
+      auto quota = [&](int x, const char* tag, int pct, const char* resetHm) {
+        if (pct < 0) return;
+        char rt[24];
+        if (resetHm && resetHm[0])
+          snprintf(rt, sizeof(rt), "%d%%%s \xE2\x86\x92%s", pct, u.stale ? "*" : "", resetHm);
+        else
+          snprintf(rt, sizeof(rt), "%d%%%s", pct, u.stale ? "*" : "");
+        renderer.drawText(SMALL_FONT_ID, x, y, tag, true, EpdFontFamily::BOLD);
+        const int lw = renderer.getTextWidth(SMALL_FONT_ID, tag, EpdFontFamily::BOLD);
+        const int rw = renderer.getTextWidth(SMALL_FONT_ID, rt);
+        const int gx = x + lw + 6;
+        const int gw = colW - lw - 6 - rw - 6;
+        const int gh = lineS - 4;
+        if (gw > 8) {
+          renderer.drawRect(gx, y + 1, gw, gh);
+          const int fw = (int)((gw - 2) * (pct / 100.0f));
+          if (fw > 0) renderer.fillRect(gx + 1, y + 2, fw, gh - 2);
+        }
+        renderer.drawText(SMALL_FONT_ID, x + colW - rw, y, rt, true);
+      };
+      quota(x0, "5H", u.primaryPercent, u.primaryResetHm);
+      quota(x0 + colW + 12, "7D", u.secondaryPercent, nullptr);
+      y += rowH;
+    }
+    y += 2;
+    renderer.drawLine(pad, y, w - pad, y);
+    y += 12;
+  }
+
+  // ── Work wrap-up (what was in flight when you left) ──
+  const int statusY = pageH - lineS - 12;
+  if (g.wrapupCount > 0) {
+    for (uint8_t i = 0; i < g.wrapupCount && y + line10 < statusY - 6; i++) {
+      const int f = fontForText(UI_10_FONT_ID, g.wrapup[i]);
+      renderer.drawText(f, pad, y, renderer.truncatedText(f, g.wrapup[i], w - pad * 2).c_str(), true);
+      y += line10 + 6;
+    }
+  } else {
+    renderer.drawText(UI_10_FONT_ID, pad, y, "No active sessions", true);
+  }
+
+  // ── Bottom status: absolute times only — this frame must stay true through
+  // the whole sleep without a repaint. ──
+  char status[96];
+  if (sleepSyncHm[0] && sleepNextHm[0]) {
+    snprintf(status, sizeof(status), "Synced %s \xC2\xB7 next ~%s \xC2\xB7 power btn wakes", sleepSyncHm, sleepNextHm);
+  } else if (pullSynced) {
+    snprintf(status, sizeof(status), "Synced \xC2\xB7 sleeping ~%um \xC2\xB7 power btn wakes",
+             (unsigned)(sleepForSec / 60));
+  } else {
+    snprintf(status, sizeof(status), "No daemon reached \xC2\xB7 sleeping ~%um \xC2\xB7 power btn wakes",
+             (unsigned)(sleepForSec / 60));
+  }
+  renderer.drawText(SMALL_FONT_ID, pad, statusY,
+                    renderer.truncatedText(SMALL_FONT_ID, status, w - pad * 2, EpdFontFamily::BOLD).c_str(), true,
+                    EpdFontFamily::BOLD);
+
+  // Ghost management: fast refreshes accumulate residue on a frame the panel
+  // will hold for an hour — insert a full waveform every Nth sleep paint.
+  const bool fullClean = (timedSleepPaintSerial() % kGlanceFullRefreshEvery) == 0;
+  renderer.displayBuffer(fullClean ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
+}
+
 void AgentDashboardActivity::render(RenderLock&&) {
+  // Frozen sleep frame: the dedicated glance layout (weather / quota /
+  // wrap-up), painted once by beginTimedSleep() right before the timed deep
+  // sleep. Takes priority over every other view — this is the frame the panel
+  // holds until the next wake.
+  if (timedSleepImminent) {
+    renderSleepGlance();
+    return;
+  }
+
   // Blocking OTA flash notice: painted once via requestUpdateAndWait() right
   // before the raw-partition write starts, so the panel holds this frame for
   // the ~1 minute of flashing and through the restart.

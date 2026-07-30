@@ -114,6 +114,12 @@ class AgentDashboardActivity final : public Activity {
   void renderOverview(const OverviewRow* rows, int n, int awaitingCount, bool fromCache, uint32_t asOfEpoch);
   void renderDetail();
   void renderCard();
+  // The frame the panel holds through a timed deep sleep: weather + provider
+  // quota + work wrap-up from the feed's glance block, with ABSOLUTE times only
+  // ("Synced HH:MM · next ~HH:MM") — a frozen frame must stay true without a
+  // repaint. Every kGlanceFullRefreshEvery-th paint uses FULL_REFRESH to clear
+  // accumulated fast-refresh ghosting.
+  void renderSleepGlance();
   // Branded header (AgentDeck mark + title) shared by every Connected screen.
   void drawBrandedHeader(const char* title, const char* subtitle) const;
   // LIMITS footer — 5H/7D quota gauges. Renders only when the hub supplies usage
@@ -244,6 +250,16 @@ class AgentDashboardActivity final : public Activity {
   bool timedSleepImminent = false;  // final Face paint says "sleeping"
   uint32_t pullSyncedAtMs = 0;
   uint32_t pullNextSec = 0;  // daemon's nextPullSec hint (0 → default)
+  // Conditional pull: deckSig of the last applied feed (seeded from the SD deck
+  // cache at onEnter, refreshed on every full feed). Echoed as `?sig=` so an
+  // unchanged deck costs one tiny response. Empty = always pull the full feed.
+  char lastFeedSig[12] = {0};
+  // Sleep-frame wall times (daemon-local "HH:MM"), computed in beginTimedSleep
+  // from the feed's serverHm; empty when no pull has anchored wall time yet.
+  char sleepSyncHm[6] = {0};
+  char sleepNextHm[6] = {0};
+  uint32_t sleepForSec = 0;  // fallback "sleeping ~Nm" when no wall time known
+  static constexpr uint32_t kGlanceFullRefreshEvery = 8;  // ghost-clearing cadence
   uint32_t enterMs = 0;      // onEnter millis — pull budget / idle anchor
   static constexpr uint32_t kPullLingerMs = 20000;   // user-presence window after a sync
   static constexpr uint32_t kPullBudgetMs = 60000;   // whole wake budget before sleeping unsynced
