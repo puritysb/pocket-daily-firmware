@@ -286,10 +286,17 @@ class AgentDashboardActivity final : public Activity {
   // The WS live socket carries sessions/usage but NOT the glance block
   // (weather / daemon-authored wrap-up) — that only rides `GET /feed`. Pull it
   // over HTTP when the current glance is older than maxAgeMs, using the live
-  // WS endpoint when connected, else the cached one. Blocking (~1-2s); called
-  // at points where that is acceptable: right after connect, and right before
-  // a sleep frame is painted.
-  void refreshGlanceIfStale(uint32_t maxAgeMs);
+  // WS endpoint when connected, else the cached one. Blocking (~1-2s), and the
+  // chain underneath (esp_http_client → std::string body → ArduinoJson →
+  // deck persist → SD) runs DEEP — call it only from a shallow stack: the top
+  // of loop() (via glanceRefreshQueued) or the sleep-frame paint path. Calling
+  // it inline at the WS-connect edge overflowed the loop task stack (panic at
+  // the stack-bottom canary right after device_info, 3/3 reproducible).
+  // Returns true when a fresh (changed) feed was applied.
+  bool refreshGlanceIfStale(uint32_t maxAgeMs);
+  // Set at the Connected transition; the fetch itself runs from the top of
+  // loop() on the next pass, where the call stack is shallowest.
+  bool glanceRefreshQueued = false;
   // Pull-mode step, run from loop(): cached-endpoint fast path + sleep decisions.
   void servicePullSync();
   // Interactive-mode idle → timed sleep handoff (cadence setting on, on battery).

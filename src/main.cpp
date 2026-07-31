@@ -37,6 +37,18 @@
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 
+// 16 KB loop task stack (Arduino default: 8 KB). The agent dashboard runs its
+// whole synchronous world on this task — WS pump + JSON dispatch, the feed
+// sync chain (esp_http_client → std::string body → ArduinoJson → deck persist
+// → SD), OTA receive, SD logging — and the 8 KB default was measured to within
+// ~1 KB of its limit at the WS-connect edge: X4 panicked at the stack-bottom
+// canary (printf-family frame, 1.15 KB) right after device_info, 3/3
+// reproducible on 23ccd9d1. Deferring the connect-edge fetch to a shallow
+// frame (AgentDashboardActivity::loop) halves the pressure; this doubles the
+// budget so the whole class of "one more frame tips it over" is gone. C3 has
+// no PSRAM but ~380 KB RAM; 8 KB more is cheap insurance.
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+
 GfxRenderer renderer(display);
 MappedInputManager mappedInputManager(gpio, renderer);
 ActivityManager activityManager(renderer, mappedInputManager);

@@ -618,6 +618,24 @@ void AgentDashboardActivity::loop() {
     requestUpdate();
   }
 
+  // Deferred connect-edge glance pull, queued by the Connected transition and
+  // run here where the call stack is shallowest. Waits out an active OTA
+  // receive (a 1-2s blocking fetch mid-stream feeds the rx-stall abort);
+  // a dropped link just unqueues — the reconnect edge re-queues it.
+  if (glanceRefreshQueued) {
+    if (dashState != DashState::Connected) {
+      glanceRefreshQueued = false;
+    } else if (!AgentDeck::OtaWs::receiving()) {
+      glanceRefreshQueued = false;
+      if (refreshGlanceIfStale(30 * 60 * 1000)) requestUpdate();
+      // The overflow diagnosis instrument: healthy is a comfortable margin
+      // (several KB). A value creeping toward 0 means the stack is being
+      // eaten again — investigate before it panics.
+      AgentLog::line("AGENT", "loop stack min-free after glance refresh: %u B",
+                     (unsigned)uxTaskGetStackHighWaterMark(nullptr));
+    }
+  }
+
   if (dashState == DashState::WifiJoining) {
     // Background STA join in progress. The Face is already on screen; promote
     // to daemon discovery when the join lands, or fall back to the interactive
@@ -716,8 +734,12 @@ void AgentDashboardActivity::loop() {
       AgentDeck::Feed::saveEndpoint(AgentDeck::Net::wsBridgeIp(), AgentDeck::Net::wsBridgePort(),
                                     AgentDeck::Net::wsBridgeToken());
       // The WS will now stream sessions/usage, but weather and the wrap-up
-      // only ride /feed — fetch them once so the ambient face is complete.
-      refreshGlanceIfStale(30 * 60 * 1000);
+      // only ride /feed — queue a fetch so the ambient face is complete. NOT
+      // inline: the connect pass already sits deep in the loop call chain, and
+      // stacking the HTTP+JSON+SD sync chain on top of it overflowed the 8 KB
+      // loop task stack (stack-canary panic right after device_info, 3/3).
+      // The top of loop() runs it next pass from the shallowest frame.
+      glanceRefreshQueued = true;
       requestUpdate();
     } else if (!nowConnected && dashState == DashState::Connecting) {
       // The cached ip:port isn't accepting — most likely the daemon moved to a
@@ -809,7 +831,7 @@ void AgentDashboardActivity::loop() {
   }
 }
 
-void AgentDashboardActivity::refreshGlanceIfStale(uint32_t maxAgeMs) {
+bool AgentDashboardActivity::refreshGlanceIfStale(uint32_t maxAgeMs) {
   {
     uint32_t at = 0;
     bool valid = false;
@@ -817,7 +839,7 @@ void AgentDashboardActivity::refreshGlanceIfStale(uint32_t maxAgeMs) {
     at = AgentDeck::g_state.glanceAtMs;
     valid = AgentDeck::g_state.glance.valid;
     AgentDeck::unlockState();
-    if (valid && at != 0 && millis() - at < maxAgeMs) return;
+    if (valid && at != 0 && millis() - at < maxAgeMs) return false;
   }
   char ip[16] = {0};
   char token[40] = {0};
@@ -827,7 +849,7 @@ void AgentDashboardActivity::refreshGlanceIfStale(uint32_t maxAgeMs) {
     port = AgentDeck::Net::wsBridgePort();
     snprintf(token, sizeof(token), "%s", AgentDeck::Net::wsBridgeToken());
   } else if (!AgentDeck::Feed::loadEndpoint(ip, sizeof(ip), port, token, sizeof(token))) {
-    return;  // no endpoint known — the cached glance (if any) is all there is
+    return false;  // no endpoint known — the cached glance (if any) is all there is
   }
   const char* board = gpio.deviceIsX3() ? "xteink_x3" : "xteink_x4";
   AgentDeck::Feed::SyncTelemetry tel;
@@ -844,6 +866,7 @@ void AgentDashboardActivity::refreshGlanceIfStale(uint32_t maxAgeMs) {
     serviceDeckPersist();
   }
   AgentLog::line("AGENT", "glance refresh: %s%s", r.ok ? "ok" : "failed", r.unchanged ? " (unchanged)" : "");
+  return r.ok && !r.unchanged;
 }
 
 bool AgentDashboardActivity::attemptPullSync(const char* ip, uint16_t port, const char* token) {
