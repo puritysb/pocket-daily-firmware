@@ -45,6 +45,7 @@ struct RedirectCapture {
   char* location = nullptr;
   bool truncated = false;
   bool oom = false;
+  HttpDownloader::HeaderCapture* capture = nullptr;  // optional named-header tap
 
   ~RedirectCapture() { free(location); }
 };
@@ -52,7 +53,11 @@ struct RedirectCapture {
 esp_err_t httpEventHandler(esp_http_client_event_t* event) {
   if (event->event_id != HTTP_EVENT_ON_HEADER || !event->header_key || !event->header_value) return ESP_OK;
   auto* redirect = static_cast<RedirectCapture*>(event->user_data);
-  if (!redirect || strcasecmp(event->header_key, "Location") != 0) return ESP_OK;
+  if (!redirect) return ESP_OK;
+  if (redirect->capture && redirect->capture->name && strcasecmp(event->header_key, redirect->capture->name) == 0) {
+    snprintf(redirect->capture->value, sizeof(redirect->capture->value), "%s", event->header_value);
+  }
+  if (strcasecmp(event->header_key, "Location") != 0) return ESP_OK;
 
   const size_t len = strlen(event->header_value);
   if (len >= REDIRECT_LOCATION_MAX) {
@@ -100,7 +105,7 @@ void logHeap(const char* stage) {
 // that ends early as ESP_ERR_HTTP_INCOMPLETE_DATA, whereas the read loop streams
 // large/slow files and surfaces a short read directly.
 HttpDownloader::DownloadError runGet(const std::string& url, const std::string& username, const std::string& password,
-                                     Sink& sink) {
+                                     Sink& sink, HttpDownloader::HeaderCapture* headerCapture = nullptr) {
   std::string currentUrl = url;
 
   for (int hop = 0; hop <= 5; ++hop) {
@@ -108,6 +113,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     // Location after TLS is established, without reserving a large loop stack/BSS
     // buffer on the memory-tight ESP32.
     RedirectCapture redirect;
+    redirect.capture = headerCapture;
     esp_http_client_config_t config = {};
     config.url = currentUrl.c_str();
     config.buffer_size = HTTP_RX_BUF;
@@ -188,6 +194,11 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
       continue;
     }
 
+    if (status == 304) {
+      // Conditional matched (?sig= echo) — bodyless by design, not an error.
+      esp_http_client_cleanup(client);
+      return HttpDownloader::NOT_MODIFIED;
+    }
     if (status != 200) {
       LOG_ERR("HTTP", "unexpected status: %d", status);
       esp_http_client_cleanup(client);
@@ -268,7 +279,8 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
                                                              ProgressCallback progress, bool* cancelFlag,
-                                                             const std::string& username, const std::string& password) {
+                                                             const std::string& username, const std::string& password,
+                                                             HeaderCapture* headerCapture) {
   LOG_DBG("HTTP", "Downloading: %s -> %s", url.c_str(), destPath.c_str());
 
   if (Storage.exists(destPath.c_str())) {
@@ -285,7 +297,7 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   sink.cancelFlag = cancelFlag;
   sink.write = [&file](const uint8_t* data, size_t len) { return file.write(data, len) == len; };
 
-  const DownloadError result = runGet(url, username, password, sink);
+  const DownloadError result = runGet(url, username, password, sink, headerCapture);
   // Close before any remove() on the same path; DESTRUCTOR_CLOSES_FILE would
   // otherwise close only after the remove.
   file.close();

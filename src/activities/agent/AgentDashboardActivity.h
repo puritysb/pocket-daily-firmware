@@ -268,6 +268,18 @@ class AgentDashboardActivity final : public Activity {
   // cache at onEnter, refreshed on every full feed). Echoed as `?sig=` so an
   // unchanged deck costs one tiny response. Empty = always pull the full feed.
   char lastFeedSig[12] = {0};
+  // M8 stage 2 — server-rendered glance frame. sig of the frame in the SD
+  // cache (X-Frame-Sig of the last Fresh fetch, this boot); ready means the
+  // cache was validated this boot and render() may blit it for the power-off
+  // frame. On-device renderGlance remains the fallback whenever either fails.
+  char glanceFrameSig[16] = {0};
+  bool glanceFrameReady = false;
+  // Conditional fetch of the server frame into the SD cache (blocking ~1s;
+  // shallow-stack callers only). Sets glanceFrameReady.
+  void fetchGlanceFrameForSleep();
+  // file → framebuffer blit + displayBuffer with the ghost-clearing cadence.
+  // False (SD/size trouble) means the caller must paint renderGlance instead.
+  bool blitGlanceFrame();
   // Next-pull wall time (daemon-local "HH:MM"), precomputed in beginTimedSleep
   // because only it knows the sleep length; empty when no pull has anchored
   // wall time yet. The *synced* time is computed at paint, not stored.

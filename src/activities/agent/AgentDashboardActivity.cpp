@@ -21,6 +21,7 @@
 #include "SilentRestart.h"
 #include "agentdeck/card_class.h"
 #include "agentdeck/feed_client.h"
+#include "agentdeck/glance_frame_client.h"
 #include "WifiCredentialStore.h"
 #include "agentdeck/ota_ws_receiver.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -867,6 +868,59 @@ bool AgentDashboardActivity::refreshGlanceIfStale(uint32_t maxAgeMs) {
   }
   AgentLog::line("AGENT", "glance refresh: %s%s", r.ok ? "ok" : "failed", r.unchanged ? " (unchanged)" : "");
   return r.ok && !r.unchanged;
+}
+
+void AgentDashboardActivity::fetchGlanceFrameForSleep() {
+  char ip[16] = {0};
+  char token[40] = {0};
+  uint16_t port = 0;
+  if (dashState == DashState::Connected && AgentDeck::Net::wsConnected()) {
+    snprintf(ip, sizeof(ip), "%s", AgentDeck::Net::wsBridgeIp());
+    port = AgentDeck::Net::wsBridgePort();
+    snprintf(token, sizeof(token), "%s", AgentDeck::Net::wsBridgeToken());
+  } else if (!AgentDeck::Feed::loadEndpoint(ip, sizeof(ip), port, token, sizeof(token))) {
+    return;  // no endpoint — glanceFrameReady keeps whatever state it had
+  }
+  const char* board = gpio.deviceIsX3() ? "xteink_x3" : "xteink_x4";
+  const auto r = AgentDeck::GlanceFrame::fetchToCache(ip, port, token, board, renderer.getBufferSize(),
+                                                      glanceFrameSig, glanceFrameSig, sizeof(glanceFrameSig));
+  switch (r) {
+    case AgentDeck::GlanceFrame::Fetch::Fresh:
+    case AgentDeck::GlanceFrame::Fetch::Unchanged:
+      glanceFrameReady = true;
+      break;
+    case AgentDeck::GlanceFrame::Fetch::Failed:
+      // Old daemon / offline / partial transfer: the on-device glance owns the
+      // frame. Drop readiness — a stale cache must not outrank fresher WS data
+      // that renderGlance would fold in.
+      glanceFrameReady = false;
+      break;
+  }
+  AgentLog::line("AGENT", "glance frame: %s",
+                 r == AgentDeck::GlanceFrame::Fetch::Fresh        ? "fresh"
+                 : r == AgentDeck::GlanceFrame::Fetch::Unchanged ? "unchanged"
+                                                                  : "unavailable (device fallback)");
+}
+
+bool AgentDashboardActivity::blitGlanceFrame() {
+  HalFile f;
+  if (!Storage.openFileForRead("AGENT", AgentDeck::GlanceFrame::cachePath(), f)) return false;
+  const size_t want = renderer.getBufferSize();
+  const size_t got = f.read(renderer.getFrameBuffer(), want);
+  const bool complete = got == want && f.size() == want;
+  f.close();
+  if (!complete) {
+    // A wrong-size cache is poison (panel geometry changed, or torn write
+    // survived somehow) — remove it and let renderGlance repaint over the
+    // partially clobbered framebuffer.
+    Storage.remove(AgentDeck::GlanceFrame::cachePath());
+    return false;
+  }
+  // Same ghost-clearing cadence as the drawn glance: every Nth retained frame
+  // pays for a full flash cycle.
+  const bool fullClean = (timedSleepPaintSerial() % kGlanceFullRefreshEvery) == 0;
+  renderer.displayBuffer(fullClean ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
+  return true;
 }
 
 bool AgentDashboardActivity::attemptPullSync(const char* ip, uint16_t port, const char* token) {
@@ -2647,6 +2701,12 @@ bool AgentDashboardActivity::paintSleepFrame() {
   // glance block (weather included) if ours is stale and any daemon is
   // reachable. Bounded by the HTTP timeouts — a second or two at power-off.
   refreshGlanceIfStale(10 * 60 * 1000);
+  // M8 stage 2: also try the server-rendered frame (rich typography, vector
+  // weather icons). One conditional GET; render() blits it when ready and
+  // falls back to the on-device glance otherwise. This runs on the (16 KB)
+  // loop-task stack from enterDeepSleep — a shallow frame, per the overflow
+  // lesson on refreshGlanceIfStale.
+  fetchGlanceFrameForSleep();
   // No next sync to promise on this path — renderGlance computes the synced
   // wall time itself at paint.
   sleepNextHm[0] = '\0';
@@ -2664,6 +2724,13 @@ void AgentDashboardActivity::render(RenderLock&&) {
   // sleep. Takes priority over every other view — this is the frame the panel
   // holds until the next wake.
   if (sleepFramePending) {
+    // Power-off frame: prefer the daemon-rendered pixels (M8 stage 2) when a
+    // validated frame is cached; anything short of a clean blit falls back to
+    // the on-device glance. The timed-sleep path stays on-device for now — it
+    // must carry the "next ~HH:MM" promise, which only the device knows.
+    if (glanceReason == GlanceReason::PoweredOff && glanceFrameReady && blitGlanceFrame()) {
+      return;
+    }
     renderGlance(glanceReason);
     return;
   }

@@ -21,6 +21,16 @@ class HttpDownloader {
     HTTP_ERROR,
     FILE_ERROR,
     ABORTED,
+    // 304 — the server's conditional (e.g. ?sig= echo) matched; no body was
+    // sent and nothing was written. Only surfaced by downloadToFile.
+    NOT_MODIFIED,
+  };
+
+  // Optional single response-header capture (e.g. X-Frame-Sig). The value is
+  // snprintf-truncated to the fixed buffer; empty when the header never came.
+  struct HeaderCapture {
+    const char* name = nullptr;
+    char value[48] = {0};
   };
 
   /**
@@ -43,7 +53,8 @@ class HttpDownloader {
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
                                       ProgressCallback progress = nullptr, bool* cancelFlag = nullptr,
-                                      const std::string& username = "", const std::string& password = "");
+                                      const std::string& username = "", const std::string& password = "",
+                                      HeaderCapture* headerCapture = nullptr);
 
   /**
    * POST a JSON body and collect the (bounded) JSON response. Plain-http local
