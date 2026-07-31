@@ -61,6 +61,8 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
+  // The wake pin is re-armed below — the latch ISR must not fire past here.
+  gpio.detachPowerButtonLatch();
   // Ensure that the power button has been released to avoid immediately turning back on if you're holding it
   while (gpio.isPressed(HalGPIO::BTN_POWER)) {
     delay(50);
@@ -95,6 +97,8 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
 }
 
 void HalPowerManager::startTimedDeepSleep(HalGPIO& gpio, uint32_t seconds) const {
+  // The wake pin is re-armed below — the latch ISR must not fire past here.
+  gpio.detachPowerButtonLatch();
   // Same release-wait as startDeepSleep(): don't wake straight back up on a
   // still-held power button.
   while (gpio.isPressed(HalGPIO::BTN_POWER)) {

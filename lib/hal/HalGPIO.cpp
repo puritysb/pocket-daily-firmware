@@ -225,7 +225,60 @@ unsigned long HalGPIO::getHeldTime() const { return inputMgr.getHeldTime(); }
 
 unsigned long HalGPIO::getPowerButtonHeldTime() const { return inputMgr.getPowerButtonHeldTime(); }
 
+// ── Power-button ISR latch ──
+// File-scope, not members: an IRAM ISR cannot carry object context. Bounce
+// tolerant by construction — the latch keeps the LONGEST completed hold, so
+// contact chatter's microscopic press/release pairs never mask a real hold.
+namespace {
+volatile uint32_t s_pwrPressAtMs = 0;  // falling-edge timestamp; 0 = not pressed
+volatile uint32_t s_pwrHeldMs = 0;     // longest completed hold since last consume
+
+void IRAM_ATTR powerButtonLatchIsr() {
+  const uint32_t now = millis();
+  if (digitalRead(InputManager::POWER_BUTTON_PIN) == LOW) {
+    s_pwrPressAtMs = now;
+  } else if (s_pwrPressAtMs != 0) {
+    const uint32_t held = now - s_pwrPressAtMs;
+    if (held > s_pwrHeldMs) s_pwrHeldMs = held;
+    s_pwrPressAtMs = 0;
+  }
+}
+}  // namespace
+
+void HalGPIO::attachPowerButtonLatch() {
+  clearPowerHoldLatch();
+  attachInterrupt(digitalPinToInterrupt(InputManager::POWER_BUTTON_PIN), powerButtonLatchIsr, CHANGE);
+}
+
+void HalGPIO::detachPowerButtonLatch() {
+  detachInterrupt(digitalPinToInterrupt(InputManager::POWER_BUTTON_PIN));
+  clearPowerHoldLatch();
+}
+
+bool HalGPIO::consumePowerHold(uint32_t minMs) {
+  noInterrupts();
+  const uint32_t completed = s_pwrHeldMs;
+  const uint32_t pressAt = s_pwrPressAtMs;
+  s_pwrHeldMs = 0;
+  interrupts();
+  if (completed >= minMs) return true;
+  // Still held right now and already past the threshold — matches the old
+  // polled behaviour for a user who holds until the device reacts.
+  if (pressAt != 0 && (uint32_t)millis() - pressAt >= minMs) return true;
+  return false;
+}
+
+void HalGPIO::clearPowerHoldLatch() {
+  noInterrupts();
+  s_pwrHeldMs = 0;
+  s_pwrPressAtMs = 0;
+  interrupts();
+}
+
 void HalGPIO::startDeepSleep() {
+  // The wake pin is about to be re-armed for deep sleep — the latch ISR must
+  // not fire on it past this point.
+  detachPowerButtonLatch();
   // Ensure that the power button has been released to avoid immediately turning back on if you're holding it
   while (inputMgr.isPressed(BTN_POWER)) {
     delay(50);

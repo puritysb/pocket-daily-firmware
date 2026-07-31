@@ -579,6 +579,12 @@ void setup() {
   // Ensure we're not still holding the power button before leaving setup
   waitForPowerRelease();
   allowSleepAt = millis() + 2000;
+  // Edge-latch the power button from here on: a busy activity can block a
+  // loop iteration for seconds, and a press-and-release inside that window is
+  // invisible to the polled check below (this is why the power button felt
+  // dead on the AgentDeck dashboard). Attached after waitForPowerRelease so
+  // the boot press can't latch.
+  gpio.attachPowerButtonLatch();
 }
 
 void loop() {
@@ -637,6 +643,8 @@ void loop() {
   }
   if (screenshotComboActive) {
     if (gpio.isPressed(HalGPIO::BTN_POWER)) return;
+    // The combo's power press must not later read as a sleep request.
+    gpio.clearPowerHoldLatch();
     if (gpio.wasReleased(HalGPIO::BTN_POWER)) {
       screenshotButtonsReleased = true;
       screenshotComboActive = false;
@@ -654,8 +662,11 @@ void loop() {
     return;
   }
 
-  if (millis() >= allowSleepAt && gpio.isPressed(HalGPIO::BTN_POWER) &&
-      gpio.getPowerButtonHeldTime() > SETTINGS.getPowerButtonDuration()) {
+  // ISR-latched: a hold that completed while the loop was blocked inside a
+  // busy activity (dashboard discovery/HTTP can take seconds per iteration)
+  // still triggers here on the next pass — the polled level check it replaces
+  // simply never saw those presses.
+  if (millis() >= allowSleepAt && gpio.consumePowerHold(SETTINGS.getPowerButtonDuration())) {
     // If the screenshot combination is potentially being pressed, don't sleep
     if (gpio.isPressed(HalGPIO::BTN_DOWN)) {
       return;

@@ -72,6 +72,24 @@ class HalGPIO {
   unsigned long getHeldTime() const;
   unsigned long getPowerButtonHeldTime() const;
 
+  // ── Power-button ISR latch ──
+  // The polled hold check samples the GPIO level once per loop iteration, and
+  // a busy activity (the AgentDeck dashboard's mDNS/WS/HTTP steps) can block
+  // an iteration for seconds — an ordinary press-and-release inside one
+  // blocked iteration is completely invisible to polling, which reads as "the
+  // power button is dead". The latch timestamps both edges in an interrupt on
+  // the dedicated power GPIO, so a completed hold survives until the loop
+  // next looks, no matter how late that is.
+  void attachPowerButtonLatch();
+  void detachPowerButtonLatch();
+  // True when a power-button hold ≥ minMs completed since the last consume,
+  // or is still in progress and already ≥ minMs. Consuming clears the
+  // completed record (a hold triggers exactly once).
+  bool consumePowerHold(uint32_t minMs);
+  // Discard any latched hold (screenshot combo — its power press must not
+  // later read as a sleep request).
+  void clearPowerHoldLatch();
+
   // Setup wake up GPIO and enter deep sleep
   void startDeepSleep();
 
