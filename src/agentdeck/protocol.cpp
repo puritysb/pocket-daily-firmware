@@ -572,6 +572,7 @@ FeedApply applyCardFeed(const char* json, size_t length) {
       parseSessionLocked(s, g_state.sessions[g_state.sessionCount++]);
     }
     parseGlanceLocked(obj["glance"].as<JsonObject>());
+    if (g_state.glance.valid) g_state.glanceAtMs = millis();
   }
   // serverTime re-anchors the daemon-clock estimate exactly like a timeline
   // event's ts would — the drifty-RTC "as of" age heals on every pull, even an

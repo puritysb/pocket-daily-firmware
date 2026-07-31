@@ -165,6 +165,11 @@ struct DashboardState {
   // work wrap-up). Survives markBridgeDisconnected() like the deck cache does:
   // it is a snapshot with its own staleness semantics, not live state.
   GlanceInfo glance;
+  // millis() when `glance` was last applied from a feed; 0 = never this boot.
+  // Drives the WS-mode staleness check — the live socket carries sessions and
+  // usage but NOT the glance block, so weather only stays fresh by pulling
+  // /feed occasionally even while connected.
+  uint32_t glanceAtMs;
 
   // Sessions (multi-agent). Cap matches AgentDeckCfg::SESSIONS_CAP.
   SessionInfo sessions[AgentDeckCfg::SESSIONS_CAP];

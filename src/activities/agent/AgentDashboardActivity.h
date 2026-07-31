@@ -283,6 +283,13 @@ class AgentDashboardActivity final : public Activity {
   static constexpr uint32_t kIdleToCadenceMs = 5 * 60 * 1000;  // interactive → cadence handoff
   // One HTTP sync against the given endpoint; updates the pull state on success.
   bool attemptPullSync(const char* ip, uint16_t port, const char* token);
+  // The WS live socket carries sessions/usage but NOT the glance block
+  // (weather / daemon-authored wrap-up) — that only rides `GET /feed`. Pull it
+  // over HTTP when the current glance is older than maxAgeMs, using the live
+  // WS endpoint when connected, else the cached one. Blocking (~1-2s); called
+  // at points where that is acceptable: right after connect, and right before
+  // a sleep frame is painted.
+  void refreshGlanceIfStale(uint32_t maxAgeMs);
   // Pull-mode step, run from loop(): cached-endpoint fast path + sleep decisions.
   void servicePullSync();
   // Interactive-mode idle → timed sleep handoff (cadence setting on, on battery).

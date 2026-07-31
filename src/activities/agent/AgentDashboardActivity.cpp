@@ -715,6 +715,9 @@ void AgentDashboardActivity::loop() {
       // syncs against it over HTTP without re-running discovery.
       AgentDeck::Feed::saveEndpoint(AgentDeck::Net::wsBridgeIp(), AgentDeck::Net::wsBridgePort(),
                                     AgentDeck::Net::wsBridgeToken());
+      // The WS will now stream sessions/usage, but weather and the wrap-up
+      // only ride /feed — fetch them once so the ambient face is complete.
+      refreshGlanceIfStale(30 * 60 * 1000);
       requestUpdate();
     } else if (!nowConnected && dashState == DashState::Connecting) {
       // The cached ip:port isn't accepting — most likely the daemon moved to a
@@ -806,6 +809,43 @@ void AgentDashboardActivity::loop() {
   }
 }
 
+void AgentDashboardActivity::refreshGlanceIfStale(uint32_t maxAgeMs) {
+  {
+    uint32_t at = 0;
+    bool valid = false;
+    AgentDeck::lockState();
+    at = AgentDeck::g_state.glanceAtMs;
+    valid = AgentDeck::g_state.glance.valid;
+    AgentDeck::unlockState();
+    if (valid && at != 0 && millis() - at < maxAgeMs) return;
+  }
+  char ip[16] = {0};
+  char token[40] = {0};
+  uint16_t port = 0;
+  if (dashState == DashState::Connected && AgentDeck::Net::wsConnected()) {
+    snprintf(ip, sizeof(ip), "%s", AgentDeck::Net::wsBridgeIp());
+    port = AgentDeck::Net::wsBridgePort();
+    snprintf(token, sizeof(token), "%s", AgentDeck::Net::wsBridgeToken());
+  } else if (!AgentDeck::Feed::loadEndpoint(ip, sizeof(ip), port, token, sizeof(token))) {
+    return;  // no endpoint known — the cached glance (if any) is all there is
+  }
+  const char* board = gpio.deviceIsX3() ? "xteink_x3" : "xteink_x4";
+  AgentDeck::Feed::SyncTelemetry tel;
+  tel.battPct = (int)powerManager.getBatteryPercentage();
+  tel.rssiDbm = (WiFi.status() == WL_CONNECTED) ? (int)WiFi.RSSI() : 0;
+  // The full feed apply also rewrites sessions — same daemon, same roster the
+  // WS already delivered, so this is a refresh, not a conflict. On `unchanged`
+  // the persisted glance in the deck cache is already current.
+  const auto r = AgentDeck::Feed::syncOnce(ip, port, token, board, lastFeedSig, tel);
+  if (r.ok && !r.unchanged) {
+    strncpy(lastFeedSig, r.deckSig, sizeof(lastFeedSig) - 1);
+    lastFeedSig[sizeof(lastFeedSig) - 1] = '\0';
+    lastDeckSaveMs = 0;
+    serviceDeckPersist();
+  }
+  AgentLog::line("AGENT", "glance refresh: %s%s", r.ok ? "ok" : "failed", r.unchanged ? " (unchanged)" : "");
+}
+
 bool AgentDashboardActivity::attemptPullSync(const char* ip, uint16_t port, const char* token) {
   const char* board = gpio.deviceIsX3() ? "xteink_x3" : "xteink_x4";
   // Telemetry rides the pull — the only battery/link observability a sleeping
@@ -886,6 +926,10 @@ void AgentDashboardActivity::serviceIdleCadence() {
 
 void AgentDashboardActivity::beginTimedSleep(uint32_t seconds) {
   if (seconds < kPullMinSec) seconds = kPullMinSec;
+  // Idle-cadence entry from WS mode never pulled a feed — fetch the glance
+  // (weather / wrap-up) before freezing the frame. The pull-mode path synced
+  // seconds ago, so this is a no-op there.
+  refreshGlanceIfStale(10 * 60 * 1000);
   // Final deck persist (unthrottled) so the frozen Face and the cache agree.
   lastDeckSaveMs = 0;
   serviceDeckPersist();
@@ -2391,6 +2435,37 @@ void AgentDashboardActivity::renderGlance(GlanceReason reason) {
     g = cachedDeck->glance;
   memcpy(baseHm, AgentDeck::g_state.serverHm, sizeof(baseHm));
   baseAtMs = AgentDeck::g_state.serverHmAtMs;
+  // Fallbacks from the live WS state, for a glance block that never arrived
+  // (daemon predating the feed, or /feed unreachable): the socket already
+  // carries provider quota and the session roster — degrade to those rather
+  // than render empty sections. No reset times here (the WS carries ISO
+  // instants, and a retained frame may only show absolute daemon-local HH:MM).
+  {
+    const auto& st = AgentDeck::g_state;
+    if (g.usageCount == 0) {
+      auto addRow = [&g](const char* provider, const char* label, float five, float seven, bool stale) {
+        if (five < 0 && seven < 0) return;
+        if (g.usageCount >= AgentDeck::GlanceInfo::USAGE_CAP) return;
+        auto& row = g.usage[g.usageCount++];
+        row.clear();
+        snprintf(row.provider, sizeof(row.provider), "%s", provider);
+        snprintf(row.label, sizeof(row.label), "%s", label);
+        if (five >= 0) row.primaryPercent = (int8_t)(five + 0.5f);
+        if (seven >= 0) row.secondaryPercent = (int8_t)(seven + 0.5f);
+        row.stale = stale;
+      };
+      addRow("claude", "Claude", st.fiveHourPercent, st.sevenDayPercent, st.usageStale);
+      addRow("codex", "Codex", st.codexFivePercent, st.codexSevenPercent, false);
+    }
+    if (g.wrapupCount == 0) {
+      for (uint8_t i = 0; i < st.sessionCount && g.wrapupCount < AgentDeck::GlanceInfo::WRAPUP_CAP; i++) {
+        const auto& se = st.sessions[i];
+        if (!se.alive) continue;
+        snprintf(g.wrapup[g.wrapupCount++], AgentDeck::GlanceInfo::WRAPUP_BYTES, "%s \xC2\xB7 %s",
+                 se.projectName[0] ? se.projectName : "session", se.activity[0] ? se.activity : se.state);
+      }
+    }
+  }
   AgentDeck::unlockState();
 
   // Wall time is the daemon's local clock advanced by however long ago its last
@@ -2545,6 +2620,10 @@ bool AgentDashboardActivity::paintSleepFrame() {
   // during the Wi-Fi picker the user is mid-task and expects the normal
   // sleep screen.
   if (dashState == DashState::WifiSelection) return false;
+  // The frame about to be held for hours deserves fresh content: pull the
+  // glance block (weather included) if ours is stale and any daemon is
+  // reachable. Bounded by the HTTP timeouts — a second or two at power-off.
+  refreshGlanceIfStale(10 * 60 * 1000);
   // No next sync to promise on this path — renderGlance computes the synced
   // wall time itself at paint.
   sleepNextHm[0] = '\0';
