@@ -263,6 +263,21 @@ bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent, c
   outContent.clear();  // start clean; the sink appends, so don't carry prior content
   Sink sink;
   sink.write = [&outContent](const uint8_t* data, size_t len) {
+    // Body accumulation is the one allocation in this client that grows with
+    // the response — and this is a -fno-exceptions build, so a failed string
+    // growth is std::terminate -> abort, not a catchable bad_alloc (X4 panic
+    // at power-off: heap free 7 KB / largest block 3.9 KB when a full /feed
+    // arrived). Pre-check the worst-case reallocation (capacity doubling
+    // copies old + new into one fresh block) with headroom, and degrade to a
+    // failed transfer — every caller already has an offline fallback.
+    if (outContent.size() + len > outContent.capacity()) {
+      const size_t worst = (outContent.size() + len) * 2 + 4096;
+      if ((size_t)ESP.getMaxAllocHeap() < worst) {
+        LOG_ERR("HTTP", "OOM guard: body at %u bytes, largest block %u", (unsigned)outContent.size(),
+                (unsigned)ESP.getMaxAllocHeap());
+        return false;
+      }
+    }
     outContent.append(reinterpret_cast<const char*>(data), len);
     return true;
   };
@@ -371,6 +386,17 @@ bool HttpDownloader::postJson(const std::string& url, const char* body, size_t b
       LOG_ERR("HTTP", "response exceeds %u bytes — aborted", (unsigned)maxResponseBytes);
       esp_http_client_cleanup(client);
       return false;
+    }
+    // Same OOM discipline as the fetchUrl string sink (-fno-exceptions:
+    // a failed growth aborts the device) — pre-check, degrade, never grow blind.
+    if (outResponse.size() + (size_t)read > outResponse.capacity()) {
+      const size_t worst = (outResponse.size() + read) * 2 + 4096;
+      if ((size_t)ESP.getMaxAllocHeap() < worst) {
+        LOG_ERR("HTTP", "OOM guard: response at %u bytes, largest block %u", (unsigned)outResponse.size(),
+                (unsigned)ESP.getMaxAllocHeap());
+        esp_http_client_cleanup(client);
+        return false;
+      }
     }
     outResponse.append(buf, read);
   }

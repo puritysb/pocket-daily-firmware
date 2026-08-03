@@ -629,11 +629,13 @@ void AgentDashboardActivity::loop() {
     } else if (!AgentDeck::OtaWs::receiving()) {
       glanceRefreshQueued = false;
       if (refreshGlanceIfStale(30 * 60 * 1000)) requestUpdate();
-      // The overflow diagnosis instrument: healthy is a comfortable margin
-      // (several KB). A value creeping toward 0 means the stack is being
-      // eaten again — investigate before it panics.
-      AgentLog::line("AGENT", "loop stack min-free after glance refresh: %u B",
-                     (unsigned)uxTaskGetStackHighWaterMark(nullptr));
+      // Diagnosis instruments: stack headroom (the 16c1674b overflow) and
+      // heap (the 53a55377 bad_alloc abort — free 7 KB / largest 3.9 KB at
+      // power-off). Numbers trending down across a day of logs are the early
+      // warning; investigate before either panics again.
+      AgentLog::line("AGENT", "post-refresh: stack min-free=%uB heap free=%u largest=%u",
+                     (unsigned)uxTaskGetStackHighWaterMark(nullptr), (unsigned)ESP.getFreeHeap(),
+                     (unsigned)ESP.getMaxAllocHeap());
     }
   }
 
@@ -842,6 +844,16 @@ bool AgentDashboardActivity::refreshGlanceIfStale(uint32_t maxAgeMs) {
     AgentDeck::unlockState();
     if (valid && at != 0 && millis() - at < maxAgeMs) return false;
   }
+  // A full feed accumulates into one contiguous string, and esp_http_client
+  // itself wants ~5 KB of buffers. On a starved heap the pull cannot succeed
+  // — and before the OOM guards landed it aborted the whole device at
+  // power-off (X4: free 7 KB / largest 3.9 KB when the feed arrived). An
+  // honest stale glance beats a doomed attempt.
+  if (ESP.getMaxAllocHeap() < 12 * 1024) {
+    AgentLog::line("AGENT", "glance refresh skipped: heap free=%u largest=%u", (unsigned)ESP.getFreeHeap(),
+                   (unsigned)ESP.getMaxAllocHeap());
+    return false;
+  }
   char ip[16] = {0};
   char token[40] = {0};
   uint16_t port = 0;
@@ -871,6 +883,12 @@ bool AgentDashboardActivity::refreshGlanceIfStale(uint32_t maxAgeMs) {
 }
 
 void AgentDashboardActivity::fetchGlanceFrameForSleep() {
+  // The frame streams to SD, but the HTTP client still needs its ~5 KB of
+  // transient buffers — skip cleanly on a starved heap (fallback renders).
+  if (ESP.getMaxAllocHeap() < 8 * 1024) {
+    AgentLog::line("AGENT", "glance frame skipped: heap largest=%u", (unsigned)ESP.getMaxAllocHeap());
+    return;
+  }
   char ip[16] = {0};
   char token[40] = {0};
   uint16_t port = 0;
