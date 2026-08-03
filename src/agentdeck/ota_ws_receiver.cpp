@@ -5,6 +5,7 @@
 #include <HalStorage.h>
 #include <MD5Builder.h>
 #include <esp_ota_ops.h>
+#include <esp_wifi.h>
 #include <mbedtls/base64.h>
 
 #include <cstring>
@@ -78,6 +79,11 @@ void sendError(const char* otaId, const char* stage, const char* error) {
 void resetRx(bool removeFile) {
   if (cacheFile) cacheFile.close();
   if (removeFile) Storage.remove(kCachePath);
+  // Restore the default modem power-save that handleBegin suspended. Every
+  // terminal receive path (abort, error, stall, begin-retry) funnels here, so
+  // the radio never stays pinned awake after a transfer dies. A successful
+  // flash reboots the chip, which resets PS anyway.
+  esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
   rx = RxState{};
 }
 
@@ -120,6 +126,12 @@ void handleBegin(JsonObjectConst obj) {
   rx.written = 0;
   rx.nextSeq = 0;
   rx.lastRxMs = millis();
+  // Modem power-save adds beacon-interval latency to every chunk ack, and the
+  // daemon's per-chunk timeout reads that as a dead device — WS OTA on battery
+  // failed chronically on both XTeink units until this. The HTTP OtaUpdater
+  // and the File Transfer web server already suspend PS the same way; resetRx
+  // restores it on every terminal path.
+  esp_wifi_set_ps(WIFI_PS_NONE);
   md5Builder.begin();
   AgentLog::line("OTA", "begin id=%s size=%u md5=%s", rx.otaId, (unsigned)size, rx.md5);
   sendAck(rx.otaId, "begin", UINT32_MAX, 0, 0);
