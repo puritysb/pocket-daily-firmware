@@ -1782,6 +1782,8 @@ bool AgentDashboardActivity::applyDecision(const AwaitingItem& it, int selectedC
 
 void AgentDashboardActivity::dismissPocketCard(const char* cardId) {
   if (!cardId || !cardId[0]) return;
+  bool cachedCardRemoved = false;
+  bool liveDeckAvailable = false;
   AgentDeck::lockState();
   auto& state = AgentDeck::g_state;
   for (uint8_t i = 0; i < state.pocketCount; i++) {
@@ -1793,6 +1795,7 @@ void AgentDashboardActivity::dismissPocketCard(const char* cardId) {
     memset(&state.pocketCards[state.pocketCount], 0, sizeof(AgentDeck::PocketCard));
     break;
   }
+  liveDeckAvailable = state.dataReceived;
   if (cachedDeck) {
     for (uint8_t i = 0; i < cachedDeck->pocketCount; i++) {
       if (strcmp(cachedDeck->pocketCards[i].cardId, cardId) != 0) continue;
@@ -1801,10 +1804,25 @@ void AgentDashboardActivity::dismissPocketCard(const char* cardId) {
                 sizeof(AgentDeck::PocketCard) * (cachedDeck->pocketCount - i - 1));
       cachedDeck->pocketCount--;
       memset(&cachedDeck->pocketCards[cachedDeck->pocketCount], 0, sizeof(AgentDeck::PocketCard));
+      cachedCardRemoved = true;
       break;
     }
   }
   AgentDeck::unlockState();
+
+  // Pocket choices are deliberately usable without a daemon. Persist the
+  // local removal immediately as well as the outbox decision; otherwise a
+  // reboot before the next successful feed would resurrect the cached card and
+  // allow the same choice to be queued twice. Keep the original savedEpoch:
+  // removing a card locally does not make the rest of the snapshot fresher.
+  if (liveDeckAvailable) {
+    // A freshly-received card may not exist in cachedDeck yet. Bypass the
+    // normal five-second throttle and snapshot the now-updated live deck.
+    lastDeckSaveMs = 0;
+    serviceDeckPersist();
+  } else if (cachedCardRemoved && !AgentDeck::DeckStore::save(*cachedDeck)) {
+    AgentLog::line("POCKET", "card cache removal not persisted: %s", cardId);
+  }
   AgentLog::line("POCKET", "card hidden: %s", cardId);
   cardSid[0] = '\0';
   cardSig = 0;

@@ -56,10 +56,11 @@ bool readApplied(char* out, size_t cap) {
   return true;
 }
 
-void writeApplied(const char* md5) {
+bool writeApplied(const char* md5) {
   HalFile f = Storage.open(kAppliedPath, O_WRITE | O_CREAT | O_TRUNC);
-  if (!f) return;
-  f.write(md5, strlen(md5));
+  if (!f) return false;
+  const size_t len = strlen(md5);
+  return f.write(md5, len) == len;
 }
 
 // Bytes already downloaded for this md5, or 0 when the marker is missing,
@@ -194,10 +195,19 @@ bool tryInstall(const char* ip, uint16_t port, const char* token, const char* bo
   esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
   if (!complete) return false;  // progress persisted; the next pull continues
 
-  // Commit marker before the flash — see kAppliedPath for why.
-  writeApplied(fwMd5);
+  // Validate first. Marking the advert as applied before this point would make
+  // a transiently-corrupt download (MD5/structure mismatch) permanently skip
+  // every retry of the same, still-valid staged build.
+  if (!OtaWs::stagePulledImage(fwSize, fwMd5)) {
+    clearProgress();  // restart cleanly on the next advert pull
+    return false;
+  }
+
+  // The image is now structurally valid and committed to the flash path. Keep
+  // the marker ahead of serviceFlash() so a genuine flash failure does not
+  // download the same 5+ MB image on every cadence wake.
+  if (!writeApplied(fwMd5)) AgentLog::line("OTA", "pull update: applied marker write failed");
   clearProgress();
-  if (!OtaWs::stagePulledImage(fwSize, fwMd5)) return false;
   AgentLog::line("OTA", "pull update staged — flashing on this wake");
   return true;
 }
