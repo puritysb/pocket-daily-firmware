@@ -2,19 +2,9 @@
 //
 // AgentDashboardActivity — offline-first Pocket reader shell.
 //
-// M1: scaffold + AgentLog SD diagnostic channel.
-// M2 (this commit): NETWORK layer. Brings up WiFi (mirrors CalibreConnect),
-//   discovers the AgentDeck daemon over mDNS (_agentdeck._tcp), connects to it
-//   over WebSocket, registers as an eink-device, and renders live connection +
-//   agent state. Display-only — button approve/deny lands in M3 (the outbound
-//   builders are already ported in agentdeck/agent_commands.*).
-// M3: render awaiting Decision Cards + approve/deny via the physical buttons.
-// M4 (this commit): full-screen Decision Card view — the product grammar is
-//   "one screen, one question, ≤4 choices, one physical press". When any
-//   session needs a decision, the card auto-surfaces from Overview and maps
-//   the four front buttons directly to [Later][…choices…]; long prompts and
-//   >3-option prompts degrade to the cursor grammar. Dismissed prompts are
-//   remembered by content signature so a card never re-surfaces unchanged.
+// Local EPUB state and the SD-backed Pocket pool are the product surface.
+// AgentDeck is an optional background authoring source; Wi-Fi and live sessions
+// never gate entry or replace carried content with a connection screen.
 //
 // Concurrency: net is serviced cooperatively from loop() on the main task — no
 // FreeRTOS network task. render() runs on the separate render task and reads the
@@ -82,6 +72,14 @@ class AgentDashboardActivity final : public Activity {
   // One local continue-reading row plus the fixed Pocket pool. Live AgentDeck
   // sessions remain an input to daemon-authored cards, never top-level rows.
   static constexpr int kOverviewCap = 1 + AgentDeck::POCKET_CARD_CAP;
+  // Scratch lives in the heap-allocated Activity object, not either task stack.
+  // Each buffer is 4 bounded rows (~1.5 KB), allocated once with the activity
+  // and reused; separate render/loop copies prevent cross-task races.
+  OverviewRow renderRows[kOverviewCap] = {};
+  OverviewRow inputRows[kOverviewCap] = {};
+  // GlanceInfo is ~600 B. Reuse a render-task-only snapshot instead of adding
+  // it to the nested render() -> renderGlance() stack chain.
+  AgentDeck::GlanceInfo renderGlanceSnapshot{};
 
   // Which screen the Connected dashboard is showing. Overview is home; OK opens a
   // session's read-only Detail (timeline + inline options as a fallback grammar).
@@ -99,15 +97,7 @@ class AgentDashboardActivity final : public Activity {
   // Snapshot one selected awaiting session. Detail never needs the old triage
   // array, so this avoids placing six large question buffers on the C3 stack.
   bool findAwaiting(const char* sid, AwaitingItem& out) const;
-  // First session (overview order) whose attention state warrants a card and
-  // whose content signature hasn't been dismissed. Returns false when quiet.
-  bool firstCardCandidate(AwaitingItem& out) const;
   bool findPocketCard(const char* cardId, AgentDeck::PocketCard& out) const;
-  // Content signature of a prompt (sid + question + requestId + option shape).
-  // A dismissed card only re-surfaces when this changes — same honesty rule as
-  // the state signature: content decides, not time.
-  static uint32_t awaitingSignature(const AwaitingItem& it);
-  bool isDismissed(uint32_t sig) const;
   // Auto-surface / auto-resolve the Card view. Runs from loop() while Connected.
   void serviceCard();
   // True when the card can bind choices directly to front buttons (softkey
@@ -235,13 +225,11 @@ class AgentDashboardActivity final : public Activity {
   // fire an inline decision (cooldown only covers short presses). Swallow it.
   bool swallowConfirmRelease = false;
   uint32_t lastUserInputMs = 0;  // any button press — suppresses auto-surface mid-navigation
-  // Recently dismissed prompt signatures (ring). Multiple sessions can be
-  // awaiting at once; a single slot would resurrect A when B is dismissed.
+  // Legacy live-card dismissal state. Live cards are no longer surfaced by
+  // Pocket, but retaining the bounded fallback keeps stale view state safe.
   static constexpr int kDismissedCap = 8;
   uint32_t dismissedSigs[kDismissedCap] = {0};
   uint8_t dismissedHead = 0;
-  // Don't auto-surface while the user is actively pressing buttons.
-  static constexpr uint32_t kAutoSurfaceQuietMs = 2500;
 
   // ── M5.5 Deck persistence ──
   // The persisted deck doubles as the offline fallback: loaded from SD in
@@ -257,8 +245,6 @@ class AgentDashboardActivity final : public Activity {
 
   // Persist the live deck to SD when its content changed (throttled; loop task).
   void serviceDeckPersist();
-  // Copy the cached deck into overview rows for the offline Face. Returns count.
-  int appendRowsFromCache(OverviewRow* out, int cap, int start) const;
   // Current unix-seconds estimate: NTP clock first, daemon-clock estimate else 0.
   static uint32_t bestEpochNow();
 

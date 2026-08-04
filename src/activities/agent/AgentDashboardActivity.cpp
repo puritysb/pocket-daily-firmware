@@ -5,6 +5,7 @@
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <Memory.h>
 #include <SdCardFont.h>
 #include <WiFi.h>
 #include <esp_ota_ops.h>
@@ -361,11 +362,15 @@ void AgentDashboardActivity::onEnter() {
   cjkFontId = loadKoreanFont();
   if (cjkFontId == 0 && SETTINGS.sdFontFamilyName[0] != '\0') cjkFontId = SETTINGS.getReaderFontId();
 
-  // M5.5: load the persisted deck BEFORE the first paint so boot lands on the
-  // last-synced cards (with an "as of" age), not an empty screen. Display-only —
-  // cached rows never gain buttons; decisions require the live daemon.
-  cachedDeck.reset(new (std::nothrow) AgentDeck::DeckStore::Snapshot());
-  if (cachedDeck && !AgentDeck::DeckStore::load(*cachedDeck)) cachedDeck->count = 0;
+  // Load the persisted Pocket BEFORE the first paint so boot lands on carried
+  // content, not an empty screen. Its choices remain actionable through the SD
+  // Outbox even when no daemon or network is present.
+  cachedDeck = makeUniqueNoThrow<AgentDeck::DeckStore::Snapshot>();
+  if (!cachedDeck) {
+    LOG_ERR("POCKET", "OOM allocating %uB deck cache", (unsigned)sizeof(AgentDeck::DeckStore::Snapshot));
+  } else if (!AgentDeck::DeckStore::load(*cachedDeck)) {
+    cachedDeck->count = 0;
+  }
   // Pocket cards are day/info content, not live session state. Seed them into
   // RAM from the deck cache so they remain readable and answerable through the
   // SD outbox before Wi-Fi or the daemon exists.
@@ -1127,24 +1132,6 @@ bool AgentDashboardActivity::findPocketCard(const char* cardId, AgentDeck::Pocke
   return found;
 }
 
-uint32_t AgentDashboardActivity::awaitingSignature(const AwaitingItem& it) {
-  uint32_t h = 2166136261u;
-  h = fnvUpdate(h, it.sid, strlen(it.sid));
-  h = fnvUpdate(h, it.question, strlen(it.question));
-  h = fnvUpdate(h, it.requestId, strlen(it.requestId));
-  h = fnvUpdate(h, &it.optionCount, sizeof(it.optionCount));
-  const uint8_t mode = static_cast<uint8_t>(it.attentionMode);
-  h = fnvUpdate(h, &mode, sizeof(mode));
-  return h;
-}
-
-bool AgentDashboardActivity::isDismissed(const uint32_t sig) const {
-  if (sig == 0) return false;
-  for (int i = 0; i < kDismissedCap; i++)
-    if (dismissedSigs[i] == sig) return true;
-  return false;
-}
-
 bool AgentDashboardActivity::cardUsesSoftkeys(const AgentDeck::AttentionMode mode, const uint8_t optionCount) {
   // Direct button↔choice binding needs every choice on a physical key: slot 1 is
   // always Later, leaving three. Everything else (incl. >3 options) falls back to
@@ -1152,21 +1139,6 @@ bool AgentDashboardActivity::cardUsesSoftkeys(const AgentDeck::AttentionMode mod
   if (mode == AgentDeck::AttentionMode::RealOptions) return optionCount <= 3;
   return mode == AgentDeck::AttentionMode::PermissionGate || mode == AgentDeck::AttentionMode::WaitingForOptions ||
          mode == AgentDeck::AttentionMode::RespondInTerminal;
-}
-
-bool AgentDashboardActivity::firstCardCandidate(AwaitingItem& out) const {
-  OverviewRow rows[kOverviewCap];
-  const int n = collectOverview(rows, kOverviewCap);
-  for (int i = 0; i < n; i++) {
-    if (!rows[i].awaiting) continue;
-    AwaitingItem item = {};
-    if (!findAwaiting(rows[i].sid, item)) continue;
-    if (item.attentionMode == AgentDeck::AttentionMode::None) continue;
-    if (isDismissed(awaitingSignature(item))) continue;
-    out = item;
-    return true;
-  }
-  return false;
 }
 
 void AgentDashboardActivity::serviceCard() {
@@ -1302,8 +1274,11 @@ void AgentDashboardActivity::serviceDeckPersist() {
   // Build the snapshot into a scratch heap buffer (never the C3 stack), write it
   // to SD without holding the state lock, then swap it in as the RAM fallback
   // under the lock (the render task reads cachedDeck through g_stateMutex).
-  std::unique_ptr<AgentDeck::DeckStore::Snapshot> snap(new (std::nothrow) AgentDeck::DeckStore::Snapshot());
-  if (!snap) return;
+  auto snap = makeUniqueNoThrow<AgentDeck::DeckStore::Snapshot>();
+  if (!snap) {
+    LOG_ERR("POCKET", "OOM allocating %uB deck snapshot", (unsigned)sizeof(AgentDeck::DeckStore::Snapshot));
+    return;
+  }
   memset(snap.get(), 0, sizeof(*snap));
   snap->glance.clear();
   strncpy(snap->deckSig, lastFeedSig, sizeof(snap->deckSig) - 1);
@@ -1325,37 +1300,6 @@ void AgentDashboardActivity::serviceDeckPersist() {
   cachedDeck.swap(snap);
   AgentDeck::unlockState();
   AgentLog::line("POCKET", "deck persisted: %u items", (unsigned)cachedDeck->pocketCount);
-}
-
-int AgentDashboardActivity::appendRowsFromCache(OverviewRow* out, int cap, int start) const {
-  auto cp = [](char* d, size_t n, const char* s) {
-    strncpy(d, s, n - 1);
-    d[n - 1] = '\0';
-  };
-  int n = start;
-  AgentDeck::lockState();
-  if (cachedDeck) {
-    for (uint8_t i = 0; i < cachedDeck->pocketCount && n < cap; i++) {
-      const auto& card = cachedDeck->pocketCards[i];
-      OverviewRow& o = out[n++];
-      memset(&o, 0, sizeof(o));
-      cp(o.sid, sizeof(o.sid), card.cardId);
-      cp(o.project, sizeof(o.project), card.title[0] ? card.title : "POCKET");
-      cp(o.agentType, sizeof(o.agentType), "pocket");
-      cp(o.controlMode, sizeof(o.controlMode), "pocket");
-      cp(o.state, sizeof(o.state), "POCKET");
-      cp(o.activity, sizeof(o.activity), card.question);
-      if (card.context[0]) {
-        const size_t used = strlen(o.activity);
-        if (used < sizeof(o.activity) - 1)
-          snprintf(o.activity + used, sizeof(o.activity) - used, "%s%s", used ? " - " : "", card.context);
-      }
-      o.awaiting = false;
-      o.pocket = true;
-    }
-  }
-  AgentDeck::unlockState();
-  return n;
 }
 
 void AgentDashboardActivity::handleButtons() {
@@ -1399,13 +1343,8 @@ void AgentDashboardActivity::handleButtons() {
   // Keep both responsive in every pre-Connected state so the user is never
   // trapped on a "searching…" screen with no way out.
   if (dashState != DashState::Connected) {
-    OverviewRow rows[kOverviewCap];
+    OverviewRow* const rows = inputRows;
     int n = collectOverview(rows, kOverviewCap);
-    bool dataReceived = false;
-    AgentDeck::lockState();
-    dataReceived = AgentDeck::g_state.dataReceived;
-    AgentDeck::unlockState();
-    if (!dataReceived) n = appendRowsFromCache(rows, kOverviewCap, n);
     if (overviewCursor >= n) overviewCursor = n > 0 ? n - 1 : 0;
     if (mappedInput.wasReleased(Btn::NavPrevious) && n > 1) {
       overviewCursor = (overviewCursor - 1 + n) % n;
@@ -1590,7 +1529,7 @@ void AgentDashboardActivity::handleButtons() {
   }
 
   // ── OVERVIEW: local book + portable Pocket items ──
-  OverviewRow rows[kOverviewCap];
+  OverviewRow* const rows = inputRows;
   const int n = collectOverview(rows, kOverviewCap);
   if (overviewCursor >= n) overviewCursor = n > 0 ? n - 1 : 0;
   if (overviewCursor < 0) overviewCursor = 0;
@@ -2701,7 +2640,7 @@ void AgentDashboardActivity::renderGlance(GlanceReason reason) {
   // Snapshot the glance under the lock: live when a feed landed this boot,
   // else the persisted copy (offline wake, or an `unchanged` conditional pull
   // whose whole point was not re-sending it).
-  AgentDeck::GlanceInfo g;
+  AgentDeck::GlanceInfo& g = renderGlanceSnapshot;
   g.clear();
   char baseHm[6] = {0};
   uint32_t baseAtMs = 0;
@@ -2786,27 +2725,30 @@ void AgentDashboardActivity::renderGlance(GlanceReason reason) {
     // RAM-only lookup: the recents list already carries title/author for the
     // open book (stamped on reader entry). getDataFromBook would Epub::load
     // metadata from SD — never do that from the render task on every paint.
-    std::string title, author;
+    char title[96] = {0};
+    char author[96] = {0};
     for (const auto& b : RECENT_BOOKS.getBooks()) {
       if (b.path == APP_STATE.openEpubPath) {
-        title = b.title;
-        author = b.author;
+        snprintf(title, sizeof(title), "%s", b.title.c_str());
+        snprintf(author, sizeof(author), "%s", b.author.c_str());
         break;
       }
     }
     // Not in recents (list cleared): fall back to the filename so the strip
     // never shows an empty title for a real open book.
-    if (title.empty()) {
-      const auto slash = APP_STATE.openEpubPath.find_last_of('/');
-      title = APP_STATE.openEpubPath.substr(slash == std::string::npos ? 0 : slash + 1);
+    if (!title[0]) {
+      const char* path = APP_STATE.openEpubPath.c_str();
+      const char* slash = strrchr(path, '/');
+      snprintf(title, sizeof(title), "%s", slash ? slash + 1 : path);
     }
     // Whole-book percent: 7th byte of the reader's progress.bin (EPUB only —
     // older files are 6 bytes and simply don't show one). The cache key must
     // mirror the Epub constructor: "/.crosspoint/epub_" + hash(path).
     int bookPercent = -1;
     if (FsHelpers::hasEpubExtension(APP_STATE.openEpubPath)) {
-      const std::string progressPath =
-          "/.crosspoint/epub_" + std::to_string(std::hash<std::string>{}(APP_STATE.openEpubPath)) + "/progress.bin";
+      char progressPath[64];
+      snprintf(progressPath, sizeof(progressPath), "/.crosspoint/epub_%u/progress.bin",
+               (unsigned)std::hash<std::string>{}(APP_STATE.openEpubPath));
       HalFile pf;
       if (Storage.openFileForRead("AGENT", progressPath, pf)) {
         uint8_t pdata[7];
@@ -2814,7 +2756,7 @@ void AgentDashboardActivity::renderGlance(GlanceReason reason) {
       }
     }
     y = sectionHeader(x, y, cw, tr(STR_POCKET_READING));
-    const int tf = fontForText(UI_12_FONT_ID, title.c_str());
+    const int tf = fontForText(UI_12_FONT_ID, title);
     int titleW = cw;
     if (bookPercent >= 0) {
       char pct[8];
@@ -2823,18 +2765,18 @@ void AgentDashboardActivity::renderGlance(GlanceReason reason) {
       renderer.drawText(UI_12_FONT_ID, x + cw - pw, y, pct, true);
       titleW = cw - pw - 8;
     }
-    renderer.drawText(tf, x, y, renderer.truncatedText(tf, title.c_str(), titleW).c_str(), true, EpdFontFamily::BOLD);
+    renderer.drawText(tf, x, y, renderer.truncatedText(tf, title, titleW).c_str(), true, EpdFontFamily::BOLD);
     y += line12 + 4;
     // Sub-line: author, plus (on a retained sleep frame only) how to get back
     // into the book — Ambient already labels Confirm "Read" in the hints bar.
     char sub[96];
     sub[0] = '\0';
-    if (isSleep && !author.empty())
-      snprintf(sub, sizeof(sub), "%s \xC2\xB7 wake holding OK to resume", author.c_str());
+    if (isSleep && author[0])
+      snprintf(sub, sizeof(sub), "%s \xC2\xB7 wake holding OK to resume", author);
     else if (isSleep)
       snprintf(sub, sizeof(sub), "Wake holding OK to resume");
-    else if (!author.empty())
-      snprintf(sub, sizeof(sub), "%s", author.c_str());
+    else if (author[0])
+      snprintf(sub, sizeof(sub), "%s", author);
     if (sub[0]) {
       const int sf = fontForText(SMALL_FONT_ID, sub);
       renderer.drawText(sf, x, y, renderer.truncatedText(sf, sub, cw).c_str(), true);
@@ -3106,7 +3048,7 @@ void AgentDashboardActivity::render(RenderLock&&) {
   // whatever is known (or an honest empty state); joining/discovering/connecting
   // progress is a status line inside renderOverview, never a screen that
   // replaces the content. ──
-  OverviewRow rows[kOverviewCap];
+  OverviewRow* const rows = renderRows;
   int n = collectOverview(rows, kOverviewCap);
 
   // No live data yet (boot / daemon lost): append persisted Pocket cards after
@@ -3119,11 +3061,7 @@ void AgentDashboardActivity::render(RenderLock&&) {
   dataReceived = AgentDeck::g_state.dataReceived;
   asOfEpoch = cachedDeck ? cachedDeck->savedEpoch : 0;
   AgentDeck::unlockState();
-  if (!dataReceived) {
-    const int beforeCache = n;
-    n = appendRowsFromCache(rows, kOverviewCap, n);
-    fromCache = n > beforeCache;
-  }
+  fromCache = !dataReceived && cachedDeck && cachedDeck->pocketCount > 0;
 
   // With neither a book nor a Pocket item, personal glance remains useful as
   // an offline retained frame (reading/weather/today). It never outranks saved

@@ -78,6 +78,11 @@ row, a fixed three-card pool, fixed UTF-8 buffers and an eight-record Outbox.
 Recommendation policy and history stay in the daemon. UI code must not add
 unbounded containers, per-frame heap growth, or new large stack objects.
 
+The render task has a 12 KB stack. Pocket's two four-row scratch buffers and
+the glance snapshot live once inside the heap-allocated activity object, with
+separate render/loop copies to avoid cross-task races. They must never move
+back into `render()` locals: the former 8 KB stack overflowed on X3 at boot.
+
 ## Delivery
 
 Every successful `pio run -e default` stages `firmware/update.bin`. Read

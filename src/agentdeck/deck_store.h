@@ -2,13 +2,10 @@
 //
 // deck_store.h — M5.5 Deck persistence.
 //
-// Persists the Face's deck (the bounded set of session cards) to the SD card so
-// the device can render the last-synced deck at boot — before Wi-Fi joins or the
-// daemon is found — with an honest "as of" sync timestamp. E-ink is a surface
-// that always shows something; this store is what it shows when nothing is live.
-//
-// Deliberately display-only: a cached card carries no requestId/options and can
-// never become actionable. Decisions require a live daemon (the Outbox is M6).
+// Persists the bounded Pocket pool and personal glance to SD so the reader can
+// render and consume its last-synced content before Wi-Fi or a daemon exists.
+// Pocket choices are durable through the Outbox; only the retained legacy
+// session records below remain display-only and non-actionable.
 //
 #include <cstdint>
 

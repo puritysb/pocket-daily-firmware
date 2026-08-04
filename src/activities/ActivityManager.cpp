@@ -22,7 +22,7 @@
 
 void ActivityManager::begin() {
   xTaskCreate(&renderTaskTrampoline, "ActivityManagerRender",
-              8192,              // Stack size
+              12 * 1024,         // Pocket/reader render chain; measured 8 KB overflowed on X3
               this,              // Parameters
               1,                 // Priority
               &renderTaskHandle  // Task handle
@@ -44,6 +44,11 @@ void ActivityManager::renderTaskLoop() {
     if (currentActivity) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
       currentActivity->render(std::move(lock));
+      const UBaseType_t stackHeadroom = uxTaskGetStackHighWaterMark(nullptr);
+      if (stackHeadroom < 1024)
+        LOG_ERR("ACT", "Render stack headroom low: %uB", (unsigned)stackHeadroom);
+      else
+        LOG_DBG("ACT", "Render stack min-free: %uB", (unsigned)stackHeadroom);
     }
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
     TaskHandle_t waiter = nullptr;
