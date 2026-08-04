@@ -1102,7 +1102,11 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
 }
 
 bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageCount) {
-  return EpubReaderUtils::saveProgress(*epub, spineIndex, currentPage, pageCount);
+  // Whole-book percent for the AgentDeck glance strip (7th byte). Same math as
+  // the status bar; costs one spine-size lookup against the loaded metadata.
+  const float frac = (pageCount > 0) ? (float)currentPage / (float)pageCount : 0.0f;
+  const int bookPercent = (int)(epub->calculateProgress(spineIndex, frac) * 100.0f + 0.5f);
+  return EpubReaderUtils::saveProgress(*epub, spineIndex, currentPage, pageCount, bookPercent);
 }
 void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
