@@ -4,6 +4,7 @@
 #include <EpdFontFamily.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
+#include <I18n.h>
 #include <SdCardFont.h>
 #include <WiFi.h>
 #include <esp_ota_ops.h>
@@ -378,7 +379,7 @@ void AgentDashboardActivity::onEnter() {
   // Conditional pull: echo the sig persisted with the deck cache so a wake
   // against an unchanged deck costs one tiny response.
   lastFeedSig[0] = '\0';
-  if (cachedDeck && cachedDeck->count > 0) {
+  if (cachedDeck && cachedDeck->deckSig[0]) {
     strncpy(lastFeedSig, cachedDeck->deckSig, sizeof(lastFeedSig) - 1);
     lastFeedSig[sizeof(lastFeedSig) - 1] = '\0';
   }
@@ -386,12 +387,12 @@ void AgentDashboardActivity::onEnter() {
   lastDeckSaveMs = 0;
   clockSynced = time(nullptr) >= 1700000000;
 
-  // M6 battery cadence: a timer wake with the setting enabled syncs once over
+  // Battery cadence: a timer wake with Pocket sync enabled syncs once over
   // HTTP and deep-sleeps again; any button press cancels into interactive mode.
   // USB power means docked — stay in the live WS mode regardless of the timer.
   enterMs = millis();
-  pullMode = SETTINGS.agentPullSyncEnabled != 0 && SETTINGS.startupApp == CrossPointSettings::STARTUP_AGENTDECK &&
-             gpio.getWakeupReason() == HalGPIO::WakeupReason::Timer && !gpio.isUsbConnected();
+  pullMode = SETTINGS.agentPullSyncEnabled != 0 && gpio.getWakeupReason() == HalGPIO::WakeupReason::Timer &&
+             !gpio.isUsbConnected();
   pullSynced = false;
   pullEndpointTried = false;
   glanceReason = GlanceReason::Ambient;
@@ -400,8 +401,9 @@ void AgentDashboardActivity::onEnter() {
   pullNextSec = 0;
   if (pullMode) AgentLog::line("AGENT", "pull-sync wake (battery cadence)");
 
-  AgentLog::line("AGENT", "AgentDashboardActivity onEnter (Face shell)");
-  // Paint the Face immediately — content first, connection is a status line.
+  AgentLog::line("POCKET", "Pocket reader onEnter");
+  // Paint Pocket immediately — local reading and cached cards do not wait for
+  // Wi-Fi, discovery, or a daemon.
   requestUpdate();
 
   if (WiFi.status() == WL_CONNECTED) {
@@ -428,8 +430,11 @@ void AgentDashboardActivity::onEnter() {
     return;
   }
 
-  // First run (no saved network): the picker genuinely needs the screen.
-  launchWifiPicker();
+  // First run without Wi-Fi is still a complete reader. Network setup is an
+  // explicit refresh action from the empty Pocket, never a boot gate.
+  WiFi.mode(WIFI_OFF);
+  dashState = DashState::Offline;
+  requestUpdate();
 }
 
 void AgentDashboardActivity::launchWifiPicker() {
@@ -447,8 +452,11 @@ void AgentDashboardActivity::launchWifiPicker() {
 
 void AgentDashboardActivity::onWifiSelectionComplete(const bool connected) {
   if (!connected) {
-    AgentLog::line("AGENT", "wifi selection cancelled — exiting");
-    finish();
+    AgentLog::line("POCKET", "wifi selection cancelled — staying offline");
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    dashState = DashState::Offline;
+    requestUpdate();
     return;
   }
   if (localIp.empty()) localIp = WiFi.localIP().toString().c_str();
@@ -538,59 +546,20 @@ uint32_t AgentDashboardActivity::computeStateSignature() const {
   uint32_t h = 2166136261u;
   AgentDeck::lockState();
   const auto& s = AgentDeck::g_state;
-  uint8_t st = static_cast<uint8_t>(s.state);
-  h = fnvUpdate(h, &st, sizeof(st));
   h = fnvUpdate(h, &s.wsConnected, sizeof(s.wsConnected));
   h = fnvUpdate(h, &s.dataReceived, sizeof(s.dataReceived));
-  h = fnvUpdate(h, &s.sessionCount, sizeof(s.sessionCount));
   h = fnvUpdate(h, &s.pocketCount, sizeof(s.pocketCount));
-  h = fnvUpdate(h, s.projectName, strlen(s.projectName));
-  h = fnvUpdate(h, s.question, strlen(s.question));
-  h = fnvUpdate(h, s.currentTool, strlen(s.currentTool));
-  h = fnvUpdate(h, &s.optionCount, sizeof(s.optionCount));
-  h = fnvUpdate(h, s.optionSessionId, strlen(s.optionSessionId));
-  h = fnvUpdate(h, &s.navigable, sizeof(s.navigable));
-  for (uint8_t i = 0; i < s.optionCount && i < 8; i++) {
-    h = fnvUpdate(h, s.options[i].label, strlen(s.options[i].label));
-    h = fnvUpdate(h, s.options[i].action, strlen(s.options[i].action));
-    h = fnvUpdate(h, &s.options[i].index, sizeof(s.options[i].index));
-  }
-  h = fnvUpdate(h, s.requestId, strlen(s.requestId));
-  // Per-session state so the triage list repaints when any session's awaiting
-  // status (or its prompt) changes, even if the focused state_update didn't.
-  for (uint8_t i = 0; i < s.sessionCount && i < AgentDeckCfg::SESSIONS_CAP; i++) {
-    h = fnvUpdate(h, s.sessions[i].id, strlen(s.sessions[i].id));
-    h = fnvUpdate(h, s.sessions[i].controlMode, strlen(s.sessions[i].controlMode));
-    h = fnvUpdate(h, s.sessions[i].state, strlen(s.sessions[i].state));
-    h = fnvUpdate(h, s.sessions[i].requestId, strlen(s.sessions[i].requestId));
-    h = fnvUpdate(h, s.sessions[i].activity, strlen(s.sessions[i].activity));
-  }
   for (uint8_t i = 0; i < s.pocketCount && i < AgentDeck::POCKET_CARD_CAP; i++) {
     h = fnvUpdate(h, s.pocketCards[i].cardId, strlen(s.pocketCards[i].cardId));
     h = fnvUpdate(h, s.pocketCards[i].question, strlen(s.pocketCards[i].question));
     h = fnvUpdate(h, &s.pocketCards[i].choiceCount, sizeof(s.pocketCards[i].choiceCount));
   }
-  // Codex limits + timeline revision so the footer / Detail repaint even when
-  // queried history replaces a same-sized ring (head/count alone can match).
-  h = fnvUpdate(h, &s.codexFivePercent, sizeof(s.codexFivePercent));
-  h = fnvUpdate(h, &s.codexSevenPercent, sizeof(s.codexSevenPercent));
-  h = fnvUpdate(h, &s.timelineRevision, sizeof(s.timelineRevision));
-  // Usage so the LIMITS footer repaints when a quota gauge / reset / subscription moves.
-  h = fnvUpdate(h, &s.fiveHourPercent, sizeof(s.fiveHourPercent));
-  h = fnvUpdate(h, &s.sevenDayPercent, sizeof(s.sevenDayPercent));
-  h = fnvUpdate(h, &s.usageStale, sizeof(s.usageStale));
-  h = fnvUpdate(h, s.fiveHourReset, strlen(s.fiveHourReset));
-  h = fnvUpdate(h, s.sevenDayReset, strlen(s.sevenDayReset));
-  h = fnvUpdate(h, s.codexPlan, strlen(s.codexPlan));
-  h = fnvUpdate(h, s.codexActiveUntil, strlen(s.codexActiveUntil));
-  h = fnvUpdate(h, s.antigravityPlan, strlen(s.antigravityPlan));
-  h = fnvUpdate(h, &s.antigravityCredits, sizeof(s.antigravityCredits));
+  h = fnvUpdate(h, &s.glance, sizeof(s.glance));
   AgentDeck::unlockState();
   // Local view/cursor state so navigation repaints.
   uint8_t vm = static_cast<uint8_t>(viewMode);
   h = fnvUpdate(h, &vm, sizeof(vm));
   h = fnvUpdate(h, &overviewCursor, sizeof(overviewCursor));
-  h = fnvUpdate(h, &triageIndex, sizeof(triageIndex));
   h = fnvUpdate(h, &optionCursor, sizeof(optionCursor));
   return h;
 }
@@ -676,9 +645,11 @@ void AgentDashboardActivity::loop() {
         beginTimedSleep(kPullDefaultSec);
         return;
       }
-      AgentLog::line("AGENT", "wifi join timeout (%s) — opening picker", joiningSsid);
+      AgentLog::line("POCKET", "wifi join timeout (%s) — keeping saved Pocket", joiningSsid);
       WiFi.disconnect(true);
-      launchWifiPicker();
+      WiFi.mode(WIFI_OFF);
+      dashState = DashState::Offline;
+      requestUpdate();
     }
     return;
   }
@@ -1019,31 +990,17 @@ void AgentDashboardActivity::servicePullSync() {
 }
 
 void AgentDashboardActivity::serviceIdleCadence() {
-  if (SETTINGS.agentPullSyncEnabled == 0 || SETTINGS.startupApp != CrossPointSettings::STARTUP_AGENTDECK) return;
+  if (SETTINGS.agentPullSyncEnabled == 0) return;
   if (gpio.isUsbConnected()) return;              // docked → stay in the live WS mode
   if (dashState != DashState::Connected) return;  // pre-connected states keep their own budgets
   if (viewMode != ViewMode::Overview) return;     // never sleep under a Card/Detail
   if (AgentDeck::OtaWs::receiving() || AgentDeck::OtaWs::flashPending()) return;
   const uint32_t idleAnchor = lastUserInputMs ? lastUserInputMs : enterMs;
   if (millis() - idleAnchor < kIdleToCadenceMs) return;
-  // A session that needs the user keeps the Face live — a frozen prompt the
-  // buttons can't answer would violate the attention contract's honesty rule.
-  AwaitingItem pending;
-  if (firstCardCandidate(pending)) return;
-  // Mid-turn sessions shorten the cadence (the daemon's nextPullSec hint uses
-  // the same rule server-side; mirrored here because WS mode has no hint).
-  bool anyActive = false;
-  AgentDeck::lockState();
-  for (uint8_t i = 0; i < AgentDeck::g_state.sessionCount; i++) {
-    const auto& s = AgentDeck::g_state.sessions[i];
-    if (s.alive && (strcmp(s.state, "processing") == 0 || strncmp(s.state, "awaiting", 8) == 0)) {
-      anyActive = true;
-      break;
-    }
-  }
-  AgentDeck::unlockState();
-  AgentLog::line("AGENT", "idle on battery — entering pull cadence");
-  beginTimedSleep(anyActive ? kPullActiveSec : kPullDefaultSec);
+  // Agent activity no longer controls this product's power policy. Use the
+  // most recent Pocket-feed hint when available, otherwise the hourly default.
+  AgentLog::line("POCKET", "idle on battery — entering Pocket cadence");
+  beginTimedSleep(pullNextSec ? pullNextSec : kPullDefaultSec);
 }
 
 void AgentDashboardActivity::beginTimedSleep(uint32_t seconds) {
@@ -1158,6 +1115,14 @@ bool AgentDashboardActivity::findPocketCard(const char* cardId, AgentDeck::Pocke
     found = true;
     break;
   }
+  if (!found && cachedDeck) {
+    for (uint8_t i = 0; i < cachedDeck->pocketCount; i++) {
+      if (strcmp(cachedDeck->pocketCards[i].cardId, cardId) != 0) continue;
+      out = cachedDeck->pocketCards[i];
+      found = true;
+      break;
+    }
+  }
   AgentDeck::unlockState();
   return found;
 }
@@ -1205,7 +1170,6 @@ bool AgentDashboardActivity::firstCardCandidate(AwaitingItem& out) const {
 }
 
 void AgentDashboardActivity::serviceCard() {
-  if (dashState != DashState::Connected) return;
   if (AgentDeck::OtaWs::receiving() || AgentDeck::OtaWs::flashPending()) return;  // no card takeovers mid-OTA
 
   if (viewMode == ViewMode::Card) {
@@ -1215,47 +1179,14 @@ void AgentDashboardActivity::serviceCard() {
       // with session state; a choice or Later removes them locally.
       return;
     }
-    AwaitingItem item = {};
-    if (!findAwaiting(cardSid, item) || item.attentionMode == AgentDeck::AttentionMode::None) {
-      // Prompt resolved (answered here, elsewhere, or the turn moved on) — home.
-      AgentLog::line("AGENT", "card resolved sid=%s", cardSid);
-      cardSid[0] = '\0';
-      cardSig = 0;
-      viewMode = ViewMode::Overview;
-      requestUpdate();
-      return;
-    }
-    const uint32_t sig = awaitingSignature(item);
-    if (sig != cardSig) {  // content changed in place (e.g. options just arrived)
-      cardSig = sig;
-      optionCursor = 0;
-      requestUpdate();
-    }
-    // A managed prompt without correlated options needs focus before the daemon
-    // relays them — same contract as opening Detail manually.
-    if (item.attentionMode == AgentDeck::AttentionMode::WaitingForOptions && !cardFocusSent &&
-        !AgentDeck::isObservedSession("", cardSid)) {
-      AgentDeck::Commands::sendFocusSession(cardSid);
-      cardFocusSent = true;
-    }
+    // Live session decisions are intentionally not a Pocket-reader surface.
+    // If legacy state left one selected, return to the portable library.
+    cardSid[0] = '\0';
+    cardSig = 0;
+    viewMode = ViewMode::Overview;
+    requestUpdate();
     return;
   }
-
-  // Auto-surface only from Overview (never hijack Detail) and only when the user
-  // isn't mid-navigation.
-  if (viewMode != ViewMode::Overview) return;
-  if (lastUserInputMs != 0 && millis() - lastUserInputMs < kAutoSurfaceQuietMs) return;
-  AwaitingItem item = {};
-  if (!firstCardCandidate(item)) return;
-  strncpy(cardSid, item.sid, sizeof(cardSid) - 1);
-  cardSid[sizeof(cardSid) - 1] = '\0';
-  cardSig = awaitingSignature(item);
-  cardFocusSent = false;
-  optionCursor = 0;
-  viewMode = ViewMode::Card;
-  AgentLog::line("AGENT", "card surfaced sid=%s mode=%u opts=%u", cardSid, (unsigned)item.attentionMode,
-                 (unsigned)item.optionCount);
-  requestUpdate();
 }
 
 int AgentDashboardActivity::collectOverview(OverviewRow* out, int cap) const {
@@ -1264,42 +1195,44 @@ int AgentDashboardActivity::collectOverview(OverviewRow* out, int cap) const {
     d[n - 1] = '\0';
   };
   int n = 0;
+
+  // The first row is always the local book, when one exists. This data lives
+  // entirely on SD and remains useful on a device that has never met a daemon.
+  if (!APP_STATE.openEpubPath.empty() && n < cap) {
+    OverviewRow& o = out[n++];
+    memset(&o, 0, sizeof(o));
+    cp(o.sid, sizeof(o.sid), "local:reading");
+    cp(o.project, sizeof(o.project), tr(STR_POCKET_CONTINUE_READING));
+    cp(o.agentType, sizeof(o.agentType), "reader");
+    cp(o.state, sizeof(o.state), tr(STR_POCKET_READING));
+    const char* title = nullptr;
+    const char* author = nullptr;
+    for (const auto& book : RECENT_BOOKS.getBooks()) {
+      if (book.path == APP_STATE.openEpubPath) {
+        title = book.title.c_str();
+        author = book.author.c_str();
+        break;
+      }
+    }
+    if (!title || !title[0]) {
+      const char* path = APP_STATE.openEpubPath.c_str();
+      const char* slash = strrchr(path, '/');
+      title = slash ? slash + 1 : path;
+    }
+    snprintf(o.activity, sizeof(o.activity), "%s%s%s", title, author && author[0] ? " - " : "",
+             author && author[0] ? author : "");
+    o.reading = true;
+  }
+
   AgentDeck::lockState();
   const auto& s = AgentDeck::g_state;
-  for (uint8_t i = 0; i < s.sessionCount && n < cap; i++) {
-    const auto& se = s.sessions[i];
-    if (!se.alive) continue;
-    OverviewRow& o = out[n++];
-    cp(o.sid, sizeof(o.sid), se.id);
-    cp(o.project, sizeof(o.project), se.projectName[0] ? se.projectName : "session");
-    cp(o.agentType, sizeof(o.agentType), se.agentType);
-    cp(o.controlMode, sizeof(o.controlMode), se.controlMode);
-    cp(o.state, sizeof(o.state), se.state);
-    cp(o.activity, sizeof(o.activity), se.activity);
-    o.awaiting = (strncmp(se.state, "awaiting", 8) == 0);
-    o.pocket = false;
-  }
-  // Observed/single-session fallback: sessions_list empty but a focused
-  // state_update is live — surface it as one row so the overview isn't blank.
-  if (n == 0 && cap > 0 && s.dataReceived && s.state != AgentState::DISCONNECTED) {
-    OverviewRow& o = out[n++];
-    cp(o.sid, sizeof(o.sid), s.sessionId[0] ? s.sessionId : s.focusedSessionId);
-    cp(o.project, sizeof(o.project), s.projectName[0] ? s.projectName : "session");
-    cp(o.agentType, sizeof(o.agentType), s.agentType);
-    cp(o.controlMode, sizeof(o.controlMode), "");
-    const bool aw = s.state == AgentState::AWAITING_PERMISSION || s.state == AgentState::AWAITING_OPTION ||
-                    s.state == AgentState::AWAITING_DIFF;
-    cp(o.state, sizeof(o.state), aw ? "awaiting" : (s.state == AgentState::PROCESSING ? "processing" : "idle"));
-    cp(o.activity, sizeof(o.activity), s.currentTool);
-    o.awaiting = aw;
-    o.pocket = false;
-  }
-  // Pocket follows live work: sessions answer "what is happening", autonomous
-  // cards answer "what is useful to carry away". Both remain one flat physical
-  // button list on the constrained display.
+  // Daemon-authored Pocket items follow the local book. Live sessions never
+  // become top-level rows; they are merely signals the daemon may distil into
+  // a portable card.
   for (uint8_t i = 0; i < s.pocketCount && n < cap; i++) {
     const auto& card = s.pocketCards[i];
     OverviewRow& o = out[n++];
+    memset(&o, 0, sizeof(o));
     cp(o.sid, sizeof(o.sid), card.cardId);
     cp(o.project, sizeof(o.project), card.title[0] ? card.title : "POCKET");
     cp(o.agentType, sizeof(o.agentType), "pocket");
@@ -1341,28 +1274,14 @@ void AgentDashboardActivity::serviceDeckPersist() {
   if (AgentDeck::OtaWs::receiving() || AgentDeck::OtaWs::flashPending()) return;
   if (lastDeckSaveMs != 0 && millis() - lastDeckSaveMs < kDeckSaveIntervalMs) return;
 
-  // Content signature of the live deck (alive sessions only, display fields
-  // only). Cheap FNV pass under the lock; the 3.5 KB snapshot copy + SD write
-  // run only when this actually changed.
-  auto cp = [](char* d, size_t n, const char* s) {
-    strncpy(d, s, n - 1);
-    d[n - 1] = '\0';
-  };
+  // Content signature of the portable Pocket deck. Live session churn is not
+  // product state and must not cause SD writes or e-ink refreshes.
   uint32_t sig = 2166136261u;
   bool dataReceived = false;
   AgentDeck::lockState();
   {
     const auto& s = AgentDeck::g_state;
     dataReceived = s.dataReceived;
-    for (uint8_t i = 0; i < s.sessionCount; i++) {
-      const auto& se = s.sessions[i];
-      if (!se.alive) continue;
-      sig = fnvUpdate(sig, se.id, strlen(se.id));
-      sig = fnvUpdate(sig, se.projectName, strlen(se.projectName));
-      sig = fnvUpdate(sig, se.agentType, strlen(se.agentType));
-      sig = fnvUpdate(sig, se.state, strlen(se.state));
-      sig = fnvUpdate(sig, se.activity, strlen(se.activity));
-    }
     for (uint8_t i = 0; i < s.pocketCount; i++) {
       const auto& card = s.pocketCards[i];
       sig = fnvUpdate(sig, card.cardId, strlen(card.cardId));
@@ -1394,20 +1313,7 @@ void AgentDashboardActivity::serviceDeckPersist() {
     snap->glance = s.glance;  // sleep-glance content rides the deck cache (v2)
     snap->pocketCount = s.pocketCount > AgentDeck::POCKET_CARD_CAP ? AgentDeck::POCKET_CARD_CAP : s.pocketCount;
     memcpy(snap->pocketCards, s.pocketCards, sizeof(AgentDeck::PocketCard) * snap->pocketCount);
-    for (uint8_t i = 0; i < s.sessionCount && snap->count < AgentDeckCfg::SESSIONS_CAP; i++) {
-      const auto& se = s.sessions[i];
-      if (!se.alive) continue;
-      auto& r = snap->records[snap->count++];
-      cp(r.sid, sizeof(r.sid), se.id);
-      cp(r.project, sizeof(r.project), se.projectName[0] ? se.projectName : "session");
-      cp(r.agentType, sizeof(r.agentType), se.agentType);
-      cp(r.state, sizeof(r.state), se.state);
-      cp(r.activity, sizeof(r.activity), se.activity);
-      r.awaiting = strncmp(se.state, "awaiting", 8) == 0 ? 1 : 0;
-      // M6 validity class — same rule as the daemon's card feed, so WS-cached
-      // and pull-cached decks grey out identically offline (card_class.h).
-      cp(r.actionClass, sizeof(r.actionClass), AgentDeck::classifyCardActionClass(se.requestId[0] != '\0', se.state));
-    }
+    snap->count = 0;  // legacy session records are never part of Pocket Home
   }
   AgentDeck::unlockState();
   snap->savedEpoch = bestEpochNow();
@@ -1415,42 +1321,24 @@ void AgentDashboardActivity::serviceDeckPersist() {
   lastDeckSaveMs = millis();
   if (!AgentDeck::DeckStore::save(*snap)) return;  // SD hiccup — retry on next change
   lastDeckSig = sig;
-  const unsigned savedCount = snap->count;
   AgentDeck::lockState();
   cachedDeck.swap(snap);
   AgentDeck::unlockState();
-  AgentLog::line("DECK", "deck persisted: %u cards", savedCount);
+  AgentLog::line("POCKET", "deck persisted: %u items", (unsigned)cachedDeck->pocketCount);
 }
 
-int AgentDashboardActivity::buildRowsFromCache(OverviewRow* out, int cap) const {
+int AgentDashboardActivity::appendRowsFromCache(OverviewRow* out, int cap, int start) const {
   auto cp = [](char* d, size_t n, const char* s) {
     strncpy(d, s, n - 1);
     d[n - 1] = '\0';
   };
-  int n = 0;
+  int n = start;
   AgentDeck::lockState();
   if (cachedDeck) {
-    for (uint8_t i = 0; i < cachedDeck->count && n < cap; i++) {
-      const auto& r = cachedDeck->records[i];
-      OverviewRow& o = out[n++];
-      cp(o.sid, sizeof(o.sid), r.sid);
-      cp(o.project, sizeof(o.project), r.project);
-      cp(o.agentType, sizeof(o.agentType), r.agentType);
-      o.controlMode[0] = '\0';  // display-only: a cached card is never actionable
-      cp(o.state, sizeof(o.state), r.state);
-      // A cached live-class card (permission gate / prompt) must read as
-      // unanswerable — say so instead of showing the stale prompt as pressable.
-      if (AgentDeck::actionClassIsLive(r.actionClass)) {
-        snprintf(o.activity, sizeof(o.activity), "Reconnect to act \xC2\xB7 %s", r.activity);
-      } else {
-        cp(o.activity, sizeof(o.activity), r.activity);
-      }
-      o.awaiting = r.awaiting != 0;
-      o.pocket = false;
-    }
     for (uint8_t i = 0; i < cachedDeck->pocketCount && n < cap; i++) {
       const auto& card = cachedDeck->pocketCards[i];
       OverviewRow& o = out[n++];
+      memset(&o, 0, sizeof(o));
       cp(o.sid, sizeof(o.sid), card.cardId);
       cp(o.project, sizeof(o.project), card.title[0] ? card.title : "POCKET");
       cp(o.agentType, sizeof(o.agentType), "pocket");
@@ -1491,7 +1379,7 @@ void AgentDashboardActivity::handleButtons() {
     if (findPocketCard(cardSid, pocket)) {
       const int raw = mappedInput.getPressedFrontButton();
       if (raw == HalGPIO::BTN_BACK) {
-        dismissPocketCard(pocket.cardId);  // Later: local only, no learning signal
+        deferPocketCard(pocket);
       } else {
         int pos = -1;
         if (raw == HalGPIO::BTN_CONFIRM)
@@ -1512,7 +1400,12 @@ void AgentDashboardActivity::handleButtons() {
   // trapped on a "searching…" screen with no way out.
   if (dashState != DashState::Connected) {
     OverviewRow rows[kOverviewCap];
-    const int n = collectOverview(rows, kOverviewCap);
+    int n = collectOverview(rows, kOverviewCap);
+    bool dataReceived = false;
+    AgentDeck::lockState();
+    dataReceived = AgentDeck::g_state.dataReceived;
+    AgentDeck::unlockState();
+    if (!dataReceived) n = appendRowsFromCache(rows, kOverviewCap, n);
     if (overviewCursor >= n) overviewCursor = n > 0 ? n - 1 : 0;
     if (mappedInput.wasReleased(Btn::NavPrevious) && n > 1) {
       overviewCursor = (overviewCursor - 1 + n) % n;
@@ -1527,6 +1420,15 @@ void AgentDashboardActivity::handleButtons() {
       cardSid[sizeof(cardSid) - 1] = '\0';
       viewMode = ViewMode::Card;
       requestUpdate();
+      return;
+    }
+    if (mappedInput.wasReleased(Btn::Confirm) && n > 0 && rows[overviewCursor].reading) {
+      exitToReader = true;
+      exitRequested = true;
+      return;
+    }
+    if (mappedInput.wasReleased(Btn::Confirm) && n == 0 && dashState == DashState::Offline) {
+      launchWifiPicker();
       return;
     }
     if (ambientGlanceShown && mappedInput.wasReleased(Btn::Confirm) && !APP_STATE.openEpubPath.empty()) {
@@ -1687,7 +1589,7 @@ void AgentDashboardActivity::handleButtons() {
     return;
   }
 
-  // ── OVERVIEW: mission-control list (home) ──
+  // ── OVERVIEW: local book + portable Pocket items ──
   OverviewRow rows[kOverviewCap];
   const int n = collectOverview(rows, kOverviewCap);
   if (overviewCursor >= n) overviewCursor = n > 0 ? n - 1 : 0;
@@ -1705,6 +1607,11 @@ void AgentDashboardActivity::handleButtons() {
   // Confirm opens the selected session's Detail (timeline + any inline decision).
   if (mappedInput.wasReleased(Btn::Confirm) && n > 0) {
     const OverviewRow& sel = rows[overviewCursor];
+    if (sel.reading) {
+      exitToReader = true;
+      exitRequested = true;
+      return;
+    }
     if (sel.pocket) {
       strncpy(cardSid, sel.sid, sizeof(cardSid) - 1);
       cardSid[sizeof(cardSid) - 1] = '\0';
@@ -1713,19 +1620,6 @@ void AgentDashboardActivity::handleButtons() {
       requestUpdate();
       return;
     }
-    strncpy(selectedSid, sel.sid, sizeof(selectedSid) - 1);
-    selectedSid[sizeof(selectedSid) - 1] = '\0';
-    optionCursor = 0;
-    detailScroll = 0;
-    viewMode = ViewMode::Detail;
-    // A managed PTY must be focused before the daemon can emit its correlated
-    // state_update / prompt_options. Observed sessions cannot be focused into a
-    // controllable PTY, so querying their read-only timeline is all we request.
-    if (!AgentDeck::isObservedSession(sel.controlMode, selectedSid)) AgentDeck::Commands::sendFocusSession(selectedSid);
-    // The live timeline_event stream is forward-only, so request this session's
-    // recent history to fill Detail on open.
-    AgentDeck::Commands::sendQuerySessionTimeline(selectedSid);
-    requestUpdate();
   }
 
   // No sessions → the Ambient glance is the face: Confirm resumes the open
@@ -1831,6 +1725,24 @@ void AgentDashboardActivity::dismissPocketCard(const char* cardId) {
   requestUpdate();
 }
 
+bool AgentDashboardActivity::deferPocketCard(const AgentDeck::PocketCard& card) {
+  if (millis() - lastDecisionMs < kDecisionCooldownMs || !card.cardId[0]) return false;
+  AgentDeck::OutboxStore::Record rec{};
+  strncpy(rec.cardId, card.cardId, sizeof(rec.cardId) - 1);
+  strncpy(rec.action, "card_choice", sizeof(rec.action) - 1);
+  strncpy(rec.choiceId, "later", sizeof(rec.choiceId) - 1);
+  rec.index = -1;
+  rec.recordedEpoch = bestEpochNow();
+  if (!AgentDeck::OutboxStore::append(rec)) {
+    AgentLog::line("POCKET", "Later not queued: %s", card.cardId);
+    return false;
+  }
+  lastDecisionMs = millis();
+  dismissPocketCard(card.cardId);
+  glanceRefreshQueued = true;
+  return true;
+}
+
 bool AgentDashboardActivity::applyPocketChoice(const AgentDeck::PocketCard& card, int selectedCursor) {
   if (millis() - lastDecisionMs < kDecisionCooldownMs || selectedCursor < 0 || selectedCursor >= card.choiceCount)
     return false;
@@ -1894,24 +1806,9 @@ void AgentDashboardActivity::drawBrandedHeader(const char* title, const char* su
   const auto& m = UITheme::getInstance().getMetrics();
   const int w = renderer.getScreenWidth();
   const Rect r{0, m.topPadding, w, m.headerHeight};
-  // Pass nullptr title: Lyra's drawHeader draws the title at contentSidePadding —
-  // exactly where our mark goes — and also owns the divider line (it lives inside
-  // its `if (title)` block). So we let drawHeader place the battery + subtitle, then
-  // lay out the mark + wordmark together on one line and redraw the divider.
-  GUI.drawHeader(renderer, r, nullptr, subtitle);
-
-  constexpr int sz = 32;  // mark width must be a multiple of 8 (see kGlyphPx note)
-  const int iconY = r.y + (m.headerHeight - sz) / 2 - 2;
-  renderer.drawIcon(AgentDeckMark, m.contentSidePadding, iconY, sz, sz);
-
-  if (title) {
-    const int line12 = renderer.getLineHeight(UI_12_FONT_ID);
-    const int titleX = m.contentSidePadding + sz + 10;
-    const int titleY = r.y + (m.headerHeight - line12) / 2;
-    renderer.drawText(UI_12_FONT_ID, titleX, titleY, title, true, EpdFontFamily::BOLD);
-  }
-  // Divider, matching LyraTheme::drawHeader (3px rule along the header baseline).
-  renderer.drawLine(r.x, r.y + r.height - 3, r.x + r.width - 1, r.y + r.height - 3, 3, true);
+  // Product identity is Pocket itself. AgentDeck is an invisible sync source,
+  // so its logo and wordmark never appear in the reader shell.
+  GUI.drawHeader(renderer, r, title, subtitle);
 }
 
 int AgentDashboardActivity::drawLimitsFooter() const {
@@ -2117,18 +2014,16 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
   const int line10 = renderer.getLineHeight(UI_10_FONT_ID);
   const int lineS = renderer.getLineHeight(SMALL_FONT_ID);
 
-  bool dataReceived;
-  AgentDeck::lockState();
-  dataReceived = AgentDeck::g_state.dataReceived;
-  AgentDeck::unlockState();
+  (void)awaitingCount;  // live Agent attention is not a Pocket Home concern
 
   renderer.clearScreen();
-  drawBrandedHeader("AgentDeck", nullptr);
+  drawBrandedHeader(tr(STR_POCKET_TITLE), tr(STR_POCKET_SUBTITLE));
   int y = m.topPadding + m.headerHeight + m.verticalSpacing;
 
-  // Footer first so the shared layout can reserve its exact dynamic height.
-  const int footTop = drawLimitsFooter();
-  const int bannerH = awaitingCount > 0 ? line10 + 22 : 0;
+  // Pocket Home reserves the full page for reading. Provider quotas and Agent
+  // session telemetry are not part of the product information architecture.
+  const int footTop = pageH;
+  const int bannerH = 0;
   const int asOfH = fromCache ? lineS + 6 : 0;  // "as of" sync-age line (M5.5)
   const int chromeH = y + lineS + 8 + asOfH + bannerH;
   const int reservedBottom = pageH - footTop;
@@ -2164,41 +2059,32 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
     snprintf(cl, sizeof(cl), "Receiving firmware update \xC2\xB7 %u%%", pct);
     statusBold = true;
   } else if (pullMode && pullSynced) {
-    // M6 battery cadence: this frame may be the one the panel holds through the
-    // whole sleep — it must say what it is. The "as of" line carries the age.
-    snprintf(cl, sizeof(cl), "Synced \xC2\xB7 sleeping until next pull \xC2\xB7 power btn wakes");
+    snprintf(cl, sizeof(cl), "%s \xC2\xB7 %s", tr(STR_POCKET_UPDATED), tr(STR_POCKET_SLEEPING));
     statusBold = true;
   } else if (pullMode) {
-    snprintf(cl, sizeof(cl), "Pull sync\xE2\x80\xA6 \xC2\xB7 Wi-Fi %s", localIp.c_str());
+    snprintf(cl, sizeof(cl), "%s", tr(STR_POCKET_CHECKING));
   } else {
     switch (dashState) {
+      case DashState::Offline:
+        snprintf(cl, sizeof(cl), "%s", tr(STR_POCKET_OFFLINE));
+        break;
       case DashState::Connected:
-        if (fromCache)  // connected but first live state hasn't landed — the rows
-                        // on screen are the persisted deck, so don't count them as live
-          snprintf(cl, sizeof(cl), "Live \xC2\xB7 %s \xC2\xB7 syncing\xE2\x80\xA6", AgentDeck::Net::wsBridgeIp());
-        else if (n > capacity)
-          snprintf(cl, sizeof(cl), "Live \xC2\xB7 %s \xC2\xB7 %d-%d/%d", AgentDeck::Net::wsBridgeIp(), firstShown,
-                   lastShown, n);
+        if (n > capacity)
+          snprintf(cl, sizeof(cl), "%s \xC2\xB7 %d-%d/%d", tr(STR_POCKET_UPDATED), firstShown, lastShown, n);
         else
-          snprintf(cl, sizeof(cl), "Live \xC2\xB7 %s \xC2\xB7 %d", AgentDeck::Net::wsBridgeIp(), n);
+          snprintf(cl, sizeof(cl), "%s \xC2\xB7 %d", tr(STR_POCKET_UPDATED), n);
         break;
       case DashState::Connecting:
-        snprintf(cl, sizeof(cl), "Connecting \xC2\xB7 %s:%u\xE2\x80\xA6", AgentDeck::Net::wsBridgeIp(),
-                 (unsigned)AgentDeck::Net::wsBridgePort());
+        snprintf(cl, sizeof(cl), "%s", tr(STR_POCKET_CONNECTING));
         break;
       case DashState::Discovering:
-        if (nextConnectAllowedMs != 0 && (int32_t)(millis() - nextConnectAllowedMs) < 0)
-          snprintf(cl, sizeof(cl), "Link unstable \xC2\xB7 pausing before retry\xE2\x80\xA6");
-        else if (discoveryNoticeShown)
-          snprintf(cl, sizeof(cl), "AgentDeck not found \xC2\xB7 still scanning\xE2\x80\xA6");
-        else
-          snprintf(cl, sizeof(cl), "Searching for AgentDeck\xE2\x80\xA6 \xC2\xB7 Wi-Fi %s", localIp.c_str());
+        snprintf(cl, sizeof(cl), "%s", tr(STR_POCKET_SEARCHING));
         break;
       case DashState::WifiJoining:
-        snprintf(cl, sizeof(cl), "Joining Wi-Fi \"%s\"\xE2\x80\xA6", joiningSsid);
+        snprintf(cl, sizeof(cl), "%s", tr(STR_POCKET_CHECKING));
         break;
       case DashState::WifiSelection:
-        snprintf(cl, sizeof(cl), "Wi-Fi setup\xE2\x80\xA6");
+        snprintf(cl, sizeof(cl), "%s", tr(STR_POCKET_SYNC));
         break;
     }
   }
@@ -2215,14 +2101,14 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
     if (asOfEpoch && nowT >= 1700000000 && (uint32_t)nowT >= asOfEpoch) {
       const uint32_t age = (uint32_t)nowT - asOfEpoch;
       if (age < 60) {
-        snprintf(asOf, sizeof(asOf), "Last synced deck \xC2\xB7 just now");
+        snprintf(asOf, sizeof(asOf), "%s", tr(STR_POCKET_SAVED));
       } else {
         char a[8];
         formatAge(age, a, sizeof(a));
-        snprintf(asOf, sizeof(asOf), "Last synced deck \xC2\xB7 as of %s ago", a);
+        snprintf(asOf, sizeof(asOf), "%s \xC2\xB7 %s", tr(STR_POCKET_SAVED), a);
       }
     } else {
-      snprintf(asOf, sizeof(asOf), "Last synced deck");
+      snprintf(asOf, sizeof(asOf), "%s", tr(STR_POCKET_SAVED));
     }
     renderer.drawText(SMALL_FONT_ID, layout.pad, y,
                       renderer.truncatedText(SMALL_FONT_ID, asOf, w - layout.pad * 2, EpdFontFamily::BOLD).c_str(),
@@ -2230,43 +2116,24 @@ void AgentDashboardActivity::renderOverview(const OverviewRow* rows, int n, int 
     y += lineS + 6;
   }
 
-  if (awaitingCount > 0) {
-    const int bh = line10 + 12;
-    renderer.fillRect(layout.pad, y, w - layout.pad * 2, bh, true);
-    char b[48];
-    snprintf(b, sizeof(b), "%d agent%s need you", awaitingCount, awaitingCount > 1 ? "s" : "");
-    renderer.drawText(UI_10_FONT_ID, layout.pad + 12, y + 6, b, false, EpdFontFamily::BOLD);
-  }
-
   if (n == 0) {
     const int emptyY = layout.cards.y + layout.cards.h / 2 - line10;
-    const char* empty;
-    if (dashState == DashState::Connected)
-      empty = dataReceived ? "No active sessions" : "Waiting for agent state\xE2\x80\xA6";
-    else if (dashState == DashState::Discovering && discoveryNoticeShown)
-      empty = "Start AgentDeck on a computer on this Wi-Fi.";
-    else
-      empty = "Cards appear when AgentDeck connects.";
-    renderer.drawText(UI_10_FONT_ID, layout.pad, emptyY, empty, true);
+    renderer.drawText(UI_10_FONT_ID, layout.pad, emptyY, tr(STR_POCKET_EMPTY), true);
   } else {
     for (int i = overviewTop; i < n && i < overviewTop + capacity; i++) {
       const AgentDeckEink::Rect card = layout.card((uint8_t)(i - overviewTop));
-      // Cached cards are display-only — no keyboard focus, nothing to open.
-      drawOverviewCard(rows[i], card.x, card.y, card.w, card.h, !fromCache && i == overviewCursor);
+      drawOverviewCard(rows[i], card.x, card.y, card.w, card.h, i == overviewCursor);
     }
   }
 
-  // Hint bar. Up/Down only meaningful with more than one row. Cached decks
-  // offer no actions (handleButtons sees the live n == 0 and no-ops anyway).
-  // Pull-synced rows are live data but NOT interactive (no WS session behind
-  // them) — advertising "Open" there would be a lie, same honesty rule. The
-  // frame frozen through a timed sleep only answers the power button.
-  bool hasPocket = false;
-  for (int i = 0; i < n; i++) hasPocket = hasPocket || rows[i].pocket;
-  const bool canNavigate = !fromCache && (dashState == DashState::Connected || hasPocket);
-  const bool canOpen = !fromCache && n > 0
-                       && (dashState == DashState::Connected || rows[overviewCursor].pocket);
-  const auto labels = mappedInput.mapLabels("Exit", canOpen ? "Open" : "",
+  // Cached Pocket cards are first-class offline content: they can be opened,
+  // completed, deferred, and answered into the durable Outbox without a live
+  // daemon. The frame frozen through timed sleep still answers only Power.
+  const bool canNavigate = n > 1;
+  const bool canOpen = n > 0 && (rows[overviewCursor].pocket || rows[overviewCursor].reading);
+  const char* confirm = canOpen ? (rows[overviewCursor].reading ? tr(STR_POCKET_READ) : tr(STR_POCKET_OPEN))
+                                : (n == 0 && dashState == DashState::Offline ? tr(STR_POCKET_SYNC) : "");
+  const auto labels = mappedInput.mapLabels(tr(STR_POCKET_LIBRARY), confirm,
                                             (n > 1 && canNavigate) ? "Up" : "",
                                             (n > 1 && canNavigate) ? "Down" : "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -2575,8 +2442,9 @@ void AgentDashboardActivity::renderPocketCard(const AgentDeck::PocketCard& card)
   const int lineS = renderer.getLineHeight(SMALL_FONT_ID);
 
   renderer.clearScreen();
-  // Both strings are daemon-authored content; no new firmware-localized copy.
-  drawBrandedHeader(card.title[0] ? card.title : card.module, card.module);
+  // The item title is content; the shell remains visibly Pocket even though a
+  // local daemon authored the payload.
+  drawBrandedHeader(card.title[0] ? card.title : tr(STR_POCKET_TITLE), tr(STR_POCKET_SUBTITLE));
   int y = m.topPadding + m.headerHeight + m.verticalSpacing + 8;
 
   const int qFont = fontForText(UI_12_FONT_ID, card.question);
@@ -2615,7 +2483,8 @@ void AgentDashboardActivity::renderPocketCard(const AgentDeck::PocketCard& card)
       snprintf(hints[i], sizeof(hints[i]), "%s", renderer.truncatedText(UI_10_FONT_ID, label, 96).c_str());
     y += renderer.getLineHeight(font) + 7;
   }
-  GUI.drawButtonHints(renderer, "Later", hints[0], hints[1], hints[2]);
+  GUI.drawButtonHints(renderer, card.choiceCount == 0 ? tr(STR_POCKET_DONE) : tr(STR_POCKET_LATER), hints[0],
+                      hints[1], hints[2]);
   renderer.displayBuffer();
 }
 
@@ -2883,7 +2752,7 @@ void AgentDashboardActivity::renderGlance(GlanceReason reason) {
   if (baseHm[0]) AgentDeck::GlanceFormat::addToHm(syncedHm, sizeof(syncedHm), baseHm, (millis() - baseAtMs) / 1000UL);
 
   renderer.clearScreen();
-  drawBrandedHeader("AgentDeck", "Glance");
+  drawBrandedHeader(tr(STR_POCKET_TITLE), tr(STR_POCKET_SUBTITLE));
   char buf[96];
 
   // ── Layout ──
@@ -2944,7 +2813,7 @@ void AgentDashboardActivity::renderGlance(GlanceReason reason) {
         if (pf.read(pdata, sizeof(pdata)) == (int)sizeof(pdata) && pdata[6] <= 100) bookPercent = pdata[6];
       }
     }
-    y = sectionHeader(x, y, cw, "READING");
+    y = sectionHeader(x, y, cw, tr(STR_POCKET_READING));
     const int tf = fontForText(UI_12_FONT_ID, title.c_str());
     int titleW = cw;
     if (bookPercent >= 0) {
@@ -2999,7 +2868,7 @@ void AgentDashboardActivity::renderGlance(GlanceReason reason) {
   // calendar is configured — the layout simply flows past it. ──
   auto drawToday = [&](int x, int y, int cw) -> int {
     if (g.eventCount == 0) return y;
-    y = sectionHeader(x, y, cw, "TODAY");
+    y = sectionHeader(x, y, cw, tr(STR_POCKET_TODAY));
     for (uint8_t i = 0; i < g.eventCount; i++) {
       if (AgentDeck::GlanceFormat::formatEventLine(buf, sizeof(buf), g.events[i]) <= 0) continue;
       const int f = fontForText(UI_10_FONT_ID, buf);
@@ -3071,29 +2940,15 @@ void AgentDashboardActivity::renderGlance(GlanceReason reason) {
     return y;
   };
 
-  const bool landscape = w > pageH;
-  const bool personalPlane = !APP_STATE.openEpubPath.empty() || g.weather.valid || g.eventCount > 0;
-  if (landscape && personalPlane) {
-    const int gap = 32;
-    const int cw = (w - pad * 2 - gap) / 2;
-    const int rx = pad + cw + gap;
-    int yL = topY;
-    int yR = topY;
-    yL = drawReading(pad, yL, cw);
-    yL = drawWeather(pad, yL, cw);
-    drawToday(pad, yL, cw);
-    yR = drawQuota(rx, yR, cw);
-    drawWrapup(rx, yR, cw, statusY);
-    renderer.drawLine(pad + cw + gap / 2, topY + 2, pad + cw + gap / 2, statusY - 12);
-  } else {
-    // Portrait (or a landscape face with only work-plane data): one column.
-    int y = topY;
-    y = drawReading(pad, y, w - pad * 2);
-    y = drawWeather(pad, y, w - pad * 2);
-    y = drawToday(pad, y, w - pad * 2);
-    y = drawQuota(pad, y, w - pad * 2);
-    drawWrapup(pad, y, w - pad * 2, statusY);
-  }
+  // Pocket Glance is deliberately personal and locally meaningful: current
+  // book, weather and today's schedule. Provider quotas and live work/session
+  // summaries belong on AgentDeck dashboards, not on this product.
+  (void)drawQuota;
+  (void)drawWrapup;
+  int y = topY;
+  y = drawReading(pad, y, w - pad * 2);
+  y = drawWeather(pad, y, w - pad * 2);
+  drawToday(pad, y, w - pad * 2);
 
   // ── Bottom status: absolute times only — a retained frame must stay true
   // without a repaint, so never a relative age here. ──
@@ -3101,31 +2956,31 @@ void AgentDashboardActivity::renderGlance(GlanceReason reason) {
   switch (reason) {
     case GlanceReason::TimedSleep:
       if (syncedHm[0] && sleepNextHm[0])
-        snprintf(status, sizeof(status), "Synced %s \xC2\xB7 next ~%s \xC2\xB7 power btn wakes", syncedHm, sleepNextHm);
+        snprintf(status, sizeof(status), "%s %s \xC2\xB7 next ~%s", tr(STR_POCKET_UPDATED), syncedHm, sleepNextHm);
       else if (pullSynced)
-        snprintf(status, sizeof(status), "Synced \xC2\xB7 sleeping ~%um \xC2\xB7 power btn wakes",
+        snprintf(status, sizeof(status), "%s \xC2\xB7 ~%um", tr(STR_POCKET_SLEEPING),
                  (unsigned)(sleepForSec / 60));
       else
-        snprintf(status, sizeof(status), "No daemon reached \xC2\xB7 sleeping ~%um \xC2\xB7 power btn wakes",
+        snprintf(status, sizeof(status), "%s \xC2\xB7 ~%um", tr(STR_POCKET_OFFLINE),
                  (unsigned)(sleepForSec / 60));
       break;
     case GlanceReason::PoweredOff:
       // Powered off by hand: there is no next sync to promise, and saying one
       // would be the exact dishonesty the absolute-times rule exists to prevent.
       if (syncedHm[0])
-        snprintf(status, sizeof(status), "Synced %s \xC2\xB7 powered off \xC2\xB7 press power to wake", syncedHm);
+        snprintf(status, sizeof(status), "%s %s \xC2\xB7 powered off", tr(STR_POCKET_UPDATED), syncedHm);
       else
-        snprintf(status, sizeof(status), "Powered off \xC2\xB7 press power to wake");
+        snprintf(status, sizeof(status), "%s", tr(STR_POCKET_OFFLINE));
       break;
     case GlanceReason::Ambient:
     default: {
       // Live face with nothing running: say where the data came from and how the
       // link stands, so the panel is honest without being an apology.
-      const char* link = dashState == DashState::Connected     ? "Live"
-                         : dashState == DashState::Connecting  ? "Connecting\xE2\x80\xA6"
-                         : dashState == DashState::WifiJoining ? "Joining Wi-Fi\xE2\x80\xA6"
-                         : dashState == DashState::Discovering ? "Offline \xC2\xB7 searching\xE2\x80\xA6"
-                                                               : "Offline";
+      const char* link = dashState == DashState::Connected     ? tr(STR_POCKET_UPDATED)
+                         : dashState == DashState::Connecting  ? tr(STR_POCKET_CONNECTING)
+                         : dashState == DashState::WifiJoining ? tr(STR_POCKET_CHECKING)
+                         : dashState == DashState::Discovering ? tr(STR_POCKET_SEARCHING)
+                                                               : tr(STR_POCKET_OFFLINE);
       if (syncedHm[0])
         snprintf(status, sizeof(status), "%s \xC2\xB7 synced %s", link, syncedHm);
       else
@@ -3144,7 +2999,8 @@ void AgentDashboardActivity::renderGlance(GlanceReason reason) {
     renderer.displayBuffer(fullClean ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
   } else {
     // Confirm resumes the open book (M9 stage 1) — label it only when there is one.
-    const auto labels = mappedInput.mapLabels("Exit", APP_STATE.openEpubPath.empty() ? "" : "Read", "", "");
+    const auto labels = mappedInput.mapLabels(tr(STR_POCKET_LIBRARY),
+                                              APP_STATE.openEpubPath.empty() ? "" : tr(STR_POCKET_READ), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer();
   }
@@ -3253,11 +3109,25 @@ void AgentDashboardActivity::render(RenderLock&&) {
   OverviewRow rows[kOverviewCap];
   int n = collectOverview(rows, kOverviewCap);
 
-  // Nothing running (offline, booting, or simply an idle desk): the panel is an
-  // information surface first and an agent controller second, so show the
-  // glance — weather, remaining AI budget, what was last being worked on —
-  // instead of an empty deck or a "connect me" apology. The glance survives
-  // reboots in the deck cache, so this works with no daemon and no network.
+  // No live data yet (boot / daemon lost): append persisted Pocket cards after
+  // the local Continue Reading row. Once any live feed arrives it wins, even
+  // when empty; the cache must never mask fresher truth.
+  bool fromCache = false;
+  uint32_t asOfEpoch = 0;
+  bool dataReceived;
+  AgentDeck::lockState();
+  dataReceived = AgentDeck::g_state.dataReceived;
+  asOfEpoch = cachedDeck ? cachedDeck->savedEpoch : 0;
+  AgentDeck::unlockState();
+  if (!dataReceived) {
+    const int beforeCache = n;
+    n = appendRowsFromCache(rows, kOverviewCap, n);
+    fromCache = n > beforeCache;
+  }
+
+  // With neither a book nor a Pocket item, personal glance remains useful as
+  // an offline retained frame (reading/weather/today). It never outranks saved
+  // items that can be opened and consumed.
   if (n == 0) {
     bool haveGlance = false;
     AgentDeck::lockState();
@@ -3270,23 +3140,6 @@ void AgentDashboardActivity::render(RenderLock&&) {
       renderGlance(GlanceReason::Ambient);
       ambientGlanceShown = true;
       return;
-    }
-  }
-
-  // M5.5: no live data yet (boot / daemon lost) → render the persisted deck.
-  // dataReceived is the chokepoint: once any live state arrives, live wins even
-  // when it says "no sessions" — the cache must never mask fresher truth.
-  bool fromCache = false;
-  uint32_t asOfEpoch = 0;
-  if (n == 0) {
-    bool dataReceived;
-    AgentDeck::lockState();
-    dataReceived = AgentDeck::g_state.dataReceived;
-    asOfEpoch = cachedDeck ? cachedDeck->savedEpoch : 0;
-    AgentDeck::unlockState();
-    if (!dataReceived) {
-      n = buildRowsFromCache(rows, kOverviewCap);
-      fromCache = n > 0;
     }
   }
 

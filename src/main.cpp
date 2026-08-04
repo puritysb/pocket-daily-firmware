@@ -551,34 +551,18 @@ void setup() {
     // through to the sleep-wake "resume reader" logic, which fires on stale
     // openEpubPath + lastSleepFromReader from a prior session.
     activityManager.goHome();
-  } else if (SETTINGS.startupApp == CrossPointSettings::STARTUP_AGENTDECK &&
-             !mappedInputManager.isPressed(MappedInputManager::Button::Back)) {
-    // Boot-to-card: AgentDeck's card face is this device's home. Holding Back
-    // during boot is the escape hatch to the reader home; exiting the dashboard
-    // also lands there (its onExit silentRestart targets home).
-    // Holding Confirm (OK) skips the dashboard entirely and resumes the open
-    // book — the glance sleep frame advertises this ("wake holding OK") so the
-    // pocket-to-reading path is one power press + one held button. The
-    // readerActivityLoadCount guard keeps a crashing book from being re-entered.
-    if (mappedInputManager.isPressed(MappedInputManager::Button::Confirm) && !APP_STATE.openEpubPath.empty() &&
-        APP_STATE.readerActivityLoadCount == 0) {
-      LOG_INF("MAIN", "Boot-to-reader (OK held at wake)");
-      activityManager.goToReader(APP_STATE.openEpubPath);
-    } else {
-      activityManager.goToAgent();
-    }
-  } else if (APP_STATE.openEpubPath.empty() || !APP_STATE.lastSleepFromReader ||
-             mappedInputManager.isPressed(MappedInputManager::Button::Back) || APP_STATE.readerActivityLoadCount > 0) {
-    // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity
-    // crashed (indicated by readerActivityLoadCount > 0)
+  } else if (mappedInputManager.isPressed(MappedInputManager::Button::Back)) {
+    // The library is always one deliberate held button away, but is no longer
+    // the product's default boot identity.
     activityManager.goHome();
+  } else if (mappedInputManager.isPressed(MappedInputManager::Button::Confirm) && !APP_STATE.openEpubPath.empty() &&
+             APP_STATE.readerActivityLoadCount == 0) {
+    LOG_INF("MAIN", "Pocket boot: resume reader (OK held)");
+    activityManager.goToReader(APP_STATE.openEpubPath);
   } else {
-    // Clear app state to avoid getting into a boot loop if the epub doesn't load
-    const auto path = APP_STATE.openEpubPath;
-    APP_STATE.openEpubPath = "";
-    APP_STATE.readerActivityLoadCount++;
-    APP_STATE.saveToFile();
-    activityManager.goToReader(path);
+    // Pocket is the product shell on every ordinary boot. AgentDeck remains a
+    // background sync source; its availability never decides where boot lands.
+    activityManager.goToAgent();
   }
 
   if (resume == BootResume::Silent) {

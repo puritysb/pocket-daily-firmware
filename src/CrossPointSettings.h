@@ -243,12 +243,14 @@ class CrossPointSettings {
   // Auto-sleep timeout setting (default 10 minutes). Legacy sleepTimeout enum values are migration-only.
   uint8_t sleepTimeoutMinutes = 10;
   // Boot destination (STARTUP_APP). Persisted via SettingsList key "startupApp".
-  uint8_t startupApp = STARTUP_HOME;
-  // AgentDeck M6 battery pull-sync cadence: when on (and the dashboard is the
-  // startup app), the idle dashboard deep-sleeps between HTTP feed pulls
-  // instead of holding a live WS connection. Off by default — the timed sleep
-  // holds the battery latch (higher sleep current than the power-off gesture).
-  uint8_t agentPullSyncEnabled = 0;
+  // This fork is a Pocket reader product. The legacy setting remains readable
+  // for file compatibility, but new installs start on the Pocket surface.
+  uint8_t startupApp = STARTUP_AGENTDECK;
+  // Pocket background cadence: the idle reader deep-sleeps between bounded
+  // HTTP feed pulls instead of holding a live WS connection. New installs opt
+  // in; users may disable it because timed sleep holds the battery latch and
+  // therefore draws more than the full power-off gesture.
+  uint8_t agentPullSyncEnabled = 1;
   // E-ink refresh frequency (default 15 pages)
   uint8_t refreshFrequency = REFRESH_15;
   uint8_t hyphenationEnabled = 0;

@@ -122,6 +122,9 @@ SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char
     first = false;
   };
   if (echoSig && echoSig[0]) app("sig=%s", echoSig);
+  // New Pocket-reader firmware asks for daemon-authored portable cards only.
+  // Older firmware omits this parameter and keeps receiving session rows.
+  app("surface=%s", "pocket-reader");
   // Board identity lets the daemon attach a board-targeted `fw` staging advert
   // (contract § Pull OTA) without relying on its IP→board memory.
   if (board && board[0]) app("board=%s", board);

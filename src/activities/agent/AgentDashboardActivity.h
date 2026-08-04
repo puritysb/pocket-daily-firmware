@@ -1,6 +1,6 @@
 #pragma once
 //
-// AgentDashboardActivity — entry point for the AgentDeck "Decision Card" mode.
+// AgentDashboardActivity — offline-first Pocket reader shell.
 //
 // M1: scaffold + AgentLog SD diagnostic channel.
 // M2 (this commit): NETWORK layer. Brings up WiFi (mirrors CalibreConnect),
@@ -41,16 +41,18 @@ class AgentDashboardActivity final : public Activity {
   // instead of the generic sleep screen — the retained frame stays useful.
   bool paintSleepFrame() override;
 
-  // Keep the main loop tight + the radio awake while we're servicing the daemon.
-  bool skipLoopDelay() override { return dashState != DashState::WifiSelection; }
-  bool preventAutoSleep() override { return dashState != DashState::WifiSelection; }
+  // Offline is the normal resting state: do not spin or pin the device awake
+  // merely because no network is available. Pull wakes stay awake until their
+  // bounded sync attempt finishes.
+  bool skipLoopDelay() override { return dashState != DashState::WifiSelection && dashState != DashState::Offline; }
+  bool preventAutoSleep() override { return pullMode; }
 
  private:
   // WifiJoining = background STA join with saved credentials (no picker UI —
   // the Face renders immediately and the join is just a status line). The
   // interactive WifiSelection picker is only pushed when there are no saved
   // credentials or the background join times out.
-  enum class DashState : uint8_t { WifiSelection, WifiJoining, Discovering, Connecting, Connected };
+  enum class DashState : uint8_t { Offline, WifiSelection, WifiJoining, Discovering, Connecting, Connected };
 
   // One session needing attention. Collected from sessions_list (or the focused
   // state_update fallback) and classified by the shared attention contract;
@@ -63,9 +65,8 @@ class AgentDashboardActivity final : public Activity {
     AgentDeck::AttentionMode attentionMode;
   };
 
-  // Compact per-session row for the Overview / Mission Control list. The bounded
-  // activity copy is intentionally large enough for 2–3 visible lines; at the
-  // 10-session cap this array adds 1,920 bytes to the render-task stack.
+  // Compact row for the local book or one daemon-authored Pocket item. Fixed
+  // buffers keep the render-task stack bounded on the no-PSRAM C3.
   struct OverviewRow {
     char sid[72];  // session id or autonomous module cardId
     char project[40];
@@ -75,9 +76,12 @@ class AgentDashboardActivity final : public Activity {
     char activity[AgentDeck::SESSION_ACTIVITY_CAP];
     bool awaiting;
     bool pocket;
+    bool reading;
   };
 
-  static constexpr int kOverviewCap = AgentDeckCfg::SESSIONS_CAP + AgentDeck::POCKET_CARD_CAP;
+  // One local continue-reading row plus the fixed Pocket pool. Live AgentDeck
+  // sessions remain an input to daemon-authored cards, never top-level rows.
+  static constexpr int kOverviewCap = 1 + AgentDeck::POCKET_CARD_CAP;
 
   // Which screen the Connected dashboard is showing. Overview is home; OK opens a
   // session's read-only Detail (timeline + inline options as a fallback grammar).
@@ -117,6 +121,7 @@ class AgentDashboardActivity final : public Activity {
   void handleButtons();
   bool applyDecision(const AwaitingItem& it, int optionCursor);
   bool applyPocketChoice(const AgentDeck::PocketCard& card, int optionCursor);
+  bool deferPocketCard(const AgentDeck::PocketCard& card);
   void dismissPocketCard(const char* cardId);
   // fromCache renders the persisted deck (display-only, no selection/Open) with
   // an "as of" sync-age line derived from asOfEpoch. Live renders pass false/0.
@@ -253,7 +258,7 @@ class AgentDashboardActivity final : public Activity {
   // Persist the live deck to SD when its content changed (throttled; loop task).
   void serviceDeckPersist();
   // Copy the cached deck into overview rows for the offline Face. Returns count.
-  int buildRowsFromCache(OverviewRow* out, int cap) const;
+  int appendRowsFromCache(OverviewRow* out, int cap, int start) const;
   // Current unix-seconds estimate: NTP clock first, daemon-clock estimate else 0.
   static uint32_t bestEpochNow();
 
