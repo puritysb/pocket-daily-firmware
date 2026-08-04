@@ -13,30 +13,6 @@ Mission: Provide a lightweight, high-performance reading experience focused on E
 * Verification: After suggesting a fix, instruct the user on how to verify it (e.g., monitoring heap via Serial or checking a specific cache file).
 ---
 
-## Development Environment Awareness
-
-**CRITICAL**: Detect the host platform at session start to choose appropriate tools and commands.
-
-### Platform Detection
-```bash
-# Detect platform (run once per session)
-uname -s
-# Returns: MINGW64_NT-* (Windows Git Bash), Linux, Darwin (macOS)
-```
-
-**Detection Required**: Run `uname -s` at session start to determine platform
-
-### Platform-Specific Behaviors
-- **Windows (Git Bash)**: Unix commands, `C:\` paths in Windows but `/` in bash, limited glob (use `find`+`xargs`)
-- **Linux/WSL**: Full bash, Unix paths, native glob support
-
-**Cross-Platform Code Formatting**:
-```bash
-find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i
-```
-
----
-
 ## Platform and Hardware Constraints
 
 ### Hardware Specs
@@ -65,20 +41,6 @@ find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i
 ## Project Architecture
 
 ### Build System: PlatformIO
-
-**PlatformIO is BOTH a VS Code extension AND a CLI tool**:
-
-1. **VS Code Extension** (Recommended):
-   * Extension ID: `platformio.platformio-ide` (see `.vscode/extensions.json`)
-   * Provides: Toolbar buttons, IntelliSense, integrated build/upload/monitor
-   * Configuration: `.vscode/c_cpp_properties.json`, `.vscode/tasks.json`
-   * Usage: Click Build (✓), Upload (→), or Monitor (🔌) buttons
-
-2. **CLI Tool** (`pio` command):
-   * **Installation**: Python package (typically `pip install platformio`)
-   * **Windows Location**: `C:\Users\<user>\AppData\Local\Programs\Python\Python3xx\Scripts\pio.exe`
-   * **Verify**: `which pio` (Git Bash) or `where.exe pio` (cmd)
-   * **Usage**: `pio run`, `pio run -t upload`, etc.
 
 **Configuration Files**:
 * `platformio.ini`: Main build configuration (committed to git)
@@ -121,14 +83,6 @@ These flags in `platformio.ini` fundamentally affect firmware behavior:
 - Grayscale rendering requires temporary buffer allocation (`renderer.storeBwBuffer()`)
 - Must call `renderer.restoreBwBuffer()` to free temporary buffers
 - See [lib/GfxRenderer/GfxRenderer.cpp:439-440](../lib/GfxRenderer/GfxRenderer.cpp) for malloc usage
-
-### Directory Structure
-* lib/: Internal libraries (Epub engine, GfxRenderer, UITheme, I18n)
-  * lib/hal/: Hardware Abstraction Layer (HalDisplay, HalGPIO, HalStorage)
-  * lib/I18n/: Internationalization (translations in `translations/*.yaml`, generated string tables)
-* src/activities/: UI logic using the Activity Lifecycle (onEnter, loop, onExit)
-* open-x4-sdk/: Low-level SDK (EInkDisplay, InputManager, BatteryMonitor, SDCardManager)
-* .crosspoint/: SD-based binary cache for EPUB metadata and pre-rendered layout sections
 
 ### Hardware Abstraction Layer (HAL)
 
@@ -272,49 +226,11 @@ When a template is necessary, limit instantiations: use explicit template instan
 
 **Rules**: NO exceptions, NO abort(), ALWAYS log before error return
 
-### Heap Buffer Allocation
+### Heap Allocation: Always Use `makeUniqueNoThrow`
 
-**Prefer `makeUniqueNoThrow` over `malloc`.** Both are nothrow (return `nullptr` on OOM rather than calling `abort()`), but `malloc` requires a manual `free` on every return path — a common source of leaks. `makeUniqueNoThrow<uint8_t[]>(size)` from `lib/Memory/Memory.h` frees automatically when it goes out of scope.
+**CRITICAL**: With `-fno-exceptions`, bare `new` on OOM calls `abort()` — it does NOT return `nullptr`. `makeUniqueNoThrow` from `lib/Memory/Memory.h` wraps `new (std::nothrow)` and returns a `std::unique_ptr` that is null on OOM and frees automatically on scope exit. `malloc` is also nothrow, but requires a manual `free` on every return path — a common source of leaks.
 
-**Preferred pattern**:
-```cpp
-#include <Memory.h>
-
-auto buffer = makeUniqueNoThrow<uint8_t[]>(bufferSize);
-if (!buffer) {
-  LOG_ERR("MODULE", "OOM: %d bytes", bufferSize);
-  return false;
-}
-
-processData(buffer.get(), bufferSize);
-// freed automatically — no manual free needed, no leak on early return
-```
-
-**`malloc` or `new (std::nothrow)` are still acceptable** when the buffer must be passed to a C API that takes ownership and frees it itself (e.g., certain SDK callbacks). In that case follow the manual pattern:
-```cpp
-auto* buffer = static_cast<uint8_t*>(malloc(bufferSize));  // or new (std::nothrow) uint8_t[bufferSize]
-if (!buffer) {
-  LOG_ERR("MODULE", "OOM: %d bytes", bufferSize);
-  return false;
-}
-sdkApiThatTakesOwnership(buffer, bufferSize);  // SDK calls free() / delete[]
-```
-
-**Rules**:
-- **Prefer `makeUniqueNoThrow`** — automatic cleanup eliminates leak risk on error paths
-- **ALWAYS check for nullptr** after any allocation and `LOG_ERR` before returning false
-- **Raw allocation only** when a C API takes ownership; document why in a comment
-
-**Examples in codebase**:
-- Memory utilities: [Memory.h](../lib/Memory/Memory.h) (`makeUniqueNoThrow`)
-- Cover image buffers: [HomeActivity.cpp:166](../src/activities/home/HomeActivity.cpp)
-- Bitmap rendering: [GfxRenderer.cpp:439-440](../lib/GfxRenderer/GfxRenderer.cpp)
-
-### Heap Allocation with `new`: Always Use `makeUniqueNoThrow`
-
-**CRITICAL**: With `-fno-exceptions`, bare `new` on OOM calls `abort()` — it does NOT return `nullptr`. Always use `makeUniqueNoThrow` from `lib/Memory/Memory.h`, which wraps `new (std::nothrow)` and returns a `std::unique_ptr` that is null on OOM and automatically frees on scope exit.
-
-**Preferred pattern**:
+**Preferred pattern** — objects and buffers alike:
 ```cpp
 #include <Memory.h>
 
@@ -324,26 +240,28 @@ if (!obj) { LOG_ERR("MOD", "OOM: MyClass"); return false; }
 auto buf = makeUniqueNoThrow<uint8_t[]>(size);
 if (!buf) { LOG_ERR("MOD", "OOM: %d bytes", size); return false; }
 
-// Pass to C APIs via .get(); unique_ptr frees automatically on return
+// Pass to C APIs via .get(); unique_ptr frees automatically, no leak on early return
 someApi(buf.get(), size);
 ```
 
-**`new (std::nothrow)` directly is acceptable** when the object must be passed to a C API that takes ownership and calls `delete` itself:
+**Raw `malloc` / `new (std::nothrow)` are acceptable only** when the allocation is handed to a C API that takes ownership and frees it itself (e.g. certain SDK callbacks). Then follow the manual pattern and document why:
 ```cpp
-auto* obj = new (std::nothrow) MyClass(args);
-if (!obj) { LOG_ERR("MOD", "OOM: MyClass"); return false; }
-sdkApiThatTakesOwnership(obj);  // SDK calls delete
+auto* buffer = static_cast<uint8_t*>(malloc(bufferSize));  // or new (std::nothrow) uint8_t[bufferSize]
+if (!buffer) { LOG_ERR("MOD", "OOM: %d bytes", bufferSize); return false; }
+sdkApiThatTakesOwnership(buffer, bufferSize);  // SDK calls free() / delete[]
 ```
 
 **Rules**:
 - **Prefer `makeUniqueNoThrow`** — automatic cleanup eliminates leak risk on error paths
 - **NEVER use bare `new`** — always `makeUniqueNoThrow` or `new (std::nothrow)`
-- **ALWAYS `LOG_ERR` before returning false** on OOM
+- **ALWAYS check for nullptr** after any allocation and `LOG_ERR` before returning false
 - **Use `.get()`** to pass the raw pointer to C-style APIs; ownership stays with the `unique_ptr`
-- **`new (std::nothrow)` directly only** when a C API takes ownership; document why in a comment
+- **Raw allocation only** when a C API takes ownership; document why in a comment
 
 **Examples in codebase**:
 - Memory utilities: [Memory.h](../lib/Memory/Memory.h) (`makeUniqueNoThrow`)
+- Cover image buffers: [HomeActivity.cpp:166](../src/activities/home/HomeActivity.cpp)
+- Bitmap rendering: [GfxRenderer.cpp:439-440](../lib/GfxRenderer/GfxRenderer.cpp)
 
 ---
 
@@ -452,158 +370,33 @@ void onExit()   { /* free: vTaskDelete, free buffer, close member FsFiles */ Act
 
 ### Global Font Loading
 
-**Source**: [src/main.cpp:40-115](../src/main.cpp)
-
-**All fonts are loaded as global static objects** at firmware startup:
-- Noto Serif: 12, 14, 16, 18pt (4 styles each: regular, bold, italic, bold-italic)
-- Noto Sans: 12, 14, 16, 18pt (4 styles each)
-- Ubuntu UI fonts: 10, 12pt (2 styles)
-
-**Total**: ~80+ global `EpdFont` and `EpdFontFamily` objects
-
-**Compilation Flag**:
-```cpp
-#ifndef OMIT_FONTS
-  // Most fonts loaded here
-#endif
-```
-
-**Implications**:
-- Fonts stored in **Flash** (marked as `static const` in `lib/EpdFont/builtinFonts/`)
-- Font rendering data cached in **DRAM** when first used
-- `OMIT_FONTS` can reduce binary size for minimal builds
-- Font IDs defined in [src/fontIds.h](../src/fontIds.h)
-
-**Usage**:
-```cpp
-#include "fontIds.h"
-
-renderer.insertFont(FONT_UI_MEDIUM, ui12FontFamily);
-renderer.drawText(FONT_UI_MEDIUM, x, y, "Hello", true);
-```
+Fonts are ~80+ global static `EpdFont` / `EpdFontFamily` objects constructed at startup in
+`src/main.cpp`, guarded by `#ifndef OMIT_FONTS`. Glyph data lives in **Flash** (`static const`
+in `lib/EpdFont/builtinFonts/`); rendering data is cached in **DRAM** on first use — so adding
+a font costs DRAM at runtime, not just flash. Font IDs are in [src/fontIds.h](../src/fontIds.h);
+`OMIT_FONTS` shrinks minimal builds.
 
 ---
 
 ## Testing and Debugging
 
-### Build Commands
+### Getting a build onto the device
 
-**Via CLI**:
-```bash
-# Build firmware (default environment)
-pio run
-
-# Build and upload to device
-pio run -t upload
-
-# Build specific environment
-pio run -e gh_release
-
-# Clean build artifacts
-pio run -t clean
-
-# Upload filesystem data (if using SPIFFS/LittleFS)
-pio run -t uploadfs
-```
-
-**Via VS Code**:
-* Use PlatformIO toolbar: Build (✓), Upload (→), Clean (🗑️)
-* Or Command Palette: `PlatformIO: Build`, `PlatformIO: Upload`, etc.
-
-### Firmware Staging (USB-free iteration)
-
-Every successful `pio run` auto-stages the built binary to `firmware/` (gitignored) via
-`scripts/stage_firmware.py`:
-
-```
-firmware/
-  update.bin                                # always latest — copy this to SD card
-  crosspoint-<version>-<env>-<sha>-<date>.bin  # versioned archive (keeps last 5)
-  LATEST_BUILD.txt                          # version, commit, size, install steps
-```
-
-**Install on-device without USB:**
-1. Copy `firmware/update.bin` to the root of the SD card.
-2. Hold **UP + POWER** to boot into recovery firmware mode.
-3. Pick `update.bin` from the file browser and confirm.
-
-**Optional auto-copy to a mounted SD card reader:** set `FIRMWARE_STAGING_DIR` (env var)
-or add `firmware_staging_dir` in `platformio.local.ini`:
-
-```ini
-# platformio.local.ini
-[env:default]
-firmware_staging_dir = /Volumes/SDCARD
-```
-
-### Monitoring and Debugging
-
-```bash
-# Enhanced monitor with color/logging (recommended)
-python3 scripts/debugging_monitor.py
-
-# Standard PlatformIO monitor
-pio device monitor
-
-# Combined upload + monitor
-pio run -t upload && pio device monitor
-```
-
-**Via VS Code**: Click Monitor (🔌) button in PlatformIO toolbar
+`pio run -t upload` over USB, or the SD-card path — every successful `pio run` auto-stages
+`firmware/update.bin`. Full procedure: **`firmware-deploy` skill**.
 
 ### Code Quality
 
 ```bash
-# Static analysis (cppcheck)
-pio check
-
-# Format code (clang-format) - Windows Git Bash
-find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i
-
-# Format code (clang-format) - Linux
-clang-format -i src/**/*.cpp src/**/*.h
+pio check                                                    # static analysis (cppcheck)
+find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i  # format (portable form)
 ```
 
 ### Debugging Crashes
 
-**Common Crash Causes**:
-
-1. **Out of Memory** (Most common):
-   ```cpp
-   LOG_DBG("MEM", "Free heap: %d bytes", ESP.getFreeHeap());
-   ```
-   - Monitor heap usage throughout activity lifecycle
-   - Check if large allocations (>10KB) occur before crash
-   - Verify buffers are freed in `onExit()`
-
-2. **Stack Overflow**:
-   ```cpp
-   LOG_DBG("TASK", "Stack high water: %d", uxTaskGetStackHighWaterMark(taskHandle));
-   ```
-   - Occurs during deep recursion or large local variables
-   - Increase task stack size in `xTaskCreate()` (2048 → 4096)
-   - Move large buffers to heap with malloc
-
-3. **Use-After-Free**:
-   - Activity deleted but task still running
-   - Always `vTaskDelete()` in `onExit()` BEFORE activity destruction
-   - Set pointers to `nullptr` after `free()`
-
-4. **Corrupt Cache Files**:
-   - Delete `.crosspoint/` directory on SD card
-   - Forces clean re-parse of all EPUBs
-   - Check file format versions in [docs/file-formats.md](../docs/file-formats.md)
-
-5. **Watchdog Timeout**:
-   - Loop/task blocked for >5 seconds
-   - Add `vTaskDelay(1)` in tight loops
-   - Check for blocking I/O operations
-
-**Verification Steps**:
-1. Check serial output for stack traces
-2. Monitor heap with `ESP.getFreeHeap()` before/after operations
-3. Verify task deletion with task list (`vTaskList()`)
-4. Test with `LOG_LEVEL=2` (debug logging enabled)
+Almost every crash here is a resource crash: OOM, stack overflow, use-after-free, a corrupt
+cache, or a watchdog timeout. Diagnosis procedure and instrumentation for each:
+**`debug-crashes` skill**.
 
 ---
 
@@ -611,115 +404,29 @@ clang-format -i src/**/*.cpp src/**/*.h
 
 ### Repository Detection Protocol
 
-**CRITICAL**: ALWAYS verify repository context before git operations. This could be:
-- A **fork** with `origin` pointing to personal repo, `upstream` to main repo
-- A **direct clone** with `origin` pointing to main repo
-- Multiple collaborator remotes
+**CRITICAL**: verify repository context before any git operation — never assume. This clone
+may be a fork (`origin` = personal, `upstream` = parent), a direct clone, or carry extra
+collaborator remotes. Check `git remote -v` and `git branch --show-current` first. The main
+branch here is **`master`**, not `main`. See the fork section below for what that means in
+practice.
 
-**Verification Commands** (run at session start):
-```bash
-# Check current branch
-git branch --show-current
-
-# Check all remotes
-git remote -v
-
-# Identify main branch name (could be 'main' or 'master')
-git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@'
-
-# Check working tree status
-git status --short
-```
-
-**Example Output** (forked repository):
-```text
-origin      https://github.com/<your-username>/crosspoint-reader.git (fetch/push)
-upstream    https://github.com/crosspoint-reader/crosspoint-reader.git (fetch/push)
-```
-
-### AgentDeck Fork: Upstream Sync and Contribution
+### AgentDeck Fork: two sync axes
 
 **This repo is a personal fork.** `origin` = your fork (`puritysb/crosspoint-reader`),
 `upstream` = the parent project (`crosspoint-reader/crosspoint-reader`). Local `master`
 intentionally carries the private **"AgentDeck Decision Card"** product stack
-(`src/agentdeck/`, `AgentDashboardActivity`, agentdeck icons — ~2,700 lines) layered on
-top of upstream. **The AgentDeck code is fork-only and never goes upstream.**
+(`src/agentdeck/`, `AgentDashboardActivity`, agentdeck icons — ~2,700 lines) layered on top of
+upstream. **The AgentDeck code is fork-only and never goes upstream.** Our `master` being far
+ahead of `upstream/master` is expected, not drift.
 
-**Key facts**:
-- Upstream's default and stable line is **`master`** (not `main`); releases land there
-  (e.g. tag 1.4.1). Upstream also has `develop` (active dev, a few commits ahead) — only
-  pull that if you explicitly want pre-release work.
-- Our `master` is intentionally far ahead of `upstream/master` (the AgentDeck stack). That
-  divergence is expected, not drift.
+- **Pulling upstream**: `./scripts/sync-upstream.sh` — **merge, never rebase**.
+- **Contributing upstream**: the PR must contain **zero** `src/agentdeck/` files, which means
+  keeping AgentDeck and reader changes in separate commits from the start.
+- **Downstream**: `src/agentdeck/*` is a hand-port of AgentDeck's ESP32 wire contract, with no
+  codegen — drift is a discipline, not a build gate.
 
-**Pulling future upstream updates** — use **merge, not rebase**:
-```bash
-./scripts/sync-upstream.sh           # fetch + report + merge upstream/master into master
-./scripts/sync-upstream.sh --check   # only report pending upstream commits, don't merge
-# then: pio run  (verify build) && git push origin master
-```
-Why merge: our `master` has ~20 AgentDeck commits on top; a rebase replays all of them and
-forces re-resolving the same conflicts every sync. A merge resolves once and preserves the
-AgentDeck history. Conflicts almost always hit only the **AgentDeck-touched shared files**
-(`ActivityManager`, `HomeActivity`, `WifiSelectionActivity`, theme files) — resolve by
-keeping BOTH sides. New `src/agentdeck/*` files never conflict.
-
-**Contributing a general feature back to upstream** (e.g. EPUB/rendering/font work, NOT
-AgentDeck): split it cleanly so the PR contains **zero AgentDeck files**:
-1. Keep EPUB/rendering changes and AgentDeck changes in **separate commits** from the start
-   (do not mix concerns in one commit — that makes extraction painful).
-2. Branch from upstream and cherry-pick only the relevant commits:
-   ```bash
-   git checkout -b feature/<name>-upstream upstream/master
-   git cherry-pick <epub-commit> [<font-commit> ...]   # exclude AgentDeck commits
-   ```
-3. If you touch a cache format, bump the version constant to **upstream's current value + 1**
-   (e.g. `SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
-4. `pio run`, push to `origin`, open a **draft** PR to upstream (public third-party repo —
-   discuss with maintainers before marking ready):
-   ```bash
-   gh pr create --repo crosspoint-reader/crosspoint-reader \
-     --base master --head <your-user>:feature/<name>-upstream --draft
-   ```
-
-### Downstream: AgentDeck-integration port sync
-
-There is a **second** sync axis, symmetric to the upstream one above. `src/agentdeck/*` is
-a **hand-port of AgentDeck's ESP32 wire contract**, not first-party AgentDeck code — the
-files carry a *"TRIMMED port of AgentDeck esp32/src/net/protocol"* header. The contract they
-port from is the SSOT in the **AgentDeck** repo:
-- Human-readable client subset: `AgentDeck/docs/esp32-client-contract.md`
-- Machine-readable source: `AgentDeck/shared/src/protocol.ts`
-  (`DISPLAY_FORWARDED_EVENTS` / `SERIAL_FORWARDED_EVENTS`) and the `sendDeviceInfo` field
-  list in `AgentDeck/esp32/src/net/protocol.cpp`.
-
-There is **no C/C++ codegen** for this contract (quicktype emits Swift/Kotlin only; unusable
-on the no-PSRAM C3 with ArduinoJson). So drift is a discipline, not a build gate:
-
-**When AgentDeck bumps the contract** (adds/renames a forwarded event, or changes a
-`device_info` field), re-port the affected files here:
-`src/agentdeck/{ws_client,protocol,mdns_discovery,udp_discovery,agent_state,agent_commands}.*`.
-Keep the port minimal — a display-only client may accept-and-ignore any inbound `type` it
-doesn't render.
-
-The fork emits both `client_register` and `device_info` on connect, with runtime board strings
-`xteink_x3` / `xteink_x4`; `display_state` / `set_orientation` may remain accept-and-ignore for
-the reader activity. This is the fork-side half; the AgentDeck side of this discipline lives
-in `AgentDeck/docs/esp32.md § Downstream client port sync`.
-
-**E-ink dashboard layout sync:** the allocation-free geometry SSOT lives in the AgentDeck repo
-at `esp32/src/ui/eink/eink_dashboard_layout.h`. AgentDeck's
-`scripts/sync-xteink-eink-dashboard.sh` mirrors it byte-for-byte to
-`src/agentdeck/eink_dashboard_layout.h`; run the script with `--check` after layout changes.
-CrossPoint keeps its own GfxRenderer, font loading, button hints, and detail interaction — only
-header/card/usage/activity/control geometry and status classification are common.
-
-**Attention steering invariant:** an `awaiting_*` label alone never creates buttons. A real
-`requestId` creates the binary Allow/Deny `permission_decision` gate. Otherwise, only options
-whose `sessionId`/stamped `focusedSessionId` matches the selected managed session are actionable
-(`navigable` → `select_option`, non-navigable → `respond(shortcut)`). An observed session without
-`requestId` is display-only and must say to respond in the terminal; never synthesize options or
-map Deny to `escape`. The wire-level SSOT is AgentDeck `docs/esp32-client-contract.md`.
+Full procedure for all three: **`fork-sync` skill**. Behavioural contract for the dashboard:
+`src/agentdeck/CLAUDE.md`.
 
 ### Git Operation Rules
 
@@ -831,71 +538,27 @@ Tested in all 4 orientations with 5MB+ files.
    - `*.generated.h` - Any auto-generated headers
    - `compile_commands.json` - LSP/IDE metadata
 
-### Modifying Generated Content Workflow
+### Modifying Generated Content
 
-**To change HTML pages**:
-1. Edit source: `data/html/<pagename>.html`
-2. Build: `pio run` (auto-triggers `scripts/build_html.py`)
-3. Generated headers update: `src/network/html/<pagename>Html.generated.h`
-4. **Commit ONLY** source HTML, NOT generated `.generated.h` files
+Find the source, edit that, regenerate, commit the source only. Per-family procedure (i18n
+YAML, HTML pages, fonts): **`generated-content` skill**.
 
-**To add/modify translations (i18n)**:
-1. Edit or add YAML file: `lib/I18n/translations/<language>.yaml`
-   - Each file must contain: `_language_name`, `_language_code`, `_order`, and `STR_*` keys
-   - English (`english.yaml`) is the reference; missing keys in other languages fall back to English
-2. Run generator: `python scripts/gen_i18n.py lib/I18n/translations lib/I18n/`
-3. Generated files update: `I18nKeys.h`, `I18nStrings.h`, `I18nStrings.cpp`
-4. **Commit** source YAML files only. All three generated files are in `.gitignore` and regenerated at build time.
-
-**To use translated strings in code**:
 ```cpp
 #include <I18n.h>
-// Use tr() macro with StrId enum (defined in generated I18nKeys.h)
+// All user-facing text goes through tr(); StrId enum lives in generated I18nKeys.h
 renderer.drawText(FONT_UI, x, y, tr(STR_LOADING), true);
 ```
-
-**To add custom fonts**:
-1. Place source fonts in `lib/EpdFont/fontsrc/` (gitignored)
-2. Run conversion script (see `lib/EpdFont/README`)
-3. Update global font objects in `src/main.cpp:40-115`
-4. Add font ID constant to `src/fontIds.h`
 
 ---
 
 ## Local Development Configuration
 
-### platformio.local.ini (Personal Overrides)
+`platformio.local.ini` holds per-machine settings (serial ports, personal debug flags) and
+overrides `platformio.ini`.
 
-**Purpose**: Personal development settings that should NEVER be committed.
-
-**Use Cases**:
-- Serial port configuration (varies by machine)
-- Debug flags for specific testing
-- Local build optimizations
-- Developer-specific paths
-
-**Example** `platformio.local.ini`:
-```ini
-# platformio.local.ini (gitignored)
-[env:default]
-upload_port = COM7              # Windows: COMx, Linux: /dev/ttyUSBx
-monitor_port = COM7
-
-build_flags =
-  ${base.build_flags}
-  -DMY_DEBUG_FLAG=1             # Personal debug flags
-  -DTEST_FEATURE_ENABLED=1
-```
-
-**Configuration Hierarchy**:
-1. `platformio.ini` - **Committed**, shared project settings
-2. `platformio.local.ini` - **Gitignored**, personal overrides
-3. Local file extends/overrides base config
-
-**Rules**:
-- **NEVER commit** `platformio.local.ini`
-- **NEVER put** personal info (serial ports, credentials) in main `platformio.ini`
-- Use `${base.build_flags}` to extend (not replace) base flags
+- **NEVER commit** `platformio.local.ini` — it is gitignored
+- **NEVER put** personal info (serial ports, credentials) in `platformio.ini`
+- Extend base flags with `${base.build_flags}`; assigning `build_flags` directly replaces them
 
 ---
 
@@ -918,30 +581,19 @@ build_flags =
 
 ### CI/CD Pipeline Awareness
 
-**GitHub Actions** run automatically on pull requests:
-
-| Workflow | File | Purpose |
-|----------|------|---------|
-| Build Check | `.github/workflows/ci.yml` | Verifies code compiles |
-| Format Check | `.github/workflows/pr-formatting-check.yml` | Validates clang-format |
-| Release Build | `.github/workflows/release.yml` | Production releases |
-| RC Build | `.github/workflows/release_candidate.yml` | Release candidates |
+GitHub Actions run on every push to a PR (see `.github/workflows/`).
 
 **Rules**:
 - **Fix CI failures BEFORE** requesting review
-- CI runs on: Push to PR, PR updates
-- Format check fails → Run clang-format locally
-- Build check fails → Fix compile errors
+- Format check fails → run clang-format locally
+- Build check fails → fix compile errors
 
 ---
 
 ## Serial Monitoring and Live Debugging
 
-### Serial Monitor Options
-
-1. **Enhanced**: `python3 scripts/debugging_monitor.py` (color-coded, recommended)
-2. **Standard**: `pio device monitor` (basic, no colors)
-3. **VS Code**: Monitor (🔌) button (IDE-integrated)
+**Monitor**: `python3 scripts/debugging_monitor.py` (color-coded, recommended) or
+`pio device monitor` (plain).
 
 ### Live Debugging Patterns
 
@@ -955,87 +607,20 @@ build_flags =
 
 ## Cache Management and Invalidation
 
-### Cache Structure on SD Card
+Books are cached under `.crosspoint/` on the SD card, keyed by a hash of the file path.
+Correctness rests entirely on a version byte per file format.
 
-**Location**: `.crosspoint/` directory on SD card root
+**ALWAYS increment the format version BEFORE changing a binary structure.** A
+same-numbered-but-different-layout header defeats the `version != SECTION_FILE_VERSION` check
+and silently feeds stale caches to the reader — it does not fail loudly.
 
-**Structure**: `.crosspoint/epub_<hash>/{book.bin, progress.bin, cover.bmp, sections/*.bin}`
+**Fork rule**: keep this fork's `SECTION_FILE_VERSION` (currently **129**) in the reserved
+**128–255** range, bumping within it — never onto upstream's line (currently 27, still
+incrementing). The upstream-contribution branch (`bilingual-toggle-upstream`) uses
+`upstream + 1` instead.
 
-**Hash**: `std::hash<std::string>{}(filepath)` → Moving/renaming file = new hash = lost progress
-
-### Cache Invalidation Rules
-
-**Cache is automatically invalidated when**:
-1. **File format version changes** (see `docs/file-formats.md`)
-   - `book.bin` version number incremented
-   - `section.bin` version number incremented
-2. **Render settings change**:
-   - Font family or size (`SETTINGS.fontFamily`, `SETTINGS.fontSize`)
-   - Line spacing (`SETTINGS.lineSpacing`)
-   - Paragraph spacing (`SETTINGS.extraParagraphSpacing`)
-   - Screen margins (`SETTINGS.screenMargin`)
-3. **Viewport dimensions change**:
-   - Screen orientation change
-   - Display resolution change
-4. **Book file modified**:
-   - Moved, renamed, or content changed (new hash)
-
-**Manual Cache Clear** (safe operations):
-```bash
-# Delete ALL caches (forces full regeneration)
-rm -rf /path/to/sd/.crosspoint/
-
-# Delete specific book cache
-rm -rf /path/to/sd/.crosspoint/epub_<hash>/
-
-# Keep progress, delete only rendered sections
-rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
-```
-
-**When to Clear Cache**:
-- EPUB parsing errors after code changes to `lib/Epub/`
-- Corrupt rendering (missing text, wrong layout)
-- Testing cache generation logic
-- After modifying:
-  - `lib/Epub/Epub/Section.cpp`
-  - `lib/Epub/Epub/BookMetadataCache.cpp`
-  - Render settings in `CrossPointSettings`
-
-### Cache File Format Versioning
-
-**Source**: `lib/Epub/Epub/Section.cpp`, `lib/Epub/Epub/BookMetadataCache.cpp`
-
-**Current Versions**:
-- `book.bin`: **Version 7** (metadata structure)
-- `section.bin` (upstream baseline): **Version 27** (layout structure)
-- `section.bin` (**this fork**): **Version 129** — the fork adds a `bilingualViewMode`
-  header field and numbers itself in the **reserved 128–255 range** instead of
-  `upstream + 1`. Upstream keeps incrementing 27→28→…; a same-numbered-but-different-layout
-  header would defeat the `version != SECTION_FILE_VERSION` invalidation and silently
-  feed stale caches to the reader. See the `SECTION_FILE_VERSION` comment in
-  `lib/Epub/Epub/Section.cpp`. v129 also stores a `BILINGUAL_MODE_ANY` sentinel for
-  chapters with no bilingual markers, so cycling view modes reuses their cache instead
-  of forcing a full re-parse (`Section::bilingualModeAgnostic`).
-
-**Version Increment Rules**:
-1. **ALWAYS increment version** BEFORE changing binary structure
-2. Version mismatch → Cache auto-invalidated and regenerated
-3. Document format changes in `docs/file-formats.md`
-4. **Fork rule**: keep the fork's `SECTION_FILE_VERSION` in the **128+ range** (bump
-   within it), never onto upstream's line. The upstream-contribution branch
-   (`bilingual-toggle-upstream`) keeps `upstream + 1` instead.
-
-**Example** (incrementing section format version):
-```cpp
-// lib/Epub/Epub/Section.cpp
-static constexpr uint8_t SECTION_FILE_VERSION = 26;  // Was 25, now 26
-
-// Add new field to structure
-struct PageLine {
-  // ... existing fields ...
-  uint16_t newField;  // New field added
-};
-```
+Cache layout, the full invalidation triggers, and how to clear by hand:
+**`lib/Epub/CLAUDE.md`**. Format documentation: `docs/file-formats.md`.
 
 ---
 
