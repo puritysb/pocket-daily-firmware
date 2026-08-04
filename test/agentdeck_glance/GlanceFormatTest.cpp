@@ -108,3 +108,24 @@ TEST(GlanceState, ClearRestoresSentinels) {
 }
 
 }  // namespace
+
+TEST(GlanceEventFormat, EventLineComposes) {
+  AgentDeck::GlanceEvent e;
+  e.clear();
+  snprintf(e.title, sizeof(e.title), "Standup");
+  char buf[96];
+  AgentDeck::GlanceFormat::formatEventLine(buf, sizeof(buf), e);
+  EXPECT_STREQ(buf, "Standup");  // all-day: no times
+
+  snprintf(e.startHm, sizeof(e.startHm), "09:30");
+  AgentDeck::GlanceFormat::formatEventLine(buf, sizeof(buf), e);
+  EXPECT_STREQ(buf, "09:30 Standup");
+
+  snprintf(e.endHm, sizeof(e.endHm), "10:00");
+  AgentDeck::GlanceFormat::formatEventLine(buf, sizeof(buf), e);
+  EXPECT_STREQ(buf, "09:30\xE2\x80\x93""10:00 Standup");
+
+  e.title[0] = '\0';
+  EXPECT_EQ(AgentDeck::GlanceFormat::formatEventLine(buf, sizeof(buf), e), 0);
+  EXPECT_STREQ(buf, "");
+}

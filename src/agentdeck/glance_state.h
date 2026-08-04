@@ -54,8 +54,8 @@ struct GlanceWeather {
 };
 
 struct GlanceUsageRow {
-  char provider[8];  // "claude" / "codex"
-  char label[12];    // "Claude" / "Codex"
+  char provider[8];         // "claude" / "codex"
+  char label[12];           // "Claude" / "Codex"
   int8_t primaryPercent;    // 5h used %, -1 = none
   int8_t secondaryPercent;  // 7d used %, -1 = none
   char primaryResetHm[6];   // absolute daemon-local "HH:MM", "" = none
@@ -67,10 +67,21 @@ struct GlanceUsageRow {
   }
 };
 
+// One calendar event for today's schedule. The daemon pre-trims the title to
+// the byte budget and sends absolute local times only (same honesty rule as
+// the rest of the glance: a retained frame must stay true without a repaint).
+struct GlanceEvent {
+  char startHm[6];  // "HH:MM", "" = all-day
+  char endHm[6];    // "HH:MM", "" = none reported
+  char title[49];   // 48-byte budget + NUL, daemon-trimmed UTF-8
+  void clear() { memset(this, 0, sizeof(*this)); }
+};
+
 struct GlanceInfo {
   static constexpr uint8_t USAGE_CAP = 3;
   static constexpr uint8_t WRAPUP_CAP = 4;
   static constexpr size_t WRAPUP_BYTES = 65;  // 64-byte budget + NUL
+  static constexpr uint8_t EVENT_CAP = 3;
 
   bool valid;  // a glance block arrived at least once
   GlanceWeather weather;
@@ -78,11 +89,14 @@ struct GlanceInfo {
   uint8_t usageCount;
   char wrapup[WRAPUP_CAP][WRAPUP_BYTES];
   uint8_t wrapupCount;
+  GlanceEvent events[EVENT_CAP];
+  uint8_t eventCount;
 
   void clear() {
     memset(this, 0, sizeof(*this));
     weather.clear();
     for (auto& u : usage) u.clear();
+    for (auto& e : events) e.clear();
   }
 };
 

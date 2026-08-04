@@ -44,9 +44,20 @@ struct RxState {
 // A receive with no traffic for this long is dead (daemon crashed/quit mid-push,
 // network partition). Without this, rx.active stays set forever and the activity
 // keeps swallowing all input "until the transfer resolves" — a soft brick until
-// reboot. The daemon's own per-chunk ack timeout is ~10 s, so 30 s of silence
-// can only mean the sender is gone; a later retry starts fresh via handleBegin.
-constexpr uint32_t kRxStallTimeoutMs = 30000;
+// reboot.
+//
+// ORDERING CONSTRAINT: this must stay comfortably LONGER than the daemon's
+// per-chunk ack timeout PLUS its reconnect wait (OTA_CHUNK_ACK_TIMEOUT_MS 30 s
+// + OTA_RECONNECT_WAIT_MS 20 s in bridge/src/daemon-server.ts). The daemon
+// recovers a stalled chunk by waiting out the ack, following the board to its
+// reconnected socket, and resending the same seq — a recovery that only works
+// if the device still holds its rx cursor. At the old 30 s (set when the
+// daemon's timeout really was ~10 s, and never revisited when it was raised)
+// both timers fired at the same instant: the device wiped rx exactly as the
+// daemon resent, so every resend was answered `no_active_update` and the
+// transfer died. Observed twice on the X4, 2026-08-04. 90 s still bounds the
+// soft-brick window to something a user waits out rather than reboots.
+constexpr uint32_t kRxStallTimeoutMs = 90000;
 
 RxState rx;
 HalFile cacheFile;
@@ -70,8 +81,9 @@ void sendAck(const char* otaId, const char* stage, uint32_t seq, uint32_t offset
 
 void sendError(const char* otaId, const char* stage, const char* error) {
   char buf[192];
-  const int n = snprintf(buf, sizeof(buf), "{\"type\":\"esp32_ota_error\",\"otaId\":\"%s\",\"stage\":\"%s\",\"error\":\"%s\"}",
-                         otaId ? otaId : "", stage, error);
+  const int n =
+      snprintf(buf, sizeof(buf), "{\"type\":\"esp32_ota_error\",\"otaId\":\"%s\",\"stage\":\"%s\",\"error\":\"%s\"}",
+               otaId ? otaId : "", stage, error);
   if (n > 0 && (size_t)n < sizeof(buf)) Net::wsSend(buf);
   AgentLog::line("OTA", "error stage=%s err=%s", stage, error);
 }
@@ -275,6 +287,53 @@ bool receiving() { return rx.active; }
 bool flashPending() { return rx.flashPending; }
 uint32_t receivedBytes() { return rx.written; }
 uint32_t totalBytes() { return rx.expectedSize; }
+
+const char* imageCachePath() { return kCachePath; }
+
+bool stagePulledImage(uint32_t expectedBytes, const char* md5hex) {
+  if (rx.active || rx.flashPending) return false;
+  if (!expectedBytes || !md5hex || strlen(md5hex) != 32) return false;
+
+  HalFile f;
+  if (!Storage.openFileForRead("OTA", kCachePath, f)) return false;
+  if (f.size() != expectedBytes) {
+    AgentLog::line("OTA", "pull image size mismatch: got %u want %u", (unsigned)f.size(), (unsigned)expectedBytes);
+    f.close();
+    Storage.remove(kCachePath);
+    return false;
+  }
+  // Whole-file MD5 (the feed advert's transfer checksum). Chunked read keeps
+  // the stack flat; decodeBuf is idle outside an active WS receive.
+  md5Builder.begin();
+  for (uint32_t off = 0; off < expectedBytes;) {
+    const int got = f.read(decodeBuf, sizeof(decodeBuf));
+    if (got <= 0) break;
+    md5Builder.add(decodeBuf, (size_t)got);
+    off += (uint32_t)got;
+  }
+  f.close();
+  md5Builder.calculate();
+  char calc[36] = {0};
+  md5Builder.getChars(calc);
+  if (strcasecmp(calc, md5hex) != 0) {
+    AgentLog::line("OTA", "pull image md5 mismatch: got %s want %s", calc, md5hex);
+    Storage.remove(kCachePath);
+    return false;
+  }
+
+  // Same bootloader-mirror structural validation as the WS `end` path.
+  const esp_partition_t* dest = esp_ota_get_next_update_partition(nullptr);
+  const firmware_flash::Result vr = firmware_flash::validateImageFile(kCachePath, dest ? dest->size : 0);
+  if (vr != firmware_flash::Result::OK) {
+    AgentLog::line("OTA", "pull image rejected: %s", firmware_flash::resultName(vr));
+    Storage.remove(kCachePath);
+    return false;
+  }
+
+  AgentLog::line("OTA", "pull image validated (%u bytes) — flash pending", (unsigned)expectedBytes);
+  rx.flashPending = true;
+  return true;
+}
 
 void service() {
   if (!rx.active || rx.flashPending) return;

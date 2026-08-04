@@ -26,14 +26,18 @@ struct SyncResult {
   // Content signature of the applied feed (echo on the next pull). Empty on
   // failure; on `unchanged` it repeats the echoed sig.
   char deckSig[12] = {0};
+  // Staged firmware advertised by the daemon (contract § Pull OTA). size 0 =
+  // none. The caller decides whether to download/install (OtaPull::tryInstall).
+  uint32_t fwSize = 0;
+  char fwMd5[36] = {0};
 };
 
 // Telemetry appended to the `GET /feed` query string — the only battery/link
 // observability a wake-sync-sleep device has. Negative/zero fields are omitted
 // from the request (rssi is dBm, so "none" is 0, not -1).
 struct SyncTelemetry {
-  int battPct = -1;   // 0-100
-  int rssiDbm = 0;    // negative when known
+  int battPct = -1;  // 0-100
+  int rssiDbm = 0;   // negative when known
 };
 
 // Push pending outbox records (if any), then GET /feed and apply it to
@@ -42,8 +46,8 @@ struct SyncTelemetry {
 // current signature matches, it answers `unchanged` and the whole visit costs
 // one tiny response. Blocking (HTTP on the loop task) — callers budget for a
 // few seconds.
-SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char* board,
-                    const char* echoSig, const SyncTelemetry& telemetry);
+SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char* board, const char* echoSig,
+                    const SyncTelemetry& telemetry);
 
 // ── Endpoint cache ──
 // The daemon endpoint is otherwise RAM-only (rediscovered every boot); a pull

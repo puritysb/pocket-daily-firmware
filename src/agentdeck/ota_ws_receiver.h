@@ -57,5 +57,17 @@ void serviceFlash();
 uint32_t receivedBytes();
 uint32_t totalBytes();
 
+// ── Pull OTA (feed-carried, contract § Pull OTA) ──
+// SD path of the shared image cache. OtaPull downloads the staged image here
+// (only while no WS transfer is active) and then hands it to stagePulledImage.
+const char* imageCachePath();
+
+// Validate an already-downloaded image at imageCachePath() (whole-file MD5 +
+// the same bootloader-mirror structural validation the WS path runs) and set
+// flashPending — the dashboard loop paints the notice and flashes exactly as
+// for a WS-received image. False (and cache removed) on any mismatch. No-op
+// false while a WS transfer is active.
+bool stagePulledImage(uint32_t expectedBytes, const char* md5hex);
+
 }  // namespace OtaWs
 }  // namespace AgentDeck

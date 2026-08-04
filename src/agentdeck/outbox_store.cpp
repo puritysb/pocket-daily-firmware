@@ -26,13 +26,14 @@ struct Header {
 static_assert(sizeof(Header) == 8, "header layout must stay stable on disk");
 
 constexpr uint32_t kMagic = 0x314F4441;  // "ADO1" (LE)
-constexpr uint8_t kVersion = 1;
+constexpr uint8_t kVersion = 2;  // Pocket card_choice adds choiceId to Record
 
 void terminateRecord(Record& r) {
   r.cardId[sizeof(r.cardId) - 1] = '\0';
   r.sessionId[sizeof(r.sessionId) - 1] = '\0';
   r.requestId[sizeof(r.requestId) - 1] = '\0';
   r.action[sizeof(r.action) - 1] = '\0';
+  r.choiceId[sizeof(r.choiceId) - 1] = '\0';
   r.decision[sizeof(r.decision) - 1] = '\0';
   r.value[sizeof(r.value) - 1] = '\0';
   r.question[sizeof(r.question) - 1] = '\0';

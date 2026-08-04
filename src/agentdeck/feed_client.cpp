@@ -1,7 +1,7 @@
 // HttpDownloader.h must precede anything that pulls lwip (WiFi/ArduinoJson via
 // Arduino.h) — its SdFat macros collide with lwip's ip4_addr.h otherwise. See
 // the same note at the top of src/network/OtaUpdater.cpp.
-#include "network/HttpDownloader.h"
+#include "feed_client.h"
 
 #include <ArduinoJson.h>
 #include <HalStorage.h>
@@ -12,7 +12,7 @@
 #include <string>
 
 #include "agent/AgentLog.h"
-#include "feed_client.h"
+#include "network/HttpDownloader.h"
 #include "outbox_store.h"
 #include "protocol.h"
 
@@ -58,6 +58,7 @@ bool pushOutbox(const char* ip, uint16_t port, const char* token, const char* bo
     if (r.sessionId[0]) d["sessionId"] = r.sessionId;
     if (r.requestId[0]) d["requestId"] = r.requestId;
     d["action"] = r.action;
+    if (r.choiceId[0]) d["choiceId"] = r.choiceId;
     if (r.decision[0]) d["decision"] = r.decision;
     if (r.index >= 0) d["index"] = r.index;
     if (r.value[0]) d["value"] = r.value;
@@ -84,8 +85,10 @@ bool pushOutbox(const char* ip, uint16_t port, const char* token, const char* bo
   if (deserializeJson(res, response) == DeserializationError::Ok) {
     unsigned applied = 0, other = 0;
     for (JsonObject r : res["results"].as<JsonArray>()) {
-      if (strcmp(r["status"] | "", "applied") == 0) applied++;
-      else other++;
+      if (strcmp(r["status"] | "", "applied") == 0)
+        applied++;
+      else
+        other++;
     }
     AgentLog::line("FEED", "outbox push: %u applied, %u expired/rejected", applied, other);
   }
@@ -97,8 +100,8 @@ bool pushOutbox(const char* ip, uint16_t port, const char* token, const char* bo
 
 }  // namespace
 
-SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char* board,
-                    const char* echoSig, const SyncTelemetry& telemetry) {
+SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char* board, const char* echoSig,
+                    const SyncTelemetry& telemetry) {
   SyncResult out;
   if (!ip || !ip[0] || !port) return out;
 
@@ -119,6 +122,9 @@ SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char
     first = false;
   };
   if (echoSig && echoSig[0]) app("sig=%s", echoSig);
+  // Board identity lets the daemon attach a board-targeted `fw` staging advert
+  // (contract § Pull OTA) without relying on its IP→board memory.
+  if (board && board[0]) app("board=%s", board);
   if (telemetry.battPct >= 0) app("batt=%d", telemetry.battPct);
   if (telemetry.rssiDbm < 0) app("rssi=%d", telemetry.rssiDbm);
 
@@ -134,6 +140,8 @@ SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char
   out.unchanged = applied.unchanged;
   out.nextPullSec = applied.nextPullSec;
   strncpy(out.deckSig, applied.deckSig, sizeof(out.deckSig) - 1);
+  out.fwSize = applied.fwSize;
+  strncpy(out.fwMd5, applied.fwMd5, sizeof(out.fwMd5) - 1);
   saveEndpoint(ip, port, token);
   return out;
 }

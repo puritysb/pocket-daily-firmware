@@ -44,6 +44,10 @@ struct Snapshot {
   // Sleep-glance block (weather / usage / wrap-up) as of the save, so the
   // offline/unchanged sleep frame can render it without a fresh feed (v2).
   GlanceInfo glance;
+  // Daemon-authored Pocket cards are device-consumable day/info content, so
+  // they survive reboot beside the session deck instead of vanishing offline.
+  uint8_t pocketCount;
+  PocketCard pocketCards[POCKET_CARD_CAP];
   Record records[AgentDeckCfg::SESSIONS_CAP];
 };
 

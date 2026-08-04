@@ -67,14 +67,17 @@ class AgentDashboardActivity final : public Activity {
   // activity copy is intentionally large enough for 2–3 visible lines; at the
   // 10-session cap this array adds 1,920 bytes to the render-task stack.
   struct OverviewRow {
-    char sid[64];
+    char sid[72];  // session id or autonomous module cardId
     char project[40];
     char agentType[16];
     char controlMode[12];
     char state[20];
     char activity[AgentDeck::SESSION_ACTIVITY_CAP];
     bool awaiting;
+    bool pocket;
   };
+
+  static constexpr int kOverviewCap = AgentDeckCfg::SESSIONS_CAP + AgentDeck::POCKET_CARD_CAP;
 
   // Which screen the Connected dashboard is showing. Overview is home; OK opens a
   // session's read-only Detail (timeline + inline options as a fallback grammar).
@@ -95,6 +98,7 @@ class AgentDashboardActivity final : public Activity {
   // First session (overview order) whose attention state warrants a card and
   // whose content signature hasn't been dismissed. Returns false when quiet.
   bool firstCardCandidate(AwaitingItem& out) const;
+  bool findPocketCard(const char* cardId, AgentDeck::PocketCard& out) const;
   // Content signature of a prompt (sid + question + requestId + option shape).
   // A dismissed card only re-surfaces when this changes — same honesty rule as
   // the state signature: content decides, not time.
@@ -112,11 +116,14 @@ class AgentDashboardActivity final : public Activity {
   void drawOverviewCard(const OverviewRow& row, int x, int y, int w, int h, bool selected) const;
   void handleButtons();
   bool applyDecision(const AwaitingItem& it, int optionCursor);
+  bool applyPocketChoice(const AgentDeck::PocketCard& card, int optionCursor);
+  void dismissPocketCard(const char* cardId);
   // fromCache renders the persisted deck (display-only, no selection/Open) with
   // an "as of" sync-age line derived from asOfEpoch. Live renders pass false/0.
   void renderOverview(const OverviewRow* rows, int n, int awaitingCount, bool fromCache, uint32_t asOfEpoch);
   void renderDetail();
   void renderCard();
+  void renderPocketCard(const AgentDeck::PocketCard& card);
   // Why the glance is being painted. It is not a sleep-only screen: the same
   // layout is the dashboard's ambient face whenever there are no live session
   // cards to show (offline, booting, or simply nothing running), which is what
@@ -194,7 +201,7 @@ class AgentDashboardActivity final : public Activity {
   int overviewTop = 0;         // first visible row (scroll window)
   int detailScroll = 0;        // first visible content line in Detail
   int detailMaxScroll = 0;     // set by renderDetail; lets handleButtons know "at bottom"
-  char selectedSid[64] = {0};  // session opened into Card/Detail (re-resolved each frame)
+  char selectedSid[72] = {0};  // session id or autonomous module cardId
   // Installed SD CJK font id (the reader's font when it's an SD font) so CJK text
   // renders instead of □; 0 when none — Latin-only built-in UI fonts have no CJK.
   int cjkFontId = 0;
@@ -215,14 +222,14 @@ class AgentDashboardActivity final : public Activity {
   uint32_t lastDecisionMs = 0;
 
   // ── Card view state ──
-  char cardSid[64] = {0};          // session the Card is showing
-  uint32_t cardSig = 0;            // signature of the prompt the Card is showing
-  bool cardFocusSent = false;      // focus_session sent for this card (WaitingForOptions)
+  char cardSid[72] = {0};      // session or autonomous module card the Card is showing
+  uint32_t cardSig = 0;        // signature of the prompt the Card is showing
+  bool cardFocusSent = false;  // focus_session sent for this card (WaitingForOptions)
   // Card→Detail transitions consume a raw front-button PRESS; the mapped RELEASE
   // of that same press would otherwise land in Detail's Confirm handler and could
   // fire an inline decision (cooldown only covers short presses). Swallow it.
   bool swallowConfirmRelease = false;
-  uint32_t lastUserInputMs = 0;    // any button press — suppresses auto-surface mid-navigation
+  uint32_t lastUserInputMs = 0;  // any button press — suppresses auto-surface mid-navigation
   // Recently dismissed prompt signatures (ring). Multiple sessions can be
   // awaiting at once; a single slot would resurrect A when B is dismissed.
   static constexpr int kDismissedCap = 8;
@@ -238,9 +245,9 @@ class AgentDashboardActivity final : public Activity {
   // Guarded by g_stateMutex: written on the loop task, read on the render task.
   // Heap (unique_ptr), not a member array — ~3.5 KB must not sit on the C3 stack.
   std::unique_ptr<AgentDeck::DeckStore::Snapshot> cachedDeck;
-  uint32_t lastDeckSig = 0;      // content signature of the last persisted deck
-  uint32_t lastDeckSaveMs = 0;   // SD-write throttle
-  bool clockSynced = false;      // SNTP landed — repaint once so "as of" gains an age
+  uint32_t lastDeckSig = 0;     // content signature of the last persisted deck
+  uint32_t lastDeckSaveMs = 0;  // SD-write throttle
+  bool clockSynced = false;     // SNTP landed — repaint once so "as of" gains an age
   static constexpr uint32_t kDeckSaveIntervalMs = 5000;
 
   // Persist the live deck to SD when its content changed (throttled; loop task).
@@ -261,6 +268,15 @@ class AgentDashboardActivity final : public Activity {
   // Which glance variant render() should paint. Non-Ambient means this frame is
   // the one the panel keeps through sleep.
   GlanceReason glanceReason = GlanceReason::Ambient;
+  // ── M9 stage 1: local plane (the open book) on the glance ──
+  // True while the Ambient glance is the face on screen. Written by render()
+  // (render task), read by handleButtons() (loop task) to give Confirm its
+  // "resume reading" meaning only when the glance is actually displayed —
+  // a stale read is benign (one inert or late press), so no lock.
+  bool ambientGlanceShown = false;
+  // Confirm on the glance face: onExit restarts into the reader
+  // (silentRestartToReader) instead of Home.
+  bool exitToReader = false;
   bool sleepFramePending = false;  // render() must paint the sleep glance
   uint32_t pullSyncedAtMs = 0;
   uint32_t pullNextSec = 0;  // daemon's nextPullSec hint (0 → default)
@@ -284,14 +300,14 @@ class AgentDashboardActivity final : public Activity {
   // because only it knows the sleep length; empty when no pull has anchored
   // wall time yet. The *synced* time is computed at paint, not stored.
   char sleepNextHm[6] = {0};
-  uint32_t sleepForSec = 0;  // fallback "sleeping ~Nm" when no wall time known
-  static constexpr uint32_t kGlanceFullRefreshEvery = 8;  // ghost-clearing cadence
-  uint32_t enterMs = 0;      // onEnter millis — pull budget / idle anchor
-  static constexpr uint32_t kPullLingerMs = 20000;   // user-presence window after a sync
-  static constexpr uint32_t kPullBudgetMs = 60000;   // whole wake budget before sleeping unsynced
-  static constexpr uint32_t kPullDefaultSec = 3600;  // no daemon hint → hourly
-  static constexpr uint32_t kPullActiveSec = 900;    // sessions mid-turn → 15 min cadence
-  static constexpr uint32_t kPullMinSec = 300;       // clamp against a degenerate hint
+  uint32_t sleepForSec = 0;                                    // fallback "sleeping ~Nm" when no wall time known
+  static constexpr uint32_t kGlanceFullRefreshEvery = 8;       // ghost-clearing cadence
+  uint32_t enterMs = 0;                                        // onEnter millis — pull budget / idle anchor
+  static constexpr uint32_t kPullLingerMs = 20000;             // user-presence window after a sync
+  static constexpr uint32_t kPullBudgetMs = 60000;             // whole wake budget before sleeping unsynced
+  static constexpr uint32_t kPullDefaultSec = 3600;            // no daemon hint → hourly
+  static constexpr uint32_t kPullActiveSec = 900;              // sessions mid-turn → 15 min cadence
+  static constexpr uint32_t kPullMinSec = 300;                 // clamp against a degenerate hint
   static constexpr uint32_t kIdleToCadenceMs = 5 * 60 * 1000;  // interactive → cadence handoff
   // One HTTP sync against the given endpoint; updates the pull state on success.
   bool attemptPullSync(const char* ip, uint16_t port, const char* token);

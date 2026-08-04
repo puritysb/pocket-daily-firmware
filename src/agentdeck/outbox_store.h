@@ -23,7 +23,8 @@ struct Record {
   char cardId[72];    // "session:" + prefixed session UUID
   char sessionId[64];
   char requestId[40];   // permission gate correlation ("" = none)
-  char action[24];      // permission_decision|select_option|respond|send_prompt|dismiss
+  char action[24];      // permission_decision|select_option|respond|send_prompt|dismiss|card_choice
+  char choiceId[32];    // card_choice stable semantic id (never a button position)
   char decision[8];     // allow|deny ("" = n/a)
   int16_t index;        // select_option wire index; -1 = none
   char value[24];       // respond shortcut/value

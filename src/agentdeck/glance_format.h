@@ -20,8 +20,8 @@ inline int hmToMinutes(const char* hm) {
   if (!hm || strlen(hm) != 5 || hm[2] != ':') return -1;
   const int h = (hm[0] - '0') * 10 + (hm[1] - '0');
   const int m = (hm[3] - '0') * 10 + (hm[4] - '0');
-  if (hm[0] < '0' || hm[0] > '9' || hm[1] < '0' || hm[1] > '9' || hm[3] < '0' || hm[3] > '9' ||
-      hm[4] < '0' || hm[4] > '9' || h > 23 || m > 59)
+  if (hm[0] < '0' || hm[0] > '9' || hm[1] < '0' || hm[1] > '9' || hm[3] < '0' || hm[3] > '9' || hm[4] < '0' ||
+      hm[4] > '9' || h > 23 || m > 59)
     return -1;
   return h * 60 + m;
 }
@@ -60,6 +60,21 @@ inline int formatRainLine(char* out, size_t cap, const GlanceWeather& w) {
   int o = snprintf(out, cap, "Rain ~%s", w.rainStartHm);
   if (w.rainEndHm[0]) o += snprintf(out + o, cap - o, "\xE2\x80\x93%s", w.rainEndHm);
   if (w.rainProbability >= 0) o += snprintf(out + o, cap - o, " %d%%", (int)w.rainProbability);
+  return o;
+}
+
+// "09:30–10:00 Standup" / "09:30 Standup" / "Standup" (all-day, no times).
+// Returns chars written; empty when the event has no title.
+inline int formatEventLine(char* out, size_t cap, const GlanceEvent& e) {
+  out[0] = '\0';
+  if (!e.title[0]) return 0;
+  int o = 0;
+  if (e.startHm[0]) {
+    o += snprintf(out + o, cap - o, "%s", e.startHm);
+    if (e.endHm[0]) o += snprintf(out + o, cap - o, "\xE2\x80\x93%s", e.endHm);
+    o += snprintf(out + o, cap - o, " ");
+  }
+  o += snprintf(out + o, cap - o, "%s", e.title);
   return o;
 }
 

@@ -21,10 +21,10 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
-#include "PowerCycle.h"
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
+#include "PowerCycle.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "SettingsList.h"
@@ -556,7 +556,17 @@ void setup() {
     // Boot-to-card: AgentDeck's card face is this device's home. Holding Back
     // during boot is the escape hatch to the reader home; exiting the dashboard
     // also lands there (its onExit silentRestart targets home).
-    activityManager.goToAgent();
+    // Holding Confirm (OK) skips the dashboard entirely and resumes the open
+    // book — the glance sleep frame advertises this ("wake holding OK") so the
+    // pocket-to-reading path is one power press + one held button. The
+    // readerActivityLoadCount guard keeps a crashing book from being re-entered.
+    if (mappedInputManager.isPressed(MappedInputManager::Button::Confirm) && !APP_STATE.openEpubPath.empty() &&
+        APP_STATE.readerActivityLoadCount == 0) {
+      LOG_INF("MAIN", "Boot-to-reader (OK held at wake)");
+      activityManager.goToReader(APP_STATE.openEpubPath);
+    } else {
+      activityManager.goToAgent();
+    }
   } else if (APP_STATE.openEpubPath.empty() || !APP_STATE.lastSleepFromReader ||
              mappedInputManager.isPressed(MappedInputManager::Button::Back) || APP_STATE.readerActivityLoadCount > 0) {
     // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity

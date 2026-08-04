@@ -504,6 +504,50 @@ void parseGlanceLocked(JsonObject glance) {
     if (g.wrapupCount >= GlanceInfo::WRAPUP_CAP) break;
     cp(g.wrapup[g.wrapupCount++], GlanceInfo::WRAPUP_BYTES, line | "");
   }
+
+  // Today's schedule (contract § Glance events): pre-trimmed titles, absolute
+  // "HH:MM" only. Absent on older daemons — the section simply doesn't render.
+  for (JsonObject e : glance["events"].as<JsonArray>()) {
+    if (g.eventCount >= GlanceInfo::EVENT_CAP) break;
+    GlanceEvent& ev = g.events[g.eventCount];
+    cp(ev.startHm, sizeof(ev.startHm), e["startHm"] | "");
+    cp(ev.endHm, sizeof(ev.endHm), e["endHm"] | "");
+    cp(ev.title, sizeof(ev.title), e["title"] | "");
+    if (ev.title[0] == '\0') {
+      ev.clear();
+      continue;  // a titleless event renders as noise — drop it
+    }
+    g.eventCount++;
+  }
+}
+
+// Parse one daemon-authored module card into the fixed Pocket pool.
+// Caller holds g_stateMutex. No heap strings survive this function.
+void parsePocketLocked(JsonObject card, PocketCard& out) {
+  memset(&out, 0, sizeof(out));
+  JsonObject module = card["module"].as<JsonObject>();
+  copyStr(out.cardId, sizeof(out.cardId), card["cardId"] | "");
+  copyStr(out.actionClass, sizeof(out.actionClass), card["actionClass"] | "info");
+  copyStr(out.module, sizeof(out.module), module["module"] | "");
+  copyStr(out.title, sizeof(out.title), module["title"] | "POCKET");
+  copyStr(out.question, sizeof(out.question), module["question"] | "");
+  out.context[0] = '\0';
+  for (JsonVariant line : module["context"].as<JsonArray>()) {
+    const char* text = line | "";
+    const size_t used = strlen(out.context);
+    const size_t extra = (used ? 3 : 0) + strlen(text);
+    // Context lines are already byte-capped by the daemon. Append only whole
+    // lines so a full fixed buffer never slices a multibyte UTF-8 sequence.
+    if (used + extra >= sizeof(out.context)) break;
+    appendSummary(out.context, sizeof(out.context), text);
+  }
+  for (JsonObject choice : module["choices"].as<JsonArray>()) {
+    if (out.choiceCount >= 3) break;
+    PocketChoice& dst = out.choices[out.choiceCount];
+    copyStr(dst.id, sizeof(dst.id), choice["id"] | "");
+    copyStr(dst.label, sizeof(dst.label), choice["label"] | "");
+    if (dst.id[0] && dst.label[0]) out.choiceCount++;
+  }
 }
 
 }  // namespace
@@ -524,13 +568,21 @@ FeedApply applyCardFeed(const char* json, size_t length) {
   filter["nextPullSec"] = true;
   filter["deckSig"] = true;
   filter["unchanged"] = true;
+  filter["cards"][0]["cardId"] = true;
   filter["cards"][0]["actionClass"] = true;
   static constexpr const char* kSessionFields[] = {
-      "id",         "projectName", "modelName",  "agentType", "controlMode", "state",
-      "port",       "alive",       "currentTool", "elapsedSec", "question",  "promptType",
-      "requestId",  "activity",    "currentTask", "goal",      "lastEventText",
+      "id",        "projectName", "modelName",   "agentType",  "controlMode",   "state",
+      "port",      "alive",       "currentTool", "elapsedSec", "question",      "promptType",
+      "requestId", "activity",    "currentTask", "goal",       "lastEventText",
   };
   for (const char* f : kSessionFields) filter["cards"][0]["session"][f] = true;
+  {
+    JsonObject module = filter["cards"][0]["module"].to<JsonObject>();
+    for (const char* f : {"module", "title", "question"}) module[f] = true;
+    module["context"][0] = true;
+    module["choices"][0]["id"] = true;
+    module["choices"][0]["label"] = true;
+  }
   // Glance (sleep dashboard) block — daemon-rendered, byte-trimmed strings.
   {
     JsonObject gw = filter["glance"]["weather"].to<JsonObject>();
@@ -541,7 +593,13 @@ FeedApply applyCardFeed(const char* json, size_t length) {
     for (const char* f : {"provider", "label", "primaryPercent", "secondaryPercent", "primaryResetHm", "stale"})
       gu[f] = true;
     filter["glance"]["wrapup"][0] = true;
+    JsonObject ge = filter["glance"]["events"][0].to<JsonObject>();
+    for (const char* f : {"startHm", "endHm", "title"}) ge[f] = true;
   }
+  // Staged firmware advert (contract § Pull OTA) — rides full AND unchanged
+  // responses, so a sleeping device learns about an update on any pull.
+  filter["fw"]["size"] = true;
+  filter["fw"]["md5"] = true;
 
   doc.clear();
   DeserializationError err = deserializeJson(doc, json, length, DeserializationOption::Filter(filter));
@@ -557,6 +615,13 @@ FeedApply applyCardFeed(const char* json, size_t length) {
 
   out.unchanged = obj["unchanged"] | false;
   strncpy(out.deckSig, obj["deckSig"] | "", sizeof(out.deckSig) - 1);
+  {
+    JsonObject fw = obj["fw"].as<JsonObject>();
+    if (!fw.isNull()) {
+      out.fwSize = fw["size"] | 0U;
+      strncpy(out.fwMd5, fw["md5"] | "", sizeof(out.fwMd5) - 1);
+    }
+  }
 
   lockState();
   if (!out.unchanged) {
@@ -565,11 +630,17 @@ FeedApply applyCardFeed(const char* json, size_t length) {
     // dataReceived=true would let that emptiness mask the persisted deck.
     g_state.dataReceived = true;
     g_state.sessionCount = 0;
+    g_state.pocketCount = 0;
     for (JsonObject card : obj["cards"].as<JsonArray>()) {
-      if (g_state.sessionCount >= AgentDeckCfg::SESSIONS_CAP) break;
       JsonObject s = card["session"].as<JsonObject>();
-      if (s.isNull()) continue;  // M7 module cards carry no session body yet
-      parseSessionLocked(s, g_state.sessions[g_state.sessionCount++]);
+      if (!s.isNull()) {
+        if (g_state.sessionCount < AgentDeckCfg::SESSIONS_CAP)
+          parseSessionLocked(s, g_state.sessions[g_state.sessionCount++]);
+        continue;
+      }
+      JsonObject module = card["module"].as<JsonObject>();
+      if (!module.isNull() && g_state.pocketCount < POCKET_CARD_CAP)
+        parsePocketLocked(card, g_state.pocketCards[g_state.pocketCount++]);
     }
     parseGlanceLocked(obj["glance"].as<JsonObject>());
     if (g_state.glance.valid) g_state.glanceAtMs = millis();
@@ -588,14 +659,13 @@ FeedApply applyCardFeed(const char* json, size_t length) {
     g_state.serverHm[sizeof(g_state.serverHm) - 1] = '\0';
     g_state.serverHmAtMs = millis();
   }
-  const uint8_t count = g_state.sessionCount;
+  const uint8_t count = g_state.sessionCount + g_state.pocketCount;
   unlockState();
 
   out.ok = true;
   out.nextPullSec = obj["nextPullSec"] | 0;
-  AgentLog::line("PROTO", "card_feed %s: %u cards nextPull=%us sig=%s",
-                 out.unchanged ? "unchanged" : "applied", (unsigned)count,
-                 (unsigned)out.nextPullSec, out.deckSig);
+  AgentLog::line("PROTO", "card_feed %s: %u cards nextPull=%us sig=%s", out.unchanged ? "unchanged" : "applied",
+                 (unsigned)count, (unsigned)out.nextPullSec, out.deckSig);
   return out;
 }
 

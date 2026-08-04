@@ -30,6 +30,10 @@ struct FeedApply {
   uint32_t nextPullSec = 0;
   // Content signature echoed on the next pull (persisted with the deck cache).
   char deckSig[12] = {0};
+  // Staged firmware advertised by the daemon (contract § Pull OTA). Rides both
+  // full and `unchanged` responses; size 0 = nothing staged for this board.
+  uint32_t fwSize = 0;
+  char fwMd5[36] = {0};
 };
 
 // M6 pull sync: parse a `GET /feed` card_feed body and land the embedded
