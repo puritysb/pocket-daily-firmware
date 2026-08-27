@@ -6,14 +6,15 @@
 
 #include "agent/AgentLog.h"
 
-namespace AgentDeck {
+namespace PocketDaily {
 namespace DeckStore {
 namespace {
 
 // Shares the OTA receiver's hidden cache directory.
 constexpr const char* kDir = "/.crosspoint";
-constexpr const char* kPath = "/.crosspoint/agentdeck-deck.bin";
-constexpr const char* kTmpPath = "/.crosspoint/agentdeck-deck.tmp";
+constexpr const char* kPath = "/.crosspoint/pocket-daily-deck.bin";
+constexpr const char* kTmpPath = "/.crosspoint/pocket-daily-deck.tmp";
+constexpr const char* kLegacyPath = "/.crosspoint/agentdeck-deck.bin";
 
 // Fixed-layout header. recordSize doubles as the schema version: any change to
 // Record's shape invalidates old files instead of misreading them.
@@ -33,9 +34,13 @@ constexpr uint32_t kMagic = 0x314B4441;  // "ADK1" (LE)
 // v3 (2026-08-04): GlanceInfo grew the events[] schedule block (M9 stage 2) —
 // sizeof(GlanceInfo) changed, so v2 files must be invalidated, not misread.
 // v4 (2026-08-04): autonomous Pocket cards ride the snapshot.
-constexpr uint8_t kVersion = 4;
+// v5 (2026-08-24): weather WMO codes and the immutable host sync HH:MM are
+// persisted for honest local glyphs/status after an offline reboot.
+// v6 (2026-08-24): five compact forecast days are persisted for the offline
+// weather ribbon; the larger GlanceInfo shape invalidates v5 safely.
+constexpr uint8_t kVersion = 6;
 
-void terminatePocket(PocketCard& card) {
+void terminatePocket(Card& card) {
   card.cardId[sizeof(card.cardId) - 1] = '\0';
   card.module[sizeof(card.module) - 1] = '\0';
   card.actionClass[sizeof(card.actionClass) - 1] = '\0';
@@ -63,8 +68,9 @@ bool save(const Snapshot& snap) {
     if (f.write(&h, sizeof(h)) != sizeof(h)) return false;
     // v2 payload between header and records: sig echo + glance snapshot.
     if (f.write(snap.deckSig, sizeof(snap.deckSig)) != sizeof(snap.deckSig)) return false;
+    if (f.write(snap.serverHm, sizeof(snap.serverHm)) != sizeof(snap.serverHm)) return false;
     if (f.write(&snap.glance, sizeof(snap.glance)) != (int)sizeof(snap.glance)) return false;
-    const uint8_t pocketCount = snap.pocketCount > POCKET_CARD_CAP ? POCKET_CARD_CAP : snap.pocketCount;
+    const uint8_t pocketCount = snap.pocketCount > CARD_CAP ? CARD_CAP : snap.pocketCount;
     if (f.write(&pocketCount, sizeof(pocketCount)) != sizeof(pocketCount)) return false;
     if (f.write(snap.pocketCards, sizeof(snap.pocketCards)) != sizeof(snap.pocketCards)) return false;
     const size_t bytes = sizeof(Record) * snap.count;
@@ -81,8 +87,11 @@ bool save(const Snapshot& snap) {
 bool load(Snapshot& out) {
   memset(&out, 0, sizeof(out));
   out.glance.clear();
-  if (!Storage.ready() || !Storage.exists(kPath)) return false;
-  HalFile f = Storage.open(kPath, O_RDONLY);
+  if (!Storage.ready()) return false;
+  const bool migrateLegacy = !Storage.exists(kPath) && Storage.exists(kLegacyPath);
+  const char* path = migrateLegacy ? kLegacyPath : kPath;
+  if (!Storage.exists(path)) return false;
+  HalFile f = Storage.open(path, O_RDONLY);
   if (!f) return false;
   Header h{};
   if (f.read(&h, sizeof(h)) != (int)sizeof(h)) return false;
@@ -92,15 +101,16 @@ bool load(Snapshot& out) {
     return false;
   }
   if (f.read(out.deckSig, sizeof(out.deckSig)) != (int)sizeof(out.deckSig) ||
+      f.read(out.serverHm, sizeof(out.serverHm)) != (int)sizeof(out.serverHm) ||
       f.read(&out.glance, sizeof(out.glance)) != (int)sizeof(out.glance) ||
       f.read(&out.pocketCount, sizeof(out.pocketCount)) != (int)sizeof(out.pocketCount) ||
-      f.read(out.pocketCards, sizeof(out.pocketCards)) != (int)sizeof(out.pocketCards) ||
-      out.pocketCount > POCKET_CARD_CAP) {
+      f.read(out.pocketCards, sizeof(out.pocketCards)) != (int)sizeof(out.pocketCards) || out.pocketCount > CARD_CAP) {
     memset(&out, 0, sizeof(out));
     out.glance.clear();
     return false;
   }
   out.deckSig[sizeof(out.deckSig) - 1] = '\0';
+  out.serverHm[sizeof(out.serverHm) - 1] = '\0';
   for (uint8_t i = 0; i < out.pocketCount; i++) terminatePocket(out.pocketCards[i]);
   const size_t bytes = sizeof(Record) * h.count;
   if (bytes && f.read(out.records, bytes) != (int)bytes) {
@@ -120,9 +130,14 @@ bool load(Snapshot& out) {
   }
   out.count = h.count;
   out.savedEpoch = h.savedEpoch;
+  f.close();
+  if (migrateLegacy && save(out)) {
+    Storage.remove(kLegacyPath);
+    AgentLog::line("DECK", "migrated legacy cache to Pocket Daily");
+  }
   AgentLog::line("DECK", "deck cache loaded: %u cards epoch=%lu", (unsigned)out.count, (unsigned long)out.savedEpoch);
   return true;
 }
 
 }  // namespace DeckStore
-}  // namespace AgentDeck
+}  // namespace PocketDaily

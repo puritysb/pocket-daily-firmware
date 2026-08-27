@@ -32,6 +32,7 @@ constexpr size_t SEARCH_MAX_RESULTS = 20;
 //   2. any agent=daemon.
 //   3. first service with a port.
 bool selectBridge(mdns_result_t* results) {
+  discovered = {};
   mdns_result_t* first = nullptr;
   mdns_result_t* daemon = nullptr;
   mdns_result_t* daemonCanonical = nullptr;
@@ -55,7 +56,7 @@ bool selectBridge(mdns_result_t* results) {
   mdns_result_t* sel = daemonCanonical ? daemonCanonical : (daemon ? daemon : first);
   if (!sel) return false;
 
-  discovered.port = sel->port;
+  discovered.endpoints.port = sel->port;
   discovered.found = true;
   discovered.token[0] = '\0';
   discovered.project[0] = '\0';
@@ -83,28 +84,26 @@ bool selectBridge(mdns_result_t* results) {
     }
   }
 
-  // Prefer the TXT canonical IP over the host A-record: on a dual-homed daemon the
-  // hostname resolves to BOTH interface IPs (.60 and .100), which makes the device
-  // flip between them every reconnect. The TXT `ip=` is the single default-route addr.
-  if (txtIp[0]) {
-    strncpy(discovered.ip, txtIp, sizeof(discovered.ip) - 1);
-    discovered.ip[sizeof(discovered.ip) - 1] = '\0';
-  } else {
-    discovered.ip[0] = '\0';
-    for (mdns_ip_addr_t* a = sel->addr; a != nullptr; a = a->next) {
-      if (a->addr.type == ESP_IPADDR_TYPE_V4) {
-        // esp_ip4_addr_t stores the address in network byte order (same shifts IP2STR uses).
-        const uint32_t v = a->addr.u_addr.ip4.addr;
-        snprintf(discovered.ip, sizeof(discovered.ip), "%u.%u.%u.%u", (unsigned)(v & 0xFF), (unsigned)((v >> 8) & 0xFF),
-                 (unsigned)((v >> 16) & 0xFF), (unsigned)((v >> 24) & 0xFF));
-        break;
-      }
+  // TXT `ip` remains the first hint for old/single-homed daemons, but it is no
+  // longer authoritative. Bonjour's SRV target can carry one A record per
+  // active interface; preserving all of them lets the HTTP layer prove which
+  // return path actually works instead of pinning the board to the default
+  // route selected by the Mac.
+  if (txtIp[0]) endpointCandidateAdd(discovered.endpoints, txtIp);
+  for (mdns_ip_addr_t* a = sel->addr; a != nullptr; a = a->next) {
+    if (a->addr.type == ESP_IPADDR_TYPE_V4) {
+      const uint32_t v = a->addr.u_addr.ip4.addr;
+      char ip[16];
+      snprintf(ip, sizeof(ip), "%u.%u.%u.%u", (unsigned)(v & 0xFF), (unsigned)((v >> 8) & 0xFF),
+               (unsigned)((v >> 16) & 0xFF), (unsigned)((v >> 24) & 0xFF));
+      endpointCandidateAdd(discovered.endpoints, ip);
     }
-    if (!discovered.ip[0]) return false;
   }
+  if (!discovered.endpoints.count) return false;
 
-  AgentLog::line("MDNS", "found bridge %s:%u agent=%s project=%s", discovered.ip, (unsigned)discovered.port,
-                 discovered.agent, discovered.project);
+  AgentLog::line("MDNS", "found bridge %s:%u candidates=%u agent=%s project=%s", discovered.primaryIp(),
+                 (unsigned)discovered.endpoints.port, (unsigned)discovered.endpoints.count, discovered.agent,
+                 discovered.project);
   return true;
 }
 }  // namespace
@@ -117,7 +116,7 @@ bool mdnsInit(const char* hostName) {
   }
   AgentLog::line("MDNS", "host=%s browsing for %s%s", safeHostName, AgentDeckCfg::MDNS_SERVICE,
                  AgentDeckCfg::MDNS_PROTO);
-  memset(&discovered, 0, sizeof(discovered));
+  discovered = {};
   return true;
 }
 

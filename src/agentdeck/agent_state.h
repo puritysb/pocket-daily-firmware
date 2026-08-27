@@ -25,6 +25,7 @@
 
 #include "agentdeck_config.h"
 #include "glance_state.h"
+#include "pocket_daily/models.h"
 
 namespace AgentDeck {
 
@@ -52,29 +53,11 @@ struct PromptOption {
   bool selected;
 };
 
-// Daemon-authored Pocket card from `FeedCard.module`. Kept separate from the
-// session array: one THREAD checkpoint plus at most two autonomous cards is
-// materially cheaper than adding module fields to every session slot on a
-// no-PSRAM C3.
-struct PocketChoice {
-  char id[32];     // daemon clamps stable ids to 31 UTF-8 bytes
-  char label[41];  // daemon CARD_CHOICE_LABEL_MAX_BYTES + NUL
-};
-
-struct PocketCard {
-  char cardId[72];
-  char module[8];
-  char actionClass[6];
-  char title[25];
-  char question[161];
-  // Context is display copy only. Join the daemon's ≤4 bounded lines once at
-  // parse time instead of reserving four separate 97-byte buffers per card.
-  char context[192];
-  PocketChoice choices[3];
-  uint8_t choiceCount;
-};
-
-static constexpr uint8_t POCKET_CARD_CAP = 3;
+// Compatibility aliases for the existing AgentDeck protocol adapter. Product
+// code owns these fixed-size models in PocketDaily; the provider only fills them.
+using PocketChoice = PocketDaily::Choice;
+using PocketCard = PocketDaily::Card;
+static constexpr uint8_t POCKET_CARD_CAP = PocketDaily::CARD_CAP;
 
 // ===== Session info (multi-agent) =====
 struct SessionInfo {

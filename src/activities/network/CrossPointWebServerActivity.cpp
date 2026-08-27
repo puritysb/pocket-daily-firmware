@@ -11,6 +11,7 @@
 
 #include "MappedInputManager.h"
 #include "NetworkModeSelectionActivity.h"
+#include "SdCardFontSystem.h"
 #include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
@@ -244,6 +245,19 @@ void CrossPointWebServerActivity::startAccessPoint() {
 
 void CrossPointWebServerActivity::startWebServer() {
   LOG_DBG("WEBACT", "Starting web server...");
+
+  // X3/X4 have no PSRAM. A resident .cpfont keeps its interval tables,
+  // decompression pages and glyph caches in internal RAM; leaving it loaded
+  // while WebServer + WebSocketsServer allocate their TCP buffers reduced the
+  // X3 to an 8 KB free heap (and a ~2 KB largest block), causing otherwise
+  // valid uploads to lose their socket after roughly 128 KB. File Transfer
+  // does not render reader text, so release the resident family while keeping
+  // the saved selection. The next reader activity reloads it on demand (and
+  // leaving this activity already performs a clean restart after Wi-Fi use).
+  const uint32_t heapBeforeFontRelease = ESP.getFreeHeap();
+  sdFontSystem.releaseLoaded(renderer);
+  LOG_DBG("WEBACT", "Released resident SD font: heap %u -> %u (largest %u)", (unsigned)heapBeforeFontRelease,
+          (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 
   // Create the web server instance
   webServer.reset(new CrossPointWebServer());

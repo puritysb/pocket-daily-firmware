@@ -8,6 +8,10 @@
 #include "agent/AgentLog.h"
 #include "agent_state.h"
 #include "agentdeck_config.h"
+#include "auth_store.h"
+#include "feed_client.h"
+#include "pocket_daily/product_identity.h"
+#include "ws_client.h"
 
 namespace AgentDeck {
 
@@ -324,6 +328,11 @@ void configureJsonFilter() {
 
   filter["type"] = true;
 
+  // auth_provision — cable-free pairing for WiFi-only X3/X4.
+  filter["authToken"] = true;
+  filter["bridgeIp"] = true;
+  filter["bridgePort"] = true;
+
   // state_update
   filter["state"] = true;
   filter["projectName"] = true;
@@ -400,6 +409,39 @@ void configureJsonFilter() {
 
 namespace Protocol {
 
+namespace {
+
+void handleAuthProvision(JsonObject& obj) {
+  const char* token = obj["authToken"] | "";
+  const char* bridgeIp = obj["bridgeIp"] | "";
+  const uint16_t bridgePort = obj["bridgePort"] | 0;
+
+  bool changed = false;
+  bool success = false;
+  if (token[0]) {
+    char current[40] = {0};
+    const bool hadCurrent = AuthStore::load(current, sizeof(current));
+    changed = !hadCurrent || strncmp(current, token, sizeof(current) - 1) != 0;
+    success = AuthStore::save(token);
+    if (success && bridgeIp[0] && bridgePort) Feed::saveEndpoint(bridgeIp, bridgePort, token);
+  }
+
+  char ack[128];
+  snprintf(ack, sizeof(ack),
+           success ? "{\"type\":\"auth_provision_ack\",\"success\":true,\"changed\":%s}"
+                   : "{\"type\":\"auth_provision_ack\",\"success\":false,\"error\":\"missing or unsaved token\"}",
+           changed ? "true" : "false");
+  Net::wsSend(ack);
+  AgentLog::line("AUTH", "pairing provision %s%s", success ? "saved" : "failed", changed ? " (changed)" : "");
+
+  // The token is part of the WebSocket URL. Drop the unauthenticated socket
+  // after acknowledging, but only after the current WebSocketsClient callback
+  // unwinds. Pocket then switches to its bounded authenticated HTTP mode.
+  if (success && changed) Net::wsDisconnectAfterLoop();
+}
+
+}  // namespace
+
 void parseMessage(const char* json, size_t length) {
   // Reject oversized frames before feeding the elastic JsonDocument — an
   // unbounded sessions_list would otherwise grow the doc until it
@@ -437,6 +479,8 @@ void parseMessage(const char* json, size_t length) {
     // Connection ack — actual connect/disconnect is tracked by the WS event
     // callbacks. Logged for diagnostics.
     AgentLog::line("PROTO", "connection ack: %s", type);
+  } else if (strcmp(type, "auth_provision") == 0) {
+    handleAuthProvision(obj);
   } else {
     // Accepted-and-ignored for M2. The original firmware also handled:
     //   device_info_request, display_state, set_orientation, wifi_provision,
@@ -470,6 +514,7 @@ void parseGlanceLocked(JsonObject glance) {
   if (!w.isNull()) {
     g.weather.valid = true;
     cp(g.weather.place, sizeof(g.weather.place), w["place"] | "");
+    g.weather.code = (int16_t)(w["code"] | -1);
     g.weather.tempC = temp(w["tempC"]);
     cp(g.weather.summary, sizeof(g.weather.summary), w["summary"] | "");
     g.weather.todayMinC = temp(w["todayMinC"]);
@@ -483,9 +528,25 @@ void parseGlanceLocked(JsonObject glance) {
     JsonObject tm = w["tomorrow"].as<JsonObject>();
     if (!tm.isNull()) {
       cp(g.weather.tomorrow.summary, sizeof(g.weather.tomorrow.summary), tm["summary"] | "");
+      g.weather.tomorrow.code = (int16_t)(tm["code"] | -1);
       g.weather.tomorrow.minC = temp(tm["minC"]);
       g.weather.tomorrow.maxC = temp(tm["maxC"]);
       g.weather.tomorrow.rainProbability = (int8_t)(tm["rainProbability"] | -1);
+    }
+    for (JsonObject src : w["days"].as<JsonArray>()) {
+      if (g.weather.dayCount >= PocketDaily::WEATHER_DAY_CAP) break;
+      GlanceDayWeather& day = g.weather.days[g.weather.dayCount];
+      cp(day.date, sizeof(day.date), src["date"] | "");
+      cp(day.summary, sizeof(day.summary), src["summary"] | "");
+      day.code = (int16_t)(src["code"] | -1);
+      day.minC = temp(src["minC"]);
+      day.maxC = temp(src["maxC"]);
+      day.rainProbability = (int8_t)(src["rainProbability"] | -1);
+      // A day with neither a date nor any forecast value is transport noise.
+      if (day.date[0] || day.code >= 0 || day.minC != GLANCE_TEMP_NONE || day.summary[0])
+        g.weather.dayCount++;
+      else
+        day.clear();
     }
   }
 
@@ -586,9 +647,11 @@ FeedApply applyCardFeed(const char* json, size_t length) {
   // Glance (sleep dashboard) block — daemon-rendered, byte-trimmed strings.
   {
     JsonObject gw = filter["glance"]["weather"].to<JsonObject>();
-    for (const char* f : {"place", "tempC", "summary", "todayMinC", "todayMaxC"}) gw[f] = true;
+    for (const char* f : {"place", "code", "tempC", "summary", "todayMinC", "todayMaxC"}) gw[f] = true;
     for (const char* f : {"startHm", "endHm", "probability"}) gw["rain"][f] = true;
-    for (const char* f : {"summary", "minC", "maxC", "rainProbability"}) gw["tomorrow"][f] = true;
+    for (const char* f : {"summary", "code", "minC", "maxC", "rainProbability"}) gw["tomorrow"][f] = true;
+    JsonObject gd = gw["days"][0].to<JsonObject>();
+    for (const char* f : {"date", "summary", "code", "minC", "maxC", "rainProbability"}) gd[f] = true;
     JsonObject gu = filter["glance"]["usage"][0].to<JsonObject>();
     for (const char* f : {"provider", "label", "primaryPercent", "secondaryPercent", "primaryResetHm", "stale"})
       gu[f] = true;
@@ -600,6 +663,9 @@ FeedApply applyCardFeed(const char* json, size_t length) {
   // responses, so a sleeping device learns about an update on any pull.
   filter["fw"]["size"] = true;
   filter["fw"]["md5"] = true;
+  filter["fw"]["productId"] = true;
+  filter["fw"]["board"] = true;
+  filter["fw"]["updateChannel"] = true;
 
   doc.clear();
   DeserializationError err = deserializeJson(doc, json, length, DeserializationOption::Filter(filter));
@@ -620,6 +686,9 @@ FeedApply applyCardFeed(const char* json, size_t length) {
     if (!fw.isNull()) {
       out.fwSize = fw["size"] | 0U;
       strncpy(out.fwMd5, fw["md5"] | "", sizeof(out.fwMd5) - 1);
+      strncpy(out.fwProductId, fw["productId"] | "", sizeof(out.fwProductId) - 1);
+      strncpy(out.fwBoard, fw["board"] | "", sizeof(out.fwBoard) - 1);
+      strncpy(out.fwUpdateChannel, fw["updateChannel"] | "", sizeof(out.fwUpdateChannel) - 1);
     }
   }
 

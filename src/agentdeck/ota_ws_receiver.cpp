@@ -12,6 +12,8 @@
 
 #include "agent/AgentLog.h"
 #include "network/FirmwareFlasher.h"
+#include "ota_pull.h"
+#include "pocket_daily/product_identity.h"
 #include "ws_client.h"
 
 namespace AgentDeck {
@@ -60,6 +62,7 @@ struct RxState {
 constexpr uint32_t kRxStallTimeoutMs = 90000;
 
 RxState rx;
+char expectedBoard[20] = {0};
 HalFile cacheFile;
 MD5Builder md5Builder;
 uint8_t decodeBuf[kMaxDecodedChunk];
@@ -102,9 +105,25 @@ void resetRx(bool removeFile) {
 void handleBegin(JsonObjectConst obj) {
   const char* otaId = obj["otaId"] | "";
   const char* md5 = obj["md5"] | "";
+  const char* productId = obj["productId"] | "";
+  const char* board = obj["board"] | "";
+  const char* updateChannel = obj["updateChannel"] | "";
   const uint32_t size = obj["size"] | 0U;
   if (!otaId[0] || size == 0) {
     sendError(otaId, "begin", "missing_parameters");
+    return;
+  }
+  if (!productId[0] || !board[0] || !updateChannel[0] || !expectedBoard[0]) {
+    sendError(otaId, "begin", "missing_ota_identity");
+    return;
+  }
+  if (!PocketDaily::otaIdentityMatches(productId, board, updateChannel, expectedBoard)) {
+    if (strcmp(productId, PocketDaily::PRODUCT_ID) != 0)
+      sendError(otaId, "begin", "product_mismatch");
+    else if (strcmp(board, expectedBoard) != 0)
+      sendError(otaId, "begin", "board_mismatch");
+    else
+      sendError(otaId, "begin", "update_channel_mismatch");
     return;
   }
 
@@ -255,6 +274,8 @@ void handleAbort(JsonObjectConst obj) {
 
 }  // namespace
 
+void configureIdentity(const char* board) { snprintf(expectedBoard, sizeof(expectedBoard), "%s", board ? board : ""); }
+
 bool maybeHandleFrame(const char* json, size_t length) {
   if (!json || length == 0 || length > kMaxOtaFrameBytes) return false;
   // Cheap probe before any JSON work. The daemon serializes {"type":"esp32_ota_…
@@ -358,6 +379,7 @@ void serviceFlash() {
     return;  // not reached
   }
   sendError(rx.otaId[0] ? rx.otaId : nullptr, "flash", firmware_flash::resultName(r));
+  OtaPull::clearAppliedMarker();
   resetRx(true);
 }
 

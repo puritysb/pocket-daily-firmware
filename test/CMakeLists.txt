@@ -27,6 +27,7 @@ set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 add_library(crosspoint_test_common INTERFACE)
 target_include_directories(crosspoint_test_common INTERFACE
   ${REPO_ROOT}
+  ${REPO_ROOT}/src
   ${REPO_ROOT}/lib
 )
 target_compile_options(crosspoint_test_common INTERFACE
@@ -46,3 +47,5 @@ add_subdirectory(utf8_compose)
 add_subdirectory(agentdeck_attention)
 add_subdirectory(agentdeck_card_class)
 add_subdirectory(agentdeck_glance)
+add_subdirectory(pocket_daily_identity)
+add_subdirectory(games)

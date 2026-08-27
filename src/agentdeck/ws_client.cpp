@@ -7,6 +7,7 @@
 #include "agent/AgentLog.h"
 #include "agent_state.h"
 #include "agentdeck_config.h"
+#include "auth_store.h"
 #include "ota_ws_receiver.h"
 #include "protocol.h"
 
@@ -23,6 +24,7 @@ uint32_t lastReconnectAttempt = 0;
 char savedIp[16] = {0};
 uint16_t savedPort = 0;
 char savedToken[40] = {0};
+bool disconnectAfterLoop = false;
 
 // ── outbound queue (any task → loop task) ──
 // links2004/WebSockets is not thread-safe; M3 button handlers enqueue here and
@@ -119,7 +121,7 @@ void pumpOutbound() {
   }
 }
 
-void wsConnect(const char* ip, uint16_t port, const char* token) {
+void wsConnect(const char* ip, uint16_t port, const char* token, const char* board) {
   if (connected || connecting) return;
   connecting = true;
 
@@ -131,16 +133,18 @@ void wsConnect(const char* ip, uint16_t port, const char* token) {
   savedPort = port;
   strncpy(savedToken, token ? token : "", sizeof(savedToken) - 1);
   savedToken[sizeof(savedToken) - 1] = '\0';
+  if (savedToken[0] == '\0') AuthStore::load(savedToken, sizeof(savedToken));
 
   // `clientType=esp32` marks this socket as board-class on the daemon so the
   // initial burst honours the ≤4096B board-frame invariant (the untagged path
   // got the full 12KB dashboard history — enough to OOM a no-PSRAM C3 right
   // after connect and start a flap loop). Same tag as esp32/src/net/ws_client.
-  char path[80];
+  char path[128];
   if (savedToken[0] != '\0')
-    snprintf(path, sizeof(path), "/?token=%s&clientType=esp32", savedToken);
+    snprintf(path, sizeof(path), "/?token=%s&clientType=esp32&board=%s", savedToken,
+             board && board[0] ? board : "unknown");
   else
-    strcpy(path, "/?clientType=esp32");
+    snprintf(path, sizeof(path), "/?clientType=esp32&board=%s", board && board[0] ? board : "unknown");
 
   ws.begin(ip, port, path);
   ws.onEvent(onWsEvent);
@@ -154,11 +158,22 @@ void wsDisconnect() {
   ws.disconnect();
   connected = false;
   connecting = false;
+  disconnectAfterLoop = false;
   savedIp[0] = '\0';  // stop the backoff reconnect loop
 }
 
+void wsDisconnectAfterLoop() { disconnectAfterLoop = true; }
+
 void wsLoop() {
   ws.loop();
+
+  // auth_provision arrives inside WebSocketsClient's TEXT callback. Calling
+  // ws.disconnect() recursively there can invalidate the client's current
+  // frame state. Defer teardown until the callback and ws.loop() have returned.
+  if (disconnectAfterLoop) {
+    wsDisconnect();
+    return;
+  }
 
   // Exponential backoff. The library's internal reconnect timer is driven by
   // setReconnectInterval(); we push updated values as our backoff grows.

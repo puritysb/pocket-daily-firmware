@@ -1,0 +1,60 @@
+{
+  "$schema": "https://raw.githubusercontent.com/puritysb/AgentDeck/master/schemas/surface-protocol/v1/integration-manifest.schema.json",
+  "schemaVersion": 1,
+  "id": "io.pocketdaily.reader",
+  "name": "Pocket Daily Reader",
+  "version": "1.4.1-pocket",
+  "manifestStatus": "published",
+  "compatibilityTier": "community",
+  "ownership": {
+    "type": "independent",
+    "owner": "Pocket Daily Reader maintainers"
+  },
+  "repository": "https://github.com/puritysb/pocket-daily-reader",
+  "issues": "https://github.com/puritysb/pocket-daily-reader/issues",
+  "license": "MIT",
+  "maintainers": [
+    {
+      "name": "Pocket Daily Reader maintainers",
+      "url": "https://github.com/puritysb/pocket-daily-reader"
+    }
+  ],
+  "profiles": [
+    {
+      "id": "portable-reader/v1",
+      "transports": ["http-pull", "http-outbox"],
+      "capabilities": [
+        "feed.pull",
+        "feed.conditional",
+        "outbox.push",
+        "glance.read",
+        "weather.snapshot.read",
+        "ota.feed",
+        "ota.resume-206",
+        "device.telemetry"
+      ],
+      "legacyBaseline": true
+    }
+  ],
+  "products": [
+    {
+      "productId": "io.pocketdaily.reader",
+      "name": "Pocket Daily Reader",
+      "defaultProfile": "portable-reader/v1",
+      "otaIdentities": [
+        {
+          "board": "xteink_x3",
+          "updateChannel": "stable"
+        },
+        {
+          "board": "xteink_x4",
+          "updateChannel": "stable"
+        }
+      ]
+    }
+  ],
+  "conformance": {
+    "status": "untested"
+  },
+  "notes": "Pocket Daily is offline-first. AgentDeck is an optional Surface provider; no network dependency is required for books, cached cards, queued actions, or the retained sleep frame. WebSocket Inbox is not advertised until its public runtime contract is implemented."
+}

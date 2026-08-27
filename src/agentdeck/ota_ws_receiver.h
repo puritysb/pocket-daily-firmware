@@ -29,6 +29,11 @@
 namespace AgentDeck {
 namespace OtaWs {
 
+// Bind OTA reception to the physical board identity before networking starts.
+// A v1 OTA begin is rejected unless productId + board + updateChannel are all
+// present and exactly match this firmware instance.
+void configureIdentity(const char* board);
+
 // Consume an inbound WS text frame when it is an esp32_ota_* message.
 // Returns true when consumed (caller must skip the normal protocol parser).
 // Cheap for non-OTA frames: a strstr probe + a size gate before any JSON work.

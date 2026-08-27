@@ -9,6 +9,7 @@
 #include <Utf8.h>
 #include <Xtc.h>
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -21,7 +22,7 @@
 #include "fontIds.h"
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 5;  // File Browser, Recents, File transfer, Agent Dashboard, Settings
+  int count = 6;  // File Browser, Recents, File transfer, Pocket Daily, Games, Settings
   if (!recentBooks.empty()) {
     count += recentBooks.size();
   }
@@ -197,8 +198,11 @@ void HomeActivity::loop() {
         case HomeMenuItem::FILE_TRANSFER:
           onFileTransferOpen();
           break;
-        case HomeMenuItem::AGENT_DASHBOARD:
-          onAgentOpen();
+        case HomeMenuItem::POCKET_DAILY:
+          onPocketDailyOpen();
+          break;
+        case HomeMenuItem::GAMES:
+          onGamesOpen();
           break;
         case HomeMenuItem::SETTINGS_MENU:
           onSettingsOpen();
@@ -234,9 +238,9 @@ void HomeActivity::render(RenderLock&&) {
                           std::bind(&HomeActivity::storeCoverBuffer, this));
 
   // Build menu items dynamically
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), tr(STR_FILE_TRANSFER),
-                                        tr(STR_AGENT_DASHBOARD), tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, AgentMark, Settings};
+  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES),     tr(STR_MENU_RECENT_BOOKS), tr(STR_FILE_TRANSFER),
+                                        tr(STR_POCKET_DAILY_APP), tr(STR_GAMES_TITLE),       tr(STR_SETTINGS_TITLE)};
+  std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, AgentMark, Bookmark, Settings};
 
   if (hasOpdsServers) {
     menuItems.insert(menuItems.begin() + 2, tr(STR_OPDS_BROWSER));
@@ -249,12 +253,10 @@ void HomeActivity::render(RenderLock&&) {
     menuIcons.insert(menuIcons.begin(), Book);
   }
 
+  const int menuTop = metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset;
+  const int menuHeight = std::max(0, pageHeight - menuTop - metrics.buttonHintsHeight);
   GUI.drawButtonMenu(
-      renderer,
-      Rect{0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset, pageWidth,
-           pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing +
-                         metrics.homeMenuTopOffset + metrics.buttonHintsHeight)},
-      static_cast<int>(menuItems.size()),
+      renderer, Rect{0, menuTop, pageWidth, menuHeight}, static_cast<int>(menuItems.size()),
       metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - recentBooks.size(),
       [&menuItems](int index) { return std::string(menuItems[index]); },
       [&menuIcons](int index) { return menuIcons[index]; });
@@ -283,6 +285,8 @@ void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 
 void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
 
-void HomeActivity::onAgentOpen() { activityManager.goToAgent(); }
+void HomeActivity::onPocketDailyOpen() { activityManager.goToPocketDaily(); }
+
+void HomeActivity::onGamesOpen() { activityManager.goToGames(); }
 
 void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }

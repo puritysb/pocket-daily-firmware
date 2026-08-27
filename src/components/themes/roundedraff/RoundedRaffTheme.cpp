@@ -50,7 +50,6 @@ int coverWidth = 0;
 
 void RoundedRaffTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title,
                                   const char* subtitle) const {
-  (void)subtitle;
   // Home screen header is custom-rendered in drawRecentBookCover.
   if (title == nullptr) {
     return;
@@ -79,6 +78,12 @@ void RoundedRaffTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const 
   const int titleFont = UiCjkFont::fontForText(renderer, title, kTitleFontId, EpdFontFamily::BOLD);
   auto headerTitle = renderer.truncatedText(titleFont, title, maxTitleWidth, EpdFontFamily::BOLD);
   renderer.drawText(titleFont, titleX, titleY, headerTitle.c_str(), true, EpdFontFamily::BOLD);
+  if (subtitle && subtitle[0]) {
+    const int subtitleFont = UiCjkFont::fontForText(renderer, subtitle, SMALL_FONT_ID);
+    const auto headerSubtitle = renderer.truncatedText(subtitleFont, subtitle, maxTitleWidth);
+    renderer.drawText(subtitleFont, titleX, titleY + renderer.getLineHeight(titleFont) + 1, headerSubtitle.c_str(),
+                      true);
+  }
   drawBatteryRight(renderer,
                    Rect{batteryIconX, rect.y + 14, RoundedRaffMetrics::values.batteryWidth,
                         RoundedRaffMetrics::values.batteryHeight},
@@ -205,7 +210,8 @@ void RoundedRaffTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int butt
   const int rowStep = rowHeight + rowGap;
   const int pageItems = std::max(1, rect.height / rowStep);
   const int safeSelectedIndex = std::max(0, selectedIndex);
-  const int pageStartIndex = (safeSelectedIndex / pageItems) * pageItems;
+  const int lastPageStart = std::max(0, buttonCount - pageItems);
+  const int pageStartIndex = std::min((safeSelectedIndex / pageItems) * pageItems, lastPageStart);
   const int menuTop = rect.y;
   const int textLineHeight = renderer.getLineHeight(kTitleFontId);
   const int menuMaxWidth = std::max(0, rect.width - sidePadding * 2);
@@ -378,8 +384,8 @@ void RoundedRaffTheme::drawList(const GfxRenderer& renderer, Rect rect, int item
         const int titleY = rowY + subtitleTopPadding;
         const int subtitleFont = UiCjkFont::fontForText(renderer, subtitleRaw.c_str(), kSubtitleFontId);
         const int subtitleY = titleY + titleLineH + subtitleInterLineGap;
-        auto subtitle = renderer.truncatedText(subtitleFont, subtitleRaw.c_str(), textAreaWidth,
-                                               EpdFontFamily::REGULAR);
+        auto subtitle =
+            renderer.truncatedText(subtitleFont, subtitleRaw.c_str(), textAreaWidth, EpdFontFamily::REGULAR);
         renderer.drawText(titleFont, rowX + kInteractiveInsetX, titleY, title.c_str(), !isSelected,
                           EpdFontFamily::BOLD);
         renderer.drawText(subtitleFont, rowX + kInteractiveInsetX, subtitleY, subtitle.c_str(), !isSelected,
@@ -414,8 +420,6 @@ void RoundedRaffTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, 
   const int hintHeight = RoundedRaffMetrics::values.buttonHintsHeight - 10;  // 30px total guide height
   const int groupWidth = (pageWidth - sidePadding * 2 - groupGap) / 2;
   const int hintY = pageHeight - hintHeight - bottomMargin;
-  const int textY = hintY + (hintHeight - renderer.getLineHeight(kGuideFontId)) / 2;
-
   const bool backDisabled = (btn1 == nullptr || btn1[0] == '\0');
   const int leftGroupX = sidePadding;
   const int rightGroupX = leftGroupX + groupWidth + groupGap;
@@ -430,8 +434,12 @@ void RoundedRaffTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, 
   renderer.fillRect(rightGroupX, hintY, groupWidth, hintHeight, false);
 
   renderer.drawRoundedRect(leftGroupX, hintY, groupWidth, hintHeight, 2, kBottomRadius, true);
-  const int selectWidth = renderer.getTextWidth(kGuideFontId, selectText.c_str(), EpdFontFamily::REGULAR);
-  const int downWidth = renderer.getTextWidth(kGuideFontId, downText.c_str(), EpdFontFamily::REGULAR);
+  const int backFont = UiCjkFont::fontForText(renderer, backLabel.c_str(), kGuideFontId);
+  const int selectFont = UiCjkFont::fontForText(renderer, selectText.c_str(), kGuideFontId);
+  const int upFont = UiCjkFont::fontForText(renderer, upText.c_str(), kGuideFontId);
+  const int downFont = UiCjkFont::fontForText(renderer, downText.c_str(), kGuideFontId);
+  const int selectWidth = renderer.getTextWidth(selectFont, selectText.c_str(), EpdFontFamily::REGULAR);
+  const int downWidth = renderer.getTextWidth(downFont, downText.c_str(), EpdFontFamily::REGULAR);
   constexpr int innerEdgePadding = 16;
 
   const int backX = leftGroupX + innerEdgePadding;
@@ -440,14 +448,18 @@ void RoundedRaffTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, 
   const int downX = rightGroupX + groupWidth - innerEdgePadding - downWidth;
 
   if (!backDisabled) {
-    renderer.drawText(kGuideFontId, backX, textY, backLabel.c_str(), true, EpdFontFamily::REGULAR);
+    const int textY = hintY + (hintHeight - renderer.getLineHeight(backFont)) / 2;
+    renderer.drawText(backFont, backX, textY, backLabel.c_str(), true, EpdFontFamily::REGULAR);
   }
-  renderer.drawText(kGuideFontId, selectX, textY, selectText.c_str(), true, EpdFontFamily::REGULAR);
+  const int selectY = hintY + (hintHeight - renderer.getLineHeight(selectFont)) / 2;
+  renderer.drawText(selectFont, selectX, selectY, selectText.c_str(), true, EpdFontFamily::REGULAR);
 
   renderer.drawRoundedRect(rightGroupX, hintY, groupWidth, hintHeight, 2, kBottomRadius, true);
 
-  renderer.drawText(kGuideFontId, upX, textY, upText.c_str(), true, EpdFontFamily::REGULAR);
-  renderer.drawText(kGuideFontId, downX, textY, downText.c_str(), true, EpdFontFamily::REGULAR);
+  const int upY = hintY + (hintHeight - renderer.getLineHeight(upFont)) / 2;
+  const int downY = hintY + (hintHeight - renderer.getLineHeight(downFont)) / 2;
+  renderer.drawText(upFont, upX, upY, upText.c_str(), true, EpdFontFamily::REGULAR);
+  renderer.drawText(downFont, downX, downY, downText.c_str(), true, EpdFontFamily::REGULAR);
 
   renderer.setOrientation(origOrientation);
 }

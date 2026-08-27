@@ -164,7 +164,6 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   constexpr int buttonWidth = 106;
   constexpr int buttonHeight = BaseMetrics::values.buttonHintsHeight;
   constexpr int buttonY = BaseMetrics::values.buttonHintsHeight;  // Distance from bottom
-  constexpr int textYOffset = 7;                                  // Distance from top of button to text baseline
   // X3 has wider screen in portrait (528 vs 480), use more spacing
   constexpr int x4ButtonPositions[] = {25, 130, 245, 350};
   constexpr int x3ButtonPositions[] = {38, 154, 268, 384};
@@ -177,9 +176,11 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
       const int x = buttonPositions[i];
       renderer.fillRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, false);
       renderer.drawRect(x, pageHeight - buttonY, buttonWidth, buttonHeight);
-      const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, labels[i]);
+      const int labelFont = UiCjkFont::fontForText(renderer, labels[i], UI_10_FONT_ID);
+      const int textWidth = renderer.getTextWidth(labelFont, labels[i]);
       const int textX = x + (buttonWidth - 1 - textWidth) / 2;
-      renderer.drawText(UI_10_FONT_ID, textX, pageHeight - buttonY + textYOffset, labels[i]);
+      const int textY = pageHeight - buttonY + (buttonHeight - renderer.getLineHeight(labelFont)) / 2;
+      renderer.drawText(labelFont, textX, textY, labels[i]);
     }
   }
 
@@ -199,21 +200,23 @@ void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
     if (topBtn != nullptr && topBtn[0] != '\0') {
       const int leftX = buttonMargin;
       renderer.drawRect(leftX, x3ButtonY, buttonWidth, buttonHeight);
-      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, topBtn);
-      const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
+      const int textFont = UiCjkFont::fontForText(renderer, topBtn, SMALL_FONT_ID);
+      const int textWidth = renderer.getTextWidth(textFont, topBtn);
+      const int textHeight = renderer.getTextHeight(textFont);
       const int textX = leftX + (buttonWidth - textHeight) / 2;
       const int textY = x3ButtonY + (buttonHeight + textWidth) / 2;
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, textY, topBtn);
+      renderer.drawTextRotated90CW(textFont, textX, textY, topBtn);
     }
 
     if (bottomBtn != nullptr && bottomBtn[0] != '\0') {
       const int rightX = screenWidth - buttonMargin - buttonWidth;
       renderer.drawRect(rightX, x3ButtonY, buttonWidth, buttonHeight);
-      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, bottomBtn);
-      const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
+      const int textFont = UiCjkFont::fontForText(renderer, bottomBtn, SMALL_FONT_ID);
+      const int textWidth = renderer.getTextWidth(textFont, bottomBtn);
+      const int textHeight = renderer.getTextHeight(textFont);
       const int textX = rightX + (buttonWidth - textHeight) / 2;
       const int textY = x3ButtonY + (buttonHeight + textWidth) / 2;
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, textY, bottomBtn);
+      renderer.drawTextRotated90CW(textFont, textX, textY, bottomBtn);
     }
   } else {
     // X4 layout: Both buttons stacked on right side
@@ -340,8 +343,8 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       if (!subtitleText.empty()) {
         const int subtitleFont = UiCjkFont::fontForText(renderer, subtitleText.c_str(), SMALL_FONT_ID);
         auto subtitle = renderer.truncatedText(subtitleFont, subtitleText.c_str(), rowTextWidth);
-        renderer.drawText(subtitleFont, rect.x + BaseMetrics::values.contentSidePadding, itemY + 22,
-                          subtitle.c_str(), i != selectedIndex);
+        renderer.drawText(subtitleFont, rect.x + BaseMetrics::values.contentSidePadding, itemY + 22, subtitle.c_str(),
+                          i != selectedIndex);
       }
     }
 
@@ -375,9 +378,8 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
   if (title) {
     int padding = rect.width - batteryX + BaseMetrics::values.batteryWidth;
     const int titleFont = UiCjkFont::fontForText(renderer, title, UI_12_FONT_ID, EpdFontFamily::BOLD);
-    auto truncatedTitle = renderer.truncatedText(titleFont, title,
-                                                 rect.width - padding * 2 - BaseMetrics::values.contentSidePadding * 2,
-                                                 EpdFontFamily::BOLD);
+    auto truncatedTitle = renderer.truncatedText(
+        titleFont, title, rect.width - padding * 2 - BaseMetrics::values.contentSidePadding * 2, EpdFontFamily::BOLD);
     renderer.drawCenteredText(titleFont, rect.y + 5, truncatedTitle.c_str(), true, EpdFontFamily::BOLD);
   }
 
@@ -399,8 +401,7 @@ void BaseTheme::drawSubHeader(const GfxRenderer& renderer, Rect rect, const char
   int rightSpace = BaseMetrics::values.contentSidePadding;
   if (rightLabel) {
     const int rightFont = UiCjkFont::fontForText(renderer, rightLabel, SMALL_FONT_ID);
-    auto truncatedRightLabel =
-        renderer.truncatedText(rightFont, rightLabel, maxListValueWidth, EpdFontFamily::REGULAR);
+    auto truncatedRightLabel = renderer.truncatedText(rightFont, rightLabel, maxListValueWidth, EpdFontFamily::REGULAR);
     int rightLabelWidth = renderer.getTextWidth(rightFont, truncatedRightLabel.c_str());
     renderer.drawText(rightFont, rect.x + rect.width - BaseMetrics::values.contentSidePadding - rightLabelWidth,
                       rect.y + 7, truncatedRightLabel.c_str());
@@ -678,9 +679,36 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
 void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                                const std::function<std::string(int index)>& buttonLabel,
                                const std::function<UIIcon(int index)>& rowIcon) const {
-  for (int i = 0; i < buttonCount; ++i) {
+  const int rowStep = BaseMetrics::values.menuRowHeight + BaseMetrics::values.menuSpacing;
+  const int availableHeight = std::max(0, rect.height - BaseMetrics::values.verticalSpacing);
+  const int pageItems = std::max(1, (availableHeight + BaseMetrics::values.menuSpacing) / rowStep);
+  const int safeSelectedIndex = std::max(0, selectedIndex);
+  const int lastPageStart = std::max(0, buttonCount - pageItems);
+  const int pageStartIndex = std::min((safeSelectedIndex / pageItems) * pageItems, lastPageStart);
+  const bool paged = buttonCount > pageItems;
+
+  if (paged) {
+    constexpr int arrowSize = 6;
+    constexpr int margin = 15;
+    const int centerX = rect.x + rect.width - margin;
+    const int indicatorTop = rect.y + BaseMetrics::values.verticalSpacing;
+    const int indicatorBottom = rect.y + rect.height - arrowSize;
+
+    for (int i = 0; i < arrowSize; ++i) {
+      if (pageStartIndex > 0) {
+        renderer.drawLine(centerX - i, indicatorTop + i, centerX + i, indicatorTop + i);
+      }
+      if (pageStartIndex + pageItems < buttonCount) {
+        renderer.drawLine(centerX - (arrowSize - 1 - i), indicatorBottom - arrowSize + 1 + i,
+                          centerX + (arrowSize - 1 - i), indicatorBottom - arrowSize + 1 + i);
+      }
+    }
+  }
+
+  for (int i = pageStartIndex; i < buttonCount && i < pageStartIndex + pageItems; ++i) {
+    const int visibleIndex = i - pageStartIndex;
     const int tileY = BaseMetrics::values.verticalSpacing + rect.y +
-                      static_cast<int>(i) * (BaseMetrics::values.menuRowHeight + BaseMetrics::values.menuSpacing);
+                      visibleIndex * (BaseMetrics::values.menuRowHeight + BaseMetrics::values.menuSpacing);
 
     const bool selected = selectedIndex == i;
 

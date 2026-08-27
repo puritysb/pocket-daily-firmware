@@ -14,6 +14,17 @@
 namespace AgentDeck {
 namespace OtaPull {
 
+// Interactive Pocket downloads are cooperative: one service call transfers a
+// bounded chunk and returns to the input loop. Only final validation/flash is
+// exclusive. Timer-wake callers keep using tryInstall() below.
+enum class InteractiveStep : uint8_t { Idle, Progress, Retry, Staged, Deferred, Failed };
+
+bool beginInteractive(const char* ip, uint16_t port, const char* token, const char* board, uint32_t fwSize,
+                      const char* fwMd5, int battPct);
+InteractiveStep serviceInteractive();
+bool interactiveActive();
+void cancelInteractive();
+
 // Act on a feed's fw advert: guards (battery / WS transfer active / already
 // applied / slot size), then blocking download (~30-60 s LAN) to the shared
 // OTA cache, MD5 + structural validation, and flashPending handoff — the
@@ -23,6 +34,18 @@ namespace OtaPull {
 // timed sleep (the existing flashPending guards already ensure this).
 bool tryInstall(const char* ip, uint16_t port, const char* token, const char* board, uint32_t fwSize, const char* fwMd5,
                 int battPct);
+
+// Durable state used by the Pocket UI/retry scheduler. A segmented transfer
+// may finish one bounded network pass without finishing the image; exposing
+// the verified SD offset lets the UI report honest progress and lets the loop
+// automatically schedule the next pass without making the user press Sync.
+uint32_t savedBytes(const char* fwMd5);
+bool alreadyApplied(const char* fwMd5);
+
+// A validated pull writes its applied marker before the destructive flash
+// step. Clear it if flashing returns an error so the same staged build can be
+// downloaded and retried after the underlying failure is corrected.
+void clearAppliedMarker();
 
 }  // namespace OtaPull
 }  // namespace AgentDeck

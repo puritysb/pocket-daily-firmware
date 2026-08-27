@@ -8,16 +8,19 @@
 //
 #include <cstdint>
 
+#include "endpoint_candidates.h"
+
 namespace AgentDeck {
 namespace Net {
 
 struct BridgeInfo {
-  char ip[16];
-  uint16_t port;
+  EndpointCandidates endpoints;
   char token[40];
   char project[40];
   char agent[16];
   bool found;
+
+  const char* primaryIp() const { return endpoints.count ? endpoints.ips[0] : ""; }
 };
 
 // Start the mDNS responder + begin browsing. Returns false if responder failed.

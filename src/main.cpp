@@ -37,6 +37,12 @@
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 
+// PlatformIO turns the compact Pocket Daily Japanese font into linker data.
+// Keep this subset in firmware so a clean SD card can render the offline deck
+// before the device has ever reached AgentDeck or File Transfer.
+extern const uint8_t pocketJpFontStart[] asm("_binary_assets_fonts_PocketJP_PocketSansJP_12_cpfont_start");
+extern const uint8_t pocketJpFontEnd[] asm("_binary_assets_fonts_PocketJP_PocketSansJP_12_cpfont_end");
+
 // 16 KB loop task stack (Arduino default: 8 KB). The agent dashboard runs its
 // whole synchronous world on this task — WS pump + JSON dispatch, the feed
 // sync chain (esp_http_client → std::string body → ArduinoJson → deck persist
@@ -44,7 +50,7 @@
 // ~1 KB of its limit at the WS-connect edge: X4 panicked at the stack-bottom
 // canary (printf-family frame, 1.15 KB) right after device_info, 3/3
 // reproducible on 23ccd9d1. Deferring the connect-edge fetch to a shallow
-// frame (AgentDashboardActivity::loop) halves the pressure; this doubles the
+// frame (PocketDailyActivity::loop) halves the pressure; this doubles the
 // budget so the whole class of "one more frame tips it over" is gone. C3 has
 // no PSRAM but ~380 KB RAM; 8 KB more is cheap insurance.
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);
@@ -121,6 +127,13 @@ EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont);
 EpdFont ui12RegularFont(&ubuntu_12_regular);
 EpdFont ui12BoldFont(&ubuntu_12_bold);
 EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
+
+// Compatibility shim for SD updaters built before the aligned-body checksum
+// edge case was fixed. Keep twelve bytes in the app image so this build's final
+// segment table does not end exactly on the checksum's 16-byte boundary. The
+// value has no runtime role; `retain` prevents section GC from removing it.
+__attribute__((used, retain))
+const uint32_t sdUpdaterAlignmentCompat[3] = {0x58334431, 0x58334432, 0x58334433};  // X3D1/X3D2/X3D3
 
 // measurement of power button press duration calibration value
 unsigned long t1 = 0;
@@ -268,6 +281,56 @@ static bool loadSleepFrameBuffer() {
   }
   Storage.remove(SLEEP_FRAME_FILE);
   return true;
+}
+
+static void installPocketJapaneseFontIfMissing() {
+  static constexpr char kHiddenRoot[] = "/.fonts";
+  static constexpr char kVisibleRoot[] = "/fonts";
+  static constexpr char kFamily[] = "PocketSansJP";
+  static constexpr char kFilename[] = "PocketSansJP_12.cpfont";
+  static constexpr char kHiddenPath[] = "/.fonts/PocketSansJP/PocketSansJP_12.cpfont";
+  static constexpr char kVisiblePath[] = "/fonts/PocketSansJP/PocketSansJP_12.cpfont";
+
+  // The deterministic Pocket subset owns a separate family. A complete reader
+  // font (NotoSansJP/BIZUDGothic/etc.) may coexist without shadowing it.
+  if (Storage.exists(kHiddenPath) || Storage.exists(kVisiblePath)) return;
+
+  const char* root = Storage.exists("/fonts/PocketSansJP") ? kVisibleRoot : kHiddenRoot;
+  char familyDir[64];
+  char finalPath[96];
+  char tempPath[96];
+  snprintf(familyDir, sizeof(familyDir), "%s/%s", root, kFamily);
+  snprintf(finalPath, sizeof(finalPath), "%s/%s", familyDir, kFilename);
+  snprintf(tempPath, sizeof(tempPath), "%s/%s.tmp", familyDir, kFilename);
+
+  if (!Storage.exists(root) && !Storage.mkdir(root)) return;
+  if (!Storage.exists(familyDir) && !Storage.mkdir(familyDir)) return;
+
+  HalFile file;
+  if (!Storage.openFileForWrite("FONT", tempPath, file)) return;
+  // Linker-provided symbols are separate declarations even though they bound
+  // one embedded blob. Integer addresses express that contract without the
+  // undefined cross-object pointer subtraction cppcheck correctly rejects.
+  const size_t total = reinterpret_cast<uintptr_t>(pocketJpFontEnd) - reinterpret_cast<uintptr_t>(pocketJpFontStart);
+  size_t written = 0;
+  while (written < total) {
+    const size_t chunk = (total - written) > 4096 ? 4096 : (total - written);
+    const size_t n = file.write(pocketJpFontStart + written, chunk);
+    if (n != chunk) break;
+    written += n;
+  }
+  file.close();
+  if (written != total) {
+    Storage.remove(tempPath);
+    LOG_ERR("FONT", "Pocket JP install incomplete: %u/%u", (unsigned)written, (unsigned)total);
+    return;
+  }
+  Storage.remove(finalPath);
+  if (!Storage.rename(tempPath, finalPath)) {
+    Storage.remove(tempPath);
+    return;
+  }
+  LOG_INF("FONT", "Installed Pocket Japanese subset (%u bytes)", (unsigned)total);
 }
 
 // Enter deep sleep mode
@@ -431,6 +494,8 @@ void setup() {
     return;
   }
 
+  installPocketJapaneseFontIfMissing();
+
   HalSystem::checkPanic();
 
   SETTINGS.loadFromFile();
@@ -560,9 +625,13 @@ void setup() {
     LOG_INF("MAIN", "Pocket boot: resume reader (OK held)");
     activityManager.goToReader(APP_STATE.openEpubPath);
   } else {
-    // Pocket is the product shell on every ordinary boot. AgentDeck remains a
-    // background sync source; its availability never decides where boot lands.
-    activityManager.goToAgent();
+    // Pocket is the default product shell, but keep the persisted startup
+    // choice honest: users who explicitly chose Library must not be routed to
+    // Pocket anyway. AgentDeck availability never influences either route.
+    if (SETTINGS.startupApp == CrossPointSettings::STARTUP_HOME)
+      activityManager.goHome();
+    else
+      activityManager.goToPocketDaily();
   }
 
   if (resume == BootResume::Silent) {

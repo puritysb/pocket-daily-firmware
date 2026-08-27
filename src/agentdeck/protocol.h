@@ -34,6 +34,9 @@ struct FeedApply {
   // full and `unchanged` responses; size 0 = nothing staged for this board.
   uint32_t fwSize = 0;
   char fwMd5[36] = {0};
+  char fwProductId[40] = {0};
+  char fwBoard[20] = {0};
+  char fwUpdateChannel[16] = {0};
 };
 
 // M6 pull sync: parse a `GET /feed` card_feed body and land the embedded

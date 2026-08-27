@@ -2,19 +2,21 @@
 
 #include <FontCacheManager.h>
 #include <HalPowerManager.h>
+#include <Memory.h>
 
 #include <algorithm>
 
 #include "OpdsServerStore.h"
-#include "agent/AgentDashboardActivity.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
+#include "games/GamesActivity.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
 #include "home/RecentBooksActivity.h"
 #include "network/CrossPointWebServerActivity.h"
+#include "pocket_daily/PocketDailyActivity.h"
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
@@ -179,8 +181,17 @@ void ActivityManager::goToFileTransfer() {
   replaceActivity(std::make_unique<CrossPointWebServerActivity>(renderer, mappedInput));
 }
 
-void ActivityManager::goToAgent() {
-  replaceActivity(std::make_unique<AgentDashboardActivity>(renderer, mappedInput));
+void ActivityManager::goToPocketDaily() {
+  replaceActivity(std::make_unique<PocketDailyActivity>(renderer, mappedInput));
+}
+
+void ActivityManager::goToGames() {
+  auto games = makeUniqueNoThrow<GamesActivity>(renderer, mappedInput);
+  if (!games) {
+    LOG_ERR("ACT", "OOM: GamesActivity");
+    return;
+  }
+  replaceActivity(std::move(games));
 }
 
 void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
@@ -229,8 +240,10 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
       initialMenuItem = HomeMenuItem::OPDS_BROWSER;
     } else if (activityName == "CrossPointWebServer") {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
-    } else if (activityName == "AgentDashboard") {
-      initialMenuItem = HomeMenuItem::AGENT_DASHBOARD;
+    } else if (activityName == "PocketDaily") {
+      initialMenuItem = HomeMenuItem::POCKET_DAILY;
+    } else if (activityName == "Games") {
+      initialMenuItem = HomeMenuItem::GAMES;
     } else if (activityName == "Settings") {
       initialMenuItem = HomeMenuItem::SETTINGS_MENU;
     }

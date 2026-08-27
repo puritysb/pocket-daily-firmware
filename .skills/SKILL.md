@@ -410,23 +410,27 @@ collaborator remotes. Check `git remote -v` and `git branch --show-current` firs
 branch here is **`master`**, not `main`. See the fork section below for what that means in
 practice.
 
-### AgentDeck Fork: two sync axes
+### Pocket Daily Fork: two sync axes
 
-**This repo is a personal fork.** `origin` = your fork (`puritysb/crosspoint-reader`),
+**This repo is a personal fork.** `origin` = your fork (`puritysb/pocket-daily-reader`),
 `upstream` = the parent project (`crosspoint-reader/crosspoint-reader`). Local `master`
-intentionally carries the private **"AgentDeck Decision Card"** product stack
-(`src/agentdeck/`, `AgentDashboardActivity`, agentdeck icons — ~2,700 lines) layered on top of
-upstream. **The AgentDeck code is fork-only and never goes upstream.** Our `master` being far
-ahead of `upstream/master` is expected, not drift.
+intentionally carries the **Pocket Daily** product stack — the offline-first Pocket shell
+(`src/pocket_daily/`, `src/activities/pocket_daily/`), the bundled games
+(`src/games/`, `src/activities/games/`), and the AgentDeck Companion provider
+(`src/agentdeck/`) — layered on top of upstream. AgentDeck is one optional sync
+provider for that product, not the product itself. **None of this stack goes
+upstream.** Our `master` being far ahead of `upstream/master` is expected, not drift.
 
 - **Pulling upstream**: `./scripts/sync-upstream.sh` — **merge, never rebase**.
-- **Contributing upstream**: the PR must contain **zero** `src/agentdeck/` files, which means
-  keeping AgentDeck and reader changes in separate commits from the start.
+- **Contributing upstream**: the PR must contain **zero** product-stack files
+  (`src/agentdeck/`, `src/pocket_daily/`, `src/activities/pocket_daily/`, `src/games/`,
+  `src/activities/games/`), which means keeping product and reader changes in separate
+  commits from the start.
 - **Downstream**: `src/agentdeck/*` is a hand-port of AgentDeck's ESP32 wire contract, with no
   codegen — drift is a discipline, not a build gate.
 
-Full procedure for all three: **`fork-sync` skill**. Behavioural contract for the dashboard:
-`src/agentdeck/CLAUDE.md`.
+Full procedure for all three: **`fork-sync` skill**. Behavioural contract for the
+Companion provider: `src/agentdeck/CLAUDE.md`.
 
 ### Git Operation Rules
 
@@ -614,7 +618,7 @@ Correctness rests entirely on a version byte per file format.
 same-numbered-but-different-layout header defeats the `version != SECTION_FILE_VERSION` check
 and silently feeds stale caches to the reader — it does not fail loudly.
 
-**Fork rule**: keep this fork's `SECTION_FILE_VERSION` (currently **129**) in the reserved
+**Fork rule**: keep this fork's `SECTION_FILE_VERSION` (currently **130**) in the reserved
 **128–255** range, bumping within it — never onto upstream's line (currently 27, still
 incrementing). The upstream-contribution branch (`bilingual-toggle-upstream`) uses
 `upstream + 1` instead.

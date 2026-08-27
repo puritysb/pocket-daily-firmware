@@ -16,11 +16,17 @@ namespace Net {
 // Initialize the WS client (creates the outbox mutex). Does not connect.
 void wsInit();
 
-// Connect to the daemon WebSocket. token may be "" for an unauthenticated LAN.
-void wsConnect(const char* ip, uint16_t port, const char* token);
+// Connect to the daemon WebSocket. An empty discovery token falls back to the
+// NVS-provisioned credential. `board` is reported in the handshake so the
+// daemon can identify and cable-free-adopt an unpaired X3/X4.
+void wsConnect(const char* ip, uint16_t port, const char* token, const char* board);
 
 // Disconnect and stop the reconnect loop.
 void wsDisconnect();
+
+// Request a disconnect after the current ws.loop() callback has unwound.
+// WebSocketsClient is not safe to tear down recursively from its TEXT event.
+void wsDisconnectAfterLoop();
 
 // Pump WebSocket events + drive exponential-backoff reconnect. Call every loop.
 void wsLoop();

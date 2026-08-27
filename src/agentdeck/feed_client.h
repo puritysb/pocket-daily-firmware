@@ -12,6 +12,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "endpoint_candidates.h"
+
 namespace AgentDeck {
 namespace Feed {
 
@@ -30,6 +32,9 @@ struct SyncResult {
   // none. The caller decides whether to download/install (OtaPull::tryInstall).
   uint32_t fwSize = 0;
   char fwMd5[36] = {0};
+  // Endpoint that actually completed the request after any daemon redirect.
+  // Callers pass this directly to OTA and cache it as the next preferred path.
+  char endpointIp[16] = {0};
 };
 
 // Telemetry appended to the `GET /feed` query string — the only battery/link
@@ -56,6 +61,10 @@ SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char
 // (dynamic 9120→9139), so callers must fall back to discovery on failure.
 bool loadEndpoint(char* ip, size_t ipCap, uint16_t& port, char* token, size_t tokenCap);
 bool saveEndpoint(const char* ip, uint16_t port, const char* token);
+// Multi-interface form used by Pocket Daily. ADE1 single-address records are
+// accepted and promoted to ADE2 on the next successful save.
+bool loadEndpointCandidates(Net::EndpointCandidates& endpoints, char* token, size_t tokenCap);
+bool saveEndpointCandidates(const Net::EndpointCandidates& endpoints, const char* token);
 
 }  // namespace Feed
 }  // namespace AgentDeck

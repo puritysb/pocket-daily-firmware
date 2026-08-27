@@ -40,6 +40,30 @@ inline bool addToHm(char* out, size_t cap, const char* baseHm, uint32_t addSec) 
   return true;
 }
 
+// ISO local date → compact weekday label. The daemon owns the timezone and
+// sends the already-local date, so the reader needs no timezone database.
+inline bool formatWeekday(char* out, size_t cap, const char* isoDate) {
+  if (!out || cap == 0) return false;
+  out[0] = '\0';
+  if (!isoDate || strlen(isoDate) != 10 || isoDate[4] != '-' || isoDate[7] != '-') return false;
+  static constexpr int digitPositions[] = {0, 1, 2, 3, 5, 6, 8, 9};
+  for (int i : digitPositions)
+    if (isoDate[i] < '0' || isoDate[i] > '9') return false;
+  const int year = (isoDate[0] - '0') * 1000 + (isoDate[1] - '0') * 100 + (isoDate[2] - '0') * 10 + isoDate[3] - '0';
+  const int month = (isoDate[5] - '0') * 10 + isoDate[6] - '0';
+  const int day = (isoDate[8] - '0') * 10 + isoDate[9] - '0';
+  if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  // Sakamoto: 0=Sunday. Calendar validity beyond the simple bounds is the
+  // provider's responsibility; malformed transport still fails closed above.
+  static constexpr int offset[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+  static constexpr const char* names[] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
+  int y = year;
+  if (month < 3) y--;
+  const int weekday = (y + y / 4 - y / 100 + y / 400 + offset[month - 1] + day) % 7;
+  snprintf(out, cap, "%s", names[weekday]);
+  return true;
+}
+
 // "28° Rain · 22–30°" (parts drop out when unknown). Returns chars written.
 inline int formatWeatherNow(char* out, size_t cap, const GlanceWeather& w) {
   int o = 0;

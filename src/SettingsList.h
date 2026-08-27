@@ -114,6 +114,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Enum(StrId::STR_QUICK_RESUME_TIMEOUT, &CrossPointSettings::quickResumeSleepScreen,
                           {StrId::STR_STATE_OFF, StrId::STR_STATE_ON}, "quickResumeSleepScreen",
                           StrId::STR_CAT_DISPLAY),
+        SettingInfo::Toggle(StrId::STR_POCKET_SLEEP_COVER, &CrossPointSettings::pocketDailySleepCover,
+                            "pocketDailySleepCover", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_HIDE_BATTERY, &CrossPointSettings::hideBatteryPercentage,
                           {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS}, "hideBatteryPercentage",
                           StrId::STR_CAT_DISPLAY),
@@ -188,9 +190,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
 
         // --- System ---
         SettingInfo::Enum(StrId::STR_STARTUP_APP, &CrossPointSettings::startupApp,
-                          {StrId::STR_STARTUP_HOME, StrId::STR_AGENT_DASHBOARD}, "startupApp",
-                          StrId::STR_CAT_SYSTEM),
-        SettingInfo::Toggle(StrId::STR_AGENT_PULL_SYNC, &CrossPointSettings::agentPullSyncEnabled,
+                          {StrId::STR_STARTUP_HOME, StrId::STR_POCKET_DAILY_APP}, "startupApp", StrId::STR_CAT_SYSTEM),
+        SettingInfo::Toggle(StrId::STR_POCKET_BACKGROUND_SYNC, &CrossPointSettings::agentPullSyncEnabled,
                             "agentPullSyncEnabled", StrId::STR_CAT_SYSTEM),
         SettingInfo::Value(
             StrId::STR_TIME_TO_SLEEP, &CrossPointSettings::sleepTimeoutMinutes,

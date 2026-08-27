@@ -2,7 +2,7 @@
 //
 // deck_store.h — M5.5 Deck persistence.
 //
-// Persists the bounded Pocket pool and personal glance to SD so the reader can
+// Persists the bounded Pocket Daily pool and personal glance to SD so the reader can
 // render and consume its last-synced content before Wi-Fi or a daemon exists.
 // Pocket choices are durable through the Outbox; only the retained legacy
 // session records below remain display-only and non-actionable.
@@ -13,8 +13,12 @@
 #include "agentdeck_config.h"
 #include "glance_state.h"
 
-namespace AgentDeck {
+namespace PocketDaily {
 namespace DeckStore {
+
+// TODO: move this storage implementation behind the PocketDaily domain API.
+// It remains in the provider directory temporarily for binary-schema stability;
+// on-disk ownership and paths are already Pocket Daily-owned.
 
 // One persisted overview card — the render-facing subset of SessionInfo.
 struct Record {
@@ -22,7 +26,7 @@ struct Record {
   char project[40];
   char agentType[16];
   char state[20];
-  char activity[SESSION_ACTIVITY_CAP];
+  char activity[AgentDeck::SESSION_ACTIVITY_CAP];
   uint8_t awaiting;
   // M6 card validity class ("live"/"day"/"info", card_class.h). A cached
   // `live` card is rendered greyed with a "reconnect to act" hint — it must
@@ -38,13 +42,16 @@ struct Snapshot {
   // the next pull so an unchanged night costs one tiny response (v2). Empty
   // when the deck was cached from the WS live mode (no sig on that path).
   char deckSig[12];
+  // Daemon-local absolute time at the successful pull. This survives an
+  // offline reboot without pretending the reader knows the host timezone.
+  char serverHm[6];
   // Sleep-glance block (weather / usage / wrap-up) as of the save, so the
   // offline/unchanged sleep frame can render it without a fresh feed (v2).
-  GlanceInfo glance;
+  PocketDaily::Glance glance;
   // Daemon-authored Pocket cards are device-consumable day/info content, so
   // they survive reboot beside the session deck instead of vanishing offline.
   uint8_t pocketCount;
-  PocketCard pocketCards[POCKET_CARD_CAP];
+  PocketDaily::Card pocketCards[PocketDaily::CARD_CAP];
   Record records[AgentDeckCfg::SESSIONS_CAP];
 };
 
@@ -59,4 +66,8 @@ bool save(const Snapshot& snap);
 bool load(Snapshot& out);
 
 }  // namespace DeckStore
-}  // namespace AgentDeck
+}  // namespace PocketDaily
+
+namespace AgentDeck {
+namespace DeckStore = PocketDaily::DeckStore;
+}

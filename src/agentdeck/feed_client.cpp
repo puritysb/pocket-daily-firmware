@@ -12,8 +12,10 @@
 #include <string>
 
 #include "agent/AgentLog.h"
+#include "auth_store.h"
 #include "network/HttpDownloader.h"
 #include "outbox_store.h"
+#include "pocket_daily/surface_request.h"
 #include "protocol.h"
 
 namespace AgentDeck {
@@ -24,13 +26,23 @@ constexpr const char* kDir = "/.crosspoint";
 constexpr const char* kEndpointPath = "/.crosspoint/agentdeck-endpoint.bin";
 constexpr const char* kEndpointTmpPath = "/.crosspoint/agentdeck-endpoint.tmp";
 
-struct EndpointRecord {
+struct EndpointRecordV1 {
   uint32_t magic;
   char ip[16];
   uint16_t port;
   char token[40];
 };
-constexpr uint32_t kEndpointMagic = 0x31454441;  // "ADE1" (LE)
+constexpr uint32_t kEndpointMagicV1 = 0x31454441;  // "ADE1" (LE)
+
+struct EndpointRecordV2 {
+  uint32_t magic;
+  char ips[Net::ENDPOINT_CANDIDATE_CAP][16];
+  uint8_t count;
+  uint8_t reserved;
+  uint16_t port;
+  char token[40];
+};
+constexpr uint32_t kEndpointMagicV2 = 0x32454441;  // "ADE2" (LE)
 
 void buildUrl(char* out, size_t cap, const char* ip, uint16_t port, const char* path, const char* token) {
   if (token && token[0]) {
@@ -40,11 +52,21 @@ void buildUrl(char* out, size_t cap, const char* ip, uint16_t port, const char* 
   }
 }
 
+bool redirectedIpv4(const HttpDownloader::EffectiveUrlCapture& effectiveUrl, char* out, size_t cap) {
+  if (!out || cap == 0 || strncmp(effectiveUrl.value, "http://", 7) != 0) return false;
+  char ip[16] = {0};
+  if (sscanf(effectiveUrl.value + 7, "%15[0-9.]", ip) != 1 || !ip[0]) return false;
+  snprintf(out, cap, "%s", ip);
+  return true;
+}
+
 // Drain the persisted outbox via POST /outbox. Every acknowledged decision is
 // removed regardless of per-decision status (expired/rejected are terminal by
 // contract). Returns false only on transport failure — records then stay
 // queued for the next sync.
-bool pushOutbox(const char* ip, uint16_t port, const char* token, const char* board) {
+bool pushOutbox(const char* ip, uint16_t port, const char* token, const char* board, char* effectiveIp,
+                size_t effectiveIpCap) {
+  if (effectiveIp && effectiveIpCap) snprintf(effectiveIp, effectiveIpCap, "%s", ip ? ip : "");
   OutboxStore::Queue q;
   if (!OutboxStore::load(q) || q.count == 0) return true;
 
@@ -74,10 +96,14 @@ bool pushOutbox(const char* ip, uint16_t port, const char* token, const char* bo
   char url[160];
   buildUrl(url, sizeof(url), ip, port, "/outbox", token);
   std::string response;
-  if (!HttpDownloader::postJson(url, json.c_str(), json.size(), response)) {
+  const PocketDaily::SurfaceRequestHeaders surfaceIdentity(board);
+  const auto requestHeaders = surfaceIdentity.view();
+  HttpDownloader::EffectiveUrlCapture effectiveUrl;
+  if (!HttpDownloader::postJson(url, json.c_str(), json.size(), response, 16384, &requestHeaders, &effectiveUrl)) {
     AgentLog::line("FEED", "outbox push failed (%u pending kept)", (unsigned)q.count);
     return false;
   }
+  redirectedIpv4(effectiveUrl, effectiveIp, effectiveIpCap);
 
   // Per-decision results are logged for the SD forensics trail; the queue is
   // cleared wholesale because acknowledgement is terminal either way.
@@ -105,12 +131,15 @@ SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char
   SyncResult out;
   if (!ip || !ip[0] || !port) return out;
 
+  char routeIp[16] = {0};
+  snprintf(routeIp, sizeof(routeIp), "%s", ip);
+
   // Outbox first: a queued decision is older than anything the feed will say,
   // and the feed we pull next should already reflect its effect.
-  pushOutbox(ip, port, token, board);
+  pushOutbox(ip, port, token, board, routeIp, sizeof(routeIp));
 
   char url[224];
-  buildUrl(url, sizeof(url), ip, port, "/feed", token);
+  buildUrl(url, sizeof(url), routeIp, port, "/feed", token);
   // Conditional pull + telemetry ride the query string (the GET is bodyless).
   // buildUrl already appended ?token=… when a token exists.
   size_t o = strlen(url);
@@ -124,7 +153,7 @@ SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char
   if (echoSig && echoSig[0]) app("sig=%s", echoSig);
   // New Pocket-reader firmware asks for daemon-authored portable cards only.
   // Older firmware omits this parameter and keeps receiving session rows.
-  app("surface=%s", "pocket-reader");
+  app("surface=%s", PocketDaily::LEGACY_SURFACE_QUERY);
   // Board identity lets the daemon attach a board-targeted `fw` staging advert
   // (contract § Pull OTA) without relying on its IP→board memory.
   if (board && board[0]) app("board=%s", board);
@@ -132,56 +161,107 @@ SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char
   if (telemetry.rssiDbm < 0) app("rssi=%d", telemetry.rssiDbm);
 
   std::string bodyStr;
-  if (!HttpDownloader::fetchUrl(url, bodyStr)) {
-    AgentLog::line("FEED", "feed pull failed: %s:%u", ip, (unsigned)port);
+  const PocketDaily::SurfaceRequestHeaders surfaceIdentity(board);
+  const auto requestHeaders = surfaceIdentity.view();
+  HttpDownloader::EffectiveUrlCapture effectiveUrl;
+  if (!HttpDownloader::fetchUrl(url, bodyStr, "", "", &requestHeaders, &effectiveUrl)) {
+    AgentLog::line("FEED", "feed pull failed: %s:%u", routeIp, (unsigned)port);
     return out;
   }
+  redirectedIpv4(effectiveUrl, routeIp, sizeof(routeIp));
   const Protocol::FeedApply applied = Protocol::applyCardFeed(bodyStr.c_str(), bodyStr.size());
   if (!applied.ok) return out;
 
   out.ok = true;
+  snprintf(out.endpointIp, sizeof(out.endpointIp), "%s", routeIp);
   out.unchanged = applied.unchanged;
   out.nextPullSec = applied.nextPullSec;
   strncpy(out.deckSig, applied.deckSig, sizeof(out.deckSig) - 1);
-  out.fwSize = applied.fwSize;
-  strncpy(out.fwMd5, applied.fwMd5, sizeof(out.fwMd5) - 1);
-  saveEndpoint(ip, port, token);
+  if (applied.fwSize) {
+    if (PocketDaily::otaIdentityMatches(applied.fwProductId, applied.fwBoard, applied.fwUpdateChannel, board)) {
+      out.fwSize = applied.fwSize;
+      strncpy(out.fwMd5, applied.fwMd5, sizeof(out.fwMd5) - 1);
+    } else {
+      AgentLog::line("OTA", "feed firmware rejected: tuple product=%s board=%s channel=%s", applied.fwProductId,
+                     applied.fwBoard, applied.fwUpdateChannel);
+    }
+  }
+  saveEndpoint(routeIp, port, token);
   return out;
 }
 
-bool loadEndpoint(char* ip, size_t ipCap, uint16_t& port, char* token, size_t tokenCap) {
+bool loadEndpointCandidates(Net::EndpointCandidates& endpoints, char* token, size_t tokenCap) {
+  endpoints = {};
+  if (token && tokenCap) token[0] = '\0';
   if (!Storage.ready() || !Storage.exists(kEndpointPath)) return false;
   HalFile f = Storage.open(kEndpointPath, O_RDONLY);
   if (!f) return false;
-  EndpointRecord rec{};
-  if (f.read(&rec, sizeof(rec)) != (int)sizeof(rec)) return false;
-  if (rec.magic != kEndpointMagic || rec.ip[0] == '\0' || rec.port == 0) return false;
-  rec.ip[sizeof(rec.ip) - 1] = '\0';
-  rec.token[sizeof(rec.token) - 1] = '\0';
-  snprintf(ip, ipCap, "%s", rec.ip);
-  snprintf(token, tokenCap, "%s", rec.token);
-  port = rec.port;
+  uint32_t magic = 0;
+  if (f.read(&magic, sizeof(magic)) != (int)sizeof(magic) || !f.seekSet(0)) return false;
+  char storedToken[40] = {0};
+  if (magic == kEndpointMagicV2) {
+    EndpointRecordV2 rec{};
+    if (f.read(&rec, sizeof(rec)) != (int)sizeof(rec) || rec.port == 0) return false;
+    rec.count = rec.count > Net::ENDPOINT_CANDIDATE_CAP ? Net::ENDPOINT_CANDIDATE_CAP : rec.count;
+    endpoints.port = rec.port;
+    for (uint8_t i = 0; i < rec.count; i++) {
+      rec.ips[i][sizeof(rec.ips[i]) - 1] = '\0';
+      Net::endpointCandidateAdd(endpoints, rec.ips[i]);
+    }
+    rec.token[sizeof(rec.token) - 1] = '\0';
+    snprintf(storedToken, sizeof(storedToken), "%s", rec.token);
+  } else if (magic == kEndpointMagicV1) {
+    EndpointRecordV1 rec{};
+    if (f.read(&rec, sizeof(rec)) != (int)sizeof(rec) || rec.ip[0] == '\0' || rec.port == 0) return false;
+    rec.ip[sizeof(rec.ip) - 1] = '\0';
+    rec.token[sizeof(rec.token) - 1] = '\0';
+    endpoints.port = rec.port;
+    Net::endpointCandidateAdd(endpoints, rec.ip);
+    snprintf(storedToken, sizeof(storedToken), "%s", rec.token);
+  } else {
+    return false;
+  }
+  if (!endpoints.count) return false;
+  // NVS is authoritative. An older endpoint record may contain a stale token
+  // from before credentials moved out of the user-browsable SD filesystem.
+  char nvsToken[40] = {0};
+  if (AuthStore::load(nvsToken, sizeof(nvsToken))) snprintf(storedToken, sizeof(storedToken), "%s", nvsToken);
+  if (token && tokenCap) snprintf(token, tokenCap, "%s", storedToken);
   return true;
 }
 
-bool saveEndpoint(const char* ip, uint16_t port, const char* token) {
-  if (!Storage.ready() || !ip || !ip[0] || !port) return false;
-  // Skip the SD write when nothing changed — this runs on every WS connect
-  // and every successful pull.
-  {
-    char curIp[16] = {0};
-    char curToken[40] = {0};
-    uint16_t curPort = 0;
-    if (loadEndpoint(curIp, sizeof(curIp), curPort, curToken, sizeof(curToken)) && curPort == port &&
-        strcmp(curIp, ip) == 0 && strcmp(curToken, token ? token : "") == 0) {
-      return true;
-    }
+bool loadEndpoint(char* ip, size_t ipCap, uint16_t& port, char* token, size_t tokenCap) {
+  Net::EndpointCandidates endpoints;
+  if (!loadEndpointCandidates(endpoints, token, tokenCap)) return false;
+  snprintf(ip, ipCap, "%s", endpoints.ips[0]);
+  port = endpoints.port;
+  return true;
+}
+
+bool saveEndpointCandidates(const Net::EndpointCandidates& endpoints, const char* token) {
+  if (!Storage.ready() || !endpoints.count || !endpoints.port) return false;
+  Net::EndpointCandidates normalized;
+  normalized.port = endpoints.port;
+  for (uint8_t i = 0; i < endpoints.count && i < Net::ENDPOINT_CANDIDATE_CAP; i++) {
+    Net::endpointCandidateAdd(normalized, endpoints.ips[i]);
+  }
+  if (!normalized.count) return false;
+
+  // Skip the SD write when nothing changed — this runs on every successful
+  // pull and the cache is also mirrored on the user-visible SD card.
+  Net::EndpointCandidates current;
+  char currentToken[40] = {0};
+  if (loadEndpointCandidates(current, currentToken, sizeof(currentToken)) && current.port == normalized.port &&
+      current.count == normalized.count && strcmp(currentToken, token ? token : "") == 0 &&
+      memcmp(current.ips, normalized.ips, sizeof(current.ips)) == 0) {
+    return true;
   }
   Storage.mkdir(kDir);
-  EndpointRecord rec{};
-  rec.magic = kEndpointMagic;
-  snprintf(rec.ip, sizeof(rec.ip), "%s", ip);
-  rec.port = port;
+  EndpointRecordV2 rec{};
+  rec.magic = kEndpointMagicV2;
+  memcpy(rec.ips, normalized.ips, sizeof(rec.ips));
+  rec.count = normalized.count;
+  rec.port = normalized.port;
   snprintf(rec.token, sizeof(rec.token), "%s", token ? token : "");
   {
     HalFile f = Storage.open(kEndpointTmpPath, O_WRITE | O_CREAT | O_TRUNC);
@@ -190,8 +270,23 @@ bool saveEndpoint(const char* ip, uint16_t port, const char* token) {
   }
   Storage.remove(kEndpointPath);
   if (!Storage.rename(kEndpointTmpPath, kEndpointPath)) return false;
-  AgentLog::line("FEED", "endpoint cached: %s:%u", ip, (unsigned)port);
+  AgentLog::line("FEED", "endpoints cached: preferred=%s:%u candidates=%u", normalized.ips[0],
+                 (unsigned)normalized.port, (unsigned)normalized.count);
   return true;
+}
+
+bool saveEndpoint(const char* ip, uint16_t port, const char* token) {
+  if (!Storage.ready() || !ip || !ip[0] || !port) return false;
+  Net::EndpointCandidates endpoints;
+  char ignoredToken[40] = {0};
+  // Preserve alternatives only when they belong to the same service port.
+  // A daemon moving to a fallback port is a new endpoint set.
+  if (!loadEndpointCandidates(endpoints, ignoredToken, sizeof(ignoredToken)) || endpoints.port != port) {
+    endpoints = {};
+    endpoints.port = port;
+  }
+  Net::endpointCandidatePromote(endpoints, ip);
+  return saveEndpointCandidates(endpoints, token);
 }
 
 }  // namespace Feed

@@ -6,14 +6,15 @@
 
 #include "agent/AgentLog.h"
 
-namespace AgentDeck {
+namespace PocketDaily {
 namespace OutboxStore {
 namespace {
 
 // Shares the hidden cache directory with deck_store / the OTA receiver.
 constexpr const char* kDir = "/.crosspoint";
-constexpr const char* kPath = "/.crosspoint/agentdeck-outbox.bin";
-constexpr const char* kTmpPath = "/.crosspoint/agentdeck-outbox.tmp";
+constexpr const char* kPath = "/.crosspoint/pocket-daily-outbox.bin";
+constexpr const char* kTmpPath = "/.crosspoint/pocket-daily-outbox.tmp";
+constexpr const char* kLegacyPath = "/.crosspoint/agentdeck-outbox.bin";
 
 // Same fixed-layout header idiom as deck_store: recordSize doubles as the
 // schema version, so any Record shape change invalidates old files.
@@ -26,7 +27,7 @@ struct Header {
 static_assert(sizeof(Header) == 8, "header layout must stay stable on disk");
 
 constexpr uint32_t kMagic = 0x314F4441;  // "ADO1" (LE)
-constexpr uint8_t kVersion = 2;  // Pocket card_choice adds choiceId to Record
+constexpr uint8_t kVersion = 2;          // Pocket card_choice adds choiceId to Record
 
 void terminateRecord(Record& r) {
   r.cardId[sizeof(r.cardId) - 1] = '\0';
@@ -66,8 +67,11 @@ bool save(const Queue& q) {
 
 bool load(Queue& out) {
   memset(&out, 0, sizeof(out));
-  if (!Storage.ready() || !Storage.exists(kPath)) return false;
-  HalFile f = Storage.open(kPath, O_RDONLY);
+  if (!Storage.ready()) return false;
+  const bool migrateLegacy = !Storage.exists(kPath) && Storage.exists(kLegacyPath);
+  const char* path = migrateLegacy ? kLegacyPath : kPath;
+  if (!Storage.exists(path)) return false;
+  HalFile f = Storage.open(path, O_RDONLY);
   if (!f) return false;
   Header h{};
   if (f.read(&h, sizeof(h)) != (int)sizeof(h)) return false;
@@ -82,6 +86,19 @@ bool load(Queue& out) {
   }
   for (uint8_t i = 0; i < h.count; i++) terminateRecord(out.records[i]);
   out.count = h.count;
+  f.close();
+  if (migrateLegacy) {
+    // Never hand a legacy queue to the network until its Pocket Daily copy is
+    // durable. Otherwise a transient migration failure followed by a
+    // successful POST could resend the same choices on the next boot.
+    if (!save(out)) {
+      memset(&out, 0, sizeof(out));
+      AgentLog::line("OUTBOX", "legacy queue migration deferred");
+      return false;
+    }
+    Storage.remove(kLegacyPath);
+    AgentLog::line("OUTBOX", "migrated legacy queue to Pocket Daily");
+  }
   return true;
 }
 
@@ -109,4 +126,4 @@ uint8_t pendingCount() {
 }
 
 }  // namespace OutboxStore
-}  // namespace AgentDeck
+}  // namespace PocketDaily

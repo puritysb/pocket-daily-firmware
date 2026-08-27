@@ -31,10 +31,21 @@ TEST(GlanceHm, AddWrapsAcrossMidnight) {
   EXPECT_FALSE(addToHm(out, sizeof(out), "garbage", 60));
 }
 
+TEST(GlanceDate, FormatsWeekdayFromDaemonLocalDate) {
+  char out[4];
+  EXPECT_TRUE(formatWeekday(out, sizeof(out), "2026-08-24"));
+  EXPECT_STREQ(out, "MON");
+  EXPECT_TRUE(formatWeekday(out, sizeof(out), "2026-08-30"));
+  EXPECT_STREQ(out, "SUN");
+  EXPECT_FALSE(formatWeekday(out, sizeof(out), "2026/08/24"));
+  EXPECT_STREQ(out, "");
+}
+
 GlanceWeather weather() {
   GlanceWeather w;
   w.clear();
   w.valid = true;
+  w.code = 61;
   w.tempC = 28;
   snprintf(w.summary, sizeof(w.summary), "Rain");
   w.todayMinC = 22;
@@ -46,8 +57,9 @@ TEST(GlanceWeatherFormat, NowLineComposes) {
   char buf[96];
   GlanceWeather w = weather();
   formatWeatherNow(buf, sizeof(buf), w);
-  EXPECT_STREQ(buf, "28\xC2\xB0 Rain \xC2\xB7 22\xE2\x80\x93"
-                    "30\xC2\xB0");
+  EXPECT_STREQ(buf,
+               "28\xC2\xB0 Rain \xC2\xB7 22\xE2\x80\x93"
+               "30\xC2\xB0");
 }
 
 TEST(GlanceWeatherFormat, NowLinePartsDropOut) {
@@ -75,8 +87,9 @@ TEST(GlanceWeatherFormat, RainWindow) {
   EXPECT_STREQ(buf, "Rain ~15:00 70%");
   snprintf(w.rainEndHm, sizeof(w.rainEndHm), "17:00");
   formatRainLine(buf, sizeof(buf), w);
-  EXPECT_STREQ(buf, "Rain ~15:00\xE2\x80\x93"
-                    "17:00 70%");
+  EXPECT_STREQ(buf,
+               "Rain ~15:00\xE2\x80\x93"
+               "17:00 70%");
 }
 
 TEST(GlanceWeatherFormat, TomorrowLine) {
@@ -90,8 +103,9 @@ TEST(GlanceWeatherFormat, TomorrowLine) {
   t.maxC = 31;
   t.rainProbability = 10;
   formatTomorrowLine(buf, sizeof(buf), t);
-  EXPECT_STREQ(buf, "Tomorrow Clear 22\xE2\x80\x93"
-                    "31\xC2\xB0 \xC2\xB7 rain 10%");
+  EXPECT_STREQ(buf,
+               "Tomorrow Clear 22\xE2\x80\x93"
+               "31\xC2\xB0 \xC2\xB7 rain 10%");
 }
 
 TEST(GlanceState, ClearRestoresSentinels) {
@@ -100,8 +114,12 @@ TEST(GlanceState, ClearRestoresSentinels) {
   g.clear();
   EXPECT_FALSE(g.valid);
   EXPECT_EQ(g.weather.tempC, GLANCE_TEMP_NONE);
+  EXPECT_EQ(g.weather.code, -1);
   EXPECT_EQ(g.weather.rainProbability, -1);
   EXPECT_EQ(g.weather.tomorrow.minC, GLANCE_TEMP_NONE);
+  EXPECT_EQ(g.weather.tomorrow.code, -1);
+  EXPECT_EQ(g.weather.dayCount, 0);
+  EXPECT_EQ(g.weather.days[0].minC, GLANCE_TEMP_NONE);
   EXPECT_EQ(g.usage[0].primaryPercent, -1);
   EXPECT_EQ(g.usageCount, 0);
   EXPECT_EQ(g.wrapupCount, 0);
@@ -123,7 +141,9 @@ TEST(GlanceEventFormat, EventLineComposes) {
 
   snprintf(e.endHm, sizeof(e.endHm), "10:00");
   AgentDeck::GlanceFormat::formatEventLine(buf, sizeof(buf), e);
-  EXPECT_STREQ(buf, "09:30\xE2\x80\x93""10:00 Standup");
+  EXPECT_STREQ(buf,
+               "09:30\xE2\x80\x93"
+               "10:00 Standup");
 
   e.title[0] = '\0';
   EXPECT_EQ(AgentDeck::GlanceFormat::formatEventLine(buf, sizeof(buf), e), 0);

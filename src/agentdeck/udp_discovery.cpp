@@ -107,14 +107,16 @@ bool udpPoll(BridgeInfo& out) {
   // it's harder to spoof and matches what actually sent the packet. Fall
   // back to JSON `ip` only if the header is missing.
   const IPAddress remote = udp.remoteIP();
-  memset(&out, 0, sizeof(out));
+  out = {};
   const uint32_t remoteRaw = static_cast<uint32_t>(remote);
   if (remoteRaw != 0 && remoteRaw != 0xFFFFFFFFu) {
-    snprintf(out.ip, sizeof(out.ip), "%u.%u.%u.%u", remote[0], remote[1], remote[2], remote[3]);
+    char sourceIp[16];
+    snprintf(sourceIp, sizeof(sourceIp), "%u.%u.%u.%u", remote[0], remote[1], remote[2], remote[3]);
+    endpointCandidateAdd(out.endpoints, sourceIp);
   } else {
-    strncpy(out.ip, ip, sizeof(out.ip) - 1);
+    endpointCandidateAdd(out.endpoints, ip);
   }
-  out.port = static_cast<uint16_t>(port);
+  out.endpoints.port = static_cast<uint16_t>(port);
   out.found = true;
 
   const char* project = doc["project"];
@@ -126,8 +128,8 @@ bool udpPoll(BridgeInfo& out) {
   const char* token = doc["token"];
   if (token) strncpy(out.token, token, sizeof(out.token) - 1);
 
-  AgentLog::line("UDP", "discovered daemon %s:%u (agent=%s project=%s)", out.ip, (unsigned)out.port, out.agent,
-                 out.project);
+  AgentLog::line("UDP", "discovered daemon %s:%u (agent=%s project=%s)", out.primaryIp(), (unsigned)out.endpoints.port,
+                 out.agent, out.project);
   return true;
 }
 

@@ -251,6 +251,9 @@ class CrossPointSettings {
   // in; users may disable it because timed sleep holds the battery latch and
   // therefore draws more than the full power-off gesture.
   uint8_t agentPullSyncEnabled = 1;
+  // Show the current book's cached cover on Pocket Daily's retained frame.
+  // Disable when the title/cover would expose private reading in a shared space.
+  uint8_t pocketDailySleepCover = 1;
   // E-ink refresh frequency (default 15 pages)
   uint8_t refreshFrequency = REFRESH_15;
   uint8_t hyphenationEnabled = 0;

@@ -14,21 +14,24 @@
 //
 #include <cstdint>
 
-namespace AgentDeck {
+namespace PocketDaily {
 namespace OutboxStore {
+
+// Product-owned durable queue. AgentDeck currently drains it, but its records
+// and SD path belong to Pocket Daily so another Companion source can do so too.
 
 // One recorded decision — field-for-field the OutboxDecision wire shape
 // (AgentDeck shared/src/protocol.ts § Card Feed Pull Sync).
 struct Record {
-  char cardId[72];    // "session:" + prefixed session UUID
+  char cardId[72];  // "session:" + prefixed session UUID
   char sessionId[64];
-  char requestId[40];   // permission gate correlation ("" = none)
-  char action[24];      // permission_decision|select_option|respond|send_prompt|dismiss|card_choice
-  char choiceId[32];    // card_choice stable semantic id (never a button position)
-  char decision[8];     // allow|deny ("" = n/a)
-  int16_t index;        // select_option wire index; -1 = none
-  char value[24];       // respond shortcut/value
-  char question[160];   // prompt echo — daemon refuses when it no longer matches
+  char requestId[40];      // permission gate correlation ("" = none)
+  char action[24];         // permission_decision|select_option|respond|send_prompt|dismiss|card_choice
+  char choiceId[32];       // card_choice stable semantic id (never a button position)
+  char decision[8];        // allow|deny ("" = n/a)
+  int16_t index;           // select_option wire index; -1 = none
+  char value[24];          // respond shortcut/value
+  char question[160];      // prompt echo — daemon refuses when it no longer matches
   uint32_t recordedEpoch;  // best epoch at record time; 0 = no clock source
 };
 
@@ -53,4 +56,8 @@ bool save(const Queue& q);
 uint8_t pendingCount();
 
 }  // namespace OutboxStore
-}  // namespace AgentDeck
+}  // namespace PocketDaily
+
+namespace AgentDeck {
+namespace OutboxStore = PocketDaily::OutboxStore;
+}

@@ -7,6 +7,7 @@
 #include <I18n.h>
 #include <Logging.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -120,10 +121,10 @@ void LyraTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
                    Rect{batteryX, rect.y + 5, LyraMetrics::values.batteryWidth, LyraMetrics::values.batteryHeight},
                    showBatteryPercentage);
 
-  const int titleFont = title != nullptr ? UiCjkFont::fontForText(renderer, title, UI_12_FONT_ID, EpdFontFamily::BOLD)
-                                         : UI_12_FONT_ID;
-  const int subtitleFont = subtitle != nullptr ? UiCjkFont::fontForText(renderer, subtitle, SMALL_FONT_ID)
-                                               : SMALL_FONT_ID;
+  const int titleFont =
+      title != nullptr ? UiCjkFont::fontForText(renderer, title, UI_12_FONT_ID, EpdFontFamily::BOLD) : UI_12_FONT_ID;
+  const int subtitleFont =
+      subtitle != nullptr ? UiCjkFont::fontForText(renderer, subtitle, SMALL_FONT_ID) : SMALL_FONT_ID;
   int maxTitleWidth = title != nullptr ? renderer.getTextWidth(titleFont, title, EpdFontFamily::BOLD) : 0;
   int maxSubtitleWidth =
       subtitle != nullptr ? renderer.getTextWidth(subtitleFont, subtitle, EpdFontFamily::REGULAR) : 0;
@@ -168,8 +169,7 @@ void LyraTheme::drawSubHeader(const GfxRenderer& renderer, Rect rect, const char
   int rightSpace = LyraMetrics::values.contentSidePadding;
   if (rightLabel) {
     const int rightFont = UiCjkFont::fontForText(renderer, rightLabel, SMALL_FONT_ID);
-    auto truncatedRightLabel =
-        renderer.truncatedText(rightFont, rightLabel, maxListValueWidth, EpdFontFamily::REGULAR);
+    auto truncatedRightLabel = renderer.truncatedText(rightFont, rightLabel, maxListValueWidth, EpdFontFamily::REGULAR);
     int rightLabelWidth = renderer.getTextWidth(rightFont, truncatedRightLabel.c_str());
     renderer.drawText(rightFont, rect.x + rect.width - LyraMetrics::values.contentSidePadding - rightLabelWidth,
                       rect.y + 7, truncatedRightLabel.c_str());
@@ -329,8 +329,8 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       if (rowSubtitle != nullptr) {
         valueY = itemY + 16;
       }
-      renderer.drawText(valueFont, rect.x + contentWidth - LyraMetrics::values.contentSidePadding - valueWidth,
-                        valueY, valueText.c_str(), !(i == selectedIndex && highlightValue));
+      renderer.drawText(valueFont, rect.x + contentWidth - LyraMetrics::values.contentSidePadding - valueWidth, valueY,
+                        valueText.c_str(), !(i == selectedIndex && highlightValue));
     }
   }
 }
@@ -345,7 +345,6 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   constexpr int smallButtonHeight = 15;
   constexpr int buttonHeight = LyraMetrics::values.buttonHintsHeight;
   constexpr int buttonY = LyraMetrics::values.buttonHintsHeight;  // Distance from bottom
-  constexpr int textYOffset = 7;                                  // Distance from top of button to text baseline
   // X3 has wider screen in portrait (528 vs 480), use more spacing
   constexpr int x4ButtonPositions[] = {58, 146, 254, 342};
   constexpr int x3ButtonPositions[] = {65, 157, 291, 383};
@@ -359,9 +358,11 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
       renderer.fillRoundedRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, cornerRadius, Color::White);
       renderer.drawRoundedRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, 1, cornerRadius, true, true, false,
                                false, true);
-      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, labels[i]);
+      const int labelFont = UiCjkFont::fontForText(renderer, labels[i], SMALL_FONT_ID);
+      const int textWidth = renderer.getTextWidth(labelFont, labels[i]);
       const int textX = x + (buttonWidth - 1 - textWidth) / 2;
-      renderer.drawText(SMALL_FONT_ID, textX, pageHeight - buttonY + textYOffset, labels[i]);
+      const int textY = pageHeight - buttonY + (buttonHeight - renderer.getLineHeight(labelFont)) / 2;
+      renderer.drawText(labelFont, textX, textY, labels[i]);
     } else {
       // Draw the filled background and border for a SMALL-sized button
       renderer.fillRoundedRect(x, pageHeight - smallButtonHeight, buttonWidth, smallButtonHeight, cornerRadius,
@@ -385,18 +386,20 @@ void LyraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
     constexpr int x3ButtonY = 155;
 
     if (topBtn != nullptr && topBtn[0] != '\0') {
+      const int textFont = UiCjkFont::fontForText(renderer, topBtn, SMALL_FONT_ID);
       renderer.drawRoundedRect(buttonMargin, x3ButtonY, buttonWidth, buttonHeight, 1, cornerRadius, false, true, false,
                                true, true);
-      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, topBtn);
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, buttonMargin, x3ButtonY + (buttonHeight + textWidth) / 2, topBtn);
+      const int textWidth = renderer.getTextWidth(textFont, topBtn);
+      renderer.drawTextRotated90CW(textFont, buttonMargin, x3ButtonY + (buttonHeight + textWidth) / 2, topBtn);
     }
 
     if (bottomBtn != nullptr && bottomBtn[0] != '\0') {
       const int rightX = screenWidth - buttonWidth;
+      const int textFont = UiCjkFont::fontForText(renderer, bottomBtn, SMALL_FONT_ID);
       renderer.drawRoundedRect(rightX, x3ButtonY, buttonWidth, buttonHeight, 1, cornerRadius, true, false, true, false,
                                true);
-      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, bottomBtn);
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, rightX, x3ButtonY + (buttonHeight + textWidth) / 2, bottomBtn);
+      const int textWidth = renderer.getTextWidth(textFont, bottomBtn);
+      renderer.drawTextRotated90CW(textFont, rightX, x3ButtonY + (buttonHeight + textWidth) / 2, bottomBtn);
     }
   } else {
     // X4 layout: Both buttons stacked on right side
@@ -532,10 +535,30 @@ void LyraTheme::drawEmptyRecents(const GfxRenderer& renderer, const Rect rect) c
 void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                                const std::function<std::string(int index)>& buttonLabel,
                                const std::function<UIIcon(int index)>& rowIcon) const {
-  for (int i = 0; i < buttonCount; ++i) {
-    int tileWidth = rect.width - LyraMetrics::values.contentSidePadding * 2;
-    Rect tileRect = Rect{rect.x + LyraMetrics::values.contentSidePadding,
-                         rect.y + i * (LyraMetrics::values.menuRowHeight + LyraMetrics::values.menuSpacing), tileWidth,
+  const int rowStep = LyraMetrics::values.menuRowHeight + LyraMetrics::values.menuSpacing;
+  const int pageItems = std::max(1, (rect.height + LyraMetrics::values.menuSpacing) / rowStep);
+  const int safeSelectedIndex = std::max(0, selectedIndex);
+  const int lastPageStart = std::max(0, buttonCount - pageItems);
+  const int pageStartIndex = std::min((safeSelectedIndex / pageItems) * pageItems, lastPageStart);
+  const bool paged = buttonCount > pageItems;
+
+  if (paged) {
+    const int scrollAreaHeight = rect.height;
+    const int scrollBarHeight = std::max(10, (scrollAreaHeight * pageItems) / buttonCount);
+    const int scrollBarTravel = std::max(0, scrollAreaHeight - scrollBarHeight);
+    const int scrollBarY = rect.y + (pageStartIndex * scrollBarTravel) / std::max(1, lastPageStart);
+    const int scrollBarX = rect.x + rect.width - LyraMetrics::values.scrollBarRightOffset;
+    renderer.drawLine(scrollBarX, rect.y, scrollBarX, rect.y + scrollAreaHeight - 1, true);
+    renderer.fillRect(scrollBarX - LyraMetrics::values.scrollBarWidth, scrollBarY, LyraMetrics::values.scrollBarWidth,
+                      scrollBarHeight, true);
+  }
+
+  for (int i = pageStartIndex; i < buttonCount && i < pageStartIndex + pageItems; ++i) {
+    const int visibleIndex = i - pageStartIndex;
+    const int scrollBarGutter =
+        paged ? LyraMetrics::values.scrollBarWidth + LyraMetrics::values.scrollBarRightOffset : 0;
+    int tileWidth = rect.width - LyraMetrics::values.contentSidePadding * 2 - scrollBarGutter;
+    Rect tileRect = Rect{rect.x + LyraMetrics::values.contentSidePadding, rect.y + visibleIndex * rowStep, tileWidth,
                          LyraMetrics::values.menuRowHeight};
 
     const bool selected = selectedIndex == i;

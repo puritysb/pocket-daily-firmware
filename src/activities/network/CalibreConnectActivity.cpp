@@ -7,6 +7,7 @@
 #include <esp_task_wdt.h>
 
 #include "MappedInputManager.h"
+#include "SdCardFontSystem.h"
 #include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
 #include "components/UITheme.h"
@@ -73,6 +74,15 @@ void CalibreConnectActivity::onWifiSelectionComplete(const bool connected) {
 void CalibreConnectActivity::startWebServer() {
   state = CalibreConnectState::SERVER_STARTING;
   requestUpdate();
+
+  // The shared web server needs contiguous internal RAM for TCP/WebSocket
+  // buffers. Keep the reader font selection, but release its resident tables
+  // and glyph caches while Calibre transfer is active; onExit restarts the
+  // device and the selected family is loaded again at boot.
+  const uint32_t heapBeforeFontRelease = ESP.getFreeHeap();
+  sdFontSystem.releaseLoaded(renderer);
+  LOG_DBG("CAL", "Released resident SD font: heap %u -> %u (largest %u)", (unsigned)heapBeforeFontRelease,
+          (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 
   MDNS.end();
   if (MDNS.begin(HOSTNAME)) {

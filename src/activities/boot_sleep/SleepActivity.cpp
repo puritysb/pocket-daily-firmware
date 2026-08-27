@@ -12,9 +12,10 @@
 #include "CrossPointState.h"
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
+#include "components/icons/agentdeck_mark.h"
 #include "fontIds.h"
-#include "images/Logo120.h"
 #include "images/MoonIcon.h"
+#include "util/PowerWakeCue.h"
 
 void SleepActivity::onEnter() {
   Activity::onEnter();
@@ -28,6 +29,14 @@ void SleepActivity::onEnter() {
     return renderLastScreenSleepScreen();
   }
 
+  // Sleeping from Home should preserve the strongest personal object on the
+  // device: the current book. CUSTOM remains an explicit user override; every
+  // other ordinary mode gets a full-screen cover whenever one is available.
+  if (!APP_STATE.openEpubPath.empty() && !APP_STATE.lastSleepFromReader &&
+      SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM) {
+    return renderCoverSleepScreen();
+  }
+
   // Show popup with reader orientation only when going to sleep from reader
   if (APP_STATE.lastSleepFromReader) {
     ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
@@ -39,7 +48,9 @@ void SleepActivity::onEnter() {
 
   switch (SETTINGS.sleepScreen) {
     case (CrossPointSettings::SLEEP_SCREEN_MODE::BLANK):
-      return renderBlankSleepScreen();
+      // A blank retained panel looks like a failed device. With no book to
+      // show, use the quiet AgentDeck compatibility page instead.
+      return renderDefaultSleepScreen();
     case (CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM):
       return renderCustomSleepScreen();
     case (CrossPointSettings::SLEEP_SCREEN_MODE::COVER):
@@ -154,14 +165,17 @@ void SleepActivity::renderDefaultSleepScreen() const {
   const auto pageHeight = renderer.getScreenHeight();
 
   renderer.clearScreen();
-  renderer.drawImage(Logo120, (pageWidth - 120) / 2, (pageHeight - 120) / 2, 120, 120);
-  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 70, tr(STR_CROSSPOINT), true, EpdFontFamily::BOLD);
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, tr(STR_SLEEPING));
+  const int markY = pageHeight / 2 - 55;
+  renderer.drawImage(AgentDeckMark, (pageWidth - 32) / 2, markY, 32, 32);
+  renderer.drawCenteredText(UI_12_FONT_ID, markY + 54, tr(STR_AGENTDECK), true, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(SMALL_FONT_ID, markY + 84, tr(STR_COMPATIBLE_SURFACE), true, EpdFontFamily::BOLD);
 
   // Make sleep screen dark unless light is selected in settings
   if (SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::LIGHT) {
     renderer.invertScreen();
   }
+
+  PowerWakeCue::draw(renderer);
 
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
@@ -214,6 +228,8 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
 
   renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
 
+  PowerWakeCue::draw(renderer);
+
   if (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
     renderer.invertScreen();
   }
@@ -233,12 +249,14 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
     renderer.clearScreen(0x00);
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
     renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+    PowerWakeCue::draw(renderer);
     renderer.copyGrayscaleLsbBuffers();
 
     bitmap.rewindToData();
     renderer.clearScreen(0x00);
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
     renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+    PowerWakeCue::draw(renderer);
     renderer.copyGrayscaleMsbBuffers();
 
     renderer.displayGrayBuffer();
