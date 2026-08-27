@@ -1,0 +1,41 @@
+# Pocket Daily's built-in Japanese starter deck.
+#
+# A coverage file is an intersection, not an addition: every glyph that must
+# survive subsetting has to occur below. Keep printable ASCII and U+FFFD here
+# explicitly, then keep the device-owned strings in their rendered form.
+ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~
+U+FFFD
+今日の単語
+習慣（しゅうかん）
+毎日、本を読む習慣をつける。
+続ける（つづける）
+日本語の勉強を毎日続ける。
+気づく（きづく）
+小さな変化に気づいた。
+選ぶ（えらぶ）
+好きな本を一冊選ぶ。
+確かめる（たしかめる）
+答えをもう一度確かめる。
+間に合う（まにあう）
+電車に間に合った。
+楽しみ（たのしみ）
+旅行を楽しみにしている。
+振り返る（ふりかえる）
+一日を静かに振り返る。
+身につける（みにつける）
+新しい表現を身につける。
+試す（ためす）
+別の方法を試してみる。
+集中（しゅうちゅう）
+読書に集中する。
+調べる（しらべる）
+知らない言葉を調べる。
+伝える（つたえる）
+自分の考えを伝える。
+比べる（くらべる）
+二つの表現を比べる。
+慣れる（なれる）
+新しい環境に慣れる。
+工夫（くふう）
+時間の使い方を工夫する。
+habit · continue notice choose check be in time look forward to reflect acquire try focus look up convey compare get used to devise

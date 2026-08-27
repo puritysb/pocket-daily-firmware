@@ -69,15 +69,20 @@ Script classify(const char* text) {
 }
 
 const char* const* prioritiesFor(Script script) {
-  static const char* const hangul[] = {"NotoSansKR", "Pretendard", "AgentDeckKR", "BIZUDGothic", "NotoSansJP", nullptr};
+  // PocketSansKR is the product-owned SD bundle. AgentDeckKR remains a legacy
+  // fallback so an existing test card keeps working until its font directory
+  // is updated.
+  static const char* const hangul[] = {"PocketSansKR", "AgentDeckKR", "NotoSansKR", "Pretendard",
+                                       "BIZUDGothic",  "NotoSansJP",  nullptr};
   // Japanese families must mirror lib/EpdFont/scripts/sd-fonts.yaml
   // (BIZUDGothic, IPAexMincho, NotoSansJP). IPAexMincho is a Mincho (serif) face
   // and is listed after the gothic families because gothic renders better at
   // small UI sizes — but it still has to be recognised, otherwise a user whose
   // only installed JP font is IPAexMincho gets no coverage from this list.
-  static const char* const japanese[] = {"BIZUDGothic", "NotoSansJP", "IPAexMincho",
-                                         "NotoSansKR",  "Pretendard", nullptr};
-  static const char* const han[] = {"NotoSansJP", "BIZUDGothic", "IPAexMincho", "NotoSansKR", "Pretendard", nullptr};
+  static const char* const japanese[] = {"PocketSansJP", "BIZUDGothic", "NotoSansJP", "IPAexMincho",
+                                         "NotoSansKR",   "Pretendard",  nullptr};
+  static const char* const han[] = {"PocketSansJP", "NotoSansJP", "BIZUDGothic", "IPAexMincho",
+                                    "NotoSansKR",   "Pretendard", nullptr};
 
   switch (script) {
     case Script::Hangul:
@@ -118,7 +123,8 @@ bool listContains(const char* const* list, const char* name) {
 
 namespace UiCjkFont {
 
-int fontForText(const GfxRenderer& renderer, const char* text, int fallbackFontId, EpdFontFamily::Style style) {
+int fontForText(const GfxRenderer& renderer, const char* text, int fallbackFontId, EpdFontFamily::Style style,
+                CoveragePolicy policy) {
   const char* const* priorities = prioritiesFor(classify(text));
   if (!priorities) return fallbackFontId;
 
@@ -201,7 +207,7 @@ int fontForText(const GfxRenderer& renderer, const char* text, int fallbackFontI
 
   // 3) No family fully covered the text — accept the partial match (fewest
   //    missing glyphs) over the Latin-only built-in fallback.
-  if (partialFamily) {
+  if (policy == CoveragePolicy::AllowPartial && partialFamily) {
     const int fontId = sdFontSystem.ensureUiFamilyLoaded(mutableRenderer, partialFamily);
     if (fontId != 0) {
       renderer.ensureSdCardFontReady(fontId, text, 0x0F);
@@ -209,6 +215,10 @@ int fontForText(const GfxRenderer& renderer, const char* text, int fallbackFontI
       LOG_DBG("UICJK", "Using partial %s fontId=%d for \"%s\"", partialFamily, fontId, text);
       return fontId;
     }
+  }
+  if (policy == CoveragePolicy::RequireFull && partialFamily) {
+    LOG_ERR("UICJK", "Strict coverage rejected partial family %s (%d missing) for \"%s\"", partialFamily, bestMissed,
+            text ? text : "");
   }
   LOG_DBG("UICJK", "Fallback built-in fontId=%d for \"%s\"", fallbackFontId, text ? text : "");
   return fallbackFontId;
