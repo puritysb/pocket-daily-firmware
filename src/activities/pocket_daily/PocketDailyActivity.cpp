@@ -342,6 +342,39 @@ int drawWeatherPoster(const GfxRenderer& renderer, const PocketDaily::Weather& w
   return maxHeight;
 }
 
+// Placeholder for a device that has never received weather. The old empty
+// state was a single small line pinned to the top-left of a ~150 px card, so
+// the panel read as broken rather than as waiting. Same grammar as the
+// populated poster — ringed mark, one honest line, the action that fixes it —
+// centred so the reserved space looks deliberate.
+void drawWeatherPlaceholder(const GfxRenderer& renderer, int x, int y, int width, int height) {
+  if (width < 80 || height < 40) {
+    renderer.drawText(SMALL_FONT_ID, x, y, tr(STR_POCKET_NO_WEATHER), true);
+    return;
+  }
+  const int ringD = std::min(46, std::max(26, height / 3));
+  const int lineH = renderer.getLineHeight(SMALL_FONT_ID);
+  const int hintH = renderer.getLineHeight(UI_10_FONT_ID);
+  const int blockH = ringD + 8 + lineH + 2 + hintH;
+  int cy = y + std::max(0, (height - blockH) / 2);
+  const int cx = x + width / 2;
+
+  const int ring = std::max(2, ringD / 16);
+  renderer.drawRoundedRect(cx - ringD / 2, cy, ringD, ringD, ring, ringD / 2, true);
+  // A neutral dash, not a condition glyph: we are not claiming a forecast.
+  renderer.drawRect(cx - ringD / 5, cy + ringD / 2 - ring / 2, ringD * 2 / 5, std::max(2, ring), true);
+  cy += ringD + 8;
+
+  const char* label = tr(STR_POCKET_NO_WEATHER);
+  int tw = renderer.getTextWidth(SMALL_FONT_ID, label, EpdFontFamily::BOLD);
+  renderer.drawText(SMALL_FONT_ID, cx - tw / 2, cy, label, true, EpdFontFamily::BOLD);
+  cy += lineH + 2;
+
+  const char* hint = tr(STR_POCKET_WEATHER_HINT);
+  tw = renderer.getTextWidth(UI_10_FONT_ID, hint);
+  renderer.drawText(UI_10_FONT_ID, cx - tw / 2, cy, hint, true);
+}
+
 // Five-day grid. Each column is weekday / condition / high-low / rain, ruled
 // apart. The wettest day is inverted rather than annotated: on 1-bit e-ink a
 // filled chip is the only emphasis that survives at a glance, and it answers
@@ -3150,7 +3183,7 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
       drawWeatherPoster(renderer, renderGlanceSnapshot.weather, x, nowY, cw, std::max(52, gridY - nowY - 6));
       if (gridH > 0) drawForecastGrid(renderer, renderGlanceSnapshot.weather, x, gridY, cw, gridH);
     } else {
-      renderer.drawText(SMALL_FONT_ID, x, y, tr(STR_POCKET_NO_WEATHER), true);
+      drawWeatherPlaceholder(renderer, x, y, cw, weatherBottom - y);
     }
 
     if (hasEvent) {
