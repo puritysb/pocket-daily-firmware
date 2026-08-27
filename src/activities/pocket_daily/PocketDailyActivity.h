@@ -209,6 +209,20 @@ class PocketDailyActivity final : public Activity {
   // that would walk straight back into the abort we just declined. Also keeps
   // the refusal to one log line per episode on the 2 s OTA-resume retry.
   bool wifiHeapBlocked = false;
+
+  // ── Sync outcome ──
+  // A Sync press used to end silently: the status line went back to the idle
+  // label whether the pull had updated the deck, found nothing new, or never
+  // reached the Companion at all. Latch what actually happened and say so for
+  // a few seconds, so the button has a visible answer.
+  enum class SyncOutcome : uint8_t { None, Updated, UpToDate, Unreachable };
+  SyncOutcome lastSyncOutcome = SyncOutcome::None;
+  uint32_t lastSyncOutcomeMs = 0;
+  static constexpr uint32_t kSyncOutcomeHoldMs = 20000;
+  // Worst-case wall time of one Sync press, shown up front. The HTTP call
+  // blocks the loop, so the Face cannot count down — but it can at least say
+  // how long the freeze is bounded to instead of leaving the user guessing.
+  static constexpr unsigned kSyncWorstCaseSec = 16;
   // ── Heap decay watch ──
   // The abort happened 7 minutes into a boot with no telemetry between the
   // successful sync at 12 s and the fatal scan at 429 s. Sample the heap on a

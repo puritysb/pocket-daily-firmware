@@ -164,132 +164,251 @@ void drawWeatherGlyph(const GfxRenderer& renderer, int x, int y, int w, int h, i
   }
 }
 
-int drawCurrentWeatherVisual(const GfxRenderer& renderer, const PocketDaily::Weather& weather, int x, int y, int width,
-                             int maxHeight) {
-  if (width < 110 || maxHeight < 46) return 0;
-  const int height = std::min(84, maxHeight);
-  const int iconW = std::min(86, std::max(54, width * 35 / 100));
-  drawWeatherGlyph(renderer, x, y + 1, iconW, height - 2, weather.code, weather.summary);
+// ── Poster numerals ─────────────────────────────────────────────────────────
+// The largest bundled face is 18 px — far too small for the temperature to
+// anchor the panel the way the approved concept does. A display font is the
+// obvious answer and the wrong one here: glyph rendering data is cached in
+// DRAM on first use, and this device has ~26 KB of heap left once the radio is
+// up. So the number is stroked directly instead. Every edge is axis-aligned,
+// which is exactly what a 1-bit panel renders best — no anti-aliasing to smear
+// at large sizes, and it costs neither flash nor DRAM.
+//
+// Segments are the classic seven, drawn with square joins and heavy stems so
+// the result reads as condensed display type rather than a calculator.
+constexpr int POSTER_DIGIT_W_PCT = 54;    // digit width as % of cap height
+constexpr int POSTER_DIGIT_GAP_PCT = 14;  // inter-digit gap as % of cap height
+constexpr int POSTER_STROKE_PCT = 30;     // stem weight as % of digit width
 
-  const int textX = x + iconW + 10;
-  const int textW = width - iconW - 10;
-  char value[24] = {0};
-  if (weather.tempC != PocketDaily::GLANCE_TEMP_NONE)
-    snprintf(value, sizeof(value), "%d\xC2\xB0", (int)weather.tempC);
-  else
-    snprintf(value, sizeof(value), "--");
-  renderer.drawText(NOTOSANS_18_FONT_ID, textX, y + 3,
-                    renderer.truncatedText(NOTOSANS_18_FONT_ID, value, textW, EpdFontFamily::BOLD).c_str(), true,
-                    EpdFontFamily::BOLD);
-
-  char range[28] = {0};
-  if (weather.todayMinC != PocketDaily::GLANCE_TEMP_NONE && weather.todayMaxC != PocketDaily::GLANCE_TEMP_NONE)
-    snprintf(range, sizeof(range), "H %d\xC2\xB0  L %d\xC2\xB0", (int)weather.todayMaxC, (int)weather.todayMinC);
-  else if (weather.summary[0])
-    snprintf(range, sizeof(range), "%s", weather.summary);
-  if (range[0]) {
-    const int rangeY = y + renderer.getLineHeight(NOTOSANS_18_FONT_ID) + 8;
-    renderer.drawText(SMALL_FONT_ID, textX, rangeY,
-                      renderer.truncatedText(SMALL_FONT_ID, range, textW, EpdFontFamily::BOLD).c_str(), true,
-                      EpdFontFamily::BOLD);
+void drawPosterDigit(const GfxRenderer& renderer, int x, int y, int w, int h, int stroke, char digit) {
+  // A=top B=upper-right C=lower-right D=bottom E=lower-left F=upper-left G=middle
+  static const char* const kSegments[10] = {
+      "ABCDEF",   // 0
+      "BC",       // 1
+      "ABDEG",    // 2
+      "ABCDG",    // 3
+      "BCFG",     // 4
+      "ACDFG",    // 5
+      "ACDEFG",   // 6
+      "ABC",      // 7
+      "ABCDEFG",  // 8
+      "ABCDFG",   // 9
+  };
+  if (digit == '-') {  // minus keeps the middle bar only, inset like a real dash
+    renderer.fillRect(x + w / 6, y + (h - stroke) / 2, w - w / 3, stroke, true);
+    return;
   }
-  return height;
+  if (digit < '0' || digit > '9') return;
+
+  // A bare "BC" would hug the right edge of its cell and read as a gap. Centre
+  // the single stem so "1" sits where the eye expects it.
+  if (digit == '1') {
+    renderer.fillRect(x + (w - stroke) / 2, y, stroke, h, true);
+    return;
+  }
+
+  const char* segments = kSegments[digit - '0'];
+  const int right = x + w - stroke;
+  const int midY = y + (h - stroke) / 2;
+  const int bottom = y + h - stroke;
+  for (const char* s = segments; *s; ++s) {
+    switch (*s) {
+      case 'A':
+        renderer.fillRect(x, y, w, stroke, true);
+        break;
+      case 'B':
+        renderer.fillRect(right, y, stroke, midY - y + stroke, true);
+        break;
+      case 'C':
+        renderer.fillRect(right, midY, stroke, bottom - midY + stroke, true);
+        break;
+      case 'D':
+        renderer.fillRect(x, bottom, w, stroke, true);
+        break;
+      case 'E':
+        renderer.fillRect(x, midY, stroke, bottom - midY + stroke, true);
+        break;
+      case 'F':
+        renderer.fillRect(x, y, stroke, midY - y + stroke, true);
+        break;
+      case 'G':
+        renderer.fillRect(x, midY, w, stroke, true);
+        break;
+      default:
+        break;
+    }
+  }
 }
 
-// Dense five-day visual for 1-bit e-ink. Each fixed column has an immediately
-// recognizable condition glyph, weekday and high/low, while the shared traces
-// preserve the useful trend and the bottom bars keep rain probability visual.
-int drawForecastRibbon(const GfxRenderer& renderer, const PocketDaily::Weather& weather, int x, int y, int width,
-                       int maxHeight) {
+int posterNumberWidth(int capHeight, const char* digits) {
+  const int dw = capHeight * POSTER_DIGIT_W_PCT / 100;
+  const int gap = capHeight * POSTER_DIGIT_GAP_PCT / 100;
+  int width = 0;
+  for (const char* c = digits; *c; ++c) width += (width ? gap : 0) + dw;
+  return width;
+}
+
+// Draws the number and returns its width. The degree ring is drawn by the
+// caller so it can sit against the cap line rather than the digit baseline.
+int drawPosterNumber(const GfxRenderer& renderer, int x, int y, int capHeight, const char* digits) {
+  const int dw = capHeight * POSTER_DIGIT_W_PCT / 100;
+  const int gap = capHeight * POSTER_DIGIT_GAP_PCT / 100;
+  const int stroke = std::max(3, dw * POSTER_STROKE_PCT / 100);
+  int cursor = x;
+  for (const char* c = digits; *c; ++c) {
+    drawPosterDigit(renderer, cursor, y, dw, capHeight, stroke, *c);
+    cursor += dw + gap;
+  }
+  return cursor - gap - x;
+}
+
+// Condition mark inside a ring, as in the approved concept. The ring gives the
+// thin glyph a defined edge, which matters on a panel with no greys to lean on.
+void drawRingedWeatherGlyph(const GfxRenderer& renderer, int cx, int cy, int diameter, int16_t code,
+                            const char* summary) {
+  const int r = diameter / 2;
+  const int ring = std::max(2, diameter / 18);
+  renderer.drawRoundedRect(cx - r, cy - r, diameter, diameter, ring, r, true);
+  const int inner = diameter - ring * 2 - diameter / 8;
+  drawWeatherGlyph(renderer, cx - inner / 2, cy - inner / 2, inner, inner, code, summary);
+}
+
+// Hero row: place-scale temperature on the left, condition and today's range on
+// the right. Replaces the old icon+18px+H/L cluster, which competed with the
+// forecast strip instead of leading it.
+int drawWeatherPoster(const GfxRenderer& renderer, const PocketDaily::Weather& weather, int x, int y, int width,
+                      int maxHeight) {
+  if (width < 150 || maxHeight < 52) return 0;
+
+  char digits[8] = {0};
+  if (weather.tempC != PocketDaily::GLANCE_TEMP_NONE)
+    snprintf(digits, sizeof(digits), "%d", (int)weather.tempC);
+  else
+    snprintf(digits, sizeof(digits), "--");
+
+  // Today's rain window is the single most actionable fact on this panel, so it
+  // gets the line directly under the number rather than a column of its own.
+  char rain[40] = {0};
+  const bool hasRain = AgentDeck::GlanceFormat::formatRainLine(rain, sizeof(rain), weather) > 0;
+  const int rainH = hasRain ? renderer.getLineHeight(SMALL_FONT_ID) + 4 : 0;
+  const int heroH = maxHeight - rainH;
+  if (heroH < 44) return 0;
+
+  // Size the number to the room available, then shrink until the right-hand
+  // column still has a readable width.
+  constexpr int kRightMinW = 96;
+  int cap = std::min(96, heroH - 4);
+  while (cap > 40 && posterNumberWidth(cap, digits) + cap / 4 + kRightMinW > width) cap -= 4;
+  const int numberW = posterNumberWidth(cap, digits);
+  drawPosterNumber(renderer, x, y, cap, digits);
+
+  // Degree ring rides the cap line, never the baseline.
+  const int degD = std::max(8, cap / 5);
+  const int degStroke = std::max(2, degD / 4);
+  renderer.drawRoundedRect(x + numberW + degD / 3, y, degD, degD, degStroke, degD / 2, true);
+
+  const int rightX = x + numberW + degD / 3 + degD + cap / 5;
+  const int rightW = x + width - rightX;
+  if (rightW >= 60) {
+    const int iconD = std::min(cap * 5 / 8, std::max(30, rightW / 3));
+    drawRingedWeatherGlyph(renderer, rightX + iconD / 2, y + iconD / 2, iconD, weather.code, weather.summary);
+
+    int ry = y + iconD + 4;
+    if (weather.summary[0] && ry + renderer.getLineHeight(SMALL_FONT_ID) <= y + heroH) {
+      renderer.drawText(SMALL_FONT_ID, rightX, ry,
+                        renderer.truncatedText(SMALL_FONT_ID, weather.summary, rightW, EpdFontFamily::BOLD).c_str(),
+                        true, EpdFontFamily::BOLD);
+      ry += renderer.getLineHeight(SMALL_FONT_ID) + 2;
+    }
+    if (weather.todayMaxC != PocketDaily::GLANCE_TEMP_NONE && weather.todayMinC != PocketDaily::GLANCE_TEMP_NONE) {
+      char hi[12];
+      char lo[12];
+      snprintf(hi, sizeof(hi), "H %d\xC2\xB0", (int)weather.todayMaxC);
+      snprintf(lo, sizeof(lo), "L %d\xC2\xB0", (int)weather.todayMinC);
+      if (ry + renderer.getLineHeight(UI_10_FONT_ID) <= y + heroH) {
+        renderer.drawText(UI_10_FONT_ID, rightX, ry, hi, true, EpdFontFamily::BOLD);
+        ry += renderer.getLineHeight(UI_10_FONT_ID);
+      }
+      if (ry + renderer.getLineHeight(UI_10_FONT_ID) <= y + heroH)
+        renderer.drawText(UI_10_FONT_ID, rightX, ry, lo, true, EpdFontFamily::BOLD);
+    }
+  }
+
+  if (hasRain) {
+    const int rainFont = SMALL_FONT_ID;
+    renderer.drawText(rainFont, x, y + heroH + 2,
+                      renderer.truncatedText(rainFont, rain, width, EpdFontFamily::BOLD).c_str(), true,
+                      EpdFontFamily::BOLD);
+  }
+  return maxHeight;
+}
+
+// Five-day grid. Each column is weekday / condition / high-low / rain, ruled
+// apart. The wettest day is inverted rather than annotated: on 1-bit e-ink a
+// filled chip is the only emphasis that survives at a glance, and it answers
+// "what should I actually notice today" without spending a line of prose.
+int drawForecastGrid(const GfxRenderer& renderer, const PocketDaily::Weather& weather, int x, int y, int width,
+                     int maxHeight) {
   const int count = std::min<int>(weather.dayCount, PocketDaily::WEATHER_DAY_CAP);
-  if (count < 2 || width < count * 44 || maxHeight < 106) return 0;
-  const int height = std::min(148, maxHeight);
+  if (count < 2 || width < count * 44 || maxHeight < 74) return 0;
+
   const int dayLine = renderer.getLineHeight(SMALL_FONT_ID);
   const int tempLine = renderer.getLineHeight(UI_10_FONT_ID);
   const int colW = width / count;
-  const int glyphSize = std::min(34, std::max(26, colW * 38 / 100));
-  renderer.drawLine(x, y, x + width, y);
+  const int glyphSize = std::min(30, std::max(22, colW * 42 / 100));
+  const int height = std::min(maxHeight, dayLine + glyphSize + tempLine * 2 + 20);
 
-  int minTemp = 127;
-  int maxTemp = -127;
+  // Emphasise the wettest day, but only when it is actually worth a warning.
+  int notable = -1;
+  int notableRain = 39;
   for (int i = 0; i < count; i++) {
-    const PocketDaily::DayWeather& day = weather.days[i];
-    if (day.minC != PocketDaily::GLANCE_TEMP_NONE) minTemp = std::min(minTemp, (int)day.minC);
-    if (day.maxC != PocketDaily::GLANCE_TEMP_NONE) maxTemp = std::max(maxTemp, (int)day.maxC);
-  }
-  if (minTemp > maxTemp) {
-    minTemp = 0;
-    maxTemp = 1;
-  }
-  if (maxTemp - minTemp < 4) {
-    minTemp -= 2;
-    maxTemp += 2;
+    if (weather.days[i].rainProbability > notableRain) {
+      notableRain = weather.days[i].rainProbability;
+      notable = i;
+    }
   }
 
-  const int glyphY = y + dayLine + 7;
-  const int tempY0 = glyphY + glyphSize + 3;
-  const int plotTop = tempY0 + tempLine + 7;
-  const int rainBase = y + height - 5;
-  const int plotBottom = std::max(plotTop + 8, rainBase - 18);
-  const int plotH = std::max(1, plotBottom - plotTop);
-  auto tempY = [&](int temp) { return plotTop + (maxTemp - temp) * plotH / std::max(1, maxTemp - minTemp); };
+  renderer.drawLine(x, y, x + width, y);
+  const int chipTop = y + 3;
+  const int chipH = dayLine + 2;
+  const int glyphY = chipTop + chipH + 4;
+  const int tempY = glyphY + glyphSize + 3;
+  const int rainY = tempY + tempLine + 2;
 
-  int previousX = 0;
-  int previousHighY = 0;
-  int previousLowY = 0;
-  bool previousHigh = false;
-  bool previousLow = false;
   for (int i = 0; i < count; i++) {
     const PocketDaily::DayWeather& day = weather.days[i];
     const int left = x + i * colW;
     const int right = i == count - 1 ? x + width : left + colW;
     const int cx = left + (right - left) / 2;
+    const bool highlight = i == notable;
+    if (i > 0) renderer.drawLine(left, y + 2, left, y + height - 2);
 
     char weekday[4] = {0};
     if (!AgentDeck::GlanceFormat::formatWeekday(weekday, sizeof(weekday), day.date))
       snprintf(weekday, sizeof(weekday), "D%d", i + 1);
-    int tw = renderer.getTextWidth(SMALL_FONT_ID, weekday, EpdFontFamily::BOLD);
-    renderer.drawText(SMALL_FONT_ID, cx - tw / 2, y + 5, weekday, true, EpdFontFamily::BOLD);
+    const int dw = renderer.getTextWidth(SMALL_FONT_ID, weekday, EpdFontFamily::BOLD);
+    if (highlight) renderer.fillRect(cx - dw / 2 - 6, chipTop, dw + 12, chipH, true);
+    renderer.drawText(SMALL_FONT_ID, cx - dw / 2, chipTop + 1, weekday, !highlight, EpdFontFamily::BOLD);
 
     drawWeatherGlyph(renderer, cx - glyphSize / 2, glyphY, glyphSize, glyphSize, day.code, day.summary);
 
     char temps[18] = {0};
     if (day.minC != PocketDaily::GLANCE_TEMP_NONE && day.maxC != PocketDaily::GLANCE_TEMP_NONE)
-      snprintf(temps, sizeof(temps), "%d/%d", (int)day.maxC, (int)day.minC);
+      snprintf(temps, sizeof(temps), "%d\xC2\xB0/%d\xC2\xB0", (int)day.maxC, (int)day.minC);
     else if (day.maxC != PocketDaily::GLANCE_TEMP_NONE)
-      snprintf(temps, sizeof(temps), "%d", (int)day.maxC);
+      snprintf(temps, sizeof(temps), "%d\xC2\xB0", (int)day.maxC);
     if (temps[0]) {
-      tw = renderer.getTextWidth(UI_10_FONT_ID, temps);
-      renderer.drawText(UI_10_FONT_ID, cx - tw / 2, tempY0, temps, true);
+      const int tw = renderer.getTextWidth(UI_10_FONT_ID, temps, EpdFontFamily::BOLD);
+      renderer.drawText(UI_10_FONT_ID, cx - tw / 2, tempY, temps, true, EpdFontFamily::BOLD);
     }
 
-    if (day.maxC != PocketDaily::GLANCE_TEMP_NONE) {
-      const int highY = tempY(day.maxC);
-      if (previousHigh) renderer.drawLine(previousX, previousHighY, cx, highY, 2, true);
-      renderer.fillRect(cx - 2, highY - 2, 5, 5, true);
-      previousHighY = highY;
-      previousHigh = true;
-    } else {
-      previousHigh = false;
+    if (day.rainProbability >= 0 && rainY + tempLine <= y + height) {
+      char rain[8];
+      snprintf(rain, sizeof(rain), "%d%%", (int)day.rainProbability);
+      const int rw = renderer.getTextWidth(UI_10_FONT_ID, rain, EpdFontFamily::BOLD);
+      if (highlight) renderer.fillRect(cx - rw / 2 - 6, rainY - 1, rw + 12, tempLine + 2, true);
+      renderer.drawText(UI_10_FONT_ID, cx - rw / 2, rainY, rain, !highlight, EpdFontFamily::BOLD);
     }
-    if (day.minC != PocketDaily::GLANCE_TEMP_NONE) {
-      const int lowY = tempY(day.minC);
-      if (previousLow) renderer.drawLine(previousX, previousLowY, cx, lowY, true);
-      renderer.drawRect(cx - 2, lowY - 2, 5, 5, true);
-      previousLowY = lowY;
-      previousLow = true;
-    } else {
-      previousLow = false;
-    }
-
-    if (day.rainProbability > 0) {
-      const int barH = std::max(3, std::min(18, (int)day.rainProbability * 18 / 100));
-      const int barW = std::max(8, std::min(18, colW / 5));
-      renderer.fillRect(cx - barW / 2, rainBase - barH, barW, barH, true);
-    }
-    previousX = cx;
   }
-  renderer.drawLine(x, rainBase, x + width, rainBase);
   return height;
 }
 
@@ -332,22 +451,6 @@ void drawPocketSideChevrons(GfxRenderer& renderer) {
     renderer.drawLine(right - inset, hardware.nextSideY, right - inset - arm, hardware.nextSideY + halfH, 2, true);
   }
   renderer.setOrientation(original);
-}
-
-int formatNextRainDay(char* out, size_t cap, const PocketDaily::Weather& weather) {
-  if (!out || cap == 0) return 0;
-  out[0] = '\0';
-  for (uint8_t i = 1; i < weather.dayCount && i < PocketDaily::WEATHER_DAY_CAP; i++) {
-    const PocketDaily::DayWeather& day = weather.days[i];
-    const WeatherGlyph glyph = weatherGlyphFor(day.code, day.summary);
-    if (glyph != WeatherGlyph::Rain && glyph != WeatherGlyph::Storm && day.rainProbability <= 0) continue;
-    char weekday[4] = {0};
-    if (!AgentDeck::GlanceFormat::formatWeekday(weekday, sizeof(weekday), day.date))
-      snprintf(weekday, sizeof(weekday), "D%d", i + 1);
-    if (day.rainProbability > 0) return snprintf(out, cap, "RAIN %s %d%%", weekday, (int)day.rainProbability);
-    return snprintf(out, cap, "RAIN %s", weekday);
-  }
-  return 0;
 }
 
 bool formatWeatherSnapshotDate(char* out, size_t cap, const PocketDaily::Weather& weather) {
@@ -1622,6 +1725,8 @@ bool PocketDailyActivity::attemptManualSync() {
       AgentLog::line("AGENT", "sync endpoint %s failed — trying %s", endpoints.ips[i], endpoints.ips[i + 1]);
   }
   if (!r.ok) {
+    lastSyncOutcome = SyncOutcome::Unreachable;
+    lastSyncOutcomeMs = millis();
     AgentLog::line("AGENT", "manual sync failed: %u candidates on port %u", (unsigned)endpoints.count,
                    (unsigned)endpoints.port);
     if (manualOtaResumePending) {
@@ -1698,6 +1803,8 @@ bool PocketDailyActivity::attemptManualSync() {
     lastDeckSaveMs = 0;
     serviceDeckPersist();
   }
+  lastSyncOutcome = r.unchanged ? SyncOutcome::UpToDate : SyncOutcome::Updated;
+  lastSyncOutcomeMs = millis();
   AgentLog::line("AGENT", "manual sync: %s", r.unchanged ? "unchanged" : "updated");
   return true;
 }
@@ -2790,9 +2897,17 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
       snprintf(statusLine, sizeof(statusLine), "%s \xC2\xB7 %u%% \xC2\xB7 SYNC TO RESUME", tr(STR_POCKET_FIRMWARE),
                pct);
   } else if (manualSyncQueued || manualSyncActive) {
-    snprintf(statusLine, sizeof(statusLine), "%s", tr(STR_POCKET_CHECKING));
+    // The pull blocks this task, so the Face cannot animate. Naming the upper
+    // bound is the honest substitute for a progress bar we cannot draw.
+    snprintf(statusLine, sizeof(statusLine), tr(STR_POCKET_CHECKING_FORMAT), kSyncWorstCaseSec);
+  } else if (lastSyncOutcome != SyncOutcome::None && millis() - lastSyncOutcomeMs < kSyncOutcomeHoldMs) {
+    // A Sync press must leave a visible answer behind, not just return to idle.
+    const char* outcome = lastSyncOutcome == SyncOutcome::Updated    ? tr(STR_POCKET_SYNC_UPDATED)
+                          : lastSyncOutcome == SyncOutcome::UpToDate ? tr(STR_POCKET_SYNC_UP_TO_DATE)
+                                                                     : tr(STR_POCKET_SYNC_UNREACHABLE);
+    snprintf(statusLine, sizeof(statusLine), "%s", outcome);
   } else if (manualSyncNeedsDiscovery) {
-    snprintf(statusLine, sizeof(statusLine), "SYNC FAILED / RETRY");
+    snprintf(statusLine, sizeof(statusLine), "%s", tr(STR_POCKET_SYNC_RETRY));
   } else if (pullMode && pullSynced) {
     snprintf(statusLine, sizeof(statusLine), "%s \xC2\xB7 %s", tr(STR_POCKET_UPDATED), tr(STR_POCKET_SLEEPING));
   } else if (pullMode) {
@@ -3025,25 +3140,15 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
         renderer.drawText(SMALL_FONT_ID, x + cw - stampW, y, weatherStamp, true, EpdFontFamily::BOLD);
       }
 
-      const int nowY = y + renderer.getLineHeight(placeFont) + 5;
-      const int forecastRoom = weatherBottom - nowY - 76;
-      const int forecastH =
-          renderGlanceSnapshot.weather.dayCount >= 2 && forecastRoom >= 106 ? std::min(148, forecastRoom) : 0;
-      const int forecastY = weatherBottom - forecastH;
-      const int nowW = cw * 62 / 100;
-      drawCurrentWeatherVisual(renderer, renderGlanceSnapshot.weather, x, nowY, nowW,
-                               std::max(46, forecastY - nowY - 4));
-
-      int rainChars = AgentDeck::GlanceFormat::formatRainLine(line, sizeof(line), renderGlanceSnapshot.weather);
-      if (rainChars == 0) rainChars = formatNextRainDay(line, sizeof(line), renderGlanceSnapshot.weather);
-      if (rainChars > 0) {
-        const int rainX = x + cw * 68 / 100;
-        const int rainW = cw - (rainX - x);
-        renderer.drawLine(rainX - 8, y + 2, rainX - 8, std::max(y + 10, std::min(forecastY - 3, nowY + 66)), 3, true);
-        const int rainFont = fontForText(UI_10_FONT_ID, line);
-        drawWrappedFixed(renderer, rainFont, rainX, y + 1, line, rainW, 2, line10 + 2, EpdFontFamily::BOLD);
-      }
-      if (forecastH > 0) drawForecastRibbon(renderer, renderGlanceSnapshot.weather, x, forecastY, cw, forecastH);
+      // Hero across the full width, grid beneath. The wrapped rain sentence and
+      // its divider are gone: they stole a third of the row to say what the
+      // grid's inverted chip now says at a glance.
+      const int nowY = y + renderer.getLineHeight(placeFont) + 6;
+      const int gridRoom = weatherBottom - nowY - 58;
+      const int gridH = renderGlanceSnapshot.weather.dayCount >= 2 && gridRoom >= 74 ? std::min(116, gridRoom) : 0;
+      const int gridY = weatherBottom - gridH;
+      drawWeatherPoster(renderer, renderGlanceSnapshot.weather, x, nowY, cw, std::max(52, gridY - nowY - 6));
+      if (gridH > 0) drawForecastGrid(renderer, renderGlanceSnapshot.weather, x, gridY, cw, gridH);
     } else {
       renderer.drawText(SMALL_FONT_ID, x, y, tr(STR_POCKET_NO_WEATHER), true);
     }
@@ -3816,23 +3921,15 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
       snprintf(weatherLabel + strlen(weatherLabel), sizeof(weatherLabel) - strlen(weatherLabel), " \xC2\xB7 %s%s",
                snapshotDate, snapshotIsStale(renderSavedEpoch) ? " SAVED" : "");
     y = sectionHeader(x, y, cw, weatherLabel);
-    const int forecastRoom = maxY - y - 76;
-    const int forecastH = g.weather.dayCount >= 2 && forecastRoom >= 106 ? std::min(148, forecastRoom) : 0;
-    const int forecastY = maxY - forecastH;
-    const int nowW = cw * 62 / 100;
-    if (y + line12 < maxY) drawCurrentWeatherVisual(renderer, g.weather, x, y, nowW, std::max(46, forecastY - y - 4));
-    int rainChars = AgentDeck::GlanceFormat::formatRainLine(buf, sizeof(buf), g.weather);
-    if (rainChars == 0) rainChars = formatNextRainDay(buf, sizeof(buf), g.weather);
-    if (rainChars > 0) {
-      const int rainX = x + cw * 68 / 100;
-      const int rainW = cw - (rainX - x);
-      renderer.drawLine(rainX - 8, y, rainX - 8, std::max(y + 10, std::min(forecastY - 3, y + 66)), 3, true);
-      const int rainFont = fontForText(UI_10_FONT_ID, buf);
-      drawWrappedFixed(renderer, rainFont, rainX, y, buf, rainW, 2, line10 + 2, EpdFontFamily::BOLD);
-    }
-    if (forecastH > 0 && forecastY >= y + 48) {
-      const int graphH = drawForecastRibbon(renderer, g.weather, x, forecastY, cw, forecastH);
-      if (graphH > 0) return std::min(maxY, forecastY + graphH + 10);
+    // The retained frame uses the same poster + grid so a woken device and a
+    // powered-off one do not look like two different products.
+    const int gridRoom = maxY - y - 58;
+    const int gridH = g.weather.dayCount >= 2 && gridRoom >= 74 ? std::min(116, gridRoom) : 0;
+    const int gridY = maxY - gridH;
+    if (y + line12 < maxY) drawWeatherPoster(renderer, g.weather, x, y, cw, std::max(52, gridY - y - 6));
+    if (gridH > 0 && gridY >= y + 48) {
+      const int gridDrawn = drawForecastGrid(renderer, g.weather, x, gridY, cw, gridH);
+      if (gridDrawn > 0) return std::min(maxY, gridY + gridDrawn + 10);
     }
     return std::min(maxY, y + 74);
   };

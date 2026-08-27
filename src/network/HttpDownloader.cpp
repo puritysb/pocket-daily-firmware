@@ -31,6 +31,13 @@ constexpr int HTTP_TX_BUF = 1024;
 // slow servers room. esp_http_client's timeout_ms is uint32, so unlike Arduino
 // HTTPClient's uint16 setTimeout it doesn't silently truncate.
 constexpr int HTTP_TIMEOUT_MS = 60000;
+// A LAN daemon on the same subnet either answers in well under a second or is
+// not there. Charging it the public-internet budget made a single Sync press
+// block the loop for 61 s (two candidates x ~30 s in the device log), during
+// which no button is polled and the Face cannot repaint — the user sees a
+// frozen "Checking for updates" and cannot even leave. Fail fast instead: two
+// candidates now cost at most ~16 s, and every caller already retries.
+constexpr int LOCAL_HTTP_TIMEOUT_MS = 8000;
 constexpr size_t READ_CHUNK = 2048;
 constexpr size_t LOCAL_READ_CHUNK = 1024;
 constexpr size_t REDIRECT_LOCATION_MAX = 4096;
@@ -131,7 +138,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     const bool localHttp = currentUrl.rfind("http://", 0) == 0;
     config.buffer_size = localHttp ? LOCAL_HTTP_RX_BUF : HTTP_RX_BUF;
     config.buffer_size_tx = HTTP_TX_BUF;
-    config.timeout_ms = HTTP_TIMEOUT_MS;
+    config.timeout_ms = localHttp ? LOCAL_HTTP_TIMEOUT_MS : HTTP_TIMEOUT_MS;
     // Verify HTTPS against the bundled CA roots. This build has esp-tls
     // CONFIG_ESP_TLS_INSECURE off, so an unverified TLS handshake can't be set
     // up at all; the model is public servers over verified https and local
@@ -398,9 +405,11 @@ bool HttpDownloader::postJson(const std::string& url, const char* body, size_t b
     esp_http_client_config_t config = {};
     config.url = currentUrl.c_str();
     config.method = HTTP_METHOD_POST;
-    config.buffer_size = HTTP_RX_BUF;
+    // Outbox posts go to the same LAN daemon as the Feed — same fail-fast budget.
+    const bool localHttp = currentUrl.rfind("http://", 0) == 0;
+    config.buffer_size = localHttp ? LOCAL_HTTP_RX_BUF : HTTP_RX_BUF;
     config.buffer_size_tx = HTTP_TX_BUF;
-    config.timeout_ms = HTTP_TIMEOUT_MS;
+    config.timeout_ms = localHttp ? LOCAL_HTTP_TIMEOUT_MS : HTTP_TIMEOUT_MS;
     config.crt_bundle_attach = esp_crt_bundle_attach;
     config.keep_alive_enable = false;
     config.disable_auto_redirect = true;
