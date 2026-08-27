@@ -1,4 +1,27 @@
-# CrossPoint Reader
+# Pocket Daily Reader
+
+Pocket Daily is offline-first firmware for Xteink X3/X4: resume the book already
+on the device, carry a small daily study deck, retain last-synced weather and
+schedule context, and keep a useful E-ink sleep frame without requiring Wi-Fi.
+
+AgentDeck is an optional Companion content provider, not the product identity.
+The firmware publishes the AgentDeck Surface Protocol v1 identity
+`io.pocketdaily.reader` with the `portable-reader/v1` profile, so AgentDeck and
+other compatible Companion implementations can provide the same bounded Feed,
+Outbox, Glance, and OTA contract. See [`agentdeck-surface.json`](./agentdeck-surface.json).
+
+Pocket Daily is built on the open-source [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader)
+engine and preserves its reader, storage, format, and recovery foundations.
+
+## Pocket Daily additions
+
+- Offline-first Pocket Home with local continue-reading and daily study cards.
+- SD-backed weather, schedule, card deck, and durable offline choice outbox.
+- Brief wake/sync/sleep operation plus AgentDeck-assisted OTA when configured.
+- Retained sleep screen based only on locally durable information.
+- Coverage-tested `PocketSansJP` UI font bundle with reproducible OFL sources.
+
+## CrossPoint foundation
 
 [![Fund contributors](https://img.shields.io/badge/%F0%9F%91%91_Fund_contributors-royalty.dev-BB953A?style=for-the-badge&labelColor=1a1a1a)](https://app.royalty.dev/crosspoint-reader/crosspoint-reader)
 
@@ -73,6 +96,17 @@ USB port or browser before assuming the device is locked. Only reach for the unl
 > Papyrix (or any other unsupported firmware) on a locked device.**
 
 ## Install firmware
+
+### Pocket Daily development build
+
+Every successful local build stages `firmware/update.bin`. Copy it to the SD
+card root, boot while holding **UP + POWER**, select `update.bin`, and confirm.
+Pocket Daily also accepts a product-compatible Companion OTA advert after the
+device has paired and completed a sync.
+
+The CrossPoint web installer below installs upstream CrossPoint, not Pocket
+Daily. Keep it as the recovery path when you intentionally want to return to
+the foundation firmware.
 
 ### Web installer (recommended)
 
@@ -156,8 +190,11 @@ Conversion runs the firmware repo's `lib/EpdFont/scripts/fontconvert_sdcard.py` 
 ### Setup
 
 ```bash
-git clone --recursive https://github.com/crosspoint-reader/crosspoint-reader
-cd crosspoint-reader
+git clone --recursive https://github.com/puritysb/pocket-daily-reader
+cd pocket-daily-reader
+
+# keep the reader-engine source available for controlled merges
+git remote add upstream https://github.com/crosspoint-reader/crosspoint-reader.git
 
 # if cloned without --recursive:
 git submodule update --init --recursive

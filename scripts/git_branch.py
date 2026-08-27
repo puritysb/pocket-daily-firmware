@@ -7,7 +7,9 @@ Release environments are unaffected; they set CROSSPOINT_VERSION in the ini.
 """
 
 import configparser
+import hashlib
 import os
+import re
 import subprocess
 import sys
 
@@ -54,13 +56,56 @@ def get_git_branch(project_dir):
     # Detached HEAD has no branch name.
     if branch == 'HEAD':
         return 'detached'
-    return branch
+    # Branch names commonly contain '/', which is awkward in OTA versions,
+    # JSON logs, and staged filenames. Keep the identity but make it portable.
+    return re.sub(r'[^A-Za-z0-9._-]+', '-', branch).strip('-') or 'unknown'
 
 
 def get_git_short_sha(project_dir):
     return run_git_value(
         project_dir, ['rev-parse', '--short', 'HEAD'], 'short SHA'
     )
+
+
+def get_worktree_fingerprint(project_dir):
+    """Return a stable short digest for local changes, or None when clean.
+
+    HEAD alone cannot distinguish two development images built from different
+    uncommitted firmware revisions. Hash both tracked diffs and untracked,
+    non-ignored files so the device status and crash report identify the exact
+    source tree that produced them.
+    """
+    try:
+        status = subprocess.check_output(
+            ['git', 'status', '--porcelain=v1', '-z', '--untracked-files=all'],
+            cwd=project_dir,
+        )
+        if not status:
+            return None
+
+        digest = hashlib.sha256()
+        digest.update(subprocess.check_output(
+            ['git', 'diff', '--binary', '--no-ext-diff', 'HEAD', '--', '.'],
+            cwd=project_dir,
+        ))
+        untracked = subprocess.check_output(
+            ['git', 'ls-files', '--others', '--exclude-standard', '-z'],
+            cwd=project_dir,
+        ).split(b'\0')
+        for relative_bytes in sorted(path for path in untracked if path):
+            relative = os.fsdecode(relative_bytes)
+            digest.update(relative_bytes)
+            digest.update(b'\0')
+            path = os.path.join(project_dir, relative)
+            if not os.path.isfile(path):
+                continue
+            with open(path, 'rb') as source:
+                for chunk in iter(lambda: source.read(64 * 1024), b''):
+                    digest.update(chunk)
+        return digest.hexdigest()[:8]
+    except (OSError, subprocess.CalledProcessError) as exc:
+        warn(f'could not fingerprint dirty worktree: {exc}')
+        return 'unknown'
 
 
 def get_base_version(project_dir):
@@ -87,6 +132,9 @@ def inject_version(env):
     branch = get_git_branch(project_dir)
     short_sha = get_git_short_sha(project_dir)
     version_string = f'{base_version}-dev-{branch}-{short_sha}'
+    worktree = get_worktree_fingerprint(project_dir)
+    if worktree:
+        version_string += f'-w{worktree}'
 
     env.Append(CPPDEFINES=[('CROSSPOINT_VERSION', f'\\"{version_string}\\"')])
     print(f'CrossPoint build version: {version_string}')

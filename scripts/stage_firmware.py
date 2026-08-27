@@ -6,7 +6,7 @@ without needing a USB connection for every iteration.
 After every successful `pio run`, copies the freshly built binary to:
 
   firmware/update.bin                              -- always latest (SD install name)
-  firmware/crosspoint-<version>-<env>-<sha>.bin    -- versioned archive (keeps last 5)
+  firmware/pocket-daily-<version>-<env>-<sha>.bin  -- versioned archive (keeps last 5)
   firmware/LATEST_BUILD.txt                        -- build metadata + install steps
 
 Optional: set the FIRMWARE_STAGING_DIR environment variable (or the
@@ -82,8 +82,8 @@ def prune_versioned_copies(staging_dir, prefix):
 
 def write_manifest(manifest_path, base_version, env_name, branch, sha, date_str, file_size, versioned_name):
     lines = [
-        "CrossPoint Firmware Staging",
-        "===========================",
+        "Pocket Daily Firmware Staging",
+        "=============================",
         "",
         f"Version:      {base_version}",
         f"Environment:  {env_name}",
@@ -123,7 +123,7 @@ def stage(source, target, env):
     date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     date_compact = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
-    prefix = f"crosspoint-{base_version}-{env_name}"
+    prefix = f"pocket-daily-{base_version}-{env_name}"
     versioned_name = f"{prefix}-{sha}-{date_compact}.bin"
     versioned_path = os.path.join(staging_dir, versioned_name)
     update_path = os.path.join(staging_dir, "update.bin")

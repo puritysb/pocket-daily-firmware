@@ -37,10 +37,13 @@ NUDGE/PULSE/QUEST items, but they never become rows or THREAD digests themselves
 
 ## Offline data lifecycle
 
-- `/.crosspoint/agentdeck-deck.bin` stores the bounded Pocket pool, glance and
+- `/.crosspoint/pocket-daily-deck.bin` stores the bounded Pocket pool, glance and
   feed signature using tmp+rename.
-- `/.crosspoint/agentdeck-outbox.bin` stores choices before UI removal.
-- The device requests `GET /feed?surface=pocket-reader`, which omits session
+- `/.crosspoint/pocket-daily-outbox.bin` stores choices before UI removal.
+- Existing `agentdeck-*.bin` files are imported once and removed only after the
+  Pocket Daily copy has been written successfully.
+- The device requests the legacy `GET /feed?surface=pocket-reader` projection
+  while its Surface v1 headers declare `portable-reader/v1`, which omits session
   projections while retaining daemon-authored module cards.
 - `choiceId: later` is a neutral read-state. The daemon marks that exact card as
   handled without rewarding or penalising its content category, so it does not

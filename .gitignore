@@ -34,4 +34,6 @@ firmware/
 
 # Bundled Korean dashboard font (intentional asset, not a transient build artifact)
 !assets/fonts/AgentDeckKR/AgentDeckKR_12.cpfont
+# Bundled Pocket Daily Japanese subset (intentional firmware asset)
+!assets/fonts/PocketJP/PocketSansJP_12.cpfont
 bilingual-sample.epub

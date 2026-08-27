@@ -2,12 +2,12 @@
 #
 # sync-upstream.sh — pull the upstream stable line into our fork's master.
 #
-# This repo is a personal fork (origin) carrying the private "AgentDeck Decision
-# Card" product stack on top of upstream crosspoint-reader. We follow upstream's
-# STABLE line (upstream/master, where releases land), not develop.
+# Pocket Daily is an independent product built on the upstream CrossPoint
+# reader engine. AgentDeck is one optional Companion provider. We follow
+# upstream's STABLE line (upstream/master, where releases land), not develop.
 #
-# Why merge (not rebase): our master has ~20 AgentDeck commits layered on top.
-# A rebase would replay all of them and force re-resolving the same conflicts
+# Why merge (not rebase): Pocket Daily has product commits layered on top. A
+# rebase would replay all of them and force re-resolving the same conflicts
 # every sync. A merge resolves once and preserves the AgentDeck history.
 #
 # This script only fetches + merges on a local branch. It does NOT push — review
@@ -72,12 +72,12 @@ if git merge --no-edit "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH"; then
   echo "    1. pio run                 # verify the firmware still builds"
   echo "    2. git push origin $LOCAL_BRANCH"
   echo
-  echo "    Conflicts usually only hit AgentDeck-touched shared files"
-  echo "    (ActivityManager, HomeActivity, themes). New src/agentdeck/* files don't conflict."
+  echo "    Conflicts usually hit Pocket Daily-touched shared files"
+  echo "    (ActivityManager, HomeActivity, themes). Provider adapters are isolated."
 else
   echo
   echo "==> MERGE CONFLICT. Resolve preserving BOTH sides:" >&2
-  echo "    - keep upstream's fixes AND our AgentDeck changes in the shared files" >&2
+  echo "    - keep upstream's fixes AND Pocket Daily changes in the shared files" >&2
   echo "    - git add <resolved>; git commit   (then: pio run; git push origin $LOCAL_BRANCH)" >&2
   echo "    - to bail out: git merge --abort" >&2
   exit 1
