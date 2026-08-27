@@ -17,10 +17,10 @@
 #include <string>
 
 namespace {
-constexpr char latestReleaseUrl[] = "https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/latest";
+constexpr char latestReleaseUrl[] = "https://api.github.com/repos/puritysb/pocket-daily-reader/releases/latest";
 
 esp_err_t http_client_set_header_cb(esp_http_client_handle_t http_client) {
-  return esp_http_client_set_header(http_client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
+  return esp_http_client_set_header(http_client, "User-Agent", "PocketDaily-ESP32-" CROSSPOINT_VERSION);
 }
 }  // namespace
 
@@ -71,14 +71,19 @@ bool OtaUpdater::isUpdateNewer() const {
     return false;
   }
 
-  int currentMajor, currentMinor, currentPatch;
-  int latestMajor, latestMinor, latestPatch;
+  int currentMajor = 0, currentMinor = 0, currentPatch = 0;
+  int latestMajor = 0, latestMinor = 0, latestPatch = 0;
 
   const auto currentVersion = CROSSPOINT_VERSION;
+  const char* latest = latestVersion.c_str();
+  if (*latest == 'v' || *latest == 'V') latest++;
 
   // semantic version check (only match on 3 segments)
-  sscanf(latestVersion.c_str(), "%d.%d.%d", &latestMajor, &latestMinor, &latestPatch);
-  sscanf(currentVersion, "%d.%d.%d", &currentMajor, &currentMinor, &currentPatch);
+  if (sscanf(latest, "%d.%d.%d", &latestMajor, &latestMinor, &latestPatch) != 3 ||
+      sscanf(currentVersion, "%d.%d.%d", &currentMajor, &currentMinor, &currentPatch) != 3) {
+    LOG_ERR("OTA", "Invalid semantic version: current=%s latest=%s", currentVersion, latestVersion.c_str());
+    return false;
+  }
 
   /*
    * Compare major versions.

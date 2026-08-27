@@ -33,20 +33,41 @@ class HttpDownloader {
     char value[48] = {0};
   };
 
+  // Optional final URL after redirects. The fixed buffer is intentionally
+  // small: OTA only needs the origin at the beginning, not a copied token or
+  // long signed asset query.
+  struct EffectiveUrlCapture {
+    char value[96] = {0};
+  };
+
+  // Optional fixed request headers. Callers own both arrays and strings for
+  // the duration of the blocking request. This deliberately avoids maps and
+  // heap allocation on the no-PSRAM ESP32-C3.
+  struct RequestHeader {
+    const char* name = nullptr;
+    const char* value = nullptr;
+  };
+  struct RequestHeaders {
+    const RequestHeader* items = nullptr;
+    size_t count = 0;
+  };
+
   /**
    * Fetch text content from a URL with optional credentials.
    */
   static bool fetchUrl(const std::string& url, std::string& outContent, const std::string& username = "",
-                       const std::string& password = "");
+                       const std::string& password = "", const RequestHeaders* requestHeaders = nullptr,
+                       EffectiveUrlCapture* effectiveUrl = nullptr);
 
   static bool fetchUrl(const std::string& url, Stream& stream, const std::string& username = "",
-                       const std::string& password = "");
+                       const std::string& password = "", const RequestHeaders* requestHeaders = nullptr);
 
   /**
    * Stream the response body to onData as it arrives, without buffering it.
    */
   static bool fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username = "",
-                       const std::string& password = "");
+                       const std::string& password = "", const RequestHeaders* requestHeaders = nullptr,
+                       EffectiveUrlCapture* effectiveUrl = nullptr);
 
   /**
    * Download a file to the SD card with optional credentials.
@@ -54,7 +75,8 @@ class HttpDownloader {
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
                                       ProgressCallback progress = nullptr, bool* cancelFlag = nullptr,
                                       const std::string& username = "", const std::string& password = "",
-                                      HeaderCapture* headerCapture = nullptr);
+                                      HeaderCapture* headerCapture = nullptr,
+                                      const RequestHeaders* requestHeaders = nullptr);
 
   /**
    * POST a JSON body and collect the (bounded) JSON response. Plain-http local
@@ -62,5 +84,6 @@ class HttpDownloader {
    * No redirect handling — intended for the AgentDeck daemon's LAN endpoints.
    */
   static bool postJson(const std::string& url, const char* body, size_t bodyLen, std::string& outResponse,
-                       size_t maxResponseBytes = 16384);
+                       size_t maxResponseBytes = 16384, const RequestHeaders* requestHeaders = nullptr,
+                       EffectiveUrlCapture* effectiveUrl = nullptr);
 };

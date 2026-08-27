@@ -8,6 +8,7 @@
 #include <esp_http_client.h>
 #include <strings.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -20,6 +21,10 @@ namespace {
 // survive. Smaller keeps contiguous heap free while WiFi and TLS are up. TX
 // only carries our GET; the body streams in READ_CHUNK pieces.
 constexpr int HTTP_RX_BUF = 4096;
+// Surface Feed/Outbox/OTA responses are LAN HTTP with compact headers. Keeping
+// the public-HTTPS 4 KiB buffer on the no-PSRAM X3 made a second endpoint fail
+// immediately whenever the first attempt fragmented the largest heap block.
+constexpr int LOCAL_HTTP_RX_BUF = 1024;
 constexpr int HTTP_TX_BUF = 1024;
 // Per-socket-op timeout. Some OPDS download endpoints are slow to send headers
 // (>15s) and chunked catalogs stall mid-body, so 15s killed them. 60s gives
@@ -27,10 +32,15 @@ constexpr int HTTP_TX_BUF = 1024;
 // HTTPClient's uint16 setTimeout it doesn't silently truncate.
 constexpr int HTTP_TIMEOUT_MS = 60000;
 constexpr size_t READ_CHUNK = 2048;
+constexpr size_t LOCAL_READ_CHUNK = 1024;
 constexpr size_t REDIRECT_LOCATION_MAX = 4096;
 
 struct Sink {
   std::function<bool(const uint8_t*, size_t)> write;  // returns false to abort the transfer
+  // Optional one-shot allocation before the read buffer is created. Text
+  // sinks use Content-Length to avoid a second std::string growth after the
+  // first 1 KiB LAN read fragments the X3 heap.
+  std::function<bool(size_t)> prepare;
   HttpDownloader::ProgressCallback progress;
   bool* cancelFlag = nullptr;
   size_t total = 0;
@@ -105,7 +115,9 @@ void logHeap(const char* stage) {
 // that ends early as ESP_ERR_HTTP_INCOMPLETE_DATA, whereas the read loop streams
 // large/slow files and surfaces a short read directly.
 HttpDownloader::DownloadError runGet(const std::string& url, const std::string& username, const std::string& password,
-                                     Sink& sink, HttpDownloader::HeaderCapture* headerCapture = nullptr) {
+                                     Sink& sink, HttpDownloader::HeaderCapture* headerCapture = nullptr,
+                                     const HttpDownloader::RequestHeaders* requestHeaders = nullptr,
+                                     HttpDownloader::EffectiveUrlCapture* effectiveUrl = nullptr) {
   std::string currentUrl = url;
 
   for (int hop = 0; hop <= 5; ++hop) {
@@ -116,7 +128,8 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     redirect.capture = headerCapture;
     esp_http_client_config_t config = {};
     config.url = currentUrl.c_str();
-    config.buffer_size = HTTP_RX_BUF;
+    const bool localHttp = currentUrl.rfind("http://", 0) == 0;
+    config.buffer_size = localHttp ? LOCAL_HTTP_RX_BUF : HTTP_RX_BUF;
     config.buffer_size_tx = HTTP_TX_BUF;
     config.timeout_ms = HTTP_TIMEOUT_MS;
     // Verify HTTPS against the bundled CA roots. This build has esp-tls
@@ -137,7 +150,14 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
       return HttpDownloader::HTTP_ERROR;
     }
 
-    esp_http_client_set_header(client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
+    esp_http_client_set_header(client, "User-Agent", "PocketDaily-ESP32-" CROSSPOINT_VERSION);
+    if (requestHeaders && requestHeaders->items) {
+      for (size_t i = 0; i < requestHeaders->count; ++i) {
+        const auto& header = requestHeaders->items[i];
+        if (header.name && header.name[0] && header.value)
+          esp_http_client_set_header(client, header.name, header.value);
+      }
+    }
     if (!username.empty() && !password.empty()) {
       // Preemptive Basic auth, like the prior addHeader; don't wait for a 401.
       const std::string credentials = username + ":" + password;
@@ -194,12 +214,17 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
       continue;
     }
 
+    if (effectiveUrl) snprintf(effectiveUrl->value, sizeof(effectiveUrl->value), "%s", currentUrl.c_str());
+
     if (status == 304) {
       // Conditional matched (?sig= echo) — bodyless by design, not an error.
       esp_http_client_cleanup(client);
       return HttpDownloader::NOT_MODIFIED;
     }
-    if (status != 200) {
+    // Pull OTA resumes use 206 Partial Content. The sink already owns the
+    // append offset and validates the completed image size + MD5, so a partial
+    // response is a successful body transfer, not an HTTP failure.
+    if (status != 200 && status != 206) {
       LOG_ERR("HTTP", "unexpected status: %d", status);
       esp_http_client_cleanup(client);
       return HttpDownloader::HTTP_ERROR;
@@ -208,10 +233,16 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     // fetch_headers returns 0 for a chunked response (no Content-Length); leave
     // total at 0 so progress stays silent and the size check is skipped.
     sink.total = contentLength > 0 ? static_cast<size_t>(contentLength) : 0;
+    if (sink.prepare && sink.total > 0 && !sink.prepare(sink.total)) {
+      LOG_ERR("HTTP", "sink prepare failed for %zu bytes", sink.total);
+      esp_http_client_cleanup(client);
+      return HttpDownloader::HTTP_ERROR;
+    }
 
-    auto buf = makeUniqueNoThrow<char[]>(READ_CHUNK);
+    const size_t readChunk = localHttp ? LOCAL_READ_CHUNK : READ_CHUNK;
+    auto buf = makeUniqueNoThrow<char[]>(readChunk);
     if (!buf) {
-      LOG_ERR("HTTP", "OOM: %u byte read buffer", (unsigned)READ_CHUNK);
+      LOG_ERR("HTTP", "OOM: %u byte read buffer", (unsigned)readChunk);
       esp_http_client_cleanup(client);
       return HttpDownloader::HTTP_ERROR;
     }
@@ -221,7 +252,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
         esp_http_client_cleanup(client);
         return HttpDownloader::ABORTED;
       }
-      const int read = esp_http_client_read(client, buf.get(), READ_CHUNK);
+      const int read = esp_http_client_read(client, buf.get(), readChunk);
       if (read < 0) {
         LOG_ERR("HTTP", "read error after %zu bytes", sink.downloaded);
         esp_http_client_cleanup(client);
@@ -236,7 +267,11 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
       if (sink.progress && sink.total > 0) sink.progress(sink.downloaded, sink.total);
     }
 
-    const bool complete = esp_http_client_is_complete_data_received(client);
+    // ESP-IDF can leave its internal completion flag false after a clean
+    // Connection: close even though the advertised body length was received.
+    // Content-Length is the stronger, observable invariant for our daemon.
+    const bool complete =
+        (sink.total > 0 && sink.downloaded == sink.total) || esp_http_client_is_complete_data_received(client);
     esp_http_client_cleanup(client);
     if (!complete) {
       LOG_ERR("HTTP", "incomplete: got %zu of %zu bytes", sink.downloaded, sink.total);
@@ -250,29 +285,45 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
 }  // namespace
 
 bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const std::string& username,
-                              const std::string& password) {
+                              const std::string& password, const RequestHeaders* requestHeaders) {
   LOG_DBG("HTTP", "Fetching: %s", url.c_str());
   Sink sink;
   sink.write = [&outContent](const uint8_t* data, size_t len) { return outContent.write(data, len) == len; };
-  return runGet(url, username, password, sink) == OK;
+  return runGet(url, username, password, sink, nullptr, requestHeaders) == OK;
 }
 
 bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent, const std::string& username,
-                              const std::string& password) {
+                              const std::string& password, const RequestHeaders* requestHeaders,
+                              EffectiveUrlCapture* effectiveUrl) {
   LOG_DBG("HTTP", "Fetching: %s", url.c_str());
   outContent.clear();  // start clean; the sink appends, so don't carry prior content
   Sink sink;
+  sink.prepare = [&outContent](size_t total) {
+    if (total <= outContent.capacity()) return true;
+    constexpr size_t kReserveMargin = 512;
+    if ((size_t)ESP.getMaxAllocHeap() < total + 1 + kReserveMargin ||
+        (size_t)ESP.getFreeHeap() < total + 1 + READ_CHUNK + kReserveMargin) {
+      LOG_ERR("HTTP", "OOM guard: cannot reserve %u bytes, free=%u largest=%u", (unsigned)total,
+              (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+      return false;
+    }
+    outContent.reserve(total);
+    return outContent.capacity() >= total;
+  };
   sink.write = [&outContent](const uint8_t* data, size_t len) {
     // Body accumulation is the one allocation in this client that grows with
     // the response — and this is a -fno-exceptions build, so a failed string
     // growth is std::terminate -> abort, not a catchable bad_alloc (X4 panic
     // at power-off: heap free 7 KB / largest block 3.9 KB when a full /feed
-    // arrived). Pre-check the worst-case reallocation (capacity doubling
-    // copies old + new into one fresh block) with headroom, and degrade to a
-    // failed transfer — every caller already has an offline fallback.
+    // arrived). Pre-check the actual likely capacity growth plus a small heap
+    // margin. The previous `(body * 2) + 4096` compared unrelated free-heap
+    // headroom against the largest *contiguous* allocation and rejected a
+    // 286-byte Feed when the X3 still had a healthy 4.6 KiB block.
     if (outContent.size() + len > outContent.capacity()) {
-      const size_t worst = (outContent.size() + len) * 2 + 4096;
-      if ((size_t)ESP.getMaxAllocHeap() < worst) {
+      const size_t needed = outContent.size() + len + 1;
+      const size_t likelyCapacity = std::max(needed, std::max<size_t>(64, outContent.capacity() * 2));
+      constexpr size_t kAllocationMargin = 512;
+      if ((size_t)ESP.getMaxAllocHeap() < likelyCapacity + kAllocationMargin) {
         LOG_ERR("HTTP", "OOM guard: body at %u bytes, largest block %u", (unsigned)outContent.size(),
                 (unsigned)ESP.getMaxAllocHeap());
         return false;
@@ -281,21 +332,23 @@ bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent, c
     outContent.append(reinterpret_cast<const char*>(data), len);
     return true;
   };
-  return runGet(url, username, password, sink) == OK;
+  return runGet(url, username, password, sink, nullptr, requestHeaders, effectiveUrl) == OK;
 }
 
 bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username,
-                              const std::string& password) {
+                              const std::string& password, const RequestHeaders* requestHeaders,
+                              EffectiveUrlCapture* effectiveUrl) {
   LOG_DBG("HTTP", "Fetching: %s", url.c_str());
   Sink sink;
   sink.write = onData;
-  return runGet(url, username, password, sink) == OK;
+  return runGet(url, username, password, sink, nullptr, requestHeaders, effectiveUrl) == OK;
 }
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
                                                              ProgressCallback progress, bool* cancelFlag,
                                                              const std::string& username, const std::string& password,
-                                                             HeaderCapture* headerCapture) {
+                                                             HeaderCapture* headerCapture,
+                                                             const RequestHeaders* requestHeaders) {
   LOG_DBG("HTTP", "Downloading: %s -> %s", url.c_str(), destPath.c_str());
 
   if (Storage.exists(destPath.c_str())) {
@@ -312,7 +365,7 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   sink.cancelFlag = cancelFlag;
   sink.write = [&file](const uint8_t* data, size_t len) { return file.write(data, len) == len; };
 
-  const DownloadError result = runGet(url, username, password, sink, headerCapture);
+  const DownloadError result = runGet(url, username, password, sink, headerCapture, requestHeaders);
   // Close before any remove() on the same path; DESTRUCTOR_CLOSES_FILE would
   // otherwise close only after the remove.
   file.close();
@@ -331,80 +384,110 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
 }
 
 bool HttpDownloader::postJson(const std::string& url, const char* body, size_t bodyLen, std::string& outResponse,
-                              size_t maxResponseBytes) {
+                              size_t maxResponseBytes, const RequestHeaders* requestHeaders,
+                              EffectiveUrlCapture* effectiveUrl) {
   LOG_DBG("HTTP", "POST: %s (%u bytes)", url.c_str(), (unsigned)bodyLen);
   outResponse.clear();
+  std::string currentUrl = url;
 
-  esp_http_client_config_t config = {};
-  config.url = url.c_str();
-  config.method = HTTP_METHOD_POST;
-  config.buffer_size = HTTP_RX_BUF;
-  config.buffer_size_tx = HTTP_TX_BUF;
-  config.timeout_ms = HTTP_TIMEOUT_MS;
-  config.crt_bundle_attach = esp_crt_bundle_attach;
-  config.keep_alive_enable = false;
-  config.disable_auto_redirect = true;
+  // Surface Outbox must follow the same dual-homed-host redirect as Feed and
+  // OTA. Replay the small, idempotency-keyed JSON body on at most two hops;
+  // esp_http_client's automatic redirect cannot safely replay a streamed POST.
+  for (int hop = 0; hop <= 2; ++hop) {
+    RedirectCapture redirect;
+    esp_http_client_config_t config = {};
+    config.url = currentUrl.c_str();
+    config.method = HTTP_METHOD_POST;
+    config.buffer_size = HTTP_RX_BUF;
+    config.buffer_size_tx = HTTP_TX_BUF;
+    config.timeout_ms = HTTP_TIMEOUT_MS;
+    config.crt_bundle_attach = esp_crt_bundle_attach;
+    config.keep_alive_enable = false;
+    config.disable_auto_redirect = true;
+    config.event_handler = httpEventHandler;
+    config.user_data = &redirect;
 
-  esp_http_client_handle_t client = esp_http_client_init(&config);
-  if (!client) {
-    LOG_ERR("HTTP", "client init failed");
-    return false;
-  }
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) {
+      LOG_ERR("HTTP", "client init failed");
+      return false;
+    }
 
-  esp_http_client_set_header(client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
-  esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_header(client, "User-Agent", "PocketDaily-ESP32-" CROSSPOINT_VERSION);
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    if (requestHeaders && requestHeaders->items) {
+      for (size_t i = 0; i < requestHeaders->count; ++i) {
+        const auto& header = requestHeaders->items[i];
+        if (header.name && header.name[0] && header.value)
+          esp_http_client_set_header(client, header.name, header.value);
+      }
+    }
 
-  esp_err_t err = esp_http_client_open(client, bodyLen);
-  if (err != ESP_OK) {
-    LOG_ERR("HTTP", "open failed: %s", esp_err_to_name(err));
-    esp_http_client_cleanup(client);
-    return false;
-  }
-  if (bodyLen && esp_http_client_write(client, body, bodyLen) != (int)bodyLen) {
-    LOG_ERR("HTTP", "body write failed");
-    esp_http_client_cleanup(client);
-    return false;
-  }
-
-  if (esp_http_client_fetch_headers(client) < 0) {
-    LOG_ERR("HTTP", "fetch headers failed");
-    esp_http_client_cleanup(client);
-    return false;
-  }
-  const int status = esp_http_client_get_status_code(client);
-
-  char buf[512];
-  while (true) {
-    const int read = esp_http_client_read(client, buf, sizeof(buf));
-    if (read < 0) {
-      LOG_ERR("HTTP", "read error after %u bytes", (unsigned)outResponse.size());
+    esp_err_t err = esp_http_client_open(client, bodyLen);
+    if (err != ESP_OK) {
+      LOG_ERR("HTTP", "open failed: %s", esp_err_to_name(err));
       esp_http_client_cleanup(client);
       return false;
     }
-    if (read == 0) break;
-    if (outResponse.size() + read > maxResponseBytes) {
-      LOG_ERR("HTTP", "response exceeds %u bytes — aborted", (unsigned)maxResponseBytes);
+    if (bodyLen && esp_http_client_write(client, body, bodyLen) != (int)bodyLen) {
+      LOG_ERR("HTTP", "body write failed");
       esp_http_client_cleanup(client);
       return false;
     }
-    // Same OOM discipline as the fetchUrl string sink (-fno-exceptions:
-    // a failed growth aborts the device) — pre-check, degrade, never grow blind.
-    if (outResponse.size() + (size_t)read > outResponse.capacity()) {
-      const size_t worst = (outResponse.size() + read) * 2 + 4096;
-      if ((size_t)ESP.getMaxAllocHeap() < worst) {
-        LOG_ERR("HTTP", "OOM guard: response at %u bytes, largest block %u", (unsigned)outResponse.size(),
-                (unsigned)ESP.getMaxAllocHeap());
+
+    if (esp_http_client_fetch_headers(client) < 0) {
+      LOG_ERR("HTTP", "fetch headers failed");
+      esp_http_client_cleanup(client);
+      return false;
+    }
+    const int status = esp_http_client_get_status_code(client);
+    if (isRedirect(status)) {
+      if (hop == 2 || redirect.oom || redirect.truncated || !redirect.location || !redirect.location[0]) {
+        LOG_ERR("HTTP", "POST redirect unusable");
         esp_http_client_cleanup(client);
         return false;
       }
+      std::string nextUrl = resolveRedirectUrl(currentUrl, redirect.location);
+      esp_http_client_cleanup(client);
+      if (nextUrl.empty()) return false;
+      currentUrl = std::move(nextUrl);
+      outResponse.clear();
+      continue;
     }
-    outResponse.append(buf, read);
-  }
-  esp_http_client_cleanup(client);
 
-  if (status != 200) {
-    LOG_ERR("HTTP", "POST status %d: %.120s", status, outResponse.c_str());
-    return false;
+    if (effectiveUrl) snprintf(effectiveUrl->value, sizeof(effectiveUrl->value), "%s", currentUrl.c_str());
+    char buf[512];
+    while (true) {
+      const int read = esp_http_client_read(client, buf, sizeof(buf));
+      if (read < 0) {
+        LOG_ERR("HTTP", "read error after %u bytes", (unsigned)outResponse.size());
+        esp_http_client_cleanup(client);
+        return false;
+      }
+      if (read == 0) break;
+      if (outResponse.size() + read > maxResponseBytes) {
+        LOG_ERR("HTTP", "response exceeds %u bytes — aborted", (unsigned)maxResponseBytes);
+        esp_http_client_cleanup(client);
+        return false;
+      }
+      if (outResponse.size() + (size_t)read > outResponse.capacity()) {
+        const size_t worst = (outResponse.size() + read) * 2 + 4096;
+        if ((size_t)ESP.getMaxAllocHeap() < worst) {
+          LOG_ERR("HTTP", "OOM guard: response at %u bytes, largest block %u", (unsigned)outResponse.size(),
+                  (unsigned)ESP.getMaxAllocHeap());
+          esp_http_client_cleanup(client);
+          return false;
+        }
+      }
+      outResponse.append(buf, read);
+    }
+    esp_http_client_cleanup(client);
+
+    if (status != 200) {
+      LOG_ERR("HTTP", "POST status %d: %.120s", status, outResponse.c_str());
+      return false;
+    }
+    return true;
   }
-  return true;
+  return false;
 }

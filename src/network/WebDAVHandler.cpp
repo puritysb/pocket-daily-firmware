@@ -328,7 +328,28 @@ void WebDAVHandler::handleGet(WebServer& s) {
   s.send(200, contentType.c_str(), "");
 
   NetworkClient client = s.client();
-  client.write(file);
+  // NetworkClient::write(Stream&) assumes Arduino Stream semantics. HalFile is
+  // intentionally a thin storage abstraction and that overload only consumed
+  // one byte on X3, then closed a response whose Content-Length advertised the
+  // whole file. Stream explicitly and handle short socket writes instead.
+  constexpr size_t kChunkSize = 4096;
+  uint8_t buffer[kChunkSize];
+  bool transferOk = true;
+  while (transferOk && file.available()) {
+    esp_task_wdt_reset();
+    const int got = file.read(buffer, sizeof(buffer));
+    if (got <= 0) break;
+    size_t sent = 0;
+    while (sent < static_cast<size_t>(got)) {
+      const size_t wrote = client.write(buffer + sent, static_cast<size_t>(got) - sent);
+      if (wrote == 0) {
+        transferOk = false;
+        break;
+      }
+      sent += wrote;
+    }
+  }
+  if (!transferOk) LOG_ERR("DAV", "GET transfer interrupted: %s", path.c_str());
   file.close();
 }
 
