@@ -5,6 +5,7 @@
 
 #include <ArduinoJson.h>
 #include <HalStorage.h>
+#include <WiFi.h>
 
 #include <cstdio>
 #include <cstring>
@@ -238,10 +239,31 @@ bool loadEndpoint(char* ip, size_t ipCap, uint16_t& port, char* token, size_t to
   return true;
 }
 
-bool saveEndpointCandidates(const Net::EndpointCandidates& endpoints, const char* token) {
+bool saveEndpointCandidates(const Net::EndpointCandidates& endpoints, const char* token, bool mergeWithCached) {
   if (!Storage.ready() || !endpoints.count || !endpoints.port) return false;
+
+  // Candidate ORDER is learned knowledge, not a discovery detail: saveEndpoint()
+  // promotes whichever address actually answered to index 0. Discovery must not
+  // throw that away. It used to: a dual-homed host advertises both its wired and
+  // wireless address, one of which may be unreachable from this device, and a UDP
+  // beacon carries only ONE address. Replacing the cache with the beacon's single
+  // entry deleted the address that had just been proven to work, so every
+  // rediscovery walked the device back onto the dead route (observed on this
+  // network: preferred=...68.60 -> preferred=...68.100, then repeated failures).
+  //
+  // Merge instead. Cached order comes first, discovery only contributes addresses
+  // we have not seen. A head that has genuinely gone away costs one bounded
+  // timeout before the loop reaches a live candidate — and that success promotes
+  // it back to the front, so the ordering is self-healing either way.
   Net::EndpointCandidates normalized;
   normalized.port = endpoints.port;
+  if (mergeWithCached) {
+    Net::EndpointCandidates cached;
+    char cachedToken[40] = {0};
+    if (loadEndpointCandidates(cached, cachedToken, sizeof(cachedToken)) && cached.port == endpoints.port) {
+      for (uint8_t i = 0; i < cached.count; i++) Net::endpointCandidateAdd(normalized, cached.ips[i]);
+    }
+  }
   for (uint8_t i = 0; i < endpoints.count && i < Net::ENDPOINT_CANDIDATE_CAP; i++) {
     Net::endpointCandidateAdd(normalized, endpoints.ips[i]);
   }
@@ -275,6 +297,26 @@ bool saveEndpointCandidates(const Net::EndpointCandidates& endpoints, const char
   return true;
 }
 
+bool orderByReachability(Net::EndpointCandidates& endpoints, uint32_t probeTimeoutMs) {
+  if (endpoints.count < 2 || !endpoints.port) return false;
+  for (uint8_t i = 0; i < endpoints.count; i++) {
+    // WiFiClient is stack-light and its socket is released at scope exit; the
+    // probe runs before any HTTP client exists, so it never competes with the
+    // request's buffers for contiguous heap.
+    WiFiClient probe;
+    const bool up = probe.connect(endpoints.ips[i], endpoints.port, (int32_t)probeTimeoutMs);
+    probe.stop();
+    if (!up) continue;
+    if (i == 0) return false;  // already in the right order
+    AgentLog::line("FEED", "endpoint probe: %s answered, %s did not", endpoints.ips[i], endpoints.ips[0]);
+    Net::endpointCandidatePromote(endpoints, endpoints.ips[i]);
+    return true;
+  }
+  // Nothing answered — the radio or the daemon is down, not the ordering.
+  // Leave the learned order untouched.
+  return false;
+}
+
 bool saveEndpoint(const char* ip, uint16_t port, const char* token) {
   if (!Storage.ready() || !ip || !ip[0] || !port) return false;
   Net::EndpointCandidates endpoints;
@@ -286,7 +328,8 @@ bool saveEndpoint(const char* ip, uint16_t port, const char* token) {
     endpoints.port = port;
   }
   Net::endpointCandidatePromote(endpoints, ip);
-  return saveEndpointCandidates(endpoints, token);
+  // Already merged from cache above; merging again would re-front the old order.
+  return saveEndpointCandidates(endpoints, token, /*mergeWithCached=*/false);
 }
 
 }  // namespace Feed

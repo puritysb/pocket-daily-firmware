@@ -1693,6 +1693,11 @@ bool PocketDailyActivity::refreshGlanceIfStale(uint32_t maxAgeMs) {
   // The full feed apply also rewrites sessions — same daemon, same roster the
   // WS already delivered, so this is a refresh, not a conflict. On `unchanged`
   // the persisted glance in the deck cache is already current.
+  // Put a candidate that currently accepts TCP at the front before spending a
+  // full request on the wrong one. Persist a reorder so the next wake starts
+  // there instead of relearning it.
+  if (AgentDeck::Feed::orderByReachability(endpoints))
+    AgentDeck::Feed::saveEndpoint(endpoints.ips[0], endpoints.port, token);
   AgentDeck::Feed::SyncResult r;
   for (uint8_t i = 0; i < endpoints.count; i++) {
     r = AgentDeck::Feed::syncOnce(endpoints.ips[i], endpoints.port, token, board, lastFeedSig, tel);
@@ -1746,6 +1751,11 @@ bool PocketDailyActivity::attemptManualSync() {
   AgentDeck::Feed::SyncTelemetry tel;
   tel.battPct = (int)powerManager.getBatteryPercentage();
   tel.rssiDbm = (int)WiFi.RSSI();
+  // Put a candidate that currently accepts TCP at the front before spending a
+  // full request on the wrong one. Persist a reorder so the next wake starts
+  // there instead of relearning it.
+  if (AgentDeck::Feed::orderByReachability(endpoints))
+    AgentDeck::Feed::saveEndpoint(endpoints.ips[0], endpoints.port, token);
   AgentDeck::Feed::SyncResult r;
   char successfulIp[16] = {0};
   for (uint8_t i = 0; i < endpoints.count; i++) {
@@ -1866,16 +1876,24 @@ bool PocketDailyActivity::attemptPullSync(const AgentDeck::Net::EndpointCandidat
   AgentDeck::Feed::SyncTelemetry tel;
   tel.battPct = (int)powerManager.getBatteryPercentage();
   tel.rssiDbm = (WiFi.status() == WL_CONNECTED) ? (int)WiFi.RSSI() : 0;
+  // Put a candidate that currently accepts TCP at the front before spending a
+  // full request on the wrong one. Persist a reorder so the next wake starts
+  // there instead of relearning it.
+  // The pull path receives its candidates by const reference (they may belong to
+  // a discovery result the caller still owns), so reorder a local copy.
+  AgentDeck::Net::EndpointCandidates ordered = endpoints;
+  if (AgentDeck::Feed::orderByReachability(ordered))
+    AgentDeck::Feed::saveEndpoint(ordered.ips[0], ordered.port, resolvedToken);
   AgentDeck::Feed::SyncResult r;
   char successfulIp[16] = {0};
-  for (uint8_t i = 0; i < endpoints.count; i++) {
-    r = AgentDeck::Feed::syncOnce(endpoints.ips[i], endpoints.port, resolvedToken, board, lastFeedSig, tel);
+  for (uint8_t i = 0; i < ordered.count; i++) {
+    r = AgentDeck::Feed::syncOnce(ordered.ips[i], ordered.port, resolvedToken, board, lastFeedSig, tel);
     if (r.ok) {
-      snprintf(successfulIp, sizeof(successfulIp), "%s", r.endpointIp[0] ? r.endpointIp : endpoints.ips[i]);
+      snprintf(successfulIp, sizeof(successfulIp), "%s", r.endpointIp[0] ? r.endpointIp : ordered.ips[i]);
       break;
     }
-    if (i + 1 < endpoints.count)
-      AgentLog::line("AGENT", "pull endpoint %s failed — trying %s", endpoints.ips[i], endpoints.ips[i + 1]);
+    if (i + 1 < ordered.count)
+      AgentLog::line("AGENT", "pull endpoint %s failed — trying %s", ordered.ips[i], ordered.ips[i + 1]);
   }
   if (!r.ok) return false;
   pullSynced = true;

@@ -64,7 +64,25 @@ bool saveEndpoint(const char* ip, uint16_t port, const char* token);
 // Multi-interface form used by Pocket Daily. ADE1 single-address records are
 // accepted and promoted to ADE2 on the next successful save.
 bool loadEndpointCandidates(Net::EndpointCandidates& endpoints, char* token, size_t tokenCap);
-bool saveEndpointCandidates(const Net::EndpointCandidates& endpoints, const char* token);
+// mergeWithCached keeps the learned order in front and lets the caller's set
+// only contribute unseen addresses — the right behaviour for a discovery
+// result. saveEndpoint() passes false because its set already carries the
+// promotion of an address that just proved it works; merging there would put
+// the stale order back in front and undo the very thing being recorded.
+bool saveEndpointCandidates(const Net::EndpointCandidates& endpoints, const char* token, bool mergeWithCached = true);
+
+// Reorder candidates so the first one is an address that currently accepts a
+// TCP connection, and return true when the head changed.
+//
+// A dual-homed daemon host publishes every address it owns, but only some of
+// them are actually usable from this device, and ICMP does not tell them apart
+// — on the network this was written for, the dead address answers ping with 0%
+// loss while every TCP pull to it fails. Probing the real thing (a connect to
+// the service port) is the only honest test, and at a ~1.2 s budget it is far
+// cheaper than discovering the same fact through a full HTTP timeout per
+// candidate. Safe by construction: if nothing answers, the order is left alone
+// and the normal try-every-candidate path still runs.
+bool orderByReachability(Net::EndpointCandidates& endpoints, uint32_t probeTimeoutMs = 1200);
 
 }  // namespace Feed
 }  // namespace AgentDeck
