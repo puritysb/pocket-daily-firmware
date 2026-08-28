@@ -21,9 +21,44 @@ Mission: Provide a lightweight, high-performance reading experience focused on E
   * **NO PSRAM**: ESP32-C3 has no PSRAM capability (unlike ESP32-S3)
   * **Single Buffer Mode**: Only ONE 48KB framebuffer (not double-buffered)
 * Flash: 16MB (Instruction storage and static data)
-* Display: 800x480 E-Ink (Slow refresh, monochrome, 1-2s full update)
-  * Framebuffer: 48,000 bytes (800 × 480 ÷ 8)
+* Display: E-Ink, 1-bit, slow refresh (1-2s full update). Panel differs by board:
+  * X4: 800 × 480 → 48,000 byte framebuffer
+  * X3: 528 × 792 → 52,272 byte framebuffer (the larger of the two, so the
+    `display` object measures ~52 KB of `.bss` in a build that supports both)
 * Storage: SD Card (Used for books and aggressive caching)
+
+### The Runtime Heap Budget (measured, X3)
+
+Static footprint is not the constraint — what is left at runtime is. Measured
+on an X3 with the per-stage ledger in `PocketDailyActivity::logHeapStage()`:
+
+| Stage | free | largest block |
+|---|---|---|
+| Before the radio | ~97 KB | ~82 KB |
+| `WiFi.mode(WIFI_STA)` + scan | ~22 KB | ~18 KB |
+| STA joined | ~27 KB | ~18 KB |
+| + mDNS responder/browser | −5.6 KB | |
+| + UDP discovery socket | −2.0 KB | |
+| After one feed pull | ~22 KB | ~7 KB |
+
+**The Wi-Fi driver alone takes ~75 KB of the ~97 KB available**, and it is
+Arduino's precompiled `esp_wifi_init(WIFI_INIT_CONFIG_DEFAULT)` — the buffer
+counts are baked into the framework's `sdkconfig` and cannot be tuned from
+this project. So the only lever is what we stack on top: raise the radio late,
+start discovery services only when discovery is actually needed, and keep any
+allocation held across a network operation small.
+
+Two traps this has produced, both of which end in `abort()`:
+* Arduino's Wi-Fi event task allocates an `arduino_event_t` per driver event.
+  That allocation is framework code and cannot be guarded from the inside —
+  the only defence is refusing to raise the radio on a starved heap.
+* On a dev build (`LOG_LEVEL=2`), serial logging itself allocates through
+  newlib stdio. A log line on an exhausted heap can take the device down.
+
+Do not "fix" fragmentation by preallocating a permanent buffer to avoid a
+transient one: it does not lower the momentary peak, it just removes that much
+headroom from everything else, permanently. Measured: doing this for a 6.2 KB
+deck snapshot dropped worst-case free heap from 11,000 B to 1,104 B.
 
 ### The Resource Protocol
 1. Stack Safety: Limit local function variables to < 256 bytes. The ESP32-C3 default stack is small; use std::unique_ptr or static pools for larger buffers.
@@ -34,7 +69,7 @@ Mission: Provide a lightweight, high-performance reading experience focused on E
 6. `constexpr` First: Compile-time constants and lookup tables must be `constexpr`, not just `static const`. This moves computation to compile time, enables dead-branch elimination, and guarantees flash placement. Use `static constexpr` for class-level constants.
 7. `std::vector` Pre-allocation: Always call `.reserve(N)` before any `push_back()` loop. Each growth event allocates a new block (2×), copies all elements, then frees the old one — three heap operations that fragment DRAM. When the final size is unknown, estimate conservatively.
 8. SPIFFS Write Throttling: Never write a settings file on every user interaction. Guard all writes with a value-change check (`if (newVal == _current) return;`). Progress saves during reading must be debounced — write on activity exit or every N page turns, not on every turn. SPIFFS sectors have a finite erase cycle limit.
-9. `new` is not nothrow on ESP32: With `-fno-exceptions`, bare `new` that fails calls `abort()` — it does NOT return `nullptr`. Always use `new (std::nothrow)` and null-check the result, or use `makeUniqueNoThrow<T>()` from `lib/Memory/Memory.h`. Never write bare `new` for any fallible allocation.
+9. `new` is not nothrow on ESP32: With `-fno-exceptions`, bare `new` that fails calls `abort()` — it does NOT return `nullptr`. Always use `new (std::nothrow)` and null-check the result, or use `makeUniqueNoThrow<T>()` from `lib/Memory/Memory.h`. Never write bare `new` for any fallible allocation. **Note that `new (std::nothrow)` only protects code you control**: the nothrow wrapper calls the throwing `operator new` internally, and throwing `bad_alloc` is itself stubbed to `abort()` in this build. A framework allocation on an exhausted heap therefore still kills the device (confirmed by symbolising a panic to `NetworkEvents::postEvent`, which does use nothrow). Keep headroom; do not rely on null checks alone.
 
 ---
 
