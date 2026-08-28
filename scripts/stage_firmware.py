@@ -26,6 +26,7 @@ import sys
 
 STAGING_DIR_NAME = "firmware"
 MAX_VERSIONED_COPIES = 5
+LEARNING_PACK_RELATIVE = os.path.join("pocket-daily", "learning", "jp-n3-ko.pdl")
 
 
 def _run_git(project_dir, args):
@@ -80,7 +81,8 @@ def prune_versioned_copies(staging_dir, prefix):
             pass
 
 
-def write_manifest(manifest_path, base_version, env_name, branch, sha, date_str, file_size, versioned_name):
+def write_manifest(manifest_path, base_version, env_name, branch, sha, date_str, file_size, versioned_name,
+                   learning_pack_size):
     lines = [
         "Pocket Daily Firmware Staging",
         "=============================",
@@ -92,6 +94,7 @@ def write_manifest(manifest_path, base_version, env_name, branch, sha, date_str,
         f"Built:        {date_str}",
         f"File size:    {file_size:,} bytes ({file_size / 1024:.0f} KB)",
         f"File:         {versioned_name}",
+        f"Learning:     jp-n3-ko.pdl ({learning_pack_size:,} bytes)",
         "",
         "Installation (SD card)",
         "----------------------",
@@ -99,6 +102,7 @@ def write_manifest(manifest_path, base_version, env_name, branch, sha, date_str,
         "2. Hold UP + POWER to boot into recovery firmware mode.",
         "3. Pick update.bin from the file browser.",
         "4. Confirm and wait for the flash + automatic restart.",
+        "5. Copy sd-card/pocket-daily to the SD card root for offline Japanese study.",
         "",
     ]
     with open(manifest_path, "w") as f:
@@ -132,9 +136,25 @@ def stage(source, target, env):
     shutil.copy2(firmware_bin, versioned_path)
     prune_versioned_copies(staging_dir, prefix)
 
+    # The complete study corpus belongs on SD, not in the already 83%-full OTA
+    # application slot. Rebuild it from the reviewed source on every successful
+    # firmware build so staged binaries and the companion SD tree cannot drift.
+    learning_builder = os.path.join(project_dir, "scripts", "build-learning-pack.py")
+    learning_source = os.path.join(project_dir, "learning", "content", "jp-n3-ko.json")
+    learning_output = os.path.join(staging_dir, "sd-card", LEARNING_PACK_RELATIVE)
+    os.makedirs(os.path.dirname(learning_output), exist_ok=True)
+    subprocess.run(
+        [sys.executable, learning_builder, "--source", learning_source, "--output", learning_output],
+        check=True,
+        cwd=project_dir,
+    )
+    learning_pack_size = os.path.getsize(learning_output)
+    learning_manifest = os.path.splitext(learning_output)[0] + ".manifest.json"
+
     file_size = os.path.getsize(update_path)
     manifest_path = os.path.join(staging_dir, "LATEST_BUILD.txt")
-    write_manifest(manifest_path, base_version, env_name, branch, sha, date_str, file_size, versioned_name)
+    write_manifest(manifest_path, base_version, env_name, branch, sha, date_str, file_size, versioned_name,
+                   learning_pack_size)
 
     extra_dir = get_custom_staging_dir(env)
     extra_msg = ""
@@ -142,12 +162,18 @@ def stage(source, target, env):
         try:
             os.makedirs(extra_dir, exist_ok=True)
             shutil.copy2(update_path, os.path.join(extra_dir, "update.bin"))
+            mounted_pack = os.path.join(extra_dir, LEARNING_PACK_RELATIVE)
+            os.makedirs(os.path.dirname(mounted_pack), exist_ok=True)
+            shutil.copy2(learning_output, mounted_pack)
+            mounted_manifest = os.path.splitext(mounted_pack)[0] + ".manifest.json"
+            shutil.copy2(learning_manifest, mounted_manifest)
             extra_msg = f"\n  → also copied to {extra_dir}/"
         except OSError as e:
             print(f"stage_firmware: could not copy to {extra_dir}: {e}", file=sys.stderr)
 
     print(f"\nStaged firmware → {os.path.relpath(staging_dir, project_dir)}/")
     print(f"  update.bin ({file_size:,} bytes){extra_msg}")
+    print(f"  sd-card/{LEARNING_PACK_RELATIVE} ({learning_pack_size:,} bytes)")
     print(f"  {versioned_name}")
 
 

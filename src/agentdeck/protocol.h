@@ -14,6 +14,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "pocket_daily/learning_pack_sync.h"
+
 namespace AgentDeck {
 namespace Protocol {
 
@@ -37,6 +39,10 @@ struct FeedApply {
   char fwProductId[40] = {0};
   char fwBoard[20] = {0};
   char fwUpdateChannel[16] = {0};
+  // Optional SD learning-pack advert. It is parsed even on an unchanged feed,
+  // just like firmware, so explicit Sync can update course content without
+  // forcing the provider to mutate the user's card deck.
+  PocketDaily::LearningPackSync::Advert learningPack;
 };
 
 // M6 pull sync: parse a `GET /feed` card_feed body and land the embedded

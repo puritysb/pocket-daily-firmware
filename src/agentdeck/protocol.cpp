@@ -666,6 +666,13 @@ FeedApply applyCardFeed(const char* json, size_t length) {
   filter["fw"]["productId"] = true;
   filter["fw"]["board"] = true;
   filter["fw"]["updateChannel"] = true;
+  // Optional SD learning pack advert (full and unchanged feeds).
+  filter["learningPack"]["id"] = true;
+  filter["learningPack"]["version"] = true;
+  filter["learningPack"]["format"] = true;
+  filter["learningPack"]["size"] = true;
+  filter["learningPack"]["md5"] = true;
+  filter["learningPack"]["licenseSpdx"] = true;
 
   doc.clear();
   DeserializationError err = deserializeJson(doc, json, length, DeserializationOption::Filter(filter));
@@ -689,6 +696,17 @@ FeedApply applyCardFeed(const char* json, size_t length) {
       strncpy(out.fwProductId, fw["productId"] | "", sizeof(out.fwProductId) - 1);
       strncpy(out.fwBoard, fw["board"] | "", sizeof(out.fwBoard) - 1);
       strncpy(out.fwUpdateChannel, fw["updateChannel"] | "", sizeof(out.fwUpdateChannel) - 1);
+    }
+  }
+  {
+    JsonObject pack = obj["learningPack"].as<JsonObject>();
+    if (!pack.isNull()) {
+      copyStr(out.learningPack.packageId, sizeof(out.learningPack.packageId), pack["id"] | "");
+      out.learningPack.contentVersion = pack["version"] | 0U;
+      out.learningPack.formatVersion = pack["format"] | 0U;
+      out.learningPack.size = pack["size"] | 0U;
+      copyStr(out.learningPack.md5, sizeof(out.learningPack.md5), pack["md5"] | "");
+      copyStr(out.learningPack.licenseSpdx, sizeof(out.learningPack.licenseSpdx), pack["licenseSpdx"] | "");
     }
   }
 

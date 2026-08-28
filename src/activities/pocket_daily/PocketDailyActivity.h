@@ -107,7 +107,9 @@ class PocketDailyActivity final : public Activity {
   // completely offline first boot and never writes a meaningless host outbox
   // decision. Guarded by the AgentDeck state mutex when copied across tasks.
   PocketDaily::Card localStudyCard{};
-  uint8_t localStudyOffset = 0;
+  uint16_t localStudyOffset = 0;
+  uint32_t localStudyPackVersion = 0;
+  uint32_t localStudyPackRecordCount = 0;
   struct ReadingSummary {
     char title[96];
     char author[80];
@@ -324,14 +326,7 @@ class PocketDailyActivity final : public Activity {
   // Guarded by g_stateMutex: written on the loop task, read on the render task.
   // Heap (unique_ptr), not a member array — ~3.5 KB must not sit on the C3 stack.
   std::unique_ptr<PocketDaily::DeckStore::Snapshot> cachedDeck;
-  // Ping-pong partner for cachedDeck. A persist must not mutate the buffer the
-  // render task is reading, so it builds into the other one and swaps under the
-  // state lock. Allocating that partner per save meant asking for a 6,244 B
-  // contiguous block on a heap whose largest block measured 4.6-6.9 KB — it is
-  // the "OOM allocating 6244B deck snapshot" in the device log, 202 occurrences,
-  // and the alloc/free churn fragments what little is left. Both buffers are
-  // claimed once in onEnter() while ~82 KB contiguous is still available.
-  std::unique_ptr<PocketDaily::DeckStore::Snapshot> deckScratch;
+
   uint32_t lastDeckSig = 0;     // content signature of the last persisted deck
   uint32_t lastDeckSaveMs = 0;  // SD-write throttle
   bool clockSynced = false;     // SNTP landed — repaint once so "as of" gains an age

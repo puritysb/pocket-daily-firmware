@@ -17,10 +17,11 @@ inline constexpr const char* SURFACE_PROFILE = "portable-reader/v1";
 inline constexpr const char* LEGACY_SURFACE_QUERY = "pocket-reader";
 inline constexpr const char* UPDATE_CHANNEL = "stable";
 inline constexpr const char* SURFACE_CAPABILITIES =
-    "feed.pull,feed.conditional,outbox.push,glance.read,weather.snapshot.read,ota.feed,ota.resume-206,device.telemetry";
+    "feed.pull,feed.conditional,outbox.push,glance.read,weather.snapshot.read,learning.pack.read,learning.pack.update,"
+    "ota.feed,ota.resume-206,device.telemetry";
 inline constexpr const char* SURFACE_CAPABILITIES_JSON =
-    "[\"feed.pull\",\"feed.conditional\",\"outbox.push\",\"glance.read\",\"weather.snapshot.read\",\"ota.feed\",\"ota."
-    "resume-206\",\"device.telemetry\"]";
+    "[\"feed.pull\",\"feed.conditional\",\"outbox.push\",\"glance.read\",\"weather.snapshot.read\","
+    "\"learning.pack.read\",\"learning.pack.update\",\"ota.feed\",\"ota.resume-206\",\"device.telemetry\"]";
 inline constexpr const char* AGENTDECK_PROVIDER_ID = "agentdeck";
 
 inline bool otaIdentityMatches(const char* productId, const char* board, const char* updateChannel,

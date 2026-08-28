@@ -47,6 +47,8 @@
 #include "components/icons/glyph_openclaw.h"
 #include "components/icons/glyph_opencode.h"
 #include "fontIds.h"
+#include "pocket_daily/learning_pack.h"
+#include "pocket_daily/learning_pack_sync.h"
 #include "pocket_daily/product_identity.h"
 #include "util/PowerWakeCue.h"
 #include "util/UiCjkFont.h"
@@ -824,12 +826,6 @@ void PocketDailyActivity::onEnter() {
   } else if (!PocketDaily::DeckStore::load(*cachedDeck)) {
     cachedDeck->count = 0;
   }
-  // Claim the persist build buffer now, while the pre-radio heap still has
-  // ~82 KB contiguous. After Wi-Fi is up the largest block measures 4.6-6.9 KB
-  // and this same request is the one that has been failing.
-  deckScratch = makeUniqueNoThrow<PocketDaily::DeckStore::Snapshot>();
-  if (!deckScratch)
-    LOG_ERR("POCKET", "OOM allocating %uB deck scratch", (unsigned)sizeof(PocketDaily::DeckStore::Snapshot));
   // Pocket cards are day/info content, not live session state. Seed them into
   // RAM from the deck cache so they remain readable and answerable through the
   // SD outbox before Wi-Fi or the daemon exists.
@@ -1804,6 +1800,16 @@ bool PocketDailyActivity::attemptManualSync() {
   manualSyncNeedsDiscovery = false;
   manualSyncDiscoveryRetryActive = false;
   manualOtaNoProgressRetries = 0;
+  const PocketDaily::LearningPackSync::Result learningResult = PocketDaily::LearningPackSync::sync(
+      successfulIp, endpoints.port, token, board, r.learningPack);
+  const bool learningUpdated = learningResult == PocketDaily::LearningPackSync::Result::Updated;
+  if (learningUpdated) {
+    localStudyPackVersion = 0;
+    localStudyPackRecordCount = 0;
+    buildLocalStudyCard();
+  }
+  if (learningResult == PocketDaily::LearningPackSync::Result::Failed)
+    AgentLog::line("LEARN", "manual content sync failed; previous SD pack retained");
   // A low battery is only a flash risk when the device is actually running
   // from it. USB power is the safest update posture, so preserve the honest
   // telemetry value in the Feed while bypassing the battery-only OTA gate.
@@ -1846,7 +1852,7 @@ bool PocketDailyActivity::attemptManualSync() {
     lastDeckSaveMs = 0;
     serviceDeckPersist();
   }
-  lastSyncOutcome = r.unchanged ? SyncOutcome::UpToDate : SyncOutcome::Updated;
+  lastSyncOutcome = (!r.unchanged || learningUpdated) ? SyncOutcome::Updated : SyncOutcome::UpToDate;
   lastSyncOutcomeMs = millis();
   AgentLog::line("AGENT", "manual sync: %s", r.unchanged ? "unchanged" : "updated");
   return true;
@@ -2158,7 +2164,11 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
     cp(o.controlMode, sizeof(o.controlMode), "pocket");
     cp(o.state, sizeof(o.state), "POCKET");
     cp(o.activity, sizeof(o.activity), card.question);
-    if (card.context[0] && strcmp(o.activity, card.context) != 0) {
+    // The local SD lesson is a recall prompt on Home: show only the target
+    // glyph there. Opening it reveals the word, reading, meaning and example
+    // through renderPocketCard(). Provider-authored information cards keep
+    // their existing question + context overview summary.
+    if (strcmp(card.module, "local") != 0 && card.context[0] && strcmp(o.activity, card.context) != 0) {
       const size_t used = strlen(o.activity);
       const size_t extra = (used ? 3 : 0) + strlen(card.context);
       // Keep UTF-8 intact; the detail view still carries the complete context
@@ -2234,16 +2244,42 @@ uint32_t PocketDailyActivity::bestEpochNow() {
 void PocketDailyActivity::buildLocalStudyCard() {
   const uint32_t epoch = bestEpochNow();
   const uint32_t day = epoch ? epoch / 86400UL : 0;
-  const size_t index = (static_cast<size_t>(day) + localStudyOffset) % kJapaneseDailyWordCount;
-  const auto& word = kJapaneseDailyWords[index];
-
   PocketDaily::Card card{};
-  snprintf(card.cardId, sizeof(card.cardId), "local:jp:%lu:%u", (unsigned long)day, (unsigned)localStudyOffset);
   snprintf(card.module, sizeof(card.module), "local");
   snprintf(card.actionClass, sizeof(card.actionClass), "day");
-  snprintf(card.title, sizeof(card.title), "今日の単語");
-  snprintf(card.question, sizeof(card.question), "%s（%s）", word.word, word.reading);
-  snprintf(card.context, sizeof(card.context), "%s · %s", word.meaning, word.example);
+  size_t index = 0;
+  bool fromPack = false;
+  PocketDaily::LearningPack::Record lesson{};
+  if (localStudyPackRecordCount == 0) {
+    PocketDaily::LearningPack::Metadata metadata{};
+    if (PocketDaily::LearningPack::ensureAvailable(&metadata)) {
+      localStudyPackVersion = metadata.contentVersion;
+      localStudyPackRecordCount = metadata.recordCount;
+    }
+  }
+  if (localStudyPackRecordCount) {
+    index = (static_cast<size_t>(day) + localStudyOffset) % localStudyPackRecordCount;
+    if (PocketDaily::LearningPack::readRecord(static_cast<uint32_t>(index), lesson)) {
+      fromPack = true;
+      snprintf(card.cardId, sizeof(card.cardId), "local:jp:%lu:%08lx", (unsigned long)localStudyPackVersion,
+               (unsigned long)lesson.itemId);
+      snprintf(card.title, sizeof(card.title), "今日の漢字");
+      snprintf(card.question, sizeof(card.question), "%s", lesson.glyph);
+      // Use the compact English gloss on the shared card renderer. The pack
+      // retains the richer Korean fields for the dedicated study activity,
+      // whose combined JP/KR font is distributed beside the SD content.
+      snprintf(card.context, sizeof(card.context), "%s（%s） · %s · %s", lesson.primaryWord, lesson.wordReading,
+               lesson.meaningEn, lesson.example);
+    }
+  }
+  if (!fromPack) {
+    index = (static_cast<size_t>(day) + localStudyOffset) % kJapaneseDailyWordCount;
+    const auto& word = kJapaneseDailyWords[index];
+    snprintf(card.cardId, sizeof(card.cardId), "local:jp:%lu:%u", (unsigned long)day, (unsigned)localStudyOffset);
+    snprintf(card.title, sizeof(card.title), "今日の単語");
+    snprintf(card.question, sizeof(card.question), "%s（%s）", word.word, word.reading);
+    snprintf(card.context, sizeof(card.context), "%s · %s", word.meaning, word.example);
+  }
   const char* ids[] = {"review", "next", "known"};
   const char* labels[] = {"Again", "Next", "Known"};
   card.choiceCount = 3;
@@ -2255,7 +2291,8 @@ void PocketDailyActivity::buildLocalStudyCard() {
   AgentDeck::lockState();
   localStudyCard = card;
   AgentDeck::unlockState();
-  AgentLog::line("POCKET", "offline JP word ready: day=%lu index=%u", (unsigned long)day, (unsigned)index);
+  AgentLog::line("POCKET", "offline JP lesson ready: source=%s day=%lu index=%u", fromPack ? "sd-pack" : "firmware",
+                 (unsigned long)day, (unsigned)index);
 }
 
 void PocketDailyActivity::serviceDeckPersist() {
@@ -2289,13 +2326,17 @@ void PocketDailyActivity::serviceDeckPersist() {
   if (!dataReceived) return;  // nothing real to persist yet
   if (sig == lastDeckSig) return;
 
-  // Build the snapshot into the ping-pong partner (never the C3 stack), write it
+  // Build the snapshot into a scratch heap buffer (never the C3 stack), write it
   // to SD without holding the state lock, then swap it in as the RAM fallback
   // under the lock (the render task reads cachedDeck through g_stateMutex).
-  // deckScratch is preallocated in onEnter(); only a boot that was already out
-  // of memory falls back to allocating here.
-  auto snap = std::move(deckScratch);
-  if (!snap) snap = makeUniqueNoThrow<PocketDaily::DeckStore::Snapshot>();
+  //
+  // This is deliberately a transient allocation. Preallocating a permanent
+  // partner buffer was tried and measured worse: the momentary peak is two
+  // snapshots either way, so pinning the second one merely moved 6,244 B out of
+  // everyone else's headroom for good — worst-case free heap fell from 11,000 B
+  // to 1,104 B across a session. Deferring mDNS/UDP already leaves enough
+  // contiguous room for this request to succeed.
+  auto snap = makeUniqueNoThrow<PocketDaily::DeckStore::Snapshot>();
   if (!snap) {
     LOG_ERR("POCKET", "OOM allocating %uB deck snapshot", (unsigned)sizeof(PocketDaily::DeckStore::Snapshot));
     return;
@@ -2316,17 +2357,11 @@ void PocketDailyActivity::serviceDeckPersist() {
   snap->savedEpoch = bestEpochNow();
 
   lastDeckSaveMs = millis();
-  if (!PocketDaily::DeckStore::save(*snap)) {
-    deckScratch = std::move(snap);  // SD hiccup — retry on next change, keep the buffer
-    return;
-  }
+  if (!PocketDaily::DeckStore::save(*snap)) return;  // SD hiccup — retry on next change
   lastDeckSig = sig;
   AgentDeck::lockState();
   cachedDeck.swap(snap);
   AgentDeck::unlockState();
-  // snap now holds the superseded cache. Keep it as the next persist's build
-  // buffer rather than freeing 6,244 B here and hunting for it again later.
-  deckScratch = std::move(snap);
   AgentLog::line("POCKET", "deck persisted: %u items", (unsigned)cachedDeck->pocketCount);
 }
 
@@ -2765,7 +2800,7 @@ bool PocketDailyActivity::applyPocketChoice(const PocketDaily::Card& card, int s
     // deck immediately. A future spaced-repetition store can refine this without
     // changing the card/button contract.
     if (strcmp(choice.id, "next") == 0 || strcmp(choice.id, "known") == 0) {
-      localStudyOffset = static_cast<uint8_t>((localStudyOffset + 1) % kJapaneseDailyWordCount);
+      ++localStudyOffset;
       buildLocalStudyCard();
     }
     lastDecisionMs = millis();

@@ -16,6 +16,8 @@ engine and preserves its reader, storage, format, and recovery foundations.
 ## Pocket Daily additions
 
 - Offline-first Pocket Home with local continue-reading and daily study cards.
+- SD-backed Japanese learning packs: offline daily kanji with licensed,
+  integrity-checked content and optional updates through Pocket Sync.
 - SD-backed weather, schedule, card deck, and durable offline choice outbox.
 - Brief wake/sync/sleep operation plus AgentDeck-assisted OTA when configured.
 - Retained sleep screen based only on locally durable information.

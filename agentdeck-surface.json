@@ -29,6 +29,8 @@
         "outbox.push",
         "glance.read",
         "weather.snapshot.read",
+        "learning.pack.read",
+        "learning.pack.update",
         "ota.feed",
         "ota.resume-206",
         "device.telemetry"

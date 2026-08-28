@@ -30,6 +30,11 @@ TEST(PocketDailyIdentity, NegotiatesPersistedWeatherOutlook) {
   EXPECT_NE(strstr(PocketDaily::SURFACE_CAPABILITIES, "weather.snapshot.read"), nullptr);
 }
 
+TEST(PocketDailyIdentity, NegotiatesSdLearningPackUpdates) {
+  EXPECT_NE(strstr(PocketDaily::SURFACE_CAPABILITIES, "learning.pack.read"), nullptr);
+  EXPECT_NE(strstr(PocketDaily::SURFACE_CAPABILITIES, "learning.pack.update"), nullptr);
+}
+
 TEST(PocketDailyIdentity, NegotiatesStandardPartialOtaResume) {
   EXPECT_NE(strstr(PocketDaily::SURFACE_CAPABILITIES, "ota.resume-206"), nullptr);
 }

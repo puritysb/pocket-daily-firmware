@@ -109,6 +109,26 @@ See the [web server docs](./docs/webserver.md) for more information on how to co
 
 The web interface also supports **WebDAV**, allowing you to mount the device as a network drive and manage files directly from your computer's file manager.
 
+### Offline Japanese learning pack
+
+Pocket Daily can load its Japanese course from the SD card without an account
+or network connection. Copy the release bundle's
+`sd-card/pocket-daily/learning/jp-n3-ko.pdl` file to this SD path:
+
+```text
+/pocket-daily/learning/jp-n3-ko.pdl
+```
+
+The firmware checks the pack format, file size, SHA-256 payload digest, SPDX
+licence and attribution before using it. An invalid or interrupted update is
+ignored and the previous valid pack is recovered when available.
+
+The same file can be uploaded wirelessly with the File Transfer web interface
+or WebDAV. A compatible Pocket Daily content provider can also advertise a
+newer pack in the normal Feed response; pressing **Sync** downloads, verifies
+and atomically installs it. Large learning packs are not downloaded during an
+automatic battery wake.
+
 Download links for files already on the device are available in the web interface, so you can retrieve books or screenshots over Wi-Fi without connecting a cable.
 
 A **Wi-Fi signal strength indicator** (dBm) is displayed on-screen during joined-network web server sessions.
