@@ -7,9 +7,17 @@ active Korean N3-oriented pack lives at:
 /pocket-daily/learning/jp-n3-ko.pdl
 ```
 
-Build the repository-authored starter pack:
+The current content version contains the cumulative N5–N3 foundation: 79 N5,
+166 N4, and 367 N3-oriented kanji, for 612 unique lessons. Level assignment is
+unofficial because the JLPT organization does not publish a current item list.
+See [`NOTICE.md`](NOTICE.md) for the pinned OpenJLPT/EDRDG/Waller/Tatoeba
+attribution and modification ledger.
+
+Recreate the normalized source from the pinned OpenJLPT checkout and the
+checked-in Korean translation ledger, then build the pack:
 
 ```sh
+python scripts/import-openjlpt-learning.py --openjlpt /path/to/OpenJLPT
 python scripts/build-learning-pack.py
 ```
 
@@ -24,9 +32,9 @@ header checksum, file size, and complete payload SHA-256 before reading it.
 ## Licence policy
 
 Every source file must declare `licenseSpdx`, `sourceRevision`, and
-`attribution`. The builder refuses content without these fields. The initial
-Korean lessons in this repository are original Pocket Daily contributor
-content licensed under CC BY-SA 4.0; see `LICENSE-CC-BY-SA-4.0.txt`.
+`attribution`. The builder refuses content without these fields. The adapted
+Korean course is distributed under CC BY-SA 4.0; see
+`LICENSE-CC-BY-SA-4.0.txt` and `NOTICE.md`.
 
 Third-party imports must remain reproducible and pinned. KANJIDIC2/JMdict
 derivatives must retain EDRDG attribution and CC BY-SA 4.0. Do not copy JLPT

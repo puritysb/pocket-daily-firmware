@@ -1,0 +1,4286 @@
+{
+  "日": {
+    "word": "日曜日",
+    "example": "日曜日、暇？",
+    "meaningKo": "날, 해, 일본, 일수",
+    "wordMeaningKo": "일요일",
+    "exampleMeaningKo": "일요일에 시간 있어?"
+  },
+  "一": {
+    "word": "一",
+    "example": "一番乗りだ。",
+    "meaningKo": "하나, 한 획 부수",
+    "wordMeaningKo": "하나",
+    "exampleMeaningKo": "일등이다."
+  },
+  "国": {
+    "word": "国",
+    "example": "帝国の逆襲。",
+    "meaningKo": "나라",
+    "wordMeaningKo": "나라",
+    "exampleMeaningKo": "제국의 역습."
+  },
+  "人": {
+    "word": "人",
+    "example": "文は人なり。",
+    "meaningKo": "사람",
+    "wordMeaningKo": "사람",
+    "exampleMeaningKo": "문장은 사람이다."
+  },
+  "年": {
+    "word": "年",
+    "example": "もう年だよ。",
+    "meaningKo": "년, 연수",
+    "wordMeaningKo": "년",
+    "exampleMeaningKo": "もう年だよ。-> 이미 한 해가 지났어."
+  },
+  "大": {
+    "word": "大人",
+    "example": "トムは大人だ。",
+    "meaningKo": "크다, 큰",
+    "wordMeaningKo": "성인",
+    "exampleMeaningKo": "トムは大人だ。-> 톰은 성인이다."
+  },
+  "十": {
+    "word": "十",
+    "example": "もう十分よ！",
+    "meaningKo": "열",
+    "wordMeaningKo": "열",
+    "exampleMeaningKo": "もう十分よ！-> 이미 충분해!"
+  },
+  "二": {
+    "word": "二",
+    "example": "いま二時半。",
+    "meaningKo": "둘, 두 획 부수",
+    "wordMeaningKo": "둘",
+    "exampleMeaningKo": "いま二時半。-> 지금 두 시 반."
+  },
+  "本": {
+    "word": "本",
+    "example": "本当にそう。",
+    "meaningKo": "책, 본래, 진짜",
+    "wordMeaningKo": "책",
+    "exampleMeaningKo": "정말 그래."
+  },
+  "中": {
+    "word": "中",
+    "example": "中に入れて。",
+    "meaningKo": "안, 가운데, 중",
+    "wordMeaningKo": "가운데",
+    "exampleMeaningKo": "안에 넣어."
+  },
+  "長": {
+    "word": "長い",
+    "example": "人生は長い。",
+    "meaningKo": "길다, 장, 우두머리",
+    "wordMeaningKo": "긴",
+    "exampleMeaningKo": "인생은 길다."
+  },
+  "出": {
+    "word": "出す",
+    "example": "口を出すな。",
+    "meaningKo": "나가다, 나오다",
+    "wordMeaningKo": "꺼내다",
+    "exampleMeaningKo": "입에 벌리지 마."
+  },
+  "三": {
+    "word": "三",
+    "example": "三時過ぎよ。",
+    "meaningKo": "셋, 삼",
+    "wordMeaningKo": "세",
+    "exampleMeaningKo": "3시 지나."
+  },
+  "時": {
+    "word": "時々",
+    "example": "うん、時々はね。",
+    "meaningKo": "시간, 시",
+    "wordMeaningKo": "때때로",
+    "exampleMeaningKo": "응, 가끔 그래."
+  },
+  "行": {
+    "word": "行く",
+    "example": "今、行くわ。",
+    "meaningKo": "가다, 행, 줄",
+    "wordMeaningKo": "가다",
+    "exampleMeaningKo": "지금 갈게."
+  },
+  "見": {
+    "word": "見せる",
+    "example": "手の内を見せるな。",
+    "meaningKo": "보다, 견",
+    "wordMeaningKo": "보이다",
+    "exampleMeaningKo": "속내를 드러내지 마."
+  },
+  "月": {
+    "word": "月曜日",
+    "example": "月曜日です。",
+    "meaningKo": "달, 월",
+    "wordMeaningKo": "월요일",
+    "exampleMeaningKo": "월요일입니다."
+  },
+  "後": {
+    "word": "後",
+    "example": "後をつけろ。",
+    "meaningKo": "뒤, 나중",
+    "wordMeaningKo": "뒤, 나중에",
+    "exampleMeaningKo": "뒤를 따라가라."
+  },
+  "前": {
+    "word": "前",
+    "example": "７時前にね。",
+    "meaningKo": "앞, 전",
+    "wordMeaningKo": "앞, 전에",
+    "exampleMeaningKo": "7시 전에 전화해."
+  },
+  "生": {
+    "word": "生徒",
+    "example": "トムは生徒です。",
+    "meaningKo": "생명, 탄생",
+    "wordMeaningKo": "학생",
+    "exampleMeaningKo": "톰은 학생입니다."
+  },
+  "五": {
+    "word": "五",
+    "example": "五ドルある？",
+    "meaningKo": "다섯",
+    "wordMeaningKo": "다섯",
+    "exampleMeaningKo": "5달러 있어?"
+  },
+  "間": {
+    "word": "時間",
+    "example": "寝る時間よ。",
+    "meaningKo": "사이, 공간",
+    "wordMeaningKo": "시간",
+    "exampleMeaningKo": "자는 시간이야."
+  },
+  "上": {
+    "word": "上",
+    "example": "お手上げだ。",
+    "meaningKo": "위, 위쪽",
+    "wordMeaningKo": "위",
+    "exampleMeaningKo": "손들었어."
+  },
+  "東": {
+    "word": "東",
+    "example": "東京駅なう。",
+    "meaningKo": "동쪽",
+    "wordMeaningKo": "동쪽",
+    "exampleMeaningKo": "도쿄역이네."
+  },
+  "四": {
+    "word": "四",
+    "example": "二の二倍は四。",
+    "meaningKo": "넷",
+    "wordMeaningKo": "넷",
+    "exampleMeaningKo": "2에 2를 곱하면 4이다."
+  },
+  "今": {
+    "word": "今",
+    "example": "今日は暑い。",
+    "meaningKo": "지금",
+    "wordMeaningKo": "지금",
+    "exampleMeaningKo": "오늘은 덥다."
+  },
+  "金": {
+    "word": "金曜日",
+    "example": "花の金曜日だ！",
+    "meaningKo": "금",
+    "wordMeaningKo": "금요일",
+    "exampleMeaningKo": "꽃의 금요일이다!"
+  },
+  "九": {
+    "word": "九",
+    "example": "九時間寝た。",
+    "meaningKo": "아홉",
+    "wordMeaningKo": "아홉",
+    "exampleMeaningKo": "9시간 잤다."
+  },
+  "入": {
+    "word": "入る",
+    "example": "私が中に入る。",
+    "meaningKo": "들어가다",
+    "wordMeaningKo": "들어가다",
+    "exampleMeaningKo": "내가 안으로 들어간다."
+  },
+  "学": {
+    "word": "学校",
+    "example": "学校はどう？",
+    "meaningKo": "배우다",
+    "wordMeaningKo": "학교",
+    "exampleMeaningKo": "학교는 어때?"
+  },
+  "高": {
+    "word": "高い",
+    "example": "それは高い。",
+    "meaningKo": "높다",
+    "wordMeaningKo": "높다, 비싸다",
+    "exampleMeaningKo": "그것은 비싸다."
+  },
+  "円": {
+    "word": "円",
+    "example": "５０円です。",
+    "meaningKo": "원",
+    "wordMeaningKo": "원, 동그라미",
+    "exampleMeaningKo": "50원입니다."
+  },
+  "子": {
+    "word": "子供",
+    "example": "子供が欲しい？",
+    "meaningKo": "아이",
+    "wordMeaningKo": "아이",
+    "exampleMeaningKo": "아이들이 필요해요?"
+  },
+  "外": {
+    "word": "外",
+    "example": "外へ出たい。",
+    "meaningKo": "바깥",
+    "wordMeaningKo": "바깥",
+    "exampleMeaningKo": "밖으로 나가고 싶어요."
+  },
+  "八": {
+    "word": "八",
+    "example": "八十歳です。",
+    "meaningKo": "여덟",
+    "wordMeaningKo": "여덟",
+    "exampleMeaningKo": "여든 살이에요."
+  },
+  "六": {
+    "word": "六",
+    "example": "六十の手習い。",
+    "meaningKo": "여섯",
+    "wordMeaningKo": "여섯",
+    "exampleMeaningKo": "스무 살에 배우는 것."
+  },
+  "下": {
+    "word": "下",
+    "example": "来て下さい。",
+    "meaningKo": "아래",
+    "wordMeaningKo": "아래",
+    "exampleMeaningKo": "와주세요."
+  },
+  "来": {
+    "word": "来る",
+    "example": "先生が来る。",
+    "meaningKo": "오다",
+    "wordMeaningKo": "오다",
+    "exampleMeaningKo": "선생님이 오세요."
+  },
+  "気": {
+    "word": "元気",
+    "example": "元気ないね。",
+    "meaningKo": "기운",
+    "wordMeaningKo": "건강, 활력",
+    "exampleMeaningKo": "기운 없네."
+  },
+  "小": {
+    "word": "小さい",
+    "example": "この本は小さい。",
+    "meaningKo": "작은",
+    "wordMeaningKo": "작다",
+    "exampleMeaningKo": "이 책은 작아요."
+  },
+  "七": {
+    "word": "七",
+    "example": "七転び八起き。",
+    "meaningKo": "일곱",
+    "wordMeaningKo": "일곱",
+    "exampleMeaningKo": "일곱 번 넘어져도 여덟 번은 일어난다."
+  },
+  "山": {
+    "word": "山",
+    "example": "山羊座です。",
+    "meaningKo": "산",
+    "wordMeaningKo": "산",
+    "exampleMeaningKo": "염소자리입니다."
+  },
+  "話": {
+    "word": "話",
+    "example": "話がそれた。",
+    "meaningKo": "이야기",
+    "wordMeaningKo": "이야기",
+    "exampleMeaningKo": "대화가 빗나갔다."
+  },
+  "女": {
+    "word": "女",
+    "example": "彼女は元気？",
+    "meaningKo": "여자",
+    "wordMeaningKo": "여자",
+    "exampleMeaningKo": "그녀는元気해?"
+  },
+  "北": {
+    "word": "北",
+    "example": "北って、どっち？",
+    "meaningKo": "북",
+    "wordMeaningKo": "북",
+    "exampleMeaningKo": "북쪽이 어디야?"
+  },
+  "午": {
+    "word": "午前",
+    "example": "午前８時です。",
+    "meaningKo": "오",
+    "wordMeaningKo": "오전",
+    "exampleMeaningKo": "오전 8시입니다."
+  },
+  "百": {
+    "word": "百",
+    "example": "五十歩百歩。",
+    "meaningKo": "백",
+    "wordMeaningKo": "백",
+    "exampleMeaningKo": "오십 보 백 보."
+  },
+  "書": {
+    "word": "書く",
+    "example": "書く紙がない。",
+    "meaningKo": "쓰다",
+    "wordMeaningKo": "쓰다",
+    "exampleMeaningKo": "쓸 종이 없어."
+  },
+  "先": {
+    "word": "先",
+    "example": "一寸先は闇。",
+    "meaningKo": "앞, 이전",
+    "wordMeaningKo": "미래, 이전",
+    "exampleMeaningKo": "앞이 어떻게 될지 아무도 모른다."
+  },
+  "名": {
+    "word": "名前",
+    "example": "弟の名前は？",
+    "meaningKo": "이름, 명성",
+    "wordMeaningKo": "이름",
+    "exampleMeaningKo": "동생 이름이 뭐야?"
+  },
+  "川": {
+    "word": "川",
+    "example": "その川は広い。",
+    "meaningKo": "강",
+    "wordMeaningKo": "강",
+    "exampleMeaningKo": "그 강은 넓다."
+  },
+  "千": {
+    "word": "千",
+    "example": "千円で足りる？",
+    "meaningKo": "천",
+    "wordMeaningKo": "천",
+    "exampleMeaningKo": "천엔으로 충분해?"
+  },
+  "水": {
+    "word": "水",
+    "example": "水が欲しい。",
+    "meaningKo": "물",
+    "wordMeaningKo": "물",
+    "exampleMeaningKo": "물이 필요해."
+  },
+  "半": {
+    "word": "半",
+    "example": "３時半です。",
+    "meaningKo": "반, 중간",
+    "wordMeaningKo": "반",
+    "exampleMeaningKo": "세 시 반이에요."
+  },
+  "男": {
+    "word": "男",
+    "example": "僕、男だよ。",
+    "meaningKo": "남자",
+    "wordMeaningKo": "남자",
+    "exampleMeaningKo": "나는 남자야."
+  },
+  "西": {
+    "word": "西",
+    "example": "日は西に沈む。",
+    "meaningKo": "서",
+    "wordMeaningKo": "서쪽",
+    "exampleMeaningKo": "해는 서쪽으로 진다."
+  },
+  "電": {
+    "word": "電気",
+    "example": "電気つけて。",
+    "meaningKo": "전기",
+    "wordMeaningKo": "전기",
+    "exampleMeaningKo": "전기를 켜줘."
+  },
+  "校": {
+    "word": "学校",
+    "example": "学校はどう？",
+    "meaningKo": "시험·학교·인쇄",
+    "wordMeaningKo": "학교",
+    "exampleMeaningKo": "학교는 어때?"
+  },
+  "語": {
+    "word": "英語",
+    "example": "英語で話せ！",
+    "meaningKo": "말·언어",
+    "wordMeaningKo": "영어",
+    "exampleMeaningKo": "영어로 말해!"
+  },
+  "土": {
+    "word": "土曜日",
+    "example": "土曜日だよ。",
+    "meaningKo": "흙·땅",
+    "wordMeaningKo": "토요일",
+    "exampleMeaningKo": "토요일이야."
+  },
+  "木": {
+    "word": "木",
+    "example": "木が燃える。",
+    "meaningKo": "나무·목재",
+    "wordMeaningKo": "나무",
+    "exampleMeaningKo": "나무가 타다."
+  },
+  "聞": {
+    "word": "聞く",
+    "example": "なぜ聞くの？",
+    "meaningKo": "듣다·묻다",
+    "wordMeaningKo": "듣다",
+    "exampleMeaningKo": "왜 듣는 거야?"
+  },
+  "食": {
+    "word": "食堂",
+    "example": "食堂はどこですか。",
+    "meaningKo": "먹다·음식",
+    "wordMeaningKo": "식당",
+    "exampleMeaningKo": "식당은 어디예요?"
+  },
+  "車": {
+    "word": "車",
+    "example": "車で行こう。",
+    "meaningKo": "차",
+    "wordMeaningKo": "차",
+    "exampleMeaningKo": "차로 가자."
+  },
+  "何": {
+    "word": "何",
+    "example": "何してるの？",
+    "meaningKo": "무엇",
+    "wordMeaningKo": "무엇",
+    "exampleMeaningKo": "뭐 하고 있어?"
+  },
+  "南": {
+    "word": "南",
+    "example": "風は南へ吹く。",
+    "meaningKo": "남쪽",
+    "wordMeaningKo": "남쪽",
+    "exampleMeaningKo": "바람이 남쪽으로 분다."
+  },
+  "万": {
+    "word": "万",
+    "example": "一事が万事。",
+    "meaningKo": "만",
+    "wordMeaningKo": "만",
+    "exampleMeaningKo": "일사만사."
+  },
+  "毎": {
+    "word": "毎年",
+    "example": "毎年同じだよ。",
+    "meaningKo": "매",
+    "wordMeaningKo": "매년",
+    "exampleMeaningKo": "매년 똑같아."
+  },
+  "白": {
+    "word": "白",
+    "example": "明々白々だ。",
+    "meaningKo": "흰",
+    "wordMeaningKo": "흰",
+    "exampleMeaningKo": "아주 분명해."
+  },
+  "天": {
+    "word": "天気",
+    "example": "ひどい天気！",
+    "meaningKo": "하늘",
+    "wordMeaningKo": "날씨",
+    "exampleMeaningKo": "날씨가 정말 나빠!"
+  },
+  "母": {
+    "word": "お母さん",
+    "example": "お母さんはどこ？",
+    "meaningKo": "어머니",
+    "wordMeaningKo": "어머니",
+    "exampleMeaningKo": "어머니는 어디에 계세요?"
+  },
+  "火": {
+    "word": "火曜日",
+    "example": "今日は火曜日です。",
+    "meaningKo": "불",
+    "wordMeaningKo": "화요일",
+    "exampleMeaningKo": "오늘은 화요일이에요."
+  },
+  "右": {
+    "word": "右",
+    "example": "右肩が痛い。",
+    "meaningKo": "오른쪽",
+    "wordMeaningKo": "오른쪽",
+    "exampleMeaningKo": "오른쪽 어깨가 아파요."
+  },
+  "読": {
+    "word": "読む",
+    "example": "そんな本読むな。",
+    "meaningKo": "읽다",
+    "wordMeaningKo": "읽다",
+    "exampleMeaningKo": "그런 책 읽지 마."
+  },
+  "友": {
+    "word": "友達",
+    "example": "友達でしょ？",
+    "meaningKo": "친구",
+    "wordMeaningKo": "친구",
+    "exampleMeaningKo": "친구잖아?"
+  },
+  "左": {
+    "word": "左",
+    "example": "左利きなの？",
+    "meaningKo": "왼쪽",
+    "wordMeaningKo": "왼손잡이",
+    "exampleMeaningKo": "왼손잡이야?"
+  },
+  "休": {
+    "word": "休み",
+    "example": "休みがある。",
+    "meaningKo": "쉬다",
+    "wordMeaningKo": "휴식, 휴일",
+    "exampleMeaningKo": "쉬는 날이 있다."
+  },
+  "父": {
+    "word": "お父さん",
+    "example": "お父さんはどこ？",
+    "meaningKo": "아버지",
+    "wordMeaningKo": "(존칭) 아버지",
+    "exampleMeaningKo": "아버지는 어디에 계세요?"
+  },
+  "雨": {
+    "word": "雨",
+    "example": "雨が降った。",
+    "meaningKo": "비",
+    "wordMeaningKo": "비",
+    "exampleMeaningKo": "비가 내렸다."
+  },
+  "会": {
+    "word": "会場",
+    "example": "会場は聴衆でいっぱいだった。",
+    "meaningKo": "만나다",
+    "wordMeaningKo": "회의장 또는 모임 장소",
+    "exampleMeaningKo": "회장은 청중으로 가득 찼다."
+  },
+  "同": {
+    "word": "同じ",
+    "example": "同じ意見です。",
+    "meaningKo": "같다",
+    "wordMeaningKo": "같은",
+    "exampleMeaningKo": "같은 의견이에요."
+  },
+  "事": {
+    "word": "事故",
+    "example": "事故があった。",
+    "meaningKo": "일",
+    "wordMeaningKo": "사고",
+    "exampleMeaningKo": "사고가 났어요."
+  },
+  "自": {
+    "word": "自由",
+    "example": "自由の身ね。",
+    "meaningKo": "스스로",
+    "wordMeaningKo": "자유",
+    "exampleMeaningKo": "자유로운 신세네."
+  },
+  "社": {
+    "word": "社会",
+    "example": "暴力は社会のガンだ。",
+    "meaningKo": "회사",
+    "wordMeaningKo": "사회",
+    "exampleMeaningKo": "폭력은 사회의 암이에요."
+  },
+  "発": {
+    "word": "発音",
+    "example": "発音がいいね。",
+    "meaningKo": "출발",
+    "wordMeaningKo": "발음",
+    "exampleMeaningKo": "발음이 좋네."
+  },
+  "者": {
+    "word": "歯医者",
+    "example": "彼は歯医者に行った。",
+    "meaningKo": "사람",
+    "wordMeaningKo": "치과",
+    "exampleMeaningKo": "그는 치과에 갔다."
+  },
+  "地": {
+    "word": "地理",
+    "example": "地理は弱い。",
+    "meaningKo": "땅",
+    "wordMeaningKo": "지리",
+    "exampleMeaningKo": "지리가 약해."
+  },
+  "業": {
+    "word": "卒業",
+    "example": "トムは卒業した。",
+    "meaningKo": "업",
+    "wordMeaningKo": "졸업",
+    "exampleMeaningKo": "톰은 졸업했다."
+  },
+  "方": {
+    "word": "両方",
+    "example": "両方好きよ。",
+    "meaningKo": "방향, 사람, 대안",
+    "wordMeaningKo": "양쪽",
+    "exampleMeaningKo": "나 둘 다 좋아해."
+  },
+  "新": {
+    "word": "新聞社",
+    "example": "どちらの新聞社にお勤めですか。",
+    "meaningKo": "새로운",
+    "wordMeaningKo": "신문사",
+    "exampleMeaningKo": "어느 신문사에 다니세요?"
+  },
+  "場": {
+    "word": "場合",
+    "example": "この場合は君が悪い。",
+    "meaningKo": "장소, 위치",
+    "wordMeaningKo": "경우",
+    "exampleMeaningKo": "이 경우는 네가 잘못이야."
+  },
+  "員": {
+    "word": "店員",
+    "example": "彼は店員に金を渡した。",
+    "meaningKo": "직원, 구성원, 수",
+    "wordMeaningKo": "점원",
+    "exampleMeaningKo": "그는 점원에게 돈을 건넸다."
+  },
+  "立": {
+    "word": "立てる",
+    "example": "腹を立てるな。",
+    "meaningKo": "일어서다, 세우다",
+    "wordMeaningKo": "세우다",
+    "exampleMeaningKo": "속상해하지 마라."
+  },
+  "開": {
+    "word": "開く",
+    "example": "本を開くな。",
+    "meaningKo": "열다, 펼치다",
+    "wordMeaningKo": "열다",
+    "exampleMeaningKo": "책을 열지 마라."
+  },
+  "手": {
+    "word": "手袋",
+    "example": "手袋してる？",
+    "meaningKo": "손",
+    "wordMeaningKo": "장갑",
+    "exampleMeaningKo": "장갑 끼고 있어?"
+  },
+  "力": {
+    "word": "力",
+    "example": "全力でやれ。",
+    "meaningKo": "힘, 강력",
+    "wordMeaningKo": "힘",
+    "exampleMeaningKo": "최선을 다해라."
+  },
+  "問": {
+    "word": "問い",
+    "example": "以下の問いに英語で答えよ。",
+    "meaningKo": "질문하다",
+    "wordMeaningKo": "질문, 질의",
+    "exampleMeaningKo": "다음 질문에 영어로 답하세요."
+  },
+  "代": {
+    "word": "代わり",
+    "example": "担当者と代わります。",
+    "meaningKo": "대신하다",
+    "wordMeaningKo": "대신, 대역",
+    "exampleMeaningKo": "담당자와 바꿉니다."
+  },
+  "明": {
+    "word": "明日",
+    "example": "明日来るの？",
+    "meaningKo": "밝다",
+    "wordMeaningKo": "내일",
+    "exampleMeaningKo": "내일 올 거야?"
+  },
+  "動": {
+    "word": "動く",
+    "example": "心が動くね。",
+    "meaningKo": "움직이다",
+    "wordMeaningKo": "움직이다",
+    "exampleMeaningKo": "마음이 움직이네."
+  },
+  "京": {
+    "word": "上京",
+    "example": "彼は商用で上京した。",
+    "meaningKo": "수도",
+    "wordMeaningKo": "도쿄로 가다",
+    "exampleMeaningKo": "그는 출장 목적으로 도쿄에 갔다."
+  },
+  "目": {
+    "word": "目",
+    "example": "目は心の鏡。",
+    "meaningKo": "눈",
+    "wordMeaningKo": "눈",
+    "exampleMeaningKo": "눈은 마음의 거울이다."
+  },
+  "通": {
+    "word": "通う",
+    "example": "私は歩いて学校に通う。",
+    "meaningKo": "통하다",
+    "wordMeaningKo": "출퇴근하다",
+    "exampleMeaningKo": "나는 걸어서 학교에 다닌다."
+  },
+  "言": {
+    "word": "言う",
+    "example": "バカ言うな。",
+    "meaningKo": "말",
+    "wordMeaningKo": "말하다",
+    "exampleMeaningKo": "바보 같은 소리 하지 마."
+  },
+  "理": {
+    "word": "理由",
+    "example": "理由は簡単だよ。",
+    "meaningKo": "논리, 배열, 이유, 정의, 진리",
+    "wordMeaningKo": "이유",
+    "exampleMeaningKo": "이유는 간단해."
+  },
+  "体": {
+    "word": "大体",
+    "example": "大体正しい。",
+    "meaningKo": "신체, 실체, 사물, 현실, 영상 단위",
+    "wordMeaningKo": "대체로",
+    "exampleMeaningKo": "대체로 맞다."
+  },
+  "田": {
+    "word": "田舎",
+    "example": "田舎育ちです。",
+    "meaningKo": "논밭",
+    "wordMeaningKo": "시골",
+    "exampleMeaningKo": "시골에서 자랐다."
+  },
+  "主": {
+    "word": "主に",
+    "example": "彼らは雇い主に忠実だ。",
+    "meaningKo": "군주, 우두머리, 주인, 주요 사항, 주된",
+    "wordMeaningKo": "주로",
+    "exampleMeaningKo": "그들은 고용주에게 충실하다."
+  },
+  "題": {
+    "word": "題",
+    "example": "問題だなあ。",
+    "meaningKo": "주제, 문제",
+    "wordMeaningKo": "제목, 주제, 테마",
+    "exampleMeaningKo": "문제네."
+  },
+  "意": {
+    "word": "意見",
+    "example": "同意見です。",
+    "meaningKo": "생각, 마음, 뜻, 취향, 생각, 욕심, 배려, 호감",
+    "wordMeaningKo": "의견",
+    "exampleMeaningKo": "같은 의견입니다."
+  },
+  "不": {
+    "word": "不便",
+    "example": "電話がないのは不便だ。",
+    "meaningKo": "부정, 비-, 나쁜, 추한, 서투른",
+    "wordMeaningKo": "불편",
+    "exampleMeaningKo": "전화기가 없어서 불편해."
+  },
+  "作": {
+    "word": "作る",
+    "example": "夕飯、作るね。",
+    "meaningKo": "만들다, 생산, 준비, 건축",
+    "wordMeaningKo": "만들다",
+    "exampleMeaningKo": "저녁 식사 만들자."
+  },
+  "用": {
+    "word": "用",
+    "example": "他にご用は？",
+    "meaningKo": "사용하다",
+    "wordMeaningKo": "사용",
+    "exampleMeaningKo": "다른 용무가 있으세요?"
+  },
+  "度": {
+    "word": "一度",
+    "example": "一度参ります。",
+    "meaningKo": "도",
+    "wordMeaningKo": "한 번",
+    "exampleMeaningKo": "한 번 가겠습니다."
+  },
+  "強": {
+    "word": "強い",
+    "example": "悪運が強い。",
+    "meaningKo": "강하다",
+    "wordMeaningKo": "강한",
+    "exampleMeaningKo": "불운이 강하다."
+  },
+  "公": {
+    "word": "公務員",
+    "example": "私は公務員です。",
+    "meaningKo": "공",
+    "wordMeaningKo": "공무원",
+    "exampleMeaningKo": "저는 공무원입니다."
+  },
+  "持": {
+    "word": "気持ち",
+    "example": "気持ち悪い！",
+    "meaningKo": "가지다",
+    "wordMeaningKo": "기분",
+    "exampleMeaningKo": "기분 나빠!"
+  },
+  "野": {
+    "word": "野",
+    "example": "野球は得意？",
+    "meaningKo": "들",
+    "wordMeaningKo": "들",
+    "exampleMeaningKo": "야구 잘해?"
+  },
+  "以": {
+    "word": "以上",
+    "example": "以上ですか？",
+    "meaningKo": "으로써",
+    "wordMeaningKo": "이상",
+    "exampleMeaningKo": "이상인가요?"
+  },
+  "思": {
+    "word": "思う",
+    "example": "勝つと思う？",
+    "meaningKo": "생각하다",
+    "wordMeaningKo": "생각하다",
+    "exampleMeaningKo": "이길 거야?"
+  },
+  "家": {
+    "word": "家内",
+    "example": "家内は医師です。",
+    "meaningKo": "집, 가문",
+    "wordMeaningKo": "집안사람",
+    "exampleMeaningKo": "집사람은 의사예요."
+  },
+  "世": {
+    "word": "世界",
+    "example": "世界は広い。",
+    "meaningKo": "세상, 대",
+    "wordMeaningKo": "세계",
+    "exampleMeaningKo": "세상은 넓다."
+  },
+  "多": {
+    "word": "多い",
+    "example": "疑問が多い。",
+    "meaningKo": "많음",
+    "wordMeaningKo": "많다",
+    "exampleMeaningKo": "의문이 많다."
+  },
+  "正": {
+    "word": "正しい",
+    "example": "大体正しい。",
+    "meaningKo": "바름, 정",
+    "wordMeaningKo": "바르다",
+    "exampleMeaningKo": "대체로 맞다."
+  },
+  "安": {
+    "word": "安全",
+    "example": "安全な旅を。",
+    "meaningKo": "편안함, 싸다",
+    "wordMeaningKo": "안전",
+    "exampleMeaningKo": "안전한 여행 되세요."
+  },
+  "院": {
+    "word": "入院",
+    "example": "入院してます。",
+    "meaningKo": "원, 기관",
+    "wordMeaningKo": "입원",
+    "exampleMeaningKo": "입원 중이에요."
+  },
+  "心": {
+    "word": "心",
+    "example": "心配するな。",
+    "meaningKo": "마음",
+    "wordMeaningKo": "마음",
+    "exampleMeaningKo": "걱정하지 마."
+  },
+  "界": {
+    "word": "世界",
+    "example": "世界は広い。",
+    "meaningKo": "세계, 경계",
+    "wordMeaningKo": "세계",
+    "exampleMeaningKo": "세상은 넓다."
+  },
+  "教": {
+    "word": "教会",
+    "example": "あれは教会です。",
+    "meaningKo": "가르치다",
+    "wordMeaningKo": "교회",
+    "exampleMeaningKo": "저건 교회예요."
+  },
+  "文": {
+    "word": "文化",
+    "example": "文化人です。",
+    "meaningKo": "글",
+    "wordMeaningKo": "문화",
+    "exampleMeaningKo": "문화인이에요."
+  },
+  "元": {
+    "word": "元",
+    "example": "元気ないね。",
+    "meaningKo": "처음",
+    "wordMeaningKo": "원래, 옛",
+    "exampleMeaningKo": "기운 없네."
+  },
+  "重": {
+    "word": "重い",
+    "example": "トムは重い。",
+    "meaningKo": "무겁다",
+    "wordMeaningKo": "무겁다",
+    "exampleMeaningKo": "톰은 무거워."
+  },
+  "近": {
+    "word": "近所",
+    "example": "近所の人よ。",
+    "meaningKo": "가까이",
+    "wordMeaningKo": "근처",
+    "exampleMeaningKo": "근처 사람아."
+  },
+  "考": {
+    "word": "考える",
+    "example": "その時に考えるよ。",
+    "meaningKo": "고려하다",
+    "wordMeaningKo": "생각하다",
+    "exampleMeaningKo": "그때 생각할게."
+  },
+  "画": {
+    "word": "漫画",
+    "example": "私は漫画家です。",
+    "meaningKo": "그림",
+    "wordMeaningKo": "만화",
+    "exampleMeaningKo": "나는 만화가야."
+  },
+  "海": {
+    "word": "海岸",
+    "example": "海岸に行こうよ。",
+    "meaningKo": "바다",
+    "wordMeaningKo": "해안",
+    "exampleMeaningKo": "해안으로 가자."
+  },
+  "売": {
+    "word": "売り場",
+    "example": "切符売り場はどこですか？",
+    "meaningKo": "팔다",
+    "wordMeaningKo": "물건을 파는 곳",
+    "exampleMeaningKo": "표 판매처는 어디입니까?"
+  },
+  "知": {
+    "word": "知らせる",
+    "example": "彼らに知らせる。",
+    "meaningKo": "알다",
+    "wordMeaningKo": "알리다",
+    "exampleMeaningKo": "그들에게 알린다."
+  },
+  "道": {
+    "word": "道具",
+    "example": "道具を乱暴に扱うな。",
+    "meaningKo": "길",
+    "wordMeaningKo": "도구, 수단",
+    "exampleMeaningKo": "도구를 함부로 다루지 마라."
+  },
+  "集": {
+    "word": "集める",
+    "example": "はがきを集める。",
+    "meaningKo": "모이다",
+    "wordMeaningKo": "무언가를 수집하다",
+    "exampleMeaningKo": "엽서 모으기."
+  },
+  "別": {
+    "word": "別",
+    "example": "別人みたい。",
+    "meaningKo": "나누다",
+    "wordMeaningKo": "별",
+    "exampleMeaningKo": "남처럼 보인다."
+  },
+  "物": {
+    "word": "品物",
+    "example": "この品物は安い。",
+    "meaningKo": "물건",
+    "wordMeaningKo": "품물",
+    "exampleMeaningKo": "이 물건은 싸다."
+  },
+  "使": {
+    "word": "使う",
+    "example": "何に使うの？",
+    "meaningKo": "사용",
+    "wordMeaningKo": "사용하다",
+    "exampleMeaningKo": "무엇에 쓰나요?"
+  },
+  "品": {
+    "word": "品物",
+    "example": "この品物は安い。",
+    "meaningKo": "품",
+    "wordMeaningKo": "상품",
+    "exampleMeaningKo": "이 상품은 싸다."
+  },
+  "計": {
+    "word": "計画",
+    "example": "計画はできた。",
+    "meaningKo": "계략",
+    "wordMeaningKo": "계획하다",
+    "exampleMeaningKo": "계획이 완성되었어."
+  },
+  "死": {
+    "word": "死ぬ",
+    "example": "死ぬもんか。",
+    "meaningKo": "죽음",
+    "wordMeaningKo": "죽다",
+    "exampleMeaningKo": "죽을 리가 없지."
+  },
+  "特": {
+    "word": "特に",
+    "example": "今朝は特に寒い。",
+    "meaningKo": "특별",
+    "wordMeaningKo": "특히",
+    "exampleMeaningKo": "오늘 아침은 특히 춥다."
+  },
+  "私": {
+    "word": "私",
+    "example": "私は忙しい。",
+    "meaningKo": "나",
+    "wordMeaningKo": "나",
+    "exampleMeaningKo": "나는 바쁘다."
+  },
+  "始": {
+    "word": "始める",
+    "example": "新たに始める。",
+    "meaningKo": "시작",
+    "wordMeaningKo": "시작하다",
+    "exampleMeaningKo": "새롭게 시작하다."
+  },
+  "朝": {
+    "word": "朝",
+    "example": "もう朝なの？",
+    "meaningKo": "아침",
+    "wordMeaningKo": "아침",
+    "exampleMeaningKo": "이미 아침이야?"
+  },
+  "運": {
+    "word": "運ぶ",
+    "example": "風は種を遠くへ運ぶ。",
+    "meaningKo": "운",
+    "wordMeaningKo": "나르다",
+    "exampleMeaningKo": "바람이 씨앗을 멀리 나른다."
+  },
+  "終": {
+    "word": "終わり",
+    "example": "終わりはない。",
+    "meaningKo": "끝",
+    "wordMeaningKo": "끝",
+    "exampleMeaningKo": "끝이 없다."
+  },
+  "台": {
+    "word": "台風",
+    "example": "台風は去った。",
+    "meaningKo": "받침대",
+    "wordMeaningKo": "태풍",
+    "exampleMeaningKo": "태풍이 지나갔다."
+  },
+  "広": {
+    "word": "広い",
+    "example": "世界は広い。",
+    "meaningKo": "넓다",
+    "wordMeaningKo": "넓다",
+    "exampleMeaningKo": "세상은 넓다."
+  },
+  "住": {
+    "word": "住所",
+    "example": "これが住所です。",
+    "meaningKo": "살다",
+    "wordMeaningKo": "주소",
+    "exampleMeaningKo": "이것이 주소입니다."
+  },
+  "真": {
+    "word": "真中",
+    "example": "湖の真中に、その島がある。",
+    "meaningKo": "참",
+    "wordMeaningKo": "가운데",
+    "exampleMeaningKo": "호수 한가운데에 그 섬이 있다."
+  },
+  "有": {
+    "word": "有る",
+    "example": "彼には精神障害が有る。",
+    "meaningKo": "있다",
+    "wordMeaningKo": "있다",
+    "exampleMeaningKo": "그에게는 정신 장애가 있다."
+  },
+  "口": {
+    "word": "人口",
+    "example": "インドは人口が多い。",
+    "meaningKo": "입",
+    "wordMeaningKo": "인구",
+    "exampleMeaningKo": "인도는 인구가 많다."
+  },
+  "少": {
+    "word": "少々",
+    "example": "少々お待ち下さい。",
+    "meaningKo": "적다",
+    "wordMeaningKo": "조금",
+    "exampleMeaningKo": "잠시만 기다려 주세요."
+  },
+  "町": {
+    "word": "町",
+    "example": "敵は町に近づく。",
+    "meaningKo": "마을",
+    "wordMeaningKo": "마을, 시가지",
+    "exampleMeaningKo": "적은 마을에 다가온다."
+  },
+  "料": {
+    "word": "食料品",
+    "example": "食料品買わなくちゃ。",
+    "meaningKo": "요금, 자재",
+    "wordMeaningKo": "식료품",
+    "exampleMeaningKo": "식료품 사야 해."
+  },
+  "工": {
+    "word": "工場",
+    "example": "川崎には工場が多い。",
+    "meaningKo": "기술, 공사",
+    "wordMeaningKo": "공장",
+    "exampleMeaningKo": "가와사키에는 공장이 많다."
+  },
+  "建": {
+    "word": "建てる",
+    "example": "父は壁を建てるのに忙しい。",
+    "meaningKo": "세우다",
+    "wordMeaningKo": "세우다",
+    "exampleMeaningKo": "아빠는 벽을 세우는 데 바빠."
+  },
+  "空": {
+    "word": "空く",
+    "example": "あと１０分で手が空く。",
+    "meaningKo": "빈, 하늘, 공",
+    "wordMeaningKo": "비다, 열리다",
+    "exampleMeaningKo": "10분 뒤엔 시간이 비어."
+  },
+  "急": {
+    "word": "急",
+    "example": "急がば回れ。",
+    "meaningKo": "급하다, 돌발",
+    "wordMeaningKo": "긴급한, 가파른",
+    "exampleMeaningKo": "급할수록 돌아가라."
+  },
+  "止": {
+    "word": "止む",
+    "example": "雨が止むのを待とう！",
+    "meaningKo": "그치다, 멈춤",
+    "wordMeaningKo": "그치다",
+    "exampleMeaningKo": "비가 그치기를 기다리자!"
+  },
+  "送": {
+    "word": "送る",
+    "example": "誰に送るの？",
+    "meaningKo": "보내다, 호송",
+    "wordMeaningKo": "보내다",
+    "exampleMeaningKo": "누구에게 보내니?"
+  },
+  "切": {
+    "word": "親切",
+    "example": "トムは親切だ。",
+    "meaningKo": "자르다, 날카로움",
+    "wordMeaningKo": "친절함",
+    "exampleMeaningKo": "톰은 친절해."
+  },
+  "転": {
+    "word": "運転",
+    "example": "君が運転して。",
+    "meaningKo": "돌다, 전하다, 변하다",
+    "wordMeaningKo": "운전",
+    "exampleMeaningKo": "네가 운전해."
+  },
+  "研": {
+    "word": "研究",
+    "example": "彼は研究に夢中だ。",
+    "meaningKo": "연마하다, 연구하다",
+    "wordMeaningKo": "연구",
+    "exampleMeaningKo": "그는 연구에 열중한다."
+  },
+  "足": {
+    "word": "足す",
+    "example": "１足す２は３である。",
+    "meaningKo": "발, 충분하다",
+    "wordMeaningKo": "더하다",
+    "exampleMeaningKo": "1에 2를 더하면 3이다."
+  },
+  "究": {
+    "word": "研究",
+    "example": "彼は研究に夢中だ。",
+    "meaningKo": "연구, 탐구",
+    "wordMeaningKo": "연구",
+    "exampleMeaningKo": "그는 연구에 열중한다."
+  },
+  "楽": {
+    "word": "楽しみ",
+    "example": "夕食が楽しみだ。",
+    "meaningKo": "음악, 편안함",
+    "wordMeaningKo": "즐거움",
+    "exampleMeaningKo": "저녁 식사가 기대된다."
+  },
+  "起": {
+    "word": "起す",
+    "example": "試験は大きな問題を提起する。",
+    "meaningKo": "일어나다, 깨다",
+    "wordMeaningKo": "깨우다",
+    "exampleMeaningKo": "시험은 중요한 문제를 제기한다."
+  },
+  "着": {
+    "word": "着物",
+    "example": "着物は着ますか。",
+    "meaningKo": "입다, 도착하다",
+    "wordMeaningKo": "기모노",
+    "exampleMeaningKo": "기모노를 입습니까?"
+  },
+  "店": {
+    "word": "店員",
+    "example": "彼は店員に金を渡した。",
+    "meaningKo": "가게, 상점",
+    "wordMeaningKo": "점원",
+    "exampleMeaningKo": "그는 점원에게 돈을 건넸다."
+  },
+  "病": {
+    "word": "病気",
+    "example": "病気がちだ。",
+    "meaningKo": "병",
+    "wordMeaningKo": "질병",
+    "exampleMeaningKo": "병치곤 하다."
+  },
+  "質": {
+    "word": "質",
+    "example": "よい質問だ。",
+    "meaningKo": "질",
+    "wordMeaningKo": "질, 본성",
+    "exampleMeaningKo": "좋은 질문이다."
+  },
+  "待": {
+    "word": "招待",
+    "example": "招待された？",
+    "meaningKo": "대",
+    "wordMeaningKo": "초대하다",
+    "exampleMeaningKo": "초대받았어?"
+  },
+  "試": {
+    "word": "試合",
+    "example": "その試合見た？",
+    "meaningKo": "시",
+    "wordMeaningKo": "경기, 게임",
+    "exampleMeaningKo": "그 경기 봤어?"
+  },
+  "族": {
+    "word": "家族",
+    "example": "大家族なの？",
+    "meaningKo": "족",
+    "wordMeaningKo": "가족",
+    "exampleMeaningKo": "대가족이에요?"
+  },
+  "銀": {
+    "word": "銀",
+    "example": "彼は銀行員です。",
+    "meaningKo": "은",
+    "wordMeaningKo": "은, 은화",
+    "exampleMeaningKo": "그는 은행원입니다."
+  },
+  "早": {
+    "word": "早い",
+    "example": "彼は素早い。",
+    "meaningKo": "조",
+    "wordMeaningKo": "빠른",
+    "exampleMeaningKo": "그는 민첩하다."
+  },
+  "映": {
+    "word": "映画",
+    "example": "いい映画だね。",
+    "meaningKo": "영",
+    "wordMeaningKo": "영화",
+    "exampleMeaningKo": "좋은 영화네."
+  },
+  "親": {
+    "word": "親",
+    "example": "親が払うよ。",
+    "meaningKo": "부모, 친밀",
+    "wordMeaningKo": "부모",
+    "exampleMeaningKo": "부모가 지불해 줄 거야."
+  },
+  "験": {
+    "word": "経験",
+    "example": "凄い経験でした。",
+    "meaningKo": "검증, 효과",
+    "wordMeaningKo": "경험하다",
+    "exampleMeaningKo": "엄청난 경험이었어."
+  },
+  "英": {
+    "word": "英語",
+    "example": "英語で話せ！",
+    "meaningKo": "영국, 영어",
+    "wordMeaningKo": "영어",
+    "exampleMeaningKo": "영어로 말해!"
+  },
+  "医": {
+    "word": "医学",
+    "example": "彼は医学の学生だ。",
+    "meaningKo": "의사, 의학",
+    "wordMeaningKo": "의학",
+    "exampleMeaningKo": "그는 의학 학생이다."
+  },
+  "仕": {
+    "word": "仕方",
+    "example": "仕方がないよ。",
+    "meaningKo": "봉사, 관직",
+    "wordMeaningKo": "방법",
+    "exampleMeaningKo": "어쩔 수 없어."
+  },
+  "去": {
+    "word": "去る",
+    "example": "時は飛び去る。",
+    "meaningKo": "떠남, 지남",
+    "wordMeaningKo": "떠나다",
+    "exampleMeaningKo": "시간이 빨리 지나간다."
+  },
+  "味": {
+    "word": "味",
+    "example": "後味が悪い。",
+    "meaningKo": "맛, 풍미",
+    "wordMeaningKo": "맛",
+    "exampleMeaningKo": "뒷맛이 나쁘다."
+  },
+  "写": {
+    "word": "写す",
+    "example": "彼女は友達のノートを写す。",
+    "meaningKo": "복사, 촬영",
+    "wordMeaningKo": "복사하다, 촬영하다",
+    "exampleMeaningKo": "그녀는 친구의 노트를 복사한다."
+  },
+  "字": {
+    "word": "字",
+    "example": "商売は赤字だ。",
+    "meaningKo": "글자",
+    "wordMeaningKo": "글자",
+    "exampleMeaningKo": "장사가 적자야."
+  },
+  "答": {
+    "word": "答",
+    "example": "何問答えた？",
+    "meaningKo": "답",
+    "wordMeaningKo": "답",
+    "exampleMeaningKo": "몇 문제 답했어?"
+  },
+  "夜": {
+    "word": "今夜",
+    "example": "今夜会える？",
+    "meaningKo": "밤",
+    "wordMeaningKo": "오늘 밤",
+    "exampleMeaningKo": "오늘 밤에 만날 수 있어?"
+  },
+  "音": {
+    "word": "音",
+    "example": "今の何の音？",
+    "meaningKo": "소리",
+    "wordMeaningKo": "소리, 음표",
+    "exampleMeaningKo": "지금 무슨 소리야?"
+  },
+  "注": {
+    "word": "注射",
+    "example": "注射の時間ですよ。",
+    "meaningKo": "주목",
+    "wordMeaningKo": "주사",
+    "exampleMeaningKo": "주사 시간입니다."
+  },
+  "帰": {
+    "word": "帰り",
+    "example": "帰りなさい。",
+    "meaningKo": "귀가",
+    "wordMeaningKo": "귀가",
+    "exampleMeaningKo": "돌아가세요."
+  },
+  "古": {
+    "word": "古い",
+    "example": "母は頭が古い。",
+    "meaningKo": "옛",
+    "wordMeaningKo": "오래된 (사람 제외)",
+    "exampleMeaningKo": "어머니는 생각이 옛날 스타일이야."
+  },
+  "歌": {
+    "word": "歌",
+    "example": "歌が歌える。",
+    "meaningKo": "노래",
+    "wordMeaningKo": "노래",
+    "exampleMeaningKo": "노래를 부를 수 있어."
+  },
+  "買": {
+    "word": "買う",
+    "example": "それ買うよ。",
+    "meaningKo": "사다",
+    "wordMeaningKo": "사다",
+    "exampleMeaningKo": "그거 살 거야."
+  },
+  "悪": {
+    "word": "悪い",
+    "example": "体に悪いよ。",
+    "meaningKo": "나쁘다",
+    "wordMeaningKo": "나쁜, 나쁜 것",
+    "exampleMeaningKo": "몸에 나빠."
+  },
+  "図": {
+    "word": "図",
+    "example": "図に乗るな。",
+    "meaningKo": "그림",
+    "wordMeaningKo": "그림, 도면, 일러스트",
+    "exampleMeaningKo": "기승전결에 말려들지 마라."
+  },
+  "週": {
+    "word": "週",
+    "example": "よい週末を！",
+    "meaningKo": "주",
+    "wordMeaningKo": "주",
+    "exampleMeaningKo": "좋은 주말 보내세요!"
+  },
+  "室": {
+    "word": "会議室",
+    "example": "会議室はどこ？",
+    "meaningKo": "방",
+    "wordMeaningKo": "회의실",
+    "exampleMeaningKo": "회의실이 어디예요?"
+  },
+  "歩": {
+    "word": "歩く",
+    "example": "彼女は歩く。",
+    "meaningKo": "걷다",
+    "wordMeaningKo": "걷다",
+    "exampleMeaningKo": "그녀는 걷는다."
+  },
+  "風": {
+    "word": "台風",
+    "example": "台風は去った。",
+    "meaningKo": "바람",
+    "wordMeaningKo": "태풍",
+    "exampleMeaningKo": "태풍은 지나갔다."
+  },
+  "紙": {
+    "word": "紙",
+    "example": "はい、手紙。",
+    "meaningKo": "종이",
+    "wordMeaningKo": "종이",
+    "exampleMeaningKo": "네, 편지입니다."
+  },
+  "黒": {
+    "word": "黒",
+    "example": "彼は腹黒い。",
+    "meaningKo": "검은색",
+    "wordMeaningKo": "검은",
+    "exampleMeaningKo": "그는 속이 검은 사람이다."
+  },
+  "花": {
+    "word": "花見",
+    "example": "あのお花見て。",
+    "meaningKo": "꽃",
+    "wordMeaningKo": "꽃구경",
+    "exampleMeaningKo": "저 꽃을 봐."
+  },
+  "春": {
+    "word": "春",
+    "example": "春になった。",
+    "meaningKo": "봄",
+    "wordMeaningKo": "봄",
+    "exampleMeaningKo": "봄이 되었다."
+  },
+  "赤": {
+    "word": "赤ん坊",
+    "example": "彼は赤ん坊同然だ。",
+    "meaningKo": "빨간색",
+    "wordMeaningKo": "아기",
+    "exampleMeaningKo": "그는 아기나 다름없다."
+  },
+  "青": {
+    "word": "青",
+    "example": "信号は青だ。",
+    "meaningKo": "파란색",
+    "wordMeaningKo": "푸른",
+    "exampleMeaningKo": "신호는 파란색이다."
+  },
+  "館": {
+    "word": "旅館",
+    "example": "あの旅館は家庭的だ。",
+    "meaningKo": "건물",
+    "wordMeaningKo": "일본식 여관",
+    "exampleMeaningKo": "그 여관은 가정적이다."
+  },
+  "屋": {
+    "word": "屋上",
+    "example": "屋上には猫が歩いている。",
+    "meaningKo": "지붕",
+    "wordMeaningKo": "옥상",
+    "exampleMeaningKo": "옥상에서 고양이가 걷고 있다."
+  },
+  "色": {
+    "word": "景色",
+    "example": "見事な景色だ。",
+    "meaningKo": "색",
+    "wordMeaningKo": "경치, 풍경",
+    "exampleMeaningKo": "훌륭한 경치다."
+  },
+  "走": {
+    "word": "走る",
+    "example": "あなたは走る。",
+    "meaningKo": "달리다",
+    "wordMeaningKo": "달리다",
+    "exampleMeaningKo": "당신은 달립니다."
+  },
+  "秋": {
+    "word": "秋",
+    "example": "女心と秋の空。",
+    "meaningKo": "가을",
+    "wordMeaningKo": "가을",
+    "exampleMeaningKo": "여자의 마음과 가을 하늘."
+  },
+  "夏": {
+    "word": "夏",
+    "example": "夏は過ぎた。",
+    "meaningKo": "여름",
+    "wordMeaningKo": "여름",
+    "exampleMeaningKo": "여름은 지나갔다."
+  },
+  "習": {
+    "word": "習慣",
+    "example": "習慣化しました。",
+    "meaningKo": "배우다",
+    "wordMeaningKo": "습관, 풍습",
+    "exampleMeaningKo": "습관화되었습니다."
+  },
+  "駅": {
+    "word": "駅",
+    "example": "東京駅なう。",
+    "meaningKo": "역",
+    "wordMeaningKo": "역",
+    "exampleMeaningKo": "도쿄 역이 현재 위치야."
+  },
+  "洋": {
+    "word": "西洋",
+    "example": "彼は西洋文化が好きだ。",
+    "meaningKo": "바다, 서양",
+    "wordMeaningKo": "서양 국가",
+    "exampleMeaningKo": "그는 서양 문화를 좋아해."
+  },
+  "旅": {
+    "word": "旅館",
+    "example": "あの旅館は家庭的だ。",
+    "meaningKo": "여행",
+    "wordMeaningKo": "일본식 여관",
+    "exampleMeaningKo": "그 여관은 가정적인 분위기야."
+  },
+  "服": {
+    "word": "服",
+    "example": "一服させて。",
+    "meaningKo": "옷, 복종",
+    "wordMeaningKo": "옷",
+    "exampleMeaningKo": "한 모금 쉬어가세요."
+  },
+  "夕": {
+    "word": "夕べ",
+    "example": "夕べ大雪が降った。",
+    "meaningKo": "저녁",
+    "wordMeaningKo": "저녁",
+    "exampleMeaningKo": "어제 밤에 눈이 많이 왔어."
+  },
+  "借": {
+    "word": "借金",
+    "example": "借金してるんだよ。",
+    "meaningKo": "빌리다",
+    "wordMeaningKo": "빚, 대출",
+    "exampleMeaningKo": "나는 빚을 지고 있어."
+  },
+  "曜": {
+    "word": "曜日",
+    "example": "土曜日だよ。",
+    "meaningKo": "요일",
+    "wordMeaningKo": "요일",
+    "exampleMeaningKo": "토요일이야."
+  },
+  "飲": {
+    "word": "飲む",
+    "example": "ビール飲む？",
+    "meaningKo": "마시다",
+    "wordMeaningKo": "마시다",
+    "exampleMeaningKo": "맥주 마실래?"
+  },
+  "肉": {
+    "word": "肉",
+    "example": "牛肉は高い。",
+    "meaningKo": "고기",
+    "wordMeaningKo": "고기",
+    "exampleMeaningKo": "소고기 가격이 비싸다."
+  },
+  "貸": {
+    "word": "貸し",
+    "example": "貸し間あり。",
+    "meaningKo": "빌려주다",
+    "wordMeaningKo": "빌려주기",
+    "exampleMeaningKo": "빌려줄 방이 있다."
+  },
+  "堂": {
+    "word": "講堂",
+    "example": "この講堂は300人まで入れる。",
+    "meaningKo": "홀",
+    "wordMeaningKo": "강당",
+    "exampleMeaningKo": "이 강당은 300명까지 수용할 수 있다."
+  },
+  "鳥": {
+    "word": "小鳥",
+    "example": "彼は小鳥を狙った。",
+    "meaningKo": "새",
+    "wordMeaningKo": "작은 새",
+    "exampleMeaningKo": "그는 작은 새를 노렸다."
+  },
+  "飯": {
+    "word": "飯",
+    "example": "ご飯にする？",
+    "meaningKo": "밥",
+    "wordMeaningKo": "식사",
+    "exampleMeaningKo": "밥 먹을래?"
+  },
+  "勉": {
+    "word": "勉強",
+    "example": "勉強するな。",
+    "meaningKo": "노력",
+    "wordMeaningKo": "공부하다",
+    "exampleMeaningKo": "공부하지 마."
+  },
+  "冬": {
+    "word": "冬",
+    "example": "冬は去った。",
+    "meaningKo": "겨울",
+    "wordMeaningKo": "겨울",
+    "exampleMeaningKo": "겨울이 지나갔다."
+  },
+  "昼": {
+    "word": "昼間",
+    "example": "太陽は昼間輝く。",
+    "meaningKo": "낮",
+    "wordMeaningKo": "낮 시간",
+    "exampleMeaningKo": "태양은 낮에 빛난다."
+  },
+  "茶": {
+    "word": "茶",
+    "example": "緑茶は無理。",
+    "meaningKo": "차",
+    "wordMeaningKo": "차",
+    "exampleMeaningKo": "녹차는 무리야."
+  },
+  "弟": {
+    "word": "弟",
+    "example": "弟の名前は？",
+    "meaningKo": "남동생",
+    "wordMeaningKo": "어린 동생",
+    "exampleMeaningKo": "동생 이름이 뭐야?"
+  },
+  "牛": {
+    "word": "牛",
+    "example": "牛肉は高い。",
+    "meaningKo": "소",
+    "wordMeaningKo": "소, 가축",
+    "exampleMeaningKo": "소고기 가격이 비싸다."
+  },
+  "魚": {
+    "word": "魚",
+    "example": "魚が食べる。",
+    "meaningKo": "물고기",
+    "wordMeaningKo": "물고기",
+    "exampleMeaningKo": "물고기를 먹다."
+  },
+  "兄": {
+    "word": "兄",
+    "example": "兄がいます。",
+    "meaningKo": "형",
+    "wordMeaningKo": "(겸양) 형님",
+    "exampleMeaningKo": "형이 한 명 있어요."
+  },
+  "犬": {
+    "word": "犬",
+    "example": "これは犬だ。",
+    "meaningKo": "개",
+    "wordMeaningKo": "개",
+    "exampleMeaningKo": "이것은 개입니다."
+  },
+  "妹": {
+    "word": "妹",
+    "example": "妹は美人だ。",
+    "meaningKo": "여동생",
+    "wordMeaningKo": "(겸양) 여동생",
+    "exampleMeaningKo": "여동생은 예쁘다."
+  },
+  "姉": {
+    "word": "姉",
+    "example": "姉はいない。",
+    "meaningKo": "누나",
+    "wordMeaningKo": "(겸양) 언니",
+    "exampleMeaningKo": "언니는 없다."
+  },
+  "漢": {
+    "word": "漢字",
+    "example": "漢字を書きます。",
+    "meaningKo": "한",
+    "wordMeaningKo": "한자",
+    "exampleMeaningKo": "한자를 씁니다."
+  },
+  "政": {
+    "word": "政府",
+    "example": "政府は倒された。",
+    "meaningKo": "정치",
+    "wordMeaningKo": "정부",
+    "exampleMeaningKo": "정부가 무너졌다."
+  },
+  "議": {
+    "word": "議会",
+    "example": "議会は解散した。",
+    "meaningKo": "의논",
+    "wordMeaningKo": "국회, 의회",
+    "exampleMeaningKo": "의회는 해산되었다."
+  },
+  "民": {
+    "word": "住民",
+    "example": "住民は当事者に背いた。",
+    "meaningKo": "백성",
+    "wordMeaningKo": "시민, 거주민",
+    "exampleMeaningKo": "주민은 당사자에게 반했다."
+  },
+  "連": {
+    "word": "連れ",
+    "example": "旅は道連れ。",
+    "meaningKo": "이으다",
+    "wordMeaningKo": "동행자, 동반자",
+    "exampleMeaningKo": "여행은 동행이 있어야 한다."
+  },
+  "対": {
+    "word": "対",
+    "example": "絶対無理だ。",
+    "meaningKo": "상대",
+    "wordMeaningKo": "쌍, 커플, 세트",
+    "exampleMeaningKo": "절대 불가능하다."
+  },
+  "部": {
+    "word": "部分",
+    "example": "部分的には賛成だよ。",
+    "meaningKo": "부분",
+    "wordMeaningKo": "부분, 부서, 관",
+    "exampleMeaningKo": "부분적으로는 찬성해."
+  },
+  "合": {
+    "word": "合図",
+    "example": "いつでも合図して。",
+    "meaningKo": "합치다",
+    "wordMeaningKo": "신호, 신호",
+    "exampleMeaningKo": "언제든지 신호해."
+  },
+  "市": {
+    "word": "市場",
+    "example": "市場に行く。",
+    "meaningKo": "시장",
+    "wordMeaningKo": "시장(개념)",
+    "exampleMeaningKo": "시장에 가다."
+  },
+  "内": {
+    "word": "内",
+    "example": "その内訳は？",
+    "meaningKo": "안",
+    "wordMeaningKo": "내부",
+    "exampleMeaningKo": "그 내역은?"
+  },
+  "相": {
+    "word": "相当",
+    "example": "相当痛みますか？",
+    "meaningKo": "상호",
+    "wordMeaningKo": "적합한, 적절한",
+    "exampleMeaningKo": "꽤 아프나요?"
+  },
+  "定": {
+    "word": "定期",
+    "example": "その島には定期便はない。",
+    "meaningKo": "정하다",
+    "wordMeaningKo": "정기, 정기편",
+    "exampleMeaningKo": "그 섬에는 정기편이 없습니다."
+  },
+  "回": {
+    "word": "回",
+    "example": "2回生です。",
+    "meaningKo": "번,회,돌다",
+    "wordMeaningKo": "횟수를 세는 단위",
+    "exampleMeaningKo": "2학년입니다."
+  },
+  "選": {
+    "word": "選手",
+    "example": "彼は野球選手だ。",
+    "meaningKo": "뽑다,선택",
+    "wordMeaningKo": "(1) 경기 선수 (2) 팀",
+    "exampleMeaningKo": "그는 야구 선수다."
+  },
+  "米": {
+    "word": "米",
+    "example": "お米はあるの？",
+    "meaningKo": "쌀,미국,미터",
+    "wordMeaningKo": "밥",
+    "exampleMeaningKo": "밥이 있어?"
+  },
+  "実": {
+    "word": "実",
+    "example": "パー確実だ。",
+    "meaningKo": "실제,열매",
+    "wordMeaningKo": "열매, 견과류, 씨앗, 내용, 좋은 결과",
+    "exampleMeaningKo": "완벽하게 확실해."
+  },
+  "関": {
+    "word": "関心",
+    "example": "政治に関心があるの？",
+    "meaningKo": "관계,관문",
+    "wordMeaningKo": "관심",
+    "exampleMeaningKo": "정치에 관심이 있어요?"
+  },
+  "決": {
+    "word": "決定",
+    "example": "決定は延期された。",
+    "meaningKo": "결정,정하다",
+    "wordMeaningKo": "결정",
+    "exampleMeaningKo": "결정이 연기되었어요."
+  },
+  "全": {
+    "word": "全",
+    "example": "全くですね。",
+    "meaningKo": "전부,완전",
+    "wordMeaningKo": "모두, 전체",
+    "exampleMeaningKo": "전혀 그렇네요."
+  },
+  "表": {
+    "word": "表",
+    "example": "いい表現だね。",
+    "meaningKo": "표면,표",
+    "wordMeaningKo": "표, 차트",
+    "exampleMeaningKo": "좋은 표현이네요."
+  },
+  "戦": {
+    "word": "戦い",
+    "example": "戦いに勝つ。",
+    "meaningKo": "전쟁",
+    "wordMeaningKo": "싸움, 투쟁",
+    "exampleMeaningKo": "싸움에서 이기다."
+  },
+  "経": {
+    "word": "経つ",
+    "example": "時が経つのは早い。",
+    "meaningKo": "경",
+    "wordMeaningKo": "시간이 흐르다",
+    "exampleMeaningKo": "시간이 빨리 지나간다."
+  },
+  "最": {
+    "word": "最も",
+    "example": "清潔は敬神に最も近い。",
+    "meaningKo": "최상",
+    "wordMeaningKo": "가장, 극도로",
+    "exampleMeaningKo": "청결은 신에 대한 경외에 가장 가깝다."
+  },
+  "現": {
+    "word": "現す",
+    "example": "いつか私の夢は実現する。",
+    "meaningKo": "현재",
+    "wordMeaningKo": "나타내다, 나타내다",
+    "exampleMeaningKo": "언젠가 내 꿈이 실현될 것이다."
+  },
+  "調": {
+    "word": "調子",
+    "example": "その調子だ。",
+    "meaningKo": "조율",
+    "wordMeaningKo": "상태, 분위기, 음조",
+    "exampleMeaningKo": "그 상태로 해."
+  },
+  "化": {
+    "word": "化学",
+    "example": "化学が嫌いだ。",
+    "meaningKo": "변화",
+    "wordMeaningKo": "화학",
+    "exampleMeaningKo": "화학이 싫어."
+  },
+  "当": {
+    "word": "当時",
+    "example": "当時私は学生だった。",
+    "meaningKo": "적합",
+    "wordMeaningKo": "그때, 그 시절",
+    "exampleMeaningKo": "그때 나는 학생이었다."
+  },
+  "約": {
+    "word": "約",
+    "example": "約束するよ。",
+    "meaningKo": "약속",
+    "wordMeaningKo": "약, 대략, 몇",
+    "exampleMeaningKo": "약속할게."
+  },
+  "首": {
+    "word": "首相",
+    "example": "首相は明日放送に出る。",
+    "meaningKo": "목, 노래수",
+    "wordMeaningKo": "수상",
+    "exampleMeaningKo": "수상이 내일 방송에 출연한다."
+  },
+  "法": {
+    "word": "法",
+    "example": "釈迦に説法。",
+    "meaningKo": "방법, 법",
+    "wordMeaningKo": "법 (법률명)",
+    "exampleMeaningKo": "석가에게 법을 설하다."
+  },
+  "性": {
+    "word": "性",
+    "example": "習い性となる。",
+    "meaningKo": "성, 성별",
+    "wordMeaningKo": "성격, 본성",
+    "exampleMeaningKo": "습관이 되다."
+  },
+  "要": {
+    "word": "要求",
+    "example": "彼は金を要求した。",
+    "meaningKo": "필요, 핵심",
+    "wordMeaningKo": "요구, 청구",
+    "exampleMeaningKo": "그는 돈을 요구했다."
+  },
+  "制": {
+    "word": "制度",
+    "example": "彼らはその制度を改めた。",
+    "meaningKo": "제도, 법",
+    "wordMeaningKo": "제도",
+    "exampleMeaningKo": "그들은 그 제도를 개선했다."
+  },
+  "治": {
+    "word": "治る",
+    "example": "早く治るといいですね。",
+    "meaningKo": "치, 다스림",
+    "wordMeaningKo": "낫다, 회복되다",
+    "exampleMeaningKo": "빨리 낫기를 바래요."
+  },
+  "務": {
+    "word": "務め",
+    "example": "彼は市長を務めた。",
+    "meaningKo": "업무, 의무",
+    "wordMeaningKo": "봉사, 의무",
+    "exampleMeaningKo": "그는 시장직을 맡았다."
+  },
+  "成": {
+    "word": "成る",
+    "example": "成せば成る。",
+    "meaningKo": "이루다, 됨",
+    "wordMeaningKo": "이루어지다",
+    "exampleMeaningKo": "행하면 이루어진다."
+  },
+  "期": {
+    "word": "期待",
+    "example": "期待しないでね。",
+    "meaningKo": "기간, 시기",
+    "wordMeaningKo": "기대, 예감, 희망",
+    "exampleMeaningKo": "기대하지 마세요."
+  },
+  "取": {
+    "word": "取れる",
+    "example": "トムと連絡が取れる？",
+    "meaningKo": "가져오다, 취하다",
+    "wordMeaningKo": "떨어지다, 벗겨지다, 제거되다",
+    "exampleMeaningKo": "톰과 연락이 되나요?"
+  },
+  "都": {
+    "word": "都",
+    "example": "工業都市です。",
+    "meaningKo": "수도, 모두",
+    "wordMeaningKo": "수도",
+    "exampleMeaningKo": "공업 도시입니다."
+  },
+  "和": {
+    "word": "平和",
+    "example": "平和だなぁ。",
+    "meaningKo": "화합, 일본풍",
+    "wordMeaningKo": "평화",
+    "exampleMeaningKo": "평화롭다."
+  },
+  "機": {
+    "word": "機嫌",
+    "example": "ご機嫌よう。",
+    "meaningKo": "기계, 기회",
+    "wordMeaningKo": "기분, 컨디션",
+    "exampleMeaningKo": "기분 어때요? (안녕하세요)"
+  },
+  "平": {
+    "word": "平ら",
+    "example": "どうぞ、お平らに。",
+    "meaningKo": "평평함, 평화",
+    "wordMeaningKo": "평평함, 고요함",
+    "exampleMeaningKo": "편히 쉬세요."
+  },
+  "加": {
+    "word": "加減",
+    "example": "いい加減にして！",
+    "meaningKo": "더하다, 가하다",
+    "wordMeaningKo": "가감, 배려",
+    "exampleMeaningKo": "적당히 해줘!"
+  },
+  "受": {
+    "word": "受け取る",
+    "example": "まじめに受け取るな。",
+    "meaningKo": "받다, 수용하다",
+    "wordMeaningKo": "받다, 수령하다",
+    "exampleMeaningKo": "진지하게 받아들이지 마."
+  },
+  "続": {
+    "word": "続き",
+    "example": "悪事続きだ。",
+    "meaningKo": "계속·연속·속편",
+    "wordMeaningKo": "속편, 계속",
+    "exampleMeaningKo": "악행이 계속된다."
+  },
+  "進": {
+    "word": "進学",
+    "example": "トムは大学進学を決意した。",
+    "meaningKo": "전진·진행·승진",
+    "wordMeaningKo": "대학 진학",
+    "exampleMeaningKo": "톰은 대학 진학을 결심했다."
+  },
+  "数": {
+    "word": "数",
+    "example": "30数えて。",
+    "meaningKo": "숫자·수·운명·법칙",
+    "wordMeaningKo": "숫자, 도수",
+    "exampleMeaningKo": "30번 세어 봐."
+  },
+  "記": {
+    "word": "記事",
+    "example": "この記事は嘘八百だ。",
+    "meaningKo": "기록·서술·이야기",
+    "wordMeaningKo": "기사, 보도, 기록",
+    "exampleMeaningKo": "이 기사는 거짓투성이야."
+  },
+  "初": {
+    "word": "初めて",
+    "example": "初めてだろ？",
+    "meaningKo": "처음·시작",
+    "wordMeaningKo": "처음으로",
+    "exampleMeaningKo": "처음이잖아?"
+  },
+  "指": {
+    "word": "指す",
+    "example": "磁石の針は北を指す。",
+    "meaningKo": "손가락·지시·측정",
+    "wordMeaningKo": "가리키다, 꽂다",
+    "exampleMeaningKo": "자석 바늘은 북쪽을 가리킨다."
+  },
+  "権": {
+    "word": "権利",
+    "example": "権利を行使する。",
+    "meaningKo": "권력·권한·권리",
+    "wordMeaningKo": "권리, 특권",
+    "exampleMeaningKo": "권리를 행사하다."
+  },
+  "支": {
+    "word": "支出",
+    "example": "彼は支出を計算した。",
+    "meaningKo": "가지·지지·지탱",
+    "wordMeaningKo": "지출, 비용",
+    "exampleMeaningKo": "그는 지출을 계산했다."
+  },
+  "産": {
+    "word": "土産",
+    "example": "お土産何買ったの？",
+    "meaningKo": "생산물, 출산, 재산",
+    "wordMeaningKo": "선물, 기념품",
+    "exampleMeaningKo": "선물 뭐 샀어?"
+  },
+  "点": {
+    "word": "欠点",
+    "example": "彼は欠点だらけだ。",
+    "meaningKo": "점, 자국, 소수점",
+    "wordMeaningKo": "결점, 흠",
+    "exampleMeaningKo": "그는 결점투성이야."
+  },
+  "報": {
+    "word": "報告",
+    "example": "報告書をよく調べた。",
+    "meaningKo": "보고, 뉴스, 보상",
+    "wordMeaningKo": "보고",
+    "exampleMeaningKo": "보고서를 잘 조사했다."
+  },
+  "済": {
+    "word": "済ませる",
+    "example": "英語の辞書なしで済ませることができますか。",
+    "meaningKo": "끝냄, 해결, 면책",
+    "wordMeaningKo": "끝내다",
+    "exampleMeaningKo": "영문 사전 없이 끝낼 수 있나요."
+  },
+  "活": {
+    "word": "活動",
+    "example": "就職活動はどう？",
+    "meaningKo": "활기, 부활, 생존",
+    "wordMeaningKo": "활동",
+    "exampleMeaningKo": "취업 활동은 어때?"
+  },
+  "原": {
+    "word": "原",
+    "example": "何が原因ですか。",
+    "meaningKo": "원래, 초원, 평야",
+    "wordMeaningKo": "원(原)",
+    "exampleMeaningKo": "원인은 무엇입니까?"
+  },
+  "共": {
+    "word": "共に",
+    "example": "輝ける魂と共に。",
+    "meaningKo": "함께, 모두, 양쪽",
+    "wordMeaningKo": "함께하다, 참여하다",
+    "exampleMeaningKo": "빛나는 영혼과 함께."
+  },
+  "得": {
+    "word": "得る",
+    "example": "それもあり得る。",
+    "meaningKo": "얻다, 이익, 획득",
+    "wordMeaningKo": "얻다, 얻다, 이기다",
+    "exampleMeaningKo": "그것도 가능할 수 있다."
+  },
+  "解": {
+    "word": "解く",
+    "example": "その問題を解くのは難しい。",
+    "meaningKo": "풀다, 해명, 이해",
+    "wordMeaningKo": "풀다",
+    "exampleMeaningKo": "그 문제를 푸는 건 어렵다."
+  },
+  "交": {
+    "word": "交換",
+    "example": "誰と誰を交換する？",
+    "meaningKo": "교류, 섞이다",
+    "wordMeaningKo": "교환",
+    "exampleMeaningKo": "누구와 누구를 교환할까?"
+  },
+  "資": {
+    "word": "資本",
+    "example": "健康が彼の資本だ。",
+    "meaningKo": "자본, 자원",
+    "wordMeaningKo": "자금, 자본",
+    "exampleMeaningKo": "건강이 그의 자본이다."
+  },
+  "予": {
+    "word": "予報",
+    "example": "予報通り、雪が降った。",
+    "meaningKo": "미리, 나",
+    "wordMeaningKo": "예보, 예측",
+    "exampleMeaningKo": "예보대로 눈이 내렸다."
+  },
+  "向": {
+    "word": "向く",
+    "example": "足の向くままに歩いた。",
+    "meaningKo": "향하다",
+    "wordMeaningKo": "방향, 맞다, 넘다",
+    "exampleMeaningKo": "발 가는 대로 걸었다."
+  },
+  "際": {
+    "word": "際",
+    "example": "際どかった。",
+    "meaningKo": "때",
+    "wordMeaningKo": "경계, 때, 위기",
+    "exampleMeaningKo": "위험했다."
+  },
+  "勝": {
+    "word": "勝ち",
+    "example": "トムの勝ち。",
+    "meaningKo": "승리",
+    "wordMeaningKo": "승리",
+    "exampleMeaningKo": "톰의 승리입니다."
+  },
+  "面": {
+    "word": "面",
+    "example": "泣き面に蜂。",
+    "meaningKo": "얼굴",
+    "wordMeaningKo": "얼굴, 표면",
+    "exampleMeaningKo": "눈물바람에 말벌이 몰아친다."
+  },
+  "告": {
+    "word": "報告",
+    "example": "報告書をよく調べた。",
+    "meaningKo": "알리다",
+    "wordMeaningKo": "보고, 정보",
+    "exampleMeaningKo": "보고서를 잘 조사했다."
+  },
+  "反": {
+    "word": "反抗",
+    "example": "イヌは飼い主に反抗した。",
+    "meaningKo": "반",
+    "wordMeaningKo": "반대, 저항",
+    "exampleMeaningKo": "개가 주인에게 반항했다."
+  },
+  "判": {
+    "word": "判断",
+    "example": "彼は判断が正確だ。",
+    "meaningKo": "판단",
+    "wordMeaningKo": "판단",
+    "exampleMeaningKo": "그는 판단이 정확하다."
+  },
+  "認": {
+    "word": "認める",
+    "example": "それは認める。",
+    "meaningKo": "인정",
+    "wordMeaningKo": "인정하다, 인정",
+    "exampleMeaningKo": "그것은 인정할 만하다."
+  },
+  "参": {
+    "word": "参加",
+    "example": "参加したい。",
+    "meaningKo": "참가",
+    "wordMeaningKo": "참가",
+    "exampleMeaningKo": "참가하고 싶어요."
+  },
+  "利": {
+    "word": "利口",
+    "example": "お利口さんね。",
+    "meaningKo": "이익",
+    "wordMeaningKo": "총명한",
+    "exampleMeaningKo": "총명한 아이네."
+  },
+  "組": {
+    "word": "組",
+    "example": "この番組見る？",
+    "meaningKo": "구성",
+    "wordMeaningKo": "반, 그룹, 팀, 세트",
+    "exampleMeaningKo": "이 프로그램 볼래?"
+  },
+  "信": {
+    "word": "信仰",
+    "example": "信仰は山をも動かす。",
+    "meaningKo": "신뢰",
+    "wordMeaningKo": "신앙, 믿음, 신조",
+    "exampleMeaningKo": "신앙은 산도 움직인다."
+  },
+  "在": {
+    "word": "存在",
+    "example": "神は存在する。",
+    "meaningKo": "있음",
+    "wordMeaningKo": "존재, 실재",
+    "exampleMeaningKo": "신은 존재한다."
+  },
+  "件": {
+    "word": "事件",
+    "example": "事件は幕を閉じた。",
+    "meaningKo": "사건",
+    "wordMeaningKo": "사건, 사고",
+    "exampleMeaningKo": "사건은 막을 내렸다."
+  },
+  "側": {
+    "word": "側",
+    "example": "右側通行です。",
+    "meaningKo": "측면",
+    "wordMeaningKo": "측면, 가장자리, 제3자",
+    "exampleMeaningKo": "우측 통행입니다."
+  },
+  "任": {
+    "word": "任せる",
+    "example": "君に任せるよ。",
+    "meaningKo": "책임",
+    "wordMeaningKo": "맡기다, 맡기다",
+    "exampleMeaningKo": "네게 맡길게."
+  },
+  "引": {
+    "word": "引用",
+    "example": "引用元はどこですか？",
+    "meaningKo": "당기다",
+    "wordMeaningKo": "인용, 인용문",
+    "exampleMeaningKo": "인용 출처는 어디입니까?"
+  },
+  "求": {
+    "word": "求める",
+    "example": "名声を求めるな。",
+    "meaningKo": "구하다",
+    "wordMeaningKo": "구하다, 요구하다",
+    "exampleMeaningKo": "명성을 추구하지 마라."
+  },
+  "所": {
+    "word": "所為",
+    "example": "それは実際君の所為である。",
+    "meaningKo": "장소",
+    "wordMeaningKo": "원인, 이유, 잘못",
+    "exampleMeaningKo": "그건 실제로 네 탓이야."
+  },
+  "次": {
+    "word": "次々",
+    "example": "次々に亡くなった。",
+    "meaningKo": "다음",
+    "wordMeaningKo": "연달아, 하나씩",
+    "exampleMeaningKo": "연속으로 사망했다."
+  },
+  "昨": {
+    "word": "昨",
+    "example": "昨夜の写真よ。",
+    "meaningKo": "어제",
+    "wordMeaningKo": "지난 (년)",
+    "exampleMeaningKo": "어제 사진이야."
+  },
+  "論": {
+    "word": "論争",
+    "example": "ビルは論争が巧みだ。",
+    "meaningKo": "논의",
+    "wordMeaningKo": "논쟁, 논쟁",
+    "exampleMeaningKo": "빌은 논쟁을 잘해."
+  },
+  "官": {
+    "word": "警官",
+    "example": "私は警官だ。",
+    "meaningKo": "관청",
+    "wordMeaningKo": "경찰관",
+    "exampleMeaningKo": "나는 경찰관이다."
+  },
+  "増": {
+    "word": "増す",
+    "example": "離れてみれば尊敬は増す。",
+    "meaningKo": "증가",
+    "wordMeaningKo": "증가하다, 더하다",
+    "exampleMeaningKo": "멀리서 보면 존경이 더 깊어진다."
+  },
+  "係": {
+    "word": "係",
+    "example": "無関係です。",
+    "meaningKo": "담당",
+    "wordMeaningKo": "담당, 관계",
+    "exampleMeaningKo": "무관합니다."
+  },
+  "感": {
+    "word": "感じ",
+    "example": "何か感じる。",
+    "meaningKo": "감정",
+    "wordMeaningKo": "느낌, 감각",
+    "exampleMeaningKo": "무언가 느낍니다."
+  },
+  "情": {
+    "word": "情報",
+    "example": "彼は情報通だ。",
+    "meaningKo": "정사",
+    "wordMeaningKo": "정보, (군사) 정보",
+    "exampleMeaningKo": "그는 정보에 밝은 사람이다."
+  },
+  "投": {
+    "word": "投票",
+    "example": "投票に行く？",
+    "meaningKo": "투척",
+    "wordMeaningKo": "투표, 여론 조사",
+    "exampleMeaningKo": "투표하러 갈래?"
+  },
+  "示": {
+    "word": "示す",
+    "example": "コンパスは北を示す。",
+    "meaningKo": "보이다",
+    "wordMeaningKo": "보이다, 나타내다",
+    "exampleMeaningKo": "나침반은 북쪽을 가리킨다."
+  },
+  "変": {
+    "word": "変化",
+    "example": "変化の時でした。",
+    "meaningKo": "변하다",
+    "wordMeaningKo": "요괴, 귀신",
+    "exampleMeaningKo": "변화의 시기였습니다."
+  },
+  "打": {
+    "word": "打つ",
+    "example": "打つ手がないね。",
+    "meaningKo": "치다",
+    "wordMeaningKo": "치다",
+    "exampleMeaningKo": "할 수 있는 수가 없네."
+  },
+  "直": {
+    "word": "直",
+    "example": "見直したよ。",
+    "meaningKo": "곧",
+    "wordMeaningKo": "바로, 정확히",
+    "exampleMeaningKo": "다시 봤어."
+  },
+  "両": {
+    "word": "両替",
+    "example": "両替したいんですが。",
+    "meaningKo": "양",
+    "wordMeaningKo": "환전, 돈 교환",
+    "exampleMeaningKo": "환전하고 싶은데요."
+  },
+  "式": {
+    "word": "式",
+    "example": "結婚式はいつ？",
+    "meaningKo": "식",
+    "wordMeaningKo": "방정식, 공식, 의식",
+    "exampleMeaningKo": "결혼식은 언제예요?"
+  },
+  "確": {
+    "word": "確実",
+    "example": "パー確実だ。",
+    "meaningKo": "확실",
+    "wordMeaningKo": "확실성, 신뢰성",
+    "exampleMeaningKo": "완전히 확실해."
+  },
+  "果": {
+    "word": "効果",
+    "example": "効果は同じです。",
+    "meaningKo": "과일",
+    "wordMeaningKo": "효과, 효력",
+    "exampleMeaningKo": "효과가 동일합니다."
+  },
+  "容": {
+    "word": "容易",
+    "example": "減量は容易くない。",
+    "meaningKo": "담다모습",
+    "wordMeaningKo": "쉬운, 간단한, 평범한",
+    "exampleMeaningKo": "체중 감량은 쉽지 않다."
+  },
+  "必": {
+    "word": "必死",
+    "example": "彼は必死に逃げた。",
+    "meaningKo": "반드시",
+    "wordMeaningKo": "죽음, 절박함, 필연적 결과",
+    "exampleMeaningKo": "그는 필사적으로 도망쳤다."
+  },
+  "演": {
+    "word": "演奏",
+    "example": "フンパを演奏しなさい。",
+    "meaningKo": "연기공연",
+    "wordMeaningKo": "음악 연주",
+    "exampleMeaningKo": "분파를 연주해라."
+  },
+  "歳": {
+    "word": "二十歳",
+    "example": "ローリーは二十歳だ。",
+    "meaningKo": "나이세",
+    "wordMeaningKo": "스무 살",
+    "exampleMeaningKo": "로리는 스무 살이다."
+  },
+  "争": {
+    "word": "論争",
+    "example": "ビルは論争が巧みだ。",
+    "meaningKo": "다투다쟁",
+    "wordMeaningKo": "논쟁, 논쟁",
+    "exampleMeaningKo": "빌은 논쟁을 잘한다."
+  },
+  "談": {
+    "word": "冗談",
+    "example": "冗談だろう！",
+    "meaningKo": "이야기토론",
+    "wordMeaningKo": "농담, 장난",
+    "exampleMeaningKo": "장난이야!"
+  },
+  "能": {
+    "word": "能",
+    "example": "可能ですか？",
+    "meaningKo": "능력재능",
+    "wordMeaningKo": "숙련된, 적절히",
+    "exampleMeaningKo": "가능합니까?"
+  },
+  "位": {
+    "word": "位",
+    "example": "王位を継ぐ。",
+    "meaningKo": "위계자리",
+    "wordMeaningKo": "등급, 위계, 약간의",
+    "exampleMeaningKo": "왕위를 계승하다."
+  },
+  "置": {
+    "word": "位置",
+    "example": "彼の正位置はサードだ。",
+    "meaningKo": "배치, 두다, 놓다",
+    "wordMeaningKo": "장소, 상황, 위치, 위치",
+    "exampleMeaningKo": "그의 제자리(적격)는 3루야."
+  },
+  "流": {
+    "word": "流す",
+    "example": "電線は電気を流す。",
+    "meaningKo": "흐름, 흘리다",
+    "wordMeaningKo": "배수하다, 띄우다, 흘리다, 순항",
+    "exampleMeaningKo": "전선이 전기를 흐르게 한다."
+  },
+  "格": {
+    "word": "格好",
+    "example": "格好つけるな。",
+    "meaningKo": "격위, 품격, 자격, 성격, 격",
+    "wordMeaningKo": "모습, 형식, 적격",
+    "exampleMeaningKo": "격식 차리지 마라."
+  },
+  "疑": {
+    "word": "疑う",
+    "example": "疑う余地はない。",
+    "meaningKo": "의심, 의구, 불신, 의문",
+    "wordMeaningKo": "의심하다, 의구하다",
+    "exampleMeaningKo": "의문의 여지는 없다."
+  },
+  "過": {
+    "word": "過去",
+    "example": "過去は過去。",
+    "meaningKo": "지남·과오",
+    "wordMeaningKo": "과거",
+    "exampleMeaningKo": "과거는过去了."
+  },
+  "局": {
+    "word": "局",
+    "example": "結局失敗するさ。",
+    "meaningKo": "국면·국부",
+    "wordMeaningKo": "국",
+    "exampleMeaningKo": "결국 실패한다."
+  },
+  "放": {
+    "word": "放す",
+    "example": "ロープを放すな。",
+    "meaningKo": "놓다·방출",
+    "wordMeaningKo": "놓다",
+    "exampleMeaningKo": "밧줄을 놓지 마라."
+  },
+  "常": {
+    "word": "常に",
+    "example": "火は常に危険だ。",
+    "meaningKo": "평상·항상",
+    "wordMeaningKo": "항상",
+    "exampleMeaningKo": "불은 항상 위험하다."
+  },
+  "状": {
+    "word": "状態",
+    "example": "最高の状態ですね。",
+    "meaningKo": "상태, 형편, 모양",
+    "wordMeaningKo": "상태, 상황",
+    "exampleMeaningKo": "최고의 상태네요."
+  },
+  "球": {
+    "word": "球",
+    "example": "地球は丸い。",
+    "meaningKo": "공, 구",
+    "wordMeaningKo": "구, 구체, 공",
+    "exampleMeaningKo": "지구는 둥글다."
+  },
+  "職": {
+    "word": "職",
+    "example": "辞職します。",
+    "meaningKo": "직책, 직업",
+    "wordMeaningKo": "취업",
+    "exampleMeaningKo": "사직합니다."
+  },
+  "与": {
+    "word": "与える",
+    "example": "悪い本は害を与える。",
+    "meaningKo": "내주다, 참여",
+    "wordMeaningKo": "주다, 수여하다",
+    "exampleMeaningKo": "나쁜 책은 해를 끼친다."
+  },
+  "供": {
+    "word": "供給",
+    "example": "食料の供給は十分だ。",
+    "meaningKo": "바치다, 제공",
+    "wordMeaningKo": "공급, 제공",
+    "exampleMeaningKo": "식량 공급은 충분하다."
+  },
+  "役": {
+    "word": "役",
+    "example": "私は服役中だ。",
+    "meaningKo": "역할, 의무",
+    "wordMeaningKo": "역할, 봉사, 직책",
+    "exampleMeaningKo": "나는 복역 중이다."
+  },
+  "構": {
+    "word": "構う",
+    "example": "もう構うのはやめてくれよ。",
+    "meaningKo": "구조, 자세",
+    "wordMeaningKo": "걱정하다",
+    "exampleMeaningKo": "もう構うのはやめてくれよ.もう 신경 쓰지 마."
+  },
+  "割": {
+    "word": "割る",
+    "example": "鏡を割るな。",
+    "meaningKo": "나누다, 비율",
+    "wordMeaningKo": "나누다, 자르다, 부수다, 반으로 나누다",
+    "exampleMeaningKo": "거울을 깨지 마라."
+  },
+  "費": {
+    "word": "費用",
+    "example": "それは費用の問題だ。",
+    "meaningKo": "비용",
+    "wordMeaningKo": "비용",
+    "exampleMeaningKo": "그건 비용 문제야."
+  },
+  "付": {
+    "word": "付ける",
+    "example": "塩で味を付ける。",
+    "meaningKo": "부착",
+    "wordMeaningKo": "붙이다, 추가하다",
+    "exampleMeaningKo": "소금으로 간을 맞춘다."
+  },
+  "由": {
+    "word": "経由",
+    "example": "経由地はどこですか。",
+    "meaningKo": "이유",
+    "wordMeaningKo": "경유",
+    "exampleMeaningKo": "경유지는 어디입니까?"
+  },
+  "説": {
+    "word": "説",
+    "example": "説明させて。",
+    "meaningKo": "설",
+    "wordMeaningKo": "이론",
+    "exampleMeaningKo": "설명하게 해줘."
+  },
+  "難": {
+    "word": "困難",
+    "example": "とても困難だった。",
+    "meaningKo": "어려움",
+    "wordMeaningKo": "어려움, 곤경",
+    "exampleMeaningKo": "매우 어려웠다."
+  },
+  "優": {
+    "word": "優勝",
+    "example": "優勝したよ。",
+    "meaningKo": "우수",
+    "wordMeaningKo": "전체 승리",
+    "exampleMeaningKo": "우승했어요."
+  },
+  "夫": {
+    "word": "夫人",
+    "example": "彼は夫人のいのままだった。",
+    "meaningKo": "남편",
+    "wordMeaningKo": "아내, 부인",
+    "exampleMeaningKo": "그는 부인의 뜻대로 했다."
+  },
+  "収": {
+    "word": "収入",
+    "example": "収入が１０％減った。",
+    "meaningKo": "수입",
+    "wordMeaningKo": "수입, 수익",
+    "exampleMeaningKo": "수입이 10% 줄었다."
+  },
+  "断": {
+    "word": "断る",
+    "example": "僕だったら、断るな。",
+    "meaningKo": "끊다, 단정",
+    "wordMeaningKo": "거절하다, 사양하다",
+    "exampleMeaningKo": "나라면 거절할 거야."
+  },
+  "石": {
+    "word": "石油",
+    "example": "あの国は石油が豊富だ。",
+    "meaningKo": "돌",
+    "wordMeaningKo": "석유, 원유, 등유",
+    "exampleMeaningKo": "그 나라는 석유가 풍부하다."
+  },
+  "違": {
+    "word": "違い",
+    "example": "間違いない！",
+    "meaningKo": "다름, 차이",
+    "wordMeaningKo": "차이, 불일치",
+    "exampleMeaningKo": "틀림없어!"
+  },
+  "消": {
+    "word": "消費",
+    "example": "価格は消費税込みです。",
+    "meaningKo": "소멸, 끄다",
+    "wordMeaningKo": "소비",
+    "exampleMeaningKo": "가격은 부가세 포함입니다."
+  },
+  "神": {
+    "word": "神",
+    "example": "神はゲイだ。",
+    "meaningKo": "신, 영혼",
+    "wordMeaningKo": "신",
+    "exampleMeaningKo": "신은 게이다."
+  },
+  "番": {
+    "word": "一番",
+    "example": "一番乗りだ。",
+    "meaningKo": "차례, 번호",
+    "wordMeaningKo": "가장, 첫 번째",
+    "exampleMeaningKo": "가장 먼저 타다."
+  },
+  "規": {
+    "word": "規則",
+    "example": "規則に逆らうな。",
+    "meaningKo": "규범, 기준",
+    "wordMeaningKo": "규정",
+    "exampleMeaningKo": "규칙에 거스르지 마라."
+  },
+  "術": {
+    "word": "手術",
+    "example": "手術は待てない。",
+    "meaningKo": "기술, 술책",
+    "wordMeaningKo": "수술",
+    "exampleMeaningKo": "수술은 기다릴 수 없다."
+  },
+  "備": {
+    "word": "備える",
+    "example": "最悪に備える必要がある。",
+    "meaningKo": "장비, 준비",
+    "wordMeaningKo": "준비하다, 갖추다",
+    "exampleMeaningKo": "최악의 상황에 대비해야 한다."
+  },
+  "宅": {
+    "word": "宅",
+    "example": "早く帰宅しろ。",
+    "meaningKo": "집, 거주",
+    "wordMeaningKo": "집, 가옥, 남편",
+    "exampleMeaningKo": "빨리 집에 돌아와."
+  },
+  "害": {
+    "word": "害",
+    "example": "有害ですか。",
+    "meaningKo": "해, 피해",
+    "wordMeaningKo": "해, 해악, 악영향, 피해",
+    "exampleMeaningKo": "유해합니까?"
+  },
+  "配": {
+    "word": "配達",
+    "example": "配達は有料ですか。",
+    "meaningKo": "배분, 처분",
+    "wordMeaningKo": "배달",
+    "exampleMeaningKo": "배달은 유료인가요?"
+  },
+  "警": {
+    "word": "警告",
+    "example": "トムに警告する。",
+    "meaningKo": "경계, 경고",
+    "wordMeaningKo": "경고",
+    "exampleMeaningKo": "톰에게 경고하다."
+  },
+  "育": {
+    "word": "育つ",
+    "example": "植物は土壌で育つ。",
+    "meaningKo": "양육, 성장",
+    "wordMeaningKo": "기르다, 자라다",
+    "exampleMeaningKo": "식물은 토양에서 자란다."
+  },
+  "席": {
+    "word": "出席",
+    "example": "出席したい。",
+    "meaningKo": "자리, 좌석",
+    "wordMeaningKo": "출석",
+    "exampleMeaningKo": "출석하고 싶다."
+  },
+  "訪": {
+    "word": "訪問",
+    "example": "訪問者は歓迎する。",
+    "meaningKo": "방문, 조회",
+    "wordMeaningKo": "방문",
+    "exampleMeaningKo": "방문자는 환영한다."
+  },
+  "乗": {
+    "word": "乗客",
+    "example": "乗客は何人ですか？",
+    "meaningKo": "타다",
+    "wordMeaningKo": "승객",
+    "exampleMeaningKo": "승객은 몇 명입니까?"
+  },
+  "残": {
+    "word": "残す",
+    "example": "仕事はやり残すなよ。",
+    "meaningKo": "남다",
+    "wordMeaningKo": "남기다, 유산으로 남기다",
+    "exampleMeaningKo": "일은 남기지 마."
+  },
+  "想": {
+    "word": "想像",
+    "example": "想像つくよ。",
+    "meaningKo": "생각",
+    "wordMeaningKo": "상상, 추측",
+    "exampleMeaningKo": "상상이 가요."
+  },
+  "声": {
+    "word": "声",
+    "example": "声援がやんだ。",
+    "meaningKo": "소리",
+    "wordMeaningKo": "목소리",
+    "exampleMeaningKo": "성원이 그쳤다."
+  },
+  "念": {
+    "word": "記念",
+    "example": "革命記念日万歳！",
+    "meaningKo": "바람",
+    "wordMeaningKo": "기념, 기억",
+    "exampleMeaningKo": "혁명 기념일 만세!"
+  },
+  "助": {
+    "word": "助手",
+    "example": "トムは私の助手です。",
+    "meaningKo": "돕다",
+    "wordMeaningKo": "보조원, 도우미, 조수, 튜터",
+    "exampleMeaningKo": "톰은 제 보조원입니다."
+  },
+  "労": {
+    "word": "労働",
+    "example": "彼は重労働に向いている。",
+    "meaningKo": "노력",
+    "wordMeaningKo": "수작업, 노역",
+    "exampleMeaningKo": "그는 무거운 노역에 적합하다."
+  },
+  "例": {
+    "word": "例",
+    "example": "これは例文です。",
+    "meaningKo": "예",
+    "wordMeaningKo": "예시",
+    "exampleMeaningKo": "이것은 예문입니다."
+  },
+  "然": {
+    "word": "偶然",
+    "example": "偶然に頼るな。",
+    "meaningKo": "그런 것/그래/만약/그 경우",
+    "wordMeaningKo": "우연히",
+    "exampleMeaningKo": "우연에 기대지 마라."
+  },
+  "限": {
+    "word": "限る",
+    "example": "夏はスイカに限る！",
+    "meaningKo": "제한/금지/최선",
+    "wordMeaningKo": "~에 한정하다",
+    "exampleMeaningKo": "여름에는 수박이 최고야!"
+  },
+  "追": {
+    "word": "追う",
+    "example": "流行を追うな。",
+    "meaningKo": "뒤쫓다, 추구하다, 따르다",
+    "wordMeaningKo": "쫓다, 뒤따르다",
+    "exampleMeaningKo": "유행을 쫓지 마라."
+  },
+  "商": {
+    "word": "商人",
+    "example": "彼は有名な商人だ。",
+    "meaningKo": "거래/판매/상인",
+    "wordMeaningKo": "상인",
+    "exampleMeaningKo": "그는 유명한 상인이다."
+  },
+  "葉": {
+    "word": "葉",
+    "example": "若葉が茂る。",
+    "meaningKo": "잎/날/조각/평면",
+    "wordMeaningKo": "잎",
+    "exampleMeaningKo": "새순이 무성하게 우거진다."
+  },
+  "伝": {
+    "word": "伝統",
+    "example": "これは家族の伝統です。",
+    "meaningKo": "전달/전승/따름/보고",
+    "wordMeaningKo": "전통, 관습",
+    "exampleMeaningKo": "이것은 가족의 전통입니다."
+  },
+  "働": {
+    "word": "働き",
+    "example": "働きたくない。",
+    "meaningKo": "일하다",
+    "wordMeaningKo": "일, 노동",
+    "exampleMeaningKo": "일하고 싶지 않아."
+  },
+  "形": {
+    "word": "形",
+    "example": "あの人形怖い。",
+    "meaningKo": "모양/형태/양식",
+    "wordMeaningKo": "모양",
+    "exampleMeaningKo": "저 인형 무서워."
+  },
+  "景": {
+    "word": "景気",
+    "example": "景気が良い。",
+    "meaningKo": "경치, 풍경",
+    "wordMeaningKo": "경기, 상황",
+    "exampleMeaningKo": "경기가 좋다."
+  },
+  "落": {
+    "word": "落す",
+    "example": "そのコップを落すな。",
+    "meaningKo": "떨어지다, 낙",
+    "wordMeaningKo": "떨어뜨리다",
+    "exampleMeaningKo": "그 컵을 떨어뜨리지 마."
+  },
+  "好": {
+    "word": "好み",
+    "example": "好みの問題だ。",
+    "meaningKo": "좋다, 좋아하는",
+    "wordMeaningKo": "취향, 기호",
+    "exampleMeaningKo": "취향의 문제다."
+  },
+  "退": {
+    "word": "退屈",
+    "example": "退屈だな〜。",
+    "meaningKo": "물러나다, 퇴",
+    "wordMeaningKo": "지루함, 심심함",
+    "exampleMeaningKo": "지루하다~."
+  },
+  "頭": {
+    "word": "頭痛",
+    "example": "まだ頭痛い？",
+    "meaningKo": "머리, 두",
+    "wordMeaningKo": "두통",
+    "exampleMeaningKo": "아직 두통이 있어?"
+  },
+  "負": {
+    "word": "負け",
+    "example": "私の負けだ。",
+    "meaningKo": "지다, 부담",
+    "wordMeaningKo": "패배, 패전",
+    "exampleMeaningKo": "내 패배야."
+  },
+  "渡": {
+    "word": "渡す",
+    "example": "君に渡す物がある。",
+    "meaningKo": "건너다, 도",
+    "wordMeaningKo": "건네다",
+    "exampleMeaningKo": "너에게 건낼 게 있어."
+  },
+  "失": {
+    "word": "失う",
+    "example": "冷静さを失うな。",
+    "meaningKo": "잃다, 실",
+    "wordMeaningKo": "잃다, 버리다",
+    "exampleMeaningKo": "냉정함을 잃지 마라."
+  },
+  "差": {
+    "word": "差",
+    "example": "大差ないよ。",
+    "meaningKo": "차이",
+    "wordMeaningKo": "차이, 변화",
+    "exampleMeaningKo": "차이가 크지 않아."
+  },
+  "末": {
+    "word": "末",
+    "example": "よい週末を！",
+    "meaningKo": "끝",
+    "wordMeaningKo": "끝, 가루",
+    "exampleMeaningKo": "좋은 주말 보내세요!"
+  },
+  "守": {
+    "word": "守る",
+    "example": "約束は守るよ。",
+    "meaningKo": "수호",
+    "wordMeaningKo": "지키다, 준수하다",
+    "exampleMeaningKo": "약속은 꼭 지킬 거야."
+  },
+  "若": {
+    "word": "若い",
+    "example": "彼はまだ若い。",
+    "meaningKo": "만약",
+    "wordMeaningKo": "젊은",
+    "exampleMeaningKo": "그는 아직 젊다."
+  },
+  "種": {
+    "word": "種",
+    "example": "苦は楽の種。",
+    "meaningKo": "종류",
+    "wordMeaningKo": "씨앗, 재질, 원인",
+    "exampleMeaningKo": "고통은 즐거움의 씨앗이다."
+  },
+  "美": {
+    "word": "美人",
+    "example": "妹は美人だ。",
+    "meaningKo": "아름다움",
+    "wordMeaningKo": "아름다운 사람 (여자)",
+    "exampleMeaningKo": "동생은 예쁘다."
+  },
+  "命": {
+    "word": "命",
+    "example": "命をかけて！",
+    "meaningKo": "명령",
+    "wordMeaningKo": "명령, 생명, 운명",
+    "exampleMeaningKo": "목숨을 걸고!"
+  },
+  "福": {
+    "word": "幸福",
+    "example": "幸福って何？",
+    "meaningKo": "복",
+    "wordMeaningKo": "행복, 축복",
+    "exampleMeaningKo": "행복이란 무엇일까?"
+  },
+  "望": {
+    "word": "望み",
+    "example": "彼は望みを捨てた。",
+    "meaningKo": "바라다, 소원, 희망",
+    "wordMeaningKo": "소원, 바람, 기대",
+    "exampleMeaningKo": "그는 소원을 버렸다."
+  },
+  "非": {
+    "word": "非常",
+    "example": "彼は非常識だ。",
+    "meaningKo": "아니다, 잘못, 부정",
+    "wordMeaningKo": "긴급한, 특별한",
+    "exampleMeaningKo": "그는 상식에 맞지 않는 행동을 한다."
+  },
+  "観": {
+    "word": "観光",
+    "example": "私も観光客です。",
+    "meaningKo": "관찰, 보기, 모습",
+    "wordMeaningKo": "관광",
+    "exampleMeaningKo": "나도 관광객이에요."
+  },
+  "察": {
+    "word": "観察",
+    "example": "彼の観察は正確だ。",
+    "meaningKo": "헤아리다, 짐작, 판단",
+    "wordMeaningKo": "관찰, 조사",
+    "exampleMeaningKo": "그의 관찰은 정확하다."
+  },
+  "段": {
+    "word": "段",
+    "example": "値段聞いた？",
+    "meaningKo": "단계, 계단",
+    "wordMeaningKo": "계단, 등급, 단계",
+    "exampleMeaningKo": "가격 들었어?"
+  },
+  "横": {
+    "word": "横断",
+    "example": "彼は道路を横断した。",
+    "meaningKo": "가로, 옆, 수평",
+    "wordMeaningKo": "건너기",
+    "exampleMeaningKo": "그는 도로를 건넜다."
+  },
+  "深": {
+    "word": "深刻",
+    "example": "深刻な問題だな。",
+    "meaningKo": "깊다, 심하다",
+    "wordMeaningKo": "심각한",
+    "exampleMeaningKo": "심각한 문제이군."
+  },
+  "申": {
+    "word": "申し訳",
+    "example": "申し訳ありません。",
+    "meaningKo": "신묘, 오후 3~5시",
+    "wordMeaningKo": "사과",
+    "exampleMeaningKo": "죄송합니다."
+  },
+  "様": {
+    "word": "様",
+    "example": "お気の毒様。",
+    "meaningKo": "양식, 상황",
+    "wordMeaningKo": "방법, 종류",
+    "exampleMeaningKo": "불쌍하시군요."
+  },
+  "財": {
+    "word": "財産",
+    "example": "財産を相続する。",
+    "meaningKo": "재산, 재물",
+    "wordMeaningKo": "재산, 부, 자산",
+    "exampleMeaningKo": "재산을 상속하다."
+  },
+  "港": {
+    "word": "港",
+    "example": "空港まで行く。",
+    "meaningKo": "항구",
+    "wordMeaningKo": "항구",
+    "exampleMeaningKo": "공항까지 가다."
+  },
+  "識": {
+    "word": "常識",
+    "example": "一般常識よ。",
+    "meaningKo": "식별, 알다",
+    "wordMeaningKo": "상식",
+    "exampleMeaningKo": "일반 상식이야."
+  },
+  "呼": {
+    "word": "呼吸",
+    "example": "深呼吸をして。",
+    "meaningKo": "부르다",
+    "wordMeaningKo": "숨",
+    "exampleMeaningKo": "깊게 숨을 쉬어."
+  },
+  "達": {
+    "word": "達する",
+    "example": "資金を調達する。",
+    "meaningKo": "달성, 도달",
+    "wordMeaningKo": "달성하다",
+    "exampleMeaningKo": "자금을 마련하다."
+  },
+  "良": {
+    "word": "良",
+    "example": "良という漢字を覚える。",
+    "meaningKo": "좋음, 훌륭",
+    "wordMeaningKo": "한자",
+    "exampleMeaningKo": "'良'이라는 한자를 외워라."
+  },
+  "候": {
+    "word": "候補",
+    "example": "彼は立候補した。",
+    "meaningKo": "기후, 기다림",
+    "wordMeaningKo": "후보 자격",
+    "exampleMeaningKo": "그는 후보 등록을 했다."
+  },
+  "程": {
+    "word": "程",
+    "example": "身の程を知れ。",
+    "meaningKo": "정도, 법, 거리",
+    "wordMeaningKo": "정도, 범위, 한계",
+    "exampleMeaningKo": "자신의 처지를 알라."
+  },
+  "満": {
+    "word": "満足",
+    "example": "それで満足？",
+    "meaningKo": "차다, 충분",
+    "wordMeaningKo": "만족",
+    "exampleMeaningKo": "그것으로 만족해?"
+  },
+  "敗": {
+    "word": "失敗",
+    "example": "大失敗だね。",
+    "meaningKo": "패배, 실패",
+    "wordMeaningKo": "실패",
+    "exampleMeaningKo": "대실패야."
+  },
+  "値": {
+    "word": "値",
+    "example": "値札を見た。",
+    "meaningKo": "값, 가격",
+    "wordMeaningKo": "값, 가격, 비용",
+    "exampleMeaningKo": "가격표를 봤다."
+  },
+  "突": {
+    "word": "突然",
+    "example": "突然彼は死んだ。",
+    "meaningKo": "찌르다, 돌진",
+    "wordMeaningKo": "갑작스럽게",
+    "exampleMeaningKo": "그는 갑자기 죽었다."
+  },
+  "光": {
+    "word": "光景",
+    "example": "感動的な光景だった。",
+    "meaningKo": "빛, 광선",
+    "wordMeaningKo": "풍경, 광경",
+    "exampleMeaningKo": "감동적인 풍경이었다."
+  },
+  "路": {
+    "word": "道路",
+    "example": "「道路工事中」",
+    "meaningKo": "길, 도로",
+    "wordMeaningKo": "도로, 고속도로",
+    "exampleMeaningKo": "「도로 공사 중」"
+  },
+  "科": {
+    "word": "科目",
+    "example": "数学は難しい科目だ。",
+    "meaningKo": "과, 부서",
+    "wordMeaningKo": "과목, 과정",
+    "exampleMeaningKo": "수학은 어려운 과목이다."
+  },
+  "積": {
+    "word": "積もる",
+    "example": "距離を見積もるのは難しいな。",
+    "meaningKo": "부피,적,적재",
+    "wordMeaningKo": "쌓이다",
+    "exampleMeaningKo": "거리를 추정하는 건 어렵다."
+  },
+  "他": {
+    "word": "他",
+    "example": "他にご用は？",
+    "meaningKo": "다른,타",
+    "wordMeaningKo": "다른 (특히 장소나 사물)",
+    "exampleMeaningKo": "다른 용무가 있으세요?"
+  },
+  "処": {
+    "word": "処理",
+    "example": "すぐに処理します。",
+    "meaningKo": "처치,다루다,장소",
+    "wordMeaningKo": "처리, 처리 방법",
+    "exampleMeaningKo": "바로 처리하겠습니다."
+  },
+  "太": {
+    "word": "太陽",
+    "example": "太陽はいいね。",
+    "meaningKo": "굵다,크다",
+    "wordMeaningKo": "태양, 태양의",
+    "exampleMeaningKo": "태양이 좋네."
+  },
+  "客": {
+    "word": "乗客",
+    "example": "乗客は何人ですか？",
+    "meaningKo": "손님",
+    "wordMeaningKo": "승객",
+    "exampleMeaningKo": "승객은 몇 명입니까?"
+  },
+  "否": {
+    "word": "否",
+    "example": "否定はしません。",
+    "meaningKo": "부정",
+    "wordMeaningKo": "아니요, 부정",
+    "exampleMeaningKo": "부정하지 않습니다."
+  },
+  "師": {
+    "word": "医師",
+    "example": "私は医師です。",
+    "meaningKo": "스승",
+    "wordMeaningKo": "의사",
+    "exampleMeaningKo": "저는 의사입니다."
+  },
+  "登": {
+    "word": "登山",
+    "example": "登山が好きなんだ。",
+    "meaningKo": "오르다",
+    "wordMeaningKo": "등산",
+    "exampleMeaningKo": "등산을 좋아한다."
+  },
+  "易": {
+    "word": "容易",
+    "example": "減量は容易くない。",
+    "meaningKo": "쉬움,점괘",
+    "wordMeaningKo": "쉬운",
+    "exampleMeaningKo": "감량은 쉽지 않다."
+  },
+  "速": {
+    "word": "速度",
+    "example": "制限速度ってある？",
+    "meaningKo": "빠름",
+    "wordMeaningKo": "속도",
+    "exampleMeaningKo": "제한 속도가 있어?"
+  },
+  "存": {
+    "word": "存在",
+    "example": "神は存在する。",
+    "meaningKo": "존재,생각",
+    "wordMeaningKo": "존재, 존재함",
+    "exampleMeaningKo": "신은 존재한다."
+  },
+  "飛": {
+    "word": "飛行",
+    "example": "紙飛行機だよ。",
+    "meaningKo": "날다,비행",
+    "wordMeaningKo": "항공",
+    "exampleMeaningKo": "종이비행기야."
+  },
+  "殺": {
+    "word": "殺す",
+    "example": "寸鉄人を殺す。",
+    "meaningKo": "죽이다",
+    "wordMeaningKo": "죽이다",
+    "exampleMeaningKo": "짧은 칼날로도 사람을 죽일 수 있다."
+  },
+  "号": {
+    "word": "信号",
+    "example": "信号は青だ。",
+    "meaningKo": "호칭,번호",
+    "wordMeaningKo": "신호등, 신호",
+    "exampleMeaningKo": "신호는 파란색이다."
+  },
+  "単": {
+    "word": "単に",
+    "example": "簡単に直ったよ。",
+    "meaningKo": "단순,단독",
+    "wordMeaningKo": "단순히, 단지",
+    "exampleMeaningKo": "간단히 고쳤어."
+  },
+  "座": {
+    "word": "座席",
+    "example": "座席へ戻ろう。",
+    "meaningKo": "앉다,좌석",
+    "wordMeaningKo": "좌석",
+    "exampleMeaningKo": "좌석으로 돌아가자."
+  },
+  "破": {
+    "word": "破る",
+    "example": "決して約束を破るな。",
+    "meaningKo": "깨다, 위반하다, 격파하다",
+    "wordMeaningKo": "깨다, 위반하다, 격파하다",
+    "exampleMeaningKo": "절대 약속을 어기지 마라."
+  },
+  "除": {
+    "word": "除く",
+    "example": "急所を除くすべての攻撃を認める。",
+    "meaningKo": "제외하다",
+    "wordMeaningKo": "제거하다, 제외하다",
+    "exampleMeaningKo": "중요부를 제외한 모든 공격을 허용한다."
+  },
+  "完": {
+    "word": "完了",
+    "example": "すべて準備完了。",
+    "meaningKo": "완벽, 완료, 끝",
+    "wordMeaningKo": "완료, 결론",
+    "exampleMeaningKo": "모든 준비가 완료되었습니다."
+  },
+  "降": {
+    "word": "降ろす",
+    "example": "駅のところで降ろすよ。",
+    "meaningKo": "내리다, 내리다",
+    "wordMeaningKo": "내리다, 내리다",
+    "exampleMeaningKo": "역에서 내려줄게."
+  },
+  "責": {
+    "word": "責任",
+    "example": "私の責任です。",
+    "meaningKo": "책망하다",
+    "wordMeaningKo": "책임, 의무",
+    "exampleMeaningKo": "제 책임입니다."
+  },
+  "捕": {
+    "word": "捕まる",
+    "example": "警察に捕まるかと思った。",
+    "meaningKo": "잡다",
+    "wordMeaningKo": "잡히다",
+    "exampleMeaningKo": "경찰에 잡힐까 봐 걱정했어."
+  },
+  "危": {
+    "word": "危険",
+    "example": "火は危険です。",
+    "meaningKo": "위험하다",
+    "wordMeaningKo": "위험",
+    "exampleMeaningKo": "불은 위험합니다."
+  },
+  "給": {
+    "word": "給料",
+    "example": "給料はいくら？",
+    "meaningKo": "급료",
+    "wordMeaningKo": "급여, 월급",
+    "exampleMeaningKo": "급여는 얼마예요?"
+  },
+  "苦": {
+    "word": "苦労",
+    "example": "苦労するよ。",
+    "meaningKo": "고통",
+    "wordMeaningKo": "고생",
+    "exampleMeaningKo": "고생할 거야."
+  },
+  "迎": {
+    "word": "迎え",
+    "example": "迎えに来て。",
+    "meaningKo": "맞이",
+    "wordMeaningKo": "영접하는 사람",
+    "exampleMeaningKo": "영접하러 와."
+  },
+  "園": {
+    "word": "公園",
+    "example": "私は公園に歩く。",
+    "meaningKo": "동산",
+    "wordMeaningKo": "공원",
+    "exampleMeaningKo": "나는 공원에서 산책한다."
+  },
+  "具": {
+    "word": "具体",
+    "example": "具体的には何すんの。",
+    "meaningKo": "구구",
+    "wordMeaningKo": "구체적인",
+    "exampleMeaningKo": "구체적으로 무슨 뜻이야?"
+  },
+  "辞": {
+    "word": "辞める",
+    "example": "辞めるべきだよ。",
+    "meaningKo": "사임",
+    "wordMeaningKo": "그만두다",
+    "exampleMeaningKo": "그만두는 게 맞아요."
+  },
+  "因": {
+    "word": "原因",
+    "example": "何が原因ですか。",
+    "meaningKo": "원인",
+    "wordMeaningKo": "원인",
+    "exampleMeaningKo": "무엇이 원인입니까?"
+  },
+  "馬": {
+    "word": "馬",
+    "example": "馬鹿みたい！",
+    "meaningKo": "말",
+    "wordMeaningKo": "(1) 말 (2) 장기 비사",
+    "exampleMeaningKo": "바보 같아!"
+  },
+  "愛": {
+    "word": "愛",
+    "example": "愛してるよ。",
+    "meaningKo": "사랑",
+    "wordMeaningKo": "사랑",
+    "exampleMeaningKo": "사랑해."
+  },
+  "富": {
+    "word": "豊富",
+    "example": "食物は豊富にある。",
+    "meaningKo": "부(富)",
+    "wordMeaningKo": "풍부함, 풍부",
+    "exampleMeaningKo": "음식이 풍부하게 있다."
+  },
+  "彼": {
+    "word": "彼等",
+    "example": "彼等の数は多い。",
+    "meaningKo": "그(彼)",
+    "wordMeaningKo": "그들 (주로 남성)",
+    "exampleMeaningKo": "그들의 수는 많다."
+  },
+  "未": {
+    "word": "未だ",
+    "example": "戦争は未だに続いている。",
+    "meaningKo": "아직(未)",
+    "wordMeaningKo": "아직, 더",
+    "exampleMeaningKo": "전쟁은 아직 계속되고 있다."
+  },
+  "舞": {
+    "word": "舞台",
+    "example": "最高の舞台だった。",
+    "meaningKo": "춤(舞)",
+    "wordMeaningKo": "무대 (극장)",
+    "exampleMeaningKo": "최고의 무대였다."
+  },
+  "亡": {
+    "word": "死亡",
+    "example": "交通事故で２人が死亡。",
+    "meaningKo": "사망(亡)",
+    "wordMeaningKo": "죽음",
+    "exampleMeaningKo": "교통사고로 2명이 사망했다."
+  },
+  "冷": {
+    "word": "冷静",
+    "example": "冷静になれ！",
+    "meaningKo": "차갑다(冷)",
+    "wordMeaningKo": "냉정, 침착",
+    "exampleMeaningKo": "냉정해져!"
+  },
+  "適": {
+    "word": "適切",
+    "example": "君の答えは適切である。",
+    "meaningKo": "적합(適)",
+    "wordMeaningKo": "적절함, 적격",
+    "exampleMeaningKo": "너의 답은 적절해."
+  },
+  "婦": {
+    "word": "婦人",
+    "example": "ご婦人からどうぞ。",
+    "meaningKo": "부인(婦)",
+    "wordMeaningKo": "여성",
+    "exampleMeaningKo": "부인분부터 드리세요."
+  },
+  "寄": {
+    "word": "寄付",
+    "example": "寄付したよ。",
+    "meaningKo": "부치다",
+    "wordMeaningKo": "기부",
+    "exampleMeaningKo": "기부했어요."
+  },
+  "込": {
+    "word": "人込み",
+    "example": "人込みの中で彼とあった。",
+    "meaningKo": "넣다",
+    "wordMeaningKo": "사람이 많은 곳",
+    "exampleMeaningKo": "그는 사람 많은 곳에서 그를 만났다."
+  },
+  "顔": {
+    "word": "笑顔",
+    "example": "笑顔！笑顔！",
+    "meaningKo": "얼굴",
+    "wordMeaningKo": "미소 짓는 얼굴",
+    "exampleMeaningKo": "미소! 미소!"
+  },
+  "類": {
+    "word": "人類",
+    "example": "人類の半分は女性だ。",
+    "meaningKo": "무리",
+    "wordMeaningKo": "인류, 인간성",
+    "exampleMeaningKo": "인류의 절반은 여성이다."
+  },
+  "余": {
+    "word": "余り",
+    "example": "これはお昼の余りです。",
+    "meaningKo": "여유",
+    "wordMeaningKo": "아주 ~지 않다",
+    "exampleMeaningKo": "이건 점심 식사 남은 거예요."
+  },
+  "王": {
+    "word": "王",
+    "example": "王位を継ぐ。",
+    "meaningKo": "왕",
+    "wordMeaningKo": "왕, 군주",
+    "exampleMeaningKo": "왕위를 계승하다."
+  },
+  "返": {
+    "word": "繰り返す",
+    "example": "歴史は繰り返す。",
+    "meaningKo": "돌리다",
+    "wordMeaningKo": "반복하다",
+    "exampleMeaningKo": "역사는 반복된다."
+  },
+  "妻": {
+    "word": "妻",
+    "example": "妻が怖くて。",
+    "meaningKo": "아내",
+    "wordMeaningKo": "(겸양) 아내",
+    "exampleMeaningKo": "아내가 무서워서요."
+  },
+  "背": {
+    "word": "背",
+    "example": "僕は猫背だ。",
+    "meaningKo": "등 뒤 거스름",
+    "wordMeaningKo": "키, 신장",
+    "exampleMeaningKo": "나는 굽은 등이 있다."
+  },
+  "熱": {
+    "word": "熱中",
+    "example": "仕事に熱中しなさい。",
+    "meaningKo": "열 온도 열병",
+    "wordMeaningKo": "열중",
+    "exampleMeaningKo": "일에 열중하세요."
+  },
+  "宿": {
+    "word": "宿",
+    "example": "宿題は完璧？",
+    "meaningKo": "여관 숙소 숙소",
+    "wordMeaningKo": "숙소, 숙박",
+    "exampleMeaningKo": "숙제는 완벽해?"
+  },
+  "薬": {
+    "word": "薬",
+    "example": "お薬飲んだ？",
+    "meaningKo": "약 화학 약재",
+    "wordMeaningKo": "약",
+    "exampleMeaningKo": "약 먹었어?"
+  },
+  "険": {
+    "word": "冒険",
+    "example": "彼は冒険好きだ。",
+    "meaningKo": "험준한 벼랑",
+    "wordMeaningKo": "위험, 모험",
+    "exampleMeaningKo": "그는 모험을 좋아하는 사람이다."
+  },
+  "頼": {
+    "word": "頼る",
+    "example": "彼に頼るな。",
+    "meaningKo": "의뢰 신뢰",
+    "wordMeaningKo": "의지하다, 기대다",
+    "exampleMeaningKo": "그에게 의지하지 마라."
+  },
+  "覚": {
+    "word": "覚悟",
+    "example": "死ぬ覚悟でやれ。",
+    "meaningKo": "각성 기억 깨달음",
+    "wordMeaningKo": "각오, 준비",
+    "exampleMeaningKo": "죽을 각오로 해라."
+  },
+  "船": {
+    "word": "船",
+    "example": "私が船長だ。",
+    "meaningKo": "배 선박",
+    "wordMeaningKo": "배, 선박, 수상 운송",
+    "exampleMeaningKo": "나는 선장이다."
+  },
+  "途": {
+    "word": "途端",
+    "example": "座った途端、寝てしまった。",
+    "meaningKo": "길",
+    "wordMeaningKo": "방금, 바로",
+    "exampleMeaningKo": "앉자마자 잠이 들었다."
+  },
+  "許": {
+    "word": "許す",
+    "example": "彼には気を許すな。",
+    "meaningKo": "허락",
+    "wordMeaningKo": "허락하다, 허용하다",
+    "exampleMeaningKo": "그에게는 마음을 열지 마라."
+  },
+  "抜": {
+    "word": "抜く",
+    "example": "神経は抜くのですか。",
+    "meaningKo": "빼다",
+    "wordMeaningKo": "빼다, 생략하다",
+    "exampleMeaningKo": "신경은 빼는 거예요?"
+  },
+  "便": {
+    "word": "便",
+    "example": "血便がでます。",
+    "meaningKo": "편리",
+    "wordMeaningKo": "방법, 수단",
+    "exampleMeaningKo": "혈변이 나옵니다."
+  },
+  "留": {
+    "word": "留学",
+    "example": "私は留学したい。",
+    "meaningKo": "멈추다",
+    "wordMeaningKo": "유학",
+    "exampleMeaningKo": "저는 유학하고 싶어요."
+  },
+  "罪": {
+    "word": "罪",
+    "example": "罪悪感を覚えた。",
+    "meaningKo": "죄",
+    "wordMeaningKo": "죄, 과실",
+    "exampleMeaningKo": "죄책감을 느꼈다."
+  },
+  "努": {
+    "word": "努力",
+    "example": "君も努力してよ。",
+    "meaningKo": "부지런",
+    "wordMeaningKo": "큰 노력, 수고",
+    "exampleMeaningKo": "너도 노력해 봐."
+  },
+  "精": {
+    "word": "精神",
+    "example": "読書は精神を育てる。",
+    "meaningKo": "정수",
+    "wordMeaningKo": "마음, 영혼, 정신, 의도",
+    "exampleMeaningKo": "독서는 정신을 길러준다."
+  },
+  "散": {
+    "word": "散歩",
+    "example": "散歩をした。",
+    "meaningKo": "흩어지다",
+    "wordMeaningKo": "산책",
+    "exampleMeaningKo": "산책을 했다."
+  },
+  "静": {
+    "word": "冷静",
+    "example": "冷静になれ！",
+    "meaningKo": "조용하다",
+    "wordMeaningKo": "냉정",
+    "exampleMeaningKo": "차분해져!"
+  },
+  "婚": {
+    "word": "婚約",
+    "example": "御婚約おめでとう。",
+    "meaningKo": "혼인",
+    "wordMeaningKo": "혼약",
+    "exampleMeaningKo": "결혼 축하합니다."
+  },
+  "喜": {
+    "word": "喜び",
+    "example": "大喜びでした。",
+    "meaningKo": "기뻐하다",
+    "wordMeaningKo": "기쁨, 즐거움, 축하",
+    "exampleMeaningKo": "매우 기뻤습니다."
+  },
+  "浮": {
+    "word": "浮",
+    "example": "浮という漢字を覚える。",
+    "meaningKo": "뜨다",
+    "wordMeaningKo": "한자",
+    "exampleMeaningKo": "'浮'라는 한자를 외워라."
+  },
+  "絶": {
+    "word": "絶対",
+    "example": "絶対無理だ。",
+    "meaningKo": "끊다",
+    "wordMeaningKo": "절대적인, 무조건적인, 절대성",
+    "exampleMeaningKo": "절대 불가능해."
+  },
+  "幸": {
+    "word": "幸い",
+    "example": "幸い天気は良かった。",
+    "meaningKo": "행복",
+    "wordMeaningKo": "행운",
+    "exampleMeaningKo": "다행히 날씨가 좋았다."
+  },
+  "押": {
+    "word": "押す",
+    "example": "ボタンを押す。",
+    "meaningKo": "누르다",
+    "wordMeaningKo": "누르다, 도장 찍다",
+    "exampleMeaningKo": "버튼을 누르다."
+  },
+  "倒": {
+    "word": "倒す",
+    "example": "本末を転倒するな。",
+    "meaningKo": "넘어지다, 전복",
+    "wordMeaningKo": "넘뜨다, 쓰러뜨리다",
+    "exampleMeaningKo": "본말을 뒤집지 마라."
+  },
+  "等": {
+    "word": "等",
+    "example": "人は皆平等だ。",
+    "meaningKo": "등급, 등, 기타",
+    "wordMeaningKo": "등, 기타 등등",
+    "exampleMeaningKo": "사람은 모두 평등하다."
+  },
+  "老": {
+    "word": "老い",
+    "example": "彼は年老いた。",
+    "meaningKo": "노인, 늙다",
+    "wordMeaningKo": "노인, 노년",
+    "exampleMeaningKo": "그는 나이가 들었다."
+  },
+  "曲": {
+    "word": "作曲",
+    "example": "作曲をしています。",
+    "meaningKo": "굽다, 음악, 불의",
+    "wordMeaningKo": "작곡",
+    "exampleMeaningKo": "곡을 쓰고 있어요."
+  },
+  "払": {
+    "word": "支払",
+    "example": "小切手で支払う。",
+    "meaningKo": "지불하다",
+    "wordMeaningKo": "지불",
+    "exampleMeaningKo": "수표로 지불하다."
+  },
+  "庭": {
+    "word": "庭",
+    "example": "家庭は円満だ。",
+    "meaningKo": "정원",
+    "wordMeaningKo": "정원",
+    "exampleMeaningKo": "가정이 원만하다."
+  },
+  "徒": {
+    "word": "生徒",
+    "example": "トムは生徒です。",
+    "meaningKo": "도중",
+    "wordMeaningKo": "학생",
+    "exampleMeaningKo": "톰은 학생입니다."
+  },
+  "勤": {
+    "word": "勤め",
+    "example": "どちらにお勤めですか。",
+    "meaningKo": "근무",
+    "wordMeaningKo": "봉사, 의무, 사업",
+    "exampleMeaningKo": "어디에서 근무하십니까?"
+  },
+  "遅": {
+    "word": "遅刻",
+    "example": "遅刻したね。",
+    "meaningKo": "느리다, 늦다, 뒤처지다",
+    "wordMeaningKo": "지각",
+    "exampleMeaningKo": "지각했네."
+  },
+  "居": {
+    "word": "居る",
+    "example": "奴ら、中に居るの？",
+    "meaningKo": "살다, 존재하다",
+    "wordMeaningKo": "살아 있다, 존재하다",
+    "exampleMeaningKo": "그들, 안에 있어?"
+  },
+  "雑": {
+    "word": "混雑",
+    "example": "食堂は混雑していた。",
+    "meaningKo": "잡다",
+    "wordMeaningKo": "혼잡",
+    "exampleMeaningKo": "식당이 혼잡했다."
+  },
+  "招": {
+    "word": "招く",
+    "example": "怠惰は失敗を招く。",
+    "meaningKo": "초대하다",
+    "wordMeaningKo": "초대하다",
+    "exampleMeaningKo": "게으러움이 실패를 초래한다."
+  },
+  "困": {
+    "word": "困難",
+    "example": "とても困難だった。",
+    "meaningKo": "곤경, 괴로움",
+    "wordMeaningKo": "어려움, 곤경",
+    "exampleMeaningKo": "매우 어려웠다."
+  },
+  "欠": {
+    "word": "欠席",
+    "example": "３人欠席です。",
+    "meaningKo": "결핍, 부족",
+    "wordMeaningKo": "결석",
+    "exampleMeaningKo": "3명이 결석했습니다."
+  },
+  "更": {
+    "word": "更に",
+    "example": "更に質問がありますか。",
+    "meaningKo": "밤, 갱신, 다시",
+    "wordMeaningKo": "게다가, 다시, 더욱",
+    "exampleMeaningKo": "질문이 더 있습니까?"
+  },
+  "刻": {
+    "word": "時刻",
+    "example": "現在の時刻は？",
+    "meaningKo": "조각, 새기다, 시간",
+    "wordMeaningKo": "순간,시간,때",
+    "exampleMeaningKo": "현재 시각은 몇 시인가요?"
+  },
+  "賛": {
+    "word": "賛成",
+    "example": "大賛成です。",
+    "meaningKo": "찬성, 칭송, 부조",
+    "wordMeaningKo": "찬성, 동의, 지지",
+    "exampleMeaningKo": "매우 찬성합니다."
+  },
+  "抱": {
+    "word": "抱く",
+    "example": "不満を抱く部下も多かった。",
+    "meaningKo": "안다, 품다",
+    "wordMeaningKo": "안다, 품다, 간직하다",
+    "exampleMeaningKo": "불만을 품은 부하들도 많았다."
+  },
+  "犯": {
+    "word": "犯人",
+    "example": "お前が犯人だ。",
+    "meaningKo": "범법, 죄",
+    "wordMeaningKo": "범인, 죄인",
+    "exampleMeaningKo": "네가 범인이야."
+  },
+  "恐": {
+    "word": "恐怖",
+    "example": "恐怖を感じた。",
+    "meaningKo": "두려움, 공경",
+    "wordMeaningKo": "두려워하다",
+    "exampleMeaningKo": "공포를 느꼈다."
+  },
+  "息": {
+    "word": "息",
+    "example": "あと一息だ。",
+    "meaningKo": "숨, 아들, 휴식",
+    "wordMeaningKo": "숨, 어조",
+    "exampleMeaningKo": "조금만 더 버티면 끝이다."
+  },
+  "遠": {
+    "word": "遠慮",
+    "example": "遠慮しないで。",
+    "meaningKo": "먼, 원거리",
+    "wordMeaningKo": "겸양",
+    "exampleMeaningKo": "실례하지 마세요."
+  },
+  "戻": {
+    "word": "戻す",
+    "example": "戻す寸前だった。",
+    "meaningKo": "돌아가다, 회복",
+    "wordMeaningKo": "되돌리다",
+    "exampleMeaningKo": "되돌리기 직전이었다."
+  },
+  "願": {
+    "word": "願い",
+    "example": "星に願いを。",
+    "meaningKo": "청원, 소원, 바램",
+    "wordMeaningKo": "바람, 소원, 요청",
+    "exampleMeaningKo": "별에게 소원을 빌어라."
+  },
+  "絵": {
+    "word": "絵画",
+    "example": "これは絵画だ。",
+    "meaningKo": "그림",
+    "wordMeaningKo": "그림",
+    "exampleMeaningKo": "이것은 그림이다."
+  },
+  "越": {
+    "word": "越す",
+    "example": "引っ越すの？",
+    "meaningKo": "건너다",
+    "wordMeaningKo": "~을 넘다",
+    "exampleMeaningKo": "이사 가니?"
+  },
+  "欲": {
+    "word": "食欲",
+    "example": "彼は食欲旺盛だ。",
+    "meaningKo": "욕망",
+    "wordMeaningKo": "식욕",
+    "exampleMeaningKo": "그는 식욕이 왕성하다."
+  },
+  "痛": {
+    "word": "痛み",
+    "example": "心が痛みます。",
+    "meaningKo": "아픔",
+    "wordMeaningKo": "아픔, 통증, 슬픔",
+    "exampleMeaningKo": "마음이 아프다."
+  },
+  "笑": {
+    "word": "笑い",
+    "example": "笑いは移る。",
+    "meaningKo": "웃다",
+    "wordMeaningKo": "웃다, 웃음, 미소",
+    "exampleMeaningKo": "웃음은 전염된다."
+  },
+  "互": {
+    "word": "互い",
+    "example": "お互いさまだろ。",
+    "meaningKo": "서로",
+    "wordMeaningKo": "상호적인",
+    "exampleMeaningKo": "서로 그런 거 아니야."
+  },
+  "束": {
+    "word": "束",
+    "example": "約束するよ。",
+    "meaningKo": "다발",
+    "wordMeaningKo": "묶음, 한 뭉치",
+    "exampleMeaningKo": "약속할게."
+  },
+  "似": {
+    "word": "似合う",
+    "example": "黒が似合うね。",
+    "meaningKo": "비슷하다",
+    "wordMeaningKo": "어울리다, 잘 어울리다",
+    "exampleMeaningKo": "검은색이 잘 어울리네."
+  },
+  "列": {
+    "word": "列",
+    "example": "列に並んで。",
+    "meaningKo": "열 줄",
+    "wordMeaningKo": "줄, 행",
+    "exampleMeaningKo": "줄을 서세요."
+  },
+  "探": {
+    "word": "探す",
+    "example": "他の仕事を探すよ。",
+    "meaningKo": "찾다",
+    "wordMeaningKo": "찾다",
+    "exampleMeaningKo": "다른 일을 찾아볼게요."
+  },
+  "逃": {
+    "word": "逃げる",
+    "example": "逃げるが勝ち。",
+    "meaningKo": "도망",
+    "wordMeaningKo": "도망치다",
+    "exampleMeaningKo": "도망치는 게 이기는 거다."
+  },
+  "遊": {
+    "word": "遊び",
+    "example": "遊びにこいよ。",
+    "meaningKo": "놀다",
+    "wordMeaningKo": "놀다",
+    "exampleMeaningKo": "놀러 와."
+  },
+  "迷": {
+    "word": "迷子",
+    "example": "簡単に迷子になる。",
+    "meaningKo": "길 잃다",
+    "wordMeaningKo": "길 잃은 아이",
+    "exampleMeaningKo": "쉽게 길을 잃는다."
+  },
+  "夢": {
+    "word": "夢中",
+    "example": "彼に夢中なの！",
+    "meaningKo": "꿈",
+    "wordMeaningKo": "열중하다, 몰두하다",
+    "exampleMeaningKo": "그 사람한테 열중해!"
+  },
+  "君": {
+    "word": "君",
+    "example": "君の番だよ。",
+    "meaningKo": "군주",
+    "wordMeaningKo": "(비공식) 너 (남성이 여성에게 사용)",
+    "exampleMeaningKo": "네 차례야."
+  },
+  "閉": {
+    "word": "閉じる",
+    "example": "その物語は彼の死で幕を閉じる。",
+    "meaningKo": "닫다",
+    "wordMeaningKo": "닫다 (책, 눈 등)",
+    "exampleMeaningKo": "그 이야기는 그의 죽음으로 막을 내린다."
+  },
+  "緒": {
+    "word": "一緒",
+    "example": "一緒に来て。",
+    "meaningKo": "실끝,시작,끝,끈,상태",
+    "wordMeaningKo": "함께",
+    "exampleMeaningKo": "같이 와."
+  },
+  "折": {
+    "word": "骨折",
+    "example": "骨折はしてない。",
+    "meaningKo": "접다,부러뜨리다,구부리다",
+    "wordMeaningKo": "골절",
+    "exampleMeaningKo": "골절은 안 했어."
+  },
+  "草": {
+    "word": "草",
+    "example": "草草の草ァ！",
+    "meaningKo": "풀,초본,초안",
+    "wordMeaningKo": "풀",
+    "exampleMeaningKo": "풀의 풀!"
+  },
+  "暮": {
+    "word": "暮れ",
+    "example": "日が暮れた。",
+    "meaningKo": "저녁,황혼,생계",
+    "wordMeaningKo": "저녁, 해질녘",
+    "exampleMeaningKo": "해가 지다."
+  },
+  "酒": {
+    "word": "酒",
+    "example": "彼は禁酒した。",
+    "meaningKo": "술,주류",
+    "wordMeaningKo": "술",
+    "exampleMeaningKo": "그는 금주했다."
+  },
+  "悲": {
+    "word": "悲劇",
+    "example": "悲劇が町を襲った。",
+    "meaningKo": "슬프다,슬퍼하다",
+    "wordMeaningKo": "비극",
+    "exampleMeaningKo": "비극이 마을을 덮쳤다."
+  },
+  "晴": {
+    "word": "素晴らしい",
+    "example": "素晴らしい！",
+    "meaningKo": "개다,맑다",
+    "wordMeaningKo": "훌륭한",
+    "exampleMeaningKo": "훌륭해!"
+  },
+  "掛": {
+    "word": "掛かる",
+    "example": "壁により掛かるな。",
+    "meaningKo": "걸다,매다,의존",
+    "wordMeaningKo": "걸리다, 매달리다",
+    "exampleMeaningKo": "벽에 기대지 마세요."
+  },
+  "到": {
+    "word": "到着",
+    "example": "到着します。",
+    "meaningKo": "도달",
+    "wordMeaningKo": "도착",
+    "exampleMeaningKo": "도착합니다."
+  },
+  "寝": {
+    "word": "寝る",
+    "example": "寝る時間よ。",
+    "meaningKo": "잠",
+    "wordMeaningKo": "잠자리에 들다, 자다",
+    "exampleMeaningKo": "자야 할 시간이다."
+  },
+  "暗": {
+    "word": "暗記",
+    "example": "暗記しました。",
+    "meaningKo": "어둠",
+    "wordMeaningKo": "암기, 외우기",
+    "exampleMeaningKo": "암기했습니다."
+  },
+  "盗": {
+    "word": "強盗",
+    "example": "強盗は縛られていた。",
+    "meaningKo": "도둑",
+    "wordMeaningKo": "강도, 절도",
+    "exampleMeaningKo": "강도는 묶여 있었다."
+  },
+  "吸": {
+    "word": "吸収",
+    "example": "綿は水を吸収する。",
+    "meaningKo": "흡입",
+    "wordMeaningKo": "흡수",
+    "exampleMeaningKo": "면은 물을 흡수한다."
+  },
+  "陽": {
+    "word": "陽気",
+    "example": "彼はいつも陽気だ。",
+    "meaningKo": "양",
+    "wordMeaningKo": "계절, 날씨, 명랑함",
+    "exampleMeaningKo": "그는 항상 명랑하다."
+  },
+  "御": {
+    "word": "御",
+    "example": "御免なさい。",
+    "meaningKo": "어른",
+    "wordMeaningKo": "존귀한",
+    "exampleMeaningKo": "미안합니다."
+  },
+  "歯": {
+    "word": "虫歯",
+    "example": "虫歯はよく痛む。",
+    "meaningKo": "이",
+    "wordMeaningKo": "충치",
+    "exampleMeaningKo": "충치는 자주 아파요."
+  },
+  "忘": {
+    "word": "忘れる",
+    "example": "死を忘れるな。",
+    "meaningKo": "잊다",
+    "wordMeaningKo": "잊어버리다",
+    "exampleMeaningKo": "죽음을 잊지 마라."
+  },
+  "雪": {
+    "word": "雪",
+    "example": "雪が降った。",
+    "meaningKo": "눈",
+    "wordMeaningKo": "눈",
+    "exampleMeaningKo": "눈이 내렸다."
+  },
+  "吹": {
+    "word": "吹く",
+    "example": "風は南へ吹く。",
+    "meaningKo": "불다",
+    "wordMeaningKo": "바람이 분다",
+    "exampleMeaningKo": "바람은 남쪽으로 분다."
+  },
+  "娘": {
+    "word": "娘",
+    "example": "猫娘は好き。",
+    "meaningKo": "딸",
+    "wordMeaningKo": "(겸양) 딸",
+    "exampleMeaningKo": "고양이 소녀를 좋아해."
+  },
+  "誤": {
+    "word": "誤り",
+    "example": "誤りを直せ。",
+    "meaningKo": "잘못",
+    "wordMeaningKo": "오류",
+    "exampleMeaningKo": "실수를 고쳐라."
+  },
+  "洗": {
+    "word": "洗う",
+    "example": "血で血を洗う。",
+    "meaningKo": "씻다",
+    "wordMeaningKo": "씻다",
+    "exampleMeaningKo": "피로 피를 씻다."
+  },
+  "慣": {
+    "word": "慣れる",
+    "example": "すぐに慣れるわ。",
+    "meaningKo": "익다",
+    "wordMeaningKo": "익숙해지다",
+    "exampleMeaningKo": "빨리 익숙해질 거야."
+  },
+  "礼": {
+    "word": "礼",
+    "example": "どうも失礼。",
+    "meaningKo": "예의",
+    "wordMeaningKo": "감사의 표현",
+    "exampleMeaningKo": "정말 죄송합니다."
+  },
+  "窓": {
+    "word": "窓",
+    "example": "窓を閉めて。",
+    "meaningKo": "창문",
+    "wordMeaningKo": "창문",
+    "exampleMeaningKo": "창문을 닫아."
+  },
+  "昔": {
+    "word": "昔",
+    "example": "昔はよかった。",
+    "meaningKo": "옛날",
+    "wordMeaningKo": "오랜 옛날",
+    "exampleMeaningKo": "옛날이 좋았어."
+  },
+  "貧": {
+    "word": "貧しい",
+    "example": "彼は貧しい。",
+    "meaningKo": "빈곤",
+    "wordMeaningKo": "가난한",
+    "exampleMeaningKo": "그는 가난하다."
+  },
+  "怒": {
+    "word": "怒る",
+    "example": "彼はすぐ怒る。",
+    "meaningKo": "분노",
+    "wordMeaningKo": "화가 나다",
+    "exampleMeaningKo": "그는 곧 화를 낸다."
+  },
+  "泳": {
+    "word": "泳ぎ",
+    "example": "泳ぎたいな。",
+    "meaningKo": "수영",
+    "wordMeaningKo": "수영",
+    "exampleMeaningKo": "수영하고 싶어."
+  },
+  "祖": {
+    "word": "祖母",
+    "example": "祖母はゆっくり話す。",
+    "meaningKo": "조상, 개척자, 창시자",
+    "wordMeaningKo": "할머니",
+    "exampleMeaningKo": "할머니는 천천히 말씀하신다."
+  },
+  "杯": {
+    "word": "杯",
+    "example": "杯という漢字を覚える。",
+    "meaningKo": "잔",
+    "wordMeaningKo": "한자",
+    "exampleMeaningKo": "'杯'이라는 한자를 외워라."
+  },
+  "疲": {
+    "word": "疲れ",
+    "example": "冬は疲れる。",
+    "meaningKo": "피로",
+    "wordMeaningKo": "피곤",
+    "exampleMeaningKo": "겨울에는 피곤해진다."
+  },
+  "皆": {
+    "word": "皆",
+    "example": "皆が笑った。",
+    "meaningKo": "모두",
+    "wordMeaningKo": "모두, 모든 사람",
+    "exampleMeaningKo": "모두가 웃었다."
+  },
+  "鳴": {
+    "word": "鳴く",
+    "example": "羊は何て鳴くの？",
+    "meaningKo": "울다",
+    "wordMeaningKo": "동물의 울음소리",
+    "exampleMeaningKo": "양은 어떻게 울까?"
+  },
+  "腹": {
+    "word": "腹",
+    "example": "彼は腹黒い。",
+    "meaningKo": "배",
+    "wordMeaningKo": "배, 복부",
+    "exampleMeaningKo": "그는 속이 검다."
+  },
+  "煙": {
+    "word": "煙",
+    "example": "劇場内禁煙。",
+    "meaningKo": "연기",
+    "wordMeaningKo": "연기, 매연",
+    "exampleMeaningKo": "극장 내 금연입니다."
+  },
+  "眠": {
+    "word": "睡眠",
+    "example": "睡眠は大切だよ。",
+    "meaningKo": "잠",
+    "wordMeaningKo": "잠",
+    "exampleMeaningKo": "수면은 중요해."
+  },
+  "怖": {
+    "word": "恐怖",
+    "example": "恐怖を感じた。",
+    "meaningKo": "무서움",
+    "wordMeaningKo": "두려움, 공포",
+    "exampleMeaningKo": "공포를 느꼈다."
+  },
+  "耳": {
+    "word": "耳",
+    "example": "初耳ですね。",
+    "meaningKo": "귀",
+    "wordMeaningKo": "귀",
+    "exampleMeaningKo": "처음 듣는 말이에요."
+  },
+  "頂": {
+    "word": "頂く",
+    "example": "以下の空欄部分にご記入頂くだけで結構です。",
+    "meaningKo": "정점",
+    "wordMeaningKo": "받다, 음식/음료를 받다",
+    "exampleMeaningKo": "아래 빈칸에 기입해 주시면 됩니다."
+  },
+  "箱": {
+    "word": "箱",
+    "example": "箱を開けて。",
+    "meaningKo": "상자",
+    "wordMeaningKo": "상자",
+    "exampleMeaningKo": "상자를 열어봐."
+  },
+  "晩": {
+    "word": "晩",
+    "example": "今晩暇かな？",
+    "meaningKo": "저녁",
+    "wordMeaningKo": "저녁",
+    "exampleMeaningKo": "오늘 저녁에 시간 있어?"
+  },
+  "寒": {
+    "word": "寒い",
+    "example": "少し肌寒い。",
+    "meaningKo": "추위",
+    "wordMeaningKo": "추운",
+    "exampleMeaningKo": "조금 피부가 시리다."
+  },
+  "髪": {
+    "word": "髪の毛",
+    "example": "彼女の髪の毛は長い。",
+    "meaningKo": "머리카락",
+    "wordMeaningKo": "머리털",
+    "exampleMeaningKo": "그녀의 머리카락은 길다."
+  },
+  "忙": {
+    "word": "忙しい",
+    "example": "今は忙しい。",
+    "meaningKo": "바쁨",
+    "wordMeaningKo": "바쁘다",
+    "exampleMeaningKo": "지금은 바쁘다."
+  },
+  "才": {
+    "word": "才能",
+    "example": "彼は才能のある人だ。",
+    "meaningKo": "재능",
+    "wordMeaningKo": "재능, 능력",
+    "exampleMeaningKo": "그는 재능이 있는 사람이다."
+  },
+  "靴": {
+    "word": "靴",
+    "example": "靴を履いて。",
+    "meaningKo": "신발",
+    "wordMeaningKo": "신발",
+    "exampleMeaningKo": "신발을 신어."
+  },
+  "恥": {
+    "word": "恥ずかしい",
+    "example": "恥ずかしいです。",
+    "meaningKo": "수치",
+    "wordMeaningKo": "부끄럽다",
+    "exampleMeaningKo": "부끄러워요."
+  },
+  "偶": {
+    "word": "偶",
+    "example": "偶然に頼るな。",
+    "meaningKo": "우연히, 짝수, 쌍, 부부, 같은 종류",
+    "wordMeaningKo": "짝수, 부부, 친구",
+    "exampleMeaningKo": "우연에 기대지 마라."
+  },
+  "偉": {
+    "word": "偉大",
+    "example": "彼は偉大な小説家だ。",
+    "meaningKo": "훌륭함, 위대함, 놀라운, 교만, 유명함, 우수함",
+    "wordMeaningKo": "위대함",
+    "exampleMeaningKo": "그는 위대한 소설가다."
+  },
+  "猫": {
+    "word": "猫",
+    "example": "僕は猫背だ。",
+    "meaningKo": "고양이",
+    "wordMeaningKo": "고양이",
+    "exampleMeaningKo": "나는 굽신거린다."
+  },
+  "幾": {
+    "word": "幾つ",
+    "example": "お幾つですか？",
+    "meaningKo": "얼마나 많은, 얼마나 큰, 얼마나 먼, 얼마나 긴, 어떤, 여러",
+    "wordMeaningKo": "몇 개? 몇 살?",
+    "exampleMeaningKo": "나이가 어떻게 되세요?"
+  }
+}
