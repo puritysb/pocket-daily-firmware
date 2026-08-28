@@ -47,6 +47,7 @@
 #include "components/icons/glyph_openclaw.h"
 #include "components/icons/glyph_opencode.h"
 #include "fontIds.h"
+#include "pocket_daily/font_pack_sync.h"
 #include "pocket_daily/learning_pack.h"
 #include "pocket_daily/learning_pack_sync.h"
 #include "pocket_daily/product_identity.h"
@@ -1810,6 +1811,12 @@ bool PocketDailyActivity::attemptManualSync() {
   }
   if (learningResult == PocketDaily::LearningPackSync::Result::Failed)
     AgentLog::line("LEARN", "manual content sync failed; previous SD pack retained");
+  const PocketDaily::FontPackSync::Result fontResult =
+      PocketDaily::FontPackSync::sync(successfulIp, endpoints.port, token, board, r.fontPack);
+  const bool fontUpdated = fontResult == PocketDaily::FontPackSync::Result::Updated;
+  if (fontUpdated) sdFontSystem.markRegistryDirty();
+  if (fontResult == PocketDaily::FontPackSync::Result::Failed)
+    AgentLog::line("FONT", "manual font sync failed; previous SD font retained");
   // A low battery is only a flash risk when the device is actually running
   // from it. USB power is the safest update posture, so preserve the honest
   // telemetry value in the Feed while bypassing the battery-only OTA gate.
@@ -1852,7 +1859,7 @@ bool PocketDailyActivity::attemptManualSync() {
     lastDeckSaveMs = 0;
     serviceDeckPersist();
   }
-  lastSyncOutcome = (!r.unchanged || learningUpdated) ? SyncOutcome::Updated : SyncOutcome::UpToDate;
+  lastSyncOutcome = (!r.unchanged || learningUpdated || fontUpdated) ? SyncOutcome::Updated : SyncOutcome::UpToDate;
   lastSyncOutcomeMs = millis();
   AgentLog::line("AGENT", "manual sync: %s", r.unchanged ? "unchanged" : "updated");
   return true;

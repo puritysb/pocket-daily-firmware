@@ -64,7 +64,7 @@ On an explicit Pocket Daily Sync, the device downloads the advertised bytes
 from:
 
 ```text
-GET /learning/pack?id=jp-n3-ko&version=2
+GET /learning/pack?id=jp-n3-ko&version=3
 ```
 
 Surface identity headers and the existing `token` query are included. The

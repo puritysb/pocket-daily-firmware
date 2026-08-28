@@ -673,6 +673,13 @@ FeedApply applyCardFeed(const char* json, size_t length) {
   filter["learningPack"]["size"] = true;
   filter["learningPack"]["md5"] = true;
   filter["learningPack"]["licenseSpdx"] = true;
+  // Optional automatic reader-font advert (full and unchanged feeds).
+  filter["fontPack"]["id"] = true;
+  filter["fontPack"]["version"] = true;
+  filter["fontPack"]["format"] = true;
+  filter["fontPack"]["size"] = true;
+  filter["fontPack"]["md5"] = true;
+  filter["fontPack"]["licenseSpdx"] = true;
 
   doc.clear();
   DeserializationError err = deserializeJson(doc, json, length, DeserializationOption::Filter(filter));
@@ -707,6 +714,17 @@ FeedApply applyCardFeed(const char* json, size_t length) {
       out.learningPack.size = pack["size"] | 0U;
       copyStr(out.learningPack.md5, sizeof(out.learningPack.md5), pack["md5"] | "");
       copyStr(out.learningPack.licenseSpdx, sizeof(out.learningPack.licenseSpdx), pack["licenseSpdx"] | "");
+    }
+  }
+  {
+    JsonObject pack = obj["fontPack"].as<JsonObject>();
+    if (!pack.isNull()) {
+      copyStr(out.fontPack.packageId, sizeof(out.fontPack.packageId), pack["id"] | "");
+      out.fontPack.contentVersion = pack["version"] | 0U;
+      out.fontPack.formatVersion = pack["format"] | 0U;
+      out.fontPack.size = pack["size"] | 0U;
+      copyStr(out.fontPack.md5, sizeof(out.fontPack.md5), pack["md5"] | "");
+      copyStr(out.fontPack.licenseSpdx, sizeof(out.fontPack.licenseSpdx), pack["licenseSpdx"] | "");
     }
   }
 

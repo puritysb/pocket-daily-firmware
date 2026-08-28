@@ -31,6 +31,8 @@
         "weather.snapshot.read",
         "learning.pack.read",
         "learning.pack.update",
+        "font.pack.read",
+        "font.pack.update",
         "ota.feed",
         "ota.resume-206",
         "device.telemetry"

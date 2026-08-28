@@ -27,6 +27,7 @@ import sys
 STAGING_DIR_NAME = "firmware"
 MAX_VERSIONED_COPIES = 5
 LEARNING_PACK_RELATIVE = os.path.join("pocket-daily", "learning", "jp-n3-ko.pdl")
+WORLD_FONT_RELATIVE = os.path.join(".fonts", "PocketSansWorld", "PocketSansWorld_12.cpfont")
 
 
 def _run_git(project_dir, args):
@@ -82,7 +83,7 @@ def prune_versioned_copies(staging_dir, prefix):
 
 
 def write_manifest(manifest_path, base_version, env_name, branch, sha, date_str, file_size, versioned_name,
-                   learning_pack_size):
+                   learning_pack_size, world_font_size):
     lines = [
         "Pocket Daily Firmware Staging",
         "=============================",
@@ -95,6 +96,7 @@ def write_manifest(manifest_path, base_version, env_name, branch, sha, date_str,
         f"File size:    {file_size:,} bytes ({file_size / 1024:.0f} KB)",
         f"File:         {versioned_name}",
         f"Learning:     jp-n3-ko.pdl ({learning_pack_size:,} bytes)",
+        f"World font:   PocketSansWorld_12.cpfont ({world_font_size:,} bytes)",
         "",
         "Installation (SD card)",
         "----------------------",
@@ -102,7 +104,7 @@ def write_manifest(manifest_path, base_version, env_name, branch, sha, date_str,
         "2. Hold UP + POWER to boot into recovery firmware mode.",
         "3. Pick update.bin from the file browser.",
         "4. Confirm and wait for the flash + automatic restart.",
-        "5. Copy sd-card/pocket-daily to the SD card root for offline Japanese study.",
+        "5. Copy the contents of sd-card/ to the SD card root for offline study and automatic CJK fonts.",
         "",
     ]
     with open(manifest_path, "w") as f:
@@ -150,11 +152,20 @@ def stage(source, target, env):
     )
     learning_pack_size = os.path.getsize(learning_output)
     learning_manifest = os.path.splitext(learning_output)[0] + ".manifest.json"
+    world_font_source = os.path.join(project_dir, "assets", "fonts", "PocketWorld", "PocketSansWorld_12.cpfont")
+    world_font_output = os.path.join(staging_dir, "sd-card", WORLD_FONT_RELATIVE)
+    if not os.path.isfile(world_font_source):
+        raise FileNotFoundError(
+            "automatic world font is missing; run scripts/build-pocket-fonts.py"
+        )
+    os.makedirs(os.path.dirname(world_font_output), exist_ok=True)
+    shutil.copy2(world_font_source, world_font_output)
+    world_font_size = os.path.getsize(world_font_output)
 
     file_size = os.path.getsize(update_path)
     manifest_path = os.path.join(staging_dir, "LATEST_BUILD.txt")
     write_manifest(manifest_path, base_version, env_name, branch, sha, date_str, file_size, versioned_name,
-                   learning_pack_size)
+                   learning_pack_size, world_font_size)
 
     extra_dir = get_custom_staging_dir(env)
     extra_msg = ""
@@ -167,6 +178,9 @@ def stage(source, target, env):
             shutil.copy2(learning_output, mounted_pack)
             mounted_manifest = os.path.splitext(mounted_pack)[0] + ".manifest.json"
             shutil.copy2(learning_manifest, mounted_manifest)
+            mounted_font = os.path.join(extra_dir, WORLD_FONT_RELATIVE)
+            os.makedirs(os.path.dirname(mounted_font), exist_ok=True)
+            shutil.copy2(world_font_output, mounted_font)
             extra_msg = f"\n  → also copied to {extra_dir}/"
         except OSError as e:
             print(f"stage_firmware: could not copy to {extra_dir}: {e}", file=sys.stderr)
@@ -174,6 +188,7 @@ def stage(source, target, env):
     print(f"\nStaged firmware → {os.path.relpath(staging_dir, project_dir)}/")
     print(f"  update.bin ({file_size:,} bytes){extra_msg}")
     print(f"  sd-card/{LEARNING_PACK_RELATIVE} ({learning_pack_size:,} bytes)")
+    print(f"  sd-card/{WORLD_FONT_RELATIVE} ({world_font_size:,} bytes)")
     print(f"  {versioned_name}")
 
 

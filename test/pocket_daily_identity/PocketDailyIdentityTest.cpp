@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "src/agentdeck/endpoint_candidates.h"
+#include "src/pocket_daily/font_pack_sync.h"
 #include "src/pocket_daily/product_identity.h"
 
 TEST(PocketDailyIdentity, PublishesCanonicalSurfaceIdentity) {
@@ -33,6 +34,19 @@ TEST(PocketDailyIdentity, NegotiatesPersistedWeatherOutlook) {
 TEST(PocketDailyIdentity, NegotiatesSdLearningPackUpdates) {
   EXPECT_NE(strstr(PocketDaily::SURFACE_CAPABILITIES, "learning.pack.read"), nullptr);
   EXPECT_NE(strstr(PocketDaily::SURFACE_CAPABILITIES, "learning.pack.update"), nullptr);
+}
+
+TEST(PocketDailyIdentity, NegotiatesAutomaticFontPackUpdates) {
+  EXPECT_NE(strstr(PocketDaily::SURFACE_CAPABILITIES, "font.pack.read"), nullptr);
+  EXPECT_NE(strstr(PocketDaily::SURFACE_CAPABILITIES, "font.pack.update"), nullptr);
+}
+
+TEST(PocketDailyIdentity, PinsAutomaticFontPackDiskContract) {
+  EXPECT_STREQ(PocketDaily::FontPackSync::PACKAGE_ID, "pocket-sans-world");
+  EXPECT_STREQ(PocketDaily::FontPackSync::FAMILY_NAME, "PocketSansWorld");
+  EXPECT_STREQ(PocketDaily::FontPackSync::FONT_PATH,
+               "/.fonts/PocketSansWorld/PocketSansWorld_12.cpfont");
+  EXPECT_EQ(PocketDaily::FontPackSync::FORMAT_VERSION, 4);
 }
 
 TEST(PocketDailyIdentity, NegotiatesStandardPartialOtaResume) {

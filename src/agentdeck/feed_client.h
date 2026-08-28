@@ -13,6 +13,7 @@
 #include <cstdint>
 
 #include "endpoint_candidates.h"
+#include "pocket_daily/font_pack_sync.h"
 #include "pocket_daily/learning_pack_sync.h"
 
 namespace AgentDeck {
@@ -34,6 +35,7 @@ struct SyncResult {
   uint32_t fwSize = 0;
   char fwMd5[36] = {0};
   PocketDaily::LearningPackSync::Advert learningPack;
+  PocketDaily::FontPackSync::Advert fontPack;
   // Endpoint that actually completed the request after any daemon redirect.
   // Callers pass this directly to OTA and cache it as the next preferred path.
   char endpointIp[16] = {0};

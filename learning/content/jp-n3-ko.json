@@ -3,7 +3,7 @@
     "id": "jp-n3-ko",
     "locale": "ko-KR",
     "title": "Pocket Daily JLPT N3 한자",
-    "contentVersion": 2,
+    "contentVersion": 3,
     "licenseSpdx": "CC-BY-SA-4.0",
     "sourceRevision": "openjlpt-c42fd9fa3777",
     "attribution": "OpenJLPT/EDRDG/Waller/Tatoeba 기반; Pocket Daily 한국어 각색; CC BY-SA 4.0",
@@ -7001,7 +7001,7 @@
       "meaningKo": "찬성, 칭송, 부조",
       "meaningEn": "approve; praise; title or inscription on picture; assist; agree with",
       "primaryWord": "賛成",
-      "wordReading": "Uӣ[い",
+      "wordReading": "さんせい",
       "wordMeaningKo": "찬성, 동의, 지지",
       "example": "大賛成です。",
       "exampleMeaningKo": "매우 찬성합니다."

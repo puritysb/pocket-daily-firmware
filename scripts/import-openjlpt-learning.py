@@ -44,6 +44,13 @@ def clean_reading(value: str) -> str:
     return value.replace(".", "").replace("-", "")
 
 
+def is_japanese_reading(value: str) -> bool:
+    """Reject mojibake while allowing kana readings and their separators."""
+    return bool(value) and all(
+        char in " /・ー（）()" or 0x3040 <= ord(char) <= 0x30FF for char in value
+    )
+
+
 def candidate_score(candidate: dict[str, Any], level: int, glyph: str) -> tuple[int, ...]:
     examples = candidate.get("examples") or []
     usable_example = any(
@@ -158,10 +165,18 @@ def build(openjlpt: Path, translations_path: Path, output: Path) -> None:
             str(korean.get("word", "")),
             str(korean.get("example", "")),
         )
-        reading = str(word.get("reading", ""))
+        # Upstream vocabulary occasionally contains malformed reading text.
+        # Keep the pinned source reproducible while allowing the reviewed
+        # adaptation ledger to correct that field explicitly.
+        reading = str(korean.get("wordReading") or word.get("reading", ""))
         if not reading:
             readings = entry.get("kunyomi") or entry.get("onyomi") or []
             reading = clean_reading(str(readings[0])) if readings else glyph
+        if not is_japanese_reading(reading):
+            raise ValueError(
+                f"invalid Japanese word reading for {glyph}: {reading!r}; "
+                "add a reviewed wordReading override to the translation ledger"
+            )
         example = str(korean.get("example", ""))
         if glyph not in example or not 0 < utf8_len(example) < 192:
             raise ValueError(f"translation ledger example is invalid for {glyph}")
@@ -198,7 +213,7 @@ def build(openjlpt: Path, translations_path: Path, output: Path) -> None:
             "id": "jp-n3-ko",
             "locale": "ko-KR",
             "title": "Pocket Daily JLPT N3 한자",
-            "contentVersion": 2,
+            "contentVersion": 3,
             "licenseSpdx": "CC-BY-SA-4.0",
             "sourceRevision": f"openjlpt-{PINNED_OPENJLPT_REVISION[:12]}",
             "attribution": (

@@ -29,12 +29,22 @@ KR_SOURCE_URL = (
 )
 KR_SOURCE_SHA256 = "194018e6b2b293a7964f037b25c0249ce1418bc9ab3c971060a03aa57861e252"
 KR_CACHE = ROOT / "lib/EpdFont/scripts/downloaded_fonts/PocketSansKR/NotoSansKR-wght.ttf"
+SC_SOURCE_COMMIT = KR_SOURCE_COMMIT
+SC_SOURCE_URL = (
+    "https://raw.githubusercontent.com/google/fonts/"
+    f"{SC_SOURCE_COMMIT}/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
+)
+SC_SOURCE_SHA256 = "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da"
+SC_CACHE = ROOT / "lib/EpdFont/scripts/downloaded_fonts/PocketSansSC/NotoSansSC-wght.ttf"
 CONVERTER = ROOT / "lib/EpdFont/scripts/fontconvert_sdcard.py"
 JP_COVERAGE = ROOT / "assets/fonts/PocketJP/coverage.txt"
 JP_OUTPUT = ROOT / "assets/fonts/PocketJP/PocketSansJP_12.cpfont"
 KR_COVERAGE = ROOT / "assets/fonts/PocketKR/coverage.txt"
 KR_OUTPUT = ROOT / "assets/fonts/PocketKR/PocketSansKR_12.cpfont"
+WORLD_COVERAGE = ROOT / "assets/fonts/PocketWorld/coverage.txt"
+WORLD_OUTPUT = ROOT / "assets/fonts/PocketWorld/PocketSansWorld_12.cpfont"
 FALLBACK_DIR = ROOT / "lib/EpdFont/builtinFonts/source/NotoSans"
+HEBREW_FALLBACK_DIR = ROOT / "lib/EpdFont/builtinFonts/source/NotoSansHebrew"
 
 
 def sha256(path: Path) -> str:
@@ -74,18 +84,27 @@ def instance(source: Path, weight: int, destination: Path) -> None:
 
 
 def main() -> int:
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts/generate-pocket-font-coverage.py")],
+        check=True,
+    )
     jp_source = source_font(JP_SOURCE_URL, JP_SOURCE_SHA256, JP_CACHE)
     kr_source = source_font(KR_SOURCE_URL, KR_SOURCE_SHA256, KR_CACHE)
+    sc_source = source_font(SC_SOURCE_URL, SC_SOURCE_SHA256, SC_CACHE)
     with tempfile.TemporaryDirectory(prefix="pocket-font-") as directory:
         temporary = Path(directory)
         jp_regular = temporary / "PocketSansJP-Medium.ttf"
         jp_bold = temporary / "PocketSansJP-Bold.ttf"
         kr_regular = temporary / "PocketSansKR-Medium.ttf"
         kr_bold = temporary / "PocketSansKR-Bold.ttf"
+        sc_regular = temporary / "PocketSansSC-Medium.ttf"
+        sc_bold = temporary / "PocketSansSC-Bold.ttf"
         instance(jp_source, 500, jp_regular)
         instance(jp_source, 700, jp_bold)
         instance(kr_source, 500, kr_regular)
         instance(kr_source, 700, kr_bold)
+        instance(sc_source, 500, sc_regular)
+        instance(sc_source, 700, sc_bold)
         subprocess.run(
             [
                 sys.executable,
@@ -135,8 +154,48 @@ def main() -> int:
             ],
             check=True,
         )
+        WORLD_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            [
+                sys.executable,
+                str(CONVERTER),
+                "--intervals",
+                "reading,cjk,hangul,hebrew",
+                "--size",
+                "12",
+                "--regular",
+                str(kr_regular),
+                "--bold",
+                str(kr_bold),
+                "--fallback-regular",
+                str(jp_regular),
+                "--fallback-regular",
+                str(FALLBACK_DIR / "NotoSans-Regular.ttf"),
+                "--fallback-regular",
+                str(HEBREW_FALLBACK_DIR / "NotoSansHebrew-Regular.ttf"),
+                "--fallback-regular",
+                str(sc_regular),
+                "--fallback-bold",
+                str(jp_bold),
+                "--fallback-bold",
+                str(FALLBACK_DIR / "NotoSans-Bold.ttf"),
+                "--fallback-bold",
+                str(HEBREW_FALLBACK_DIR / "NotoSansHebrew-Bold.ttf"),
+                "--fallback-bold",
+                str(sc_bold),
+                "--name",
+                "PocketSansWorld",
+                "-o",
+                str(WORLD_OUTPUT),
+            ],
+            check=True,
+        )
     checker = ROOT / "scripts/check-cpfont-coverage.py"
-    for output, coverage in ((JP_OUTPUT, JP_COVERAGE), (KR_OUTPUT, KR_COVERAGE)):
+    for output, coverage in (
+        (JP_OUTPUT, JP_COVERAGE),
+        (KR_OUTPUT, KR_COVERAGE),
+        (WORLD_OUTPUT, WORLD_COVERAGE),
+    ):
         subprocess.run([sys.executable, str(checker), str(output), str(coverage)], check=True)
         print(f"{output.relative_to(ROOT)} sha256={sha256(output)}")
     return 0

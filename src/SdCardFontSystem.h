@@ -31,6 +31,12 @@ class SdCardFontSystem {
   /// saved reader selection. Returns the loaded font ID, or 0 if unavailable.
   int ensureUiFamilyLoaded(GfxRenderer& renderer, const char* familyName);
 
+  /// Load Pocket Daily's broad reading family without changing the saved
+  /// reader selection. All supported book languages use the same flattened
+  /// family, so callers never need to ask the user to choose a script font.
+  /// Falls back to the saved reader font when the automatic pack is absent.
+  int ensureAutomaticReaderFontLoaded(GfxRenderer& renderer);
+
   /// Font ID of the currently-loaded SD family (0 if none). Lets callers that
   /// want to avoid single-slot unload/reload churn test the resident font
   /// against their text before requesting a swap via ensureUiFamilyLoaded().

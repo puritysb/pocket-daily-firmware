@@ -141,6 +141,36 @@ int SdCardFontSystem::ensureUiFamilyLoaded(GfxRenderer& renderer, const char* fa
   return manager_.getFontId(familyName);
 }
 
+int SdCardFontSystem::ensureAutomaticReaderFontLoaded(GfxRenderer& renderer) {
+  static constexpr char automaticFamily[] = "PocketSansWorld";
+
+  refreshIfDirty();
+  const auto* family = registry_.findFamily(automaticFamily);
+  if (!family) {
+    ensureLoaded(renderer);
+    return SETTINGS.getReaderFontId();
+  }
+
+  const uint8_t sizeEnum = fontSizeEnumFromSettings();
+  const auto* selected = family->findClosestReaderSize(sizeEnum);
+  const uint8_t wantedPt = selected ? selected->pointSize : 0;
+  if (manager_.currentFamilyName() == automaticFamily && manager_.currentPointSize() == wantedPt) {
+    return manager_.getFontId(automaticFamily);
+  }
+
+  if (!manager_.currentFamilyName().empty()) {
+    manager_.unloadAll(renderer);
+  }
+  if (!manager_.loadFamily(*family, renderer, sizeEnum)) {
+    LOG_ERR("SDFS", "Failed to load automatic reader font: %s", automaticFamily);
+    ensureLoaded(renderer);
+    return SETTINGS.getReaderFontId();
+  }
+
+  LOG_DBG("SDFS", "Loaded automatic reader font: %s", automaticFamily);
+  return manager_.getFontId(automaticFamily);
+}
+
 int SdCardFontSystem::currentLoadedFontId() const {
   const std::string& name = manager_.currentFamilyName();
   if (name.empty()) return 0;

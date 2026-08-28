@@ -14,6 +14,7 @@
 #include "ProgressFile.h"
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"
+#include "SdCardFontSystem.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -97,7 +98,7 @@ void TxtReaderActivity::initializeReader() {
   }
 
   // Store current settings for cache validation
-  cachedFontId = SETTINGS.getReaderFontId();
+  cachedFontId = sdFontSystem.ensureAutomaticReaderFontLoaded(renderer);
   cachedScreenMargin = SETTINGS.screenMargin;
   cachedParagraphAlignment = SETTINGS.paragraphAlignment;
 

@@ -283,25 +283,35 @@ static bool loadSleepFrameBuffer() {
   return true;
 }
 
-static void installPocketJapaneseFontIfMissing() {
+static void installPocketJapaneseFont() {
   static constexpr char kHiddenRoot[] = "/.fonts";
   static constexpr char kVisibleRoot[] = "/fonts";
   static constexpr char kFamily[] = "PocketSansJP";
   static constexpr char kFilename[] = "PocketSansJP_12.cpfont";
-  static constexpr char kHiddenPath[] = "/.fonts/PocketSansJP/PocketSansJP_12.cpfont";
-  static constexpr char kVisiblePath[] = "/fonts/PocketSansJP/PocketSansJP_12.cpfont";
-
-  // The deterministic Pocket subset owns a separate family. A complete reader
-  // font (NotoSansJP/BIZUDGothic/etc.) may coexist without shadowing it.
-  if (Storage.exists(kHiddenPath) || Storage.exists(kVisiblePath)) return;
+  static constexpr char kRevision[] = "3\n";
 
   const char* root = Storage.exists("/fonts/PocketSansJP") ? kVisibleRoot : kHiddenRoot;
   char familyDir[64];
   char finalPath[96];
   char tempPath[96];
+  char revisionPath[96];
   snprintf(familyDir, sizeof(familyDir), "%s/%s", root, kFamily);
   snprintf(finalPath, sizeof(finalPath), "%s/%s", familyDir, kFilename);
   snprintf(tempPath, sizeof(tempPath), "%s/%s.tmp", familyDir, kFilename);
+  snprintf(revisionPath, sizeof(revisionPath), "%s/.pocket-revision", familyDir);
+
+  // OTA replaces this embedded, content-derived subset whenever its revision
+  // changes. Merely checking for file existence left the original 16-word font
+  // installed forever even after the learning deck grew to 612 records.
+  if (Storage.exists(finalPath)) {
+    char installedRevision[sizeof(kRevision)] = {};
+    HalFile revisionFile;
+    if (Storage.openFileForRead("FONT", revisionPath, revisionFile) &&
+        revisionFile.read(installedRevision, sizeof(kRevision) - 1) == sizeof(kRevision) - 1 &&
+        memcmp(installedRevision, kRevision, sizeof(kRevision) - 1) == 0) {
+      return;
+    }
+  }
 
   if (!Storage.exists(root) && !Storage.mkdir(root)) return;
   if (!Storage.exists(familyDir) && !Storage.mkdir(familyDir)) return;
@@ -329,6 +339,11 @@ static void installPocketJapaneseFontIfMissing() {
   if (!Storage.rename(tempPath, finalPath)) {
     Storage.remove(tempPath);
     return;
+  }
+
+  HalFile revisionFile;
+  if (Storage.openFileForWrite("FONT", revisionPath, revisionFile)) {
+    revisionFile.write(kRevision, sizeof(kRevision) - 1);
   }
   LOG_INF("FONT", "Installed Pocket Japanese subset (%u bytes)", (unsigned)total);
 }
@@ -494,7 +509,7 @@ void setup() {
     return;
   }
 
-  installPocketJapaneseFontIfMissing();
+  installPocketJapaneseFont();
 
   HalSystem::checkPanic();
 

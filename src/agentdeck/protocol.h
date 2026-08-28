@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "pocket_daily/font_pack_sync.h"
 #include "pocket_daily/learning_pack_sync.h"
 
 namespace AgentDeck {
@@ -43,6 +44,8 @@ struct FeedApply {
   // just like firmware, so explicit Sync can update course content without
   // forcing the provider to mutate the user's card deck.
   PocketDaily::LearningPackSync::Advert learningPack;
+  // Optional broad SD font pack advert, available on full and unchanged feeds.
+  PocketDaily::FontPackSync::Advert fontPack;
 };
 
 // M6 pull sync: parse a `GET /feed` card_feed body and land the embedded

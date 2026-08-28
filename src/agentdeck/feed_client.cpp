@@ -179,6 +179,7 @@ SyncResult syncOnce(const char* ip, uint16_t port, const char* token, const char
   out.nextPullSec = applied.nextPullSec;
   strncpy(out.deckSig, applied.deckSig, sizeof(out.deckSig) - 1);
   out.learningPack = applied.learningPack;
+  out.fontPack = applied.fontPack;
   if (applied.fwSize) {
     if (PocketDaily::otaIdentityMatches(applied.fwProductId, applied.fwBoard, applied.fwUpdateChannel, board)) {
       out.fwSize = applied.fwSize;

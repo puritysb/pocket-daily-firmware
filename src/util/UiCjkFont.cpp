@@ -72,17 +72,17 @@ const char* const* prioritiesFor(Script script) {
   // PocketSansKR is the product-owned SD bundle. AgentDeckKR remains a legacy
   // fallback so an existing test card keeps working until its font directory
   // is updated.
-  static const char* const hangul[] = {"PocketSansKR", "AgentDeckKR", "NotoSansKR", "Pretendard",
-                                       "BIZUDGothic",  "NotoSansJP",  nullptr};
+  static const char* const hangul[] = {"PocketSansWorld", "PocketSansKR", "AgentDeckKR", "NotoSansKR",
+                                       "Pretendard",      "BIZUDGothic",  "NotoSansJP",  nullptr};
   // Japanese families must mirror lib/EpdFont/scripts/sd-fonts.yaml
   // (BIZUDGothic, IPAexMincho, NotoSansJP). IPAexMincho is a Mincho (serif) face
   // and is listed after the gothic families because gothic renders better at
   // small UI sizes — but it still has to be recognised, otherwise a user whose
   // only installed JP font is IPAexMincho gets no coverage from this list.
-  static const char* const japanese[] = {"PocketSansJP", "BIZUDGothic", "NotoSansJP", "IPAexMincho",
-                                         "NotoSansKR",   "Pretendard",  nullptr};
-  static const char* const han[] = {"PocketSansJP", "NotoSansJP", "BIZUDGothic", "IPAexMincho",
-                                    "NotoSansKR",   "Pretendard", nullptr};
+  static const char* const japanese[] = {"PocketSansWorld", "PocketSansJP", "BIZUDGothic", "NotoSansJP",
+                                         "IPAexMincho",      "NotoSansKR",   "Pretendard",  nullptr};
+  static const char* const han[] = {"PocketSansWorld", "PocketSansJP", "NotoSansJP", "BIZUDGothic",
+                                    "IPAexMincho",      "NotoSansKR",   "Pretendard", nullptr};
 
   switch (script) {
     case Script::Hangul:

@@ -848,7 +848,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     return;
   }
 
-  sdFontSystem.ensureLoaded(renderer);
+  activeReaderFontId = sdFontSystem.ensureAutomaticReaderFontLoaded(renderer);
 
   const auto showPendingSyncSaveError = [this]() {
     if (!pendingSyncSaveError) return;
@@ -903,7 +903,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     LOG_DBG("ERS", "Loading file: %s, index: %d", filepath.c_str(), currentSpineIndex);
     section = std::unique_ptr<Section>(new Section(epub, currentSpineIndex, renderer));
 
-    if (!section->loadSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
+    if (!section->loadSectionFile(activeReaderFontId, SETTINGS.getReaderLineCompression(),
                                   SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
                                   viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
                                   SETTINGS.imageRendering, SETTINGS.focusReadingEnabled, SETTINGS.bilingualViewMode)) {
@@ -913,7 +913,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
       const auto popupFn = [this]() { GUI.drawPopup(renderer, tr(STR_INDEXING)); };
 
-      if (!section->createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
+      if (!section->createSectionFile(activeReaderFontId, SETTINGS.getReaderLineCompression(),
                                       SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
                                       viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
                                       SETTINGS.imageRendering, SETTINGS.focusReadingEnabled, SETTINGS.bilingualViewMode,
@@ -1085,7 +1085,7 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   }
 
   Section nextSection(epub, nextSpineIndex, renderer);
-  if (nextSection.loadSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
+  if (nextSection.loadSectionFile(activeReaderFontId, SETTINGS.getReaderLineCompression(),
                                   SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
                                   viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
                                   SETTINGS.imageRendering, SETTINGS.focusReadingEnabled, SETTINGS.bilingualViewMode)) {
@@ -1094,7 +1094,7 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
 
   LOG_DBG("ERS", "Silently indexing next chapter: %d", nextSpineIndex);
   if (!nextSection.createSectionFile(
-          SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing,
+          activeReaderFontId, SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing,
           SETTINGS.paragraphAlignment, viewportWidth, viewportHeight, SETTINGS.hyphenationEnabled,
           SETTINGS.embeddedStyle, SETTINGS.imageRendering, SETTINGS.focusReadingEnabled, SETTINGS.bilingualViewMode)) {
     LOG_ERR("ERS", "Failed silent indexing for chapter: %d", nextSpineIndex);
@@ -1112,7 +1112,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft) {
   const auto t0 = millis();
-  const int fontId = SETTINGS.getReaderFontId();
+  const int fontId = activeReaderFontId;
 
   // Font prewarm: scan pass accumulates text, then prewarm, then real render
   auto* fcm = renderer.getFontCacheManager();
