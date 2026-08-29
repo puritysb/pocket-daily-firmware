@@ -20,6 +20,7 @@
 #include "agentdeck/deck_store.h"
 #include "agentdeck/endpoint_candidates.h"
 #include "agentdeck/ota_ws_receiver.h"
+#include "pocket_daily/font_pack_sync.h"
 #include "pocket_daily/models.h"
 
 class PocketDailyActivity final : public Activity {
@@ -39,11 +40,13 @@ class PocketDailyActivity final : public Activity {
   // merely because no network is available. Pull wakes stay awake until their
   // bounded sync attempt finishes.
   bool skipLoopDelay() override {
-    return dashState != DashState::WifiSelection && dashState != DashState::Offline && dashState != DashState::Online;
+    return manualAssetSyncActive ||
+           (dashState != DashState::WifiSelection && dashState != DashState::Offline && dashState != DashState::Online);
   }
   bool preventAutoSleep() override {
-    return pullMode || manualSyncActive || manualOtaIncrementalActive || manualOtaResumePending || pullOtaDownloading ||
-           AgentDeck::OtaWs::receiving() || AgentDeck::OtaWs::flashPending();
+    return pullMode || manualSyncActive || manualAssetSyncActive || manualOtaIncrementalActive ||
+           manualOtaResumePending || pullOtaDownloading || AgentDeck::OtaWs::receiving() ||
+           AgentDeck::OtaWs::flashPending();
   }
 
  private:
@@ -407,6 +410,10 @@ class PocketDailyActivity final : public Activity {
   // Pocket Daily is awake and checks a staged pull-OTA advert even when the
   // live WebSocket is unavailable.
   bool attemptManualSync();
+  enum class AssetSyncStage : uint8_t { None, Learning, Font };
+  void serviceManualAssetSync();
+  bool beginPendingFontSync();
+  void finishManualAssetSync();
   // Set at the Connected transition; the fetch itself runs from the top of
   // loop() on the next pass, where the call stack is shallowest.
   bool glanceRefreshQueued = false;
@@ -416,6 +423,23 @@ class PocketDailyActivity final : public Activity {
   bool forceGlanceRefresh = false;
   bool manualSyncQueued = false;
   bool manualSyncActive = false;
+  // Learning/font payloads use one 64 KiB HTTP response per loop pass. Their
+  // temp candidates remain inactive until the final digest and atomic rename.
+  bool manualAssetSyncActive = false;
+  bool manualAssetAnyUpdated = false;
+  bool manualAssetHadFailure = false;
+  bool manualAssetFeedChanged = false;
+  AssetSyncStage manualAssetSyncStage = AssetSyncStage::None;
+  uint8_t manualAssetRetryCount = 0;
+  int8_t manualAssetPctBucket = -1;
+  uint32_t manualAssetNextAtMs = 0;
+  uint32_t manualAssetDownloadedBytes = 0;
+  uint32_t manualAssetTotalBytes = 0;
+  char manualAssetIp[16] = {0};
+  uint16_t manualAssetPort = 0;
+  char manualAssetToken[40] = {0};
+  char manualAssetBoard[20] = {0};
+  PocketDaily::FontPackSync::Advert pendingFontAdvert{};
   // Pull OTA is resumable on SD, but a bounded tryInstall() pass can end after
   // a handful of segments. Keep retry ownership in the activity so one Sync
   // continues until validation/flash, including Wi-Fi/server reconnection.

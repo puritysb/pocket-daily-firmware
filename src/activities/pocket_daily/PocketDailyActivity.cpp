@@ -860,6 +860,21 @@ void PocketDailyActivity::onEnter() {
   pullEndpointTried = false;
   manualSyncQueued = false;
   manualSyncActive = false;
+  manualAssetSyncActive = false;
+  manualAssetAnyUpdated = false;
+  manualAssetHadFailure = false;
+  manualAssetFeedChanged = false;
+  manualAssetSyncStage = AssetSyncStage::None;
+  manualAssetRetryCount = 0;
+  manualAssetPctBucket = -1;
+  manualAssetNextAtMs = 0;
+  manualAssetDownloadedBytes = 0;
+  manualAssetTotalBytes = 0;
+  manualAssetIp[0] = '\0';
+  manualAssetPort = 0;
+  manualAssetToken[0] = '\0';
+  manualAssetBoard[0] = '\0';
+  pendingFontAdvert = {};
   manualOtaResumePending = false;
   manualOtaIncrementalActive = false;
   pullOtaDownloading = false;
@@ -1212,11 +1227,19 @@ void PocketDailyActivity::loop() {
     requestUpdate();
   }
 
+  // Course/font payloads advance one bounded response per pass. This runs
+  // after handleButtons(), so Back/carousel/card actions are observed before
+  // the next socket is opened; onExit() cancels the inactive temp candidate.
+  if (manualAssetSyncActive && !AgentDeck::OtaWs::receiving() && !AgentDeck::OtaWs::flashPending() &&
+      (int32_t)(millis() - manualAssetNextAtMs) >= 0) {
+    serviceManualAssetSync();
+  }
+
   // Deferred connect-edge glance pull, queued by the Connected transition and
   // run here where the call stack is shallowest. Waits out an active OTA
   // receive (a 1-2s blocking fetch mid-stream feeds the rx-stall abort);
   // a dropped link just unqueues — the reconnect edge re-queues it.
-  if (glanceRefreshQueued) {
+  if (glanceRefreshQueued && !manualAssetSyncActive) {
     if (dashState != DashState::Connected) {
       glanceRefreshQueued = false;
     } else if (!AgentDeck::OtaWs::receiving()) {
@@ -1238,7 +1261,8 @@ void PocketDailyActivity::loop() {
   // HTTP handshake here at the shallowest loop frame. The multi-megabyte OTA
   // body is serviced separately in bounded chunks so input is polled between
   // every network burst.
-  if (manualOtaIncrementalActive && !AgentDeck::OtaWs::receiving() && !AgentDeck::OtaWs::flashPending() &&
+  if (manualOtaIncrementalActive && !manualAssetSyncActive && !AgentDeck::OtaWs::receiving() &&
+      !AgentDeck::OtaWs::flashPending() &&
       (int32_t)(millis() - manualOtaResumeAtMs) >= 0) {
     if (WiFi.status() != WL_CONNECTED) {
       AgentDeck::OtaPull::cancelInteractive();
@@ -1301,8 +1325,8 @@ void PocketDailyActivity::loop() {
     }
   }
 
-  if (manualOtaResumePending && !manualSyncQueued && !manualSyncActive && !AgentDeck::OtaWs::receiving() &&
-      !AgentDeck::OtaWs::flashPending()) {
+  if (manualOtaResumePending && !manualAssetSyncActive && !manualSyncQueued && !manualSyncActive &&
+      !AgentDeck::OtaWs::receiving() && !AgentDeck::OtaWs::flashPending()) {
     const uint32_t now = millis();
     if (manualOtaResumeStartedMs && now - manualOtaResumeStartedMs >= kManualOtaResumeWindowMs) {
       manualOtaResumePending = false;
@@ -1348,7 +1372,7 @@ void PocketDailyActivity::loop() {
     }
   }
 
-  if (manualSyncQueued && !AgentDeck::OtaWs::receiving()) {
+  if (manualSyncQueued && !manualAssetSyncActive && !AgentDeck::OtaWs::receiving()) {
     manualSyncQueued = false;
     manualSyncActive = true;
     requestUpdateAndWait();
@@ -1718,6 +1742,130 @@ bool PocketDailyActivity::refreshGlanceIfStale(uint32_t maxAgeMs) {
   return r.ok && !r.unchanged;
 }
 
+bool PocketDailyActivity::beginPendingFontSync() {
+  const PocketDaily::FontPackSync::BeginResult result = PocketDaily::FontPackSync::begin(
+      manualAssetIp, manualAssetPort, manualAssetToken, manualAssetBoard, pendingFontAdvert);
+  pendingFontAdvert = {};
+  if (result == PocketDaily::FontPackSync::BeginResult::Started) {
+    manualAssetSyncActive = true;
+    manualAssetSyncStage = AssetSyncStage::Font;
+    manualAssetRetryCount = 0;
+    manualAssetPctBucket = -1;
+    manualAssetDownloadedBytes = 0;
+    manualAssetTotalBytes = PocketDaily::FontPackSync::totalBytes();
+    manualAssetNextAtMs = millis();
+    AgentLog::line("FONT", "cooperative font sync armed");
+    requestUpdate();
+    return true;
+  }
+  if (result == PocketDaily::FontPackSync::BeginResult::Failed) {
+    manualAssetHadFailure = true;
+    AgentLog::line("FONT", "manual font sync failed; previous SD font retained");
+  }
+  return false;
+}
+
+void PocketDailyActivity::finishManualAssetSync() {
+  manualAssetSyncActive = false;
+  manualAssetSyncStage = AssetSyncStage::None;
+  manualAssetRetryCount = 0;
+  manualAssetPctBucket = -1;
+  manualAssetDownloadedBytes = 0;
+  manualAssetTotalBytes = 0;
+  lastSyncOutcome = (manualAssetFeedChanged || manualAssetAnyUpdated) ? SyncOutcome::Updated : SyncOutcome::UpToDate;
+  lastSyncOutcomeMs = millis();
+  AgentLog::line("ASSET", "foreground assets done: updated=%u failed=%u", manualAssetAnyUpdated ? 1U : 0U,
+                 manualAssetHadFailure ? 1U : 0U);
+  requestUpdate();
+}
+
+void PocketDailyActivity::serviceManualAssetSync() {
+  if (!manualAssetSyncActive) return;
+  if (!wifiReadyForHttp()) {
+    PocketDaily::LearningPackSync::cancel();
+    PocketDaily::FontPackSync::cancel();
+    manualAssetHadFailure = true;
+    manualSyncNeedsDiscovery = true;
+    finishManualAssetSync();
+    return;
+  }
+
+  const AssetSyncStage stage = manualAssetSyncStage;
+  bool progressed = false;
+  bool retry = false;
+  bool updated = false;
+  bool failed = false;
+  {
+    // The renderer's SD font is released only for this bounded response, not
+    // for the complete 11 MB transfer. This preserves the measured X3 heap
+    // margin while allowing queued paints between chunks.
+    RenderLock chunkLock(*this);
+    sdFontSystem.releaseLoaded(renderer);
+    if (stage == AssetSyncStage::Learning) {
+      const PocketDaily::LearningPackSync::Step step = PocketDaily::LearningPackSync::service();
+      progressed = step == PocketDaily::LearningPackSync::Step::Progress;
+      retry = step == PocketDaily::LearningPackSync::Step::Retry;
+      updated = step == PocketDaily::LearningPackSync::Step::Updated;
+      failed = step == PocketDaily::LearningPackSync::Step::Failed ||
+               step == PocketDaily::LearningPackSync::Step::Idle;
+      manualAssetDownloadedBytes = updated ? manualAssetTotalBytes : PocketDaily::LearningPackSync::downloadedBytes();
+    } else if (stage == AssetSyncStage::Font) {
+      const PocketDaily::FontPackSync::Step step = PocketDaily::FontPackSync::service();
+      progressed = step == PocketDaily::FontPackSync::Step::Progress;
+      retry = step == PocketDaily::FontPackSync::Step::Retry;
+      updated = step == PocketDaily::FontPackSync::Step::Updated;
+      failed = step == PocketDaily::FontPackSync::Step::Failed || step == PocketDaily::FontPackSync::Step::Idle;
+      manualAssetDownloadedBytes = updated ? manualAssetTotalBytes : PocketDaily::FontPackSync::downloadedBytes();
+    } else {
+      failed = true;
+    }
+  }
+
+  if (progressed) {
+    manualAssetRetryCount = 0;
+    manualAssetNextAtMs = millis() + 40;
+    const int bucket = manualAssetTotalBytes
+                           ? (int)((uint64_t)manualAssetDownloadedBytes * 20 / manualAssetTotalBytes)
+                           : 0;
+    if (bucket != manualAssetPctBucket) {
+      manualAssetPctBucket = bucket;
+      requestUpdate();
+    }
+    return;
+  }
+  if (retry) {
+    if (manualAssetRetryCount < 5) manualAssetRetryCount++;
+    if (manualAssetRetryCount < 3) {
+      manualAssetNextAtMs = millis() + (500U << manualAssetRetryCount);
+      return;
+    }
+    if (stage == AssetSyncStage::Learning)
+      PocketDaily::LearningPackSync::cancel();
+    else
+      PocketDaily::FontPackSync::cancel();
+    failed = true;
+  }
+
+  if (updated) {
+    manualAssetAnyUpdated = true;
+    if (stage == AssetSyncStage::Learning) {
+      localStudyPackVersion = 0;
+      localStudyPackRecordCount = 0;
+      buildLocalStudyCard();
+    } else if (stage == AssetSyncStage::Font) {
+      sdFontSystem.markRegistryDirty();
+    }
+  }
+  if (failed) {
+    manualAssetHadFailure = true;
+    AgentLog::line(stage == AssetSyncStage::Learning ? "LEARN" : "FONT",
+                   "cooperative transfer failed; previous SD asset retained");
+  }
+
+  if (stage == AssetSyncStage::Learning && beginPendingFontSync()) return;
+  finishManualAssetSync();
+}
+
 bool PocketDailyActivity::attemptManualSync() {
   if (!wifiReadyForHttp()) {
     manualSyncNeedsDiscovery = true;
@@ -1801,22 +1949,36 @@ bool PocketDailyActivity::attemptManualSync() {
   manualSyncNeedsDiscovery = false;
   manualSyncDiscoveryRetryActive = false;
   manualOtaNoProgressRetries = 0;
-  const PocketDaily::LearningPackSync::Result learningResult = PocketDaily::LearningPackSync::sync(
-      successfulIp, endpoints.port, token, board, r.learningPack);
-  const bool learningUpdated = learningResult == PocketDaily::LearningPackSync::Result::Updated;
-  if (learningUpdated) {
-    localStudyPackVersion = 0;
-    localStudyPackRecordCount = 0;
-    buildLocalStudyCard();
+  manualAssetAnyUpdated = false;
+  manualAssetHadFailure = false;
+  manualAssetFeedChanged = !r.unchanged;
+  manualAssetSyncStage = AssetSyncStage::None;
+  manualAssetRetryCount = 0;
+  manualAssetPctBucket = -1;
+  manualAssetDownloadedBytes = 0;
+  manualAssetTotalBytes = 0;
+  snprintf(manualAssetIp, sizeof(manualAssetIp), "%s", successfulIp);
+  manualAssetPort = endpoints.port;
+  snprintf(manualAssetToken, sizeof(manualAssetToken), "%s", token);
+  snprintf(manualAssetBoard, sizeof(manualAssetBoard), "%s", board);
+  pendingFontAdvert = r.fontPack;
+
+  const PocketDaily::LearningPackSync::BeginResult learningBegin = PocketDaily::LearningPackSync::begin(
+      manualAssetIp, manualAssetPort, manualAssetToken, manualAssetBoard, r.learningPack);
+  if (learningBegin == PocketDaily::LearningPackSync::BeginResult::Started) {
+    manualAssetSyncActive = true;
+    manualAssetSyncStage = AssetSyncStage::Learning;
+    manualAssetTotalBytes = r.learningPack.size;
+    manualAssetNextAtMs = millis();
+    AgentLog::line("LEARN", "cooperative content sync armed");
+  } else {
+    if (learningBegin == PocketDaily::LearningPackSync::BeginResult::Failed) {
+      manualAssetHadFailure = true;
+      AgentLog::line("LEARN", "manual content sync failed; previous SD pack retained");
+    }
+    manualAssetSyncActive = false;
+    beginPendingFontSync();
   }
-  if (learningResult == PocketDaily::LearningPackSync::Result::Failed)
-    AgentLog::line("LEARN", "manual content sync failed; previous SD pack retained");
-  const PocketDaily::FontPackSync::Result fontResult =
-      PocketDaily::FontPackSync::sync(successfulIp, endpoints.port, token, board, r.fontPack);
-  const bool fontUpdated = fontResult == PocketDaily::FontPackSync::Result::Updated;
-  if (fontUpdated) sdFontSystem.markRegistryDirty();
-  if (fontResult == PocketDaily::FontPackSync::Result::Failed)
-    AgentLog::line("FONT", "manual font sync failed; previous SD font retained");
   // A low battery is only a flash risk when the device is actually running
   // from it. USB power is the safest update posture, so preserve the honest
   // telemetry value in the Feed while bypassing the battery-only OTA gate.
@@ -1859,9 +2021,9 @@ bool PocketDailyActivity::attemptManualSync() {
     lastDeckSaveMs = 0;
     serviceDeckPersist();
   }
-  lastSyncOutcome = (!r.unchanged || learningUpdated || fontUpdated) ? SyncOutcome::Updated : SyncOutcome::UpToDate;
-  lastSyncOutcomeMs = millis();
-  AgentLog::line("AGENT", "manual sync: %s", r.unchanged ? "unchanged" : "updated");
+  if (!manualAssetSyncActive) finishManualAssetSync();
+  AgentLog::line("AGENT", "manual sync: %s%s", r.unchanged ? "unchanged" : "updated",
+                 manualAssetSyncActive ? " (asset transfer continues)" : "");
   return true;
 }
 
@@ -1984,7 +2146,9 @@ void PocketDailyActivity::serviceIdleCadence() {
   // A foreground Sync owns the awake period until it finishes or its bounded
   // retry window expires. Cadence sleep during a resumable transfer was the
   // main reason users saw a fast burst turn into multi-minute gaps.
-  if (manualSyncActive || manualOtaIncrementalActive || manualOtaResumePending || pullOtaDownloading) return;
+  if (manualSyncActive || manualAssetSyncActive || manualOtaIncrementalActive || manualOtaResumePending ||
+      pullOtaDownloading)
+    return;
   const uint32_t idleAnchor = lastUserInputMs ? lastUserInputMs : enterMs;
   if (millis() - idleAnchor < kIdleToCadenceMs) return;
   // Agent activity no longer controls this product's power policy. Use the
@@ -2031,6 +2195,10 @@ void PocketDailyActivity::beginTimedSleep(uint32_t seconds) {
 
 void PocketDailyActivity::onExit() {
   Activity::onExit();
+
+  PocketDaily::LearningPackSync::cancel();
+  PocketDaily::FontPackSync::cancel();
+  manualAssetSyncActive = false;
 
   // Cooperative OTA has no background task, so cancellation is immediate and
   // the durable SD offset remains available for the next Pocket Sync.
@@ -2444,6 +2612,7 @@ void PocketDailyActivity::handleButtons() {
     }
     const bool syncReleased =
         gpio.wasReleased(HalGPIO::BTN_RIGHT) || (gpio.wasReleased(HalGPIO::BTN_CONFIRM) && n == 0);
+    if (syncReleased && manualAssetSyncActive) return;
     if (syncReleased && WiFi.status() != WL_CONNECTED) {
       // A failed HTTP/OTA socket can drop STA while the presentation state is
       // still Online. Sync is a connectivity action, so key it from the radio
@@ -2660,6 +2829,7 @@ void PocketDailyActivity::handleButtons() {
     return;
   }
   if (gpio.wasReleased(HalGPIO::BTN_RIGHT) || (gpio.wasReleased(HalGPIO::BTN_CONFIRM) && n == 0)) {
+    if (manualAssetSyncActive) return;
     if (manualSyncNeedsDiscovery) {
       manualSyncNeedsDiscovery = false;
       AgentDeck::Net::mdnsRefresh();
@@ -2980,6 +3150,10 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
     const uint32_t total = AgentDeck::OtaWs::totalBytes();
     const unsigned pct = total ? (unsigned)((uint64_t)AgentDeck::OtaWs::receivedBytes() * 100 / total) : 0;
     snprintf(statusLine, sizeof(statusLine), "%s \xC2\xB7 %u%%", tr(STR_POCKET_FIRMWARE), pct);
+  } else if (manualAssetSyncActive && manualAssetTotalBytes > 0) {
+    const unsigned pct = (unsigned)((uint64_t)manualAssetDownloadedBytes * 100 / manualAssetTotalBytes);
+    snprintf(statusLine, sizeof(statusLine), "%s \xC2\xB7 %u%% \xC2\xB7 DOWNLOADING",
+             manualAssetSyncStage == AssetSyncStage::Learning ? "LEARNING" : "FONT", pct);
   } else if (pullOtaTotalBytes > 0 && pullOtaDownloadedBytes < pullOtaTotalBytes) {
     const unsigned pct = (unsigned)((uint64_t)pullOtaDownloadedBytes * 100 / pullOtaTotalBytes);
     if (pullOtaDownloading || manualSyncActive)
@@ -3060,8 +3234,8 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
   drawBrandedHeader(tr(STR_POCKET_DAILY), nullptr);
   const int statusBandY = m.topPadding + m.headerHeight;
   const int statusBandH = renderer.getLineHeight(SMALL_FONT_ID) + 4;
-  const bool syncInk = savedWifiScanActive || manualSyncQueued || manualSyncActive || manualOtaIncrementalActive ||
-                       pullOtaDownloading || AgentDeck::OtaWs::receiving();
+  const bool syncInk = savedWifiScanActive || manualSyncQueued || manualSyncActive || manualAssetSyncActive ||
+                       manualOtaIncrementalActive || pullOtaDownloading || AgentDeck::OtaWs::receiving();
   if (syncInk) {
     // E-ink activity signal: invert the quiet status row, then advance four
     // white toner blocks only when the phase/progress changes. It reads as
@@ -3074,6 +3248,10 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
     if (pullOtaTotalBytes && pullOtaDownloadedBytes < pullOtaTotalBytes)
       activeCells = std::max(
           1, std::min(4, (int)(((uint64_t)pullOtaDownloadedBytes * 4 + pullOtaTotalBytes - 1) / pullOtaTotalBytes)));
+    else if (manualAssetSyncActive && manualAssetTotalBytes)
+      activeCells = std::max(
+          1, std::min(4, (int)(((uint64_t)manualAssetDownloadedBytes * 4 + manualAssetTotalBytes - 1) /
+                               manualAssetTotalBytes)));
     const int cellsX = w - pad - cellsW - 7;
     for (int i = 0; i < 4; i++) {
       const int cellX = cellsX + i * (cellW + cellGap);

@@ -14,12 +14,17 @@ struct Advert {
   char licenseSpdx[32] = {0};
 };
 
-enum class Result : uint8_t { NotAdvertised, Current, Updated, Failed };
+enum class BeginResult : uint8_t { NotAdvertised, Current, Started, Failed };
+enum class Step : uint8_t { Idle, Progress, Updated, Retry, Failed };
 
-// Download an advertised pack from the already-authenticated Surface provider.
-// This is intentionally called only by an explicit user Sync; unattended wake
-// pulls must not spend battery downloading multi-megabyte course assets.
-Result sync(const char* ip, uint16_t port, const char* token, const char* board, const Advert& advert);
+// Foreground-only cooperative transfer. service() advances one 64 KiB response
+// and returns to the main input loop; unattended pulls never start it.
+BeginResult begin(const char* ip, uint16_t port, const char* token, const char* board, const Advert& advert);
+Step service();
+void cancel();
+bool active();
+uint32_t downloadedBytes();
+uint32_t totalBytes();
 
 }  // namespace LearningPackSync
 }  // namespace PocketDaily

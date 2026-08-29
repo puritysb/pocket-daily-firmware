@@ -25,11 +25,17 @@ struct Advert {
   char licenseSpdx[32] = {0};
 };
 
-enum class Result : uint8_t { NotAdvertised, Current, Updated, Failed };
+enum class BeginResult : uint8_t { NotAdvertised, Current, Started, Failed };
+enum class Step : uint8_t { Idle, Progress, Updated, Retry, Failed };
 
-// Download and atomically install the broad SD-paged reader font. This is
-// called only by foreground Sync because the pack is roughly 11 MB.
-Result sync(const char* ip, uint16_t port, const char* token, const char* board, const Advert& advert);
+// Download and atomically install the broad SD-paged reader font in bounded
+// foreground steps. Controls run between every service() call.
+BeginResult begin(const char* ip, uint16_t port, const char* token, const char* board, const Advert& advert);
+Step service();
+void cancel();
+bool active();
+uint32_t downloadedBytes();
+uint32_t totalBytes();
 
 }  // namespace FontPackSync
 }  // namespace PocketDaily

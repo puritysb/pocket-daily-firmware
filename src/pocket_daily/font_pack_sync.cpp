@@ -2,15 +2,12 @@
 #include "pocket_daily/font_pack_sync.h"
 
 #include <HalStorage.h>
-#include <MD5Builder.h>
-
 #include <cctype>
 #include <cstdio>
 #include <cstring>
 
 #include "agent/AgentLog.h"
-#include "network/HttpDownloader.h"
-#include "pocket_daily/surface_request.h"
+#include "pocket_daily/segmented_download.h"
 
 namespace PocketDaily {
 namespace FontPackSync {
@@ -47,24 +44,8 @@ bool fileSize(const char* path, uint32_t& out) {
   return true;
 }
 
-bool fileMd5(const char* path, char out[33]) {
-  out[0] = '\0';
-  HalFile file = Storage.open(path, O_RDONLY);
-  if (!file) return false;
-  MD5Builder md5;
-  md5.begin();
-  uint8_t buffer[256];
-  while (true) {
-    const int got = file.read(buffer, sizeof(buffer));
-    if (got < 0) return false;
-    if (got == 0) break;
-    md5.add(buffer, static_cast<size_t>(got));
-  }
-  md5.calculate();
-  md5.getChars(out);
-  out[32] = '\0';
-  return true;
-}
+Advert activeAdvert;
+bool syncActive = false;
 
 bool validHeader(const char* path) {
   uint8_t header[32] = {0};
@@ -117,50 +98,66 @@ bool installCandidate(const Advert& advert) {
 
 }  // namespace
 
-Result sync(const char* ip, uint16_t port, const char* token, const char* board, const Advert& advert) {
-  if (!advert.packageId[0]) return Result::NotAdvertised;
+BeginResult begin(const char* ip, uint16_t port, const char* token, const char* board, const Advert& advert) {
+  if (!advert.packageId[0]) return BeginResult::NotAdvertised;
   if (!ip || !ip[0] || !port || strcmp(advert.packageId, PACKAGE_ID) != 0 || advert.contentVersion == 0 ||
       advert.formatVersion != FORMAT_VERSION || advert.size < 64 || advert.size > MAX_PACK_BYTES ||
       !validMd5(advert.md5) || strcmp(advert.licenseSpdx, "OFL-1.1") != 0) {
     AgentLog::line("FONT", "pack advert rejected: id=%s version=%lu format=%u size=%lu", advert.packageId,
                    (unsigned long)advert.contentVersion, (unsigned)advert.formatVersion, (unsigned long)advert.size);
-    return Result::Failed;
+    return BeginResult::Failed;
   }
-  if (isCurrent(advert)) return Result::Current;
-  if (!ensureDirectories()) return Result::Failed;
+  if (isCurrent(advert)) return BeginResult::Current;
+  if (!ensureDirectories()) return BeginResult::Failed;
 
-  char url[320];
-  size_t offset = static_cast<size_t>(snprintf(url, sizeof(url), "http://%s:%u/fonts/pack?id=%s&version=%lu", ip,
-                                               (unsigned)port, PACKAGE_ID, (unsigned long)advert.contentVersion));
-  if (token && token[0] && offset < sizeof(url)) snprintf(url + offset, sizeof(url) - offset, "&token=%s", token);
-
-  const SurfaceRequestHeaders identity(board);
-  const auto requestHeaders = identity.view();
-  const auto downloaded =
-      HttpDownloader::downloadToFile(url, TEMP_PATH, nullptr, nullptr, "", "", nullptr, &requestHeaders);
-  if (downloaded != HttpDownloader::OK) {
-    AgentLog::line("FONT", "pack download failed: code=%d", (int)downloaded);
-    return Result::Failed;
+  char requestPath[128];
+  if (snprintf(requestPath, sizeof(requestPath), "/fonts/pack?id=%s&version=%lu", PACKAGE_ID,
+               (unsigned long)advert.contentVersion) >= (int)sizeof(requestPath) ||
+      !SegmentedDownload::begin(ip, port, token, board, requestPath, TEMP_PATH, advert.size, advert.md5)) {
+    return BeginResult::Failed;
   }
-
-  uint32_t actualSize = 0;
-  char actualMd5[33] = {0};
-  const bool accepted = fileSize(TEMP_PATH, actualSize) && actualSize == advert.size && fileMd5(TEMP_PATH, actualMd5) &&
-                        strcasecmp(actualMd5, advert.md5) == 0 && validHeader(TEMP_PATH);
-  if (!accepted) {
-    AgentLog::line("FONT", "pack verification failed: size=%lu/%lu md5=%s/%s", (unsigned long)actualSize,
-                   (unsigned long)advert.size, actualMd5, advert.md5);
-    Storage.remove(TEMP_PATH);
-    return Result::Failed;
-  }
-  if (!installCandidate(advert)) {
-    Storage.remove(TEMP_PATH);
-    return Result::Failed;
-  }
-  AgentLog::line("FONT", "installed %s v%lu (%lu bytes)", FAMILY_NAME, (unsigned long)advert.contentVersion,
-                 (unsigned long)advert.size);
-  return Result::Updated;
+  activeAdvert = advert;
+  syncActive = true;
+  return BeginResult::Started;
 }
+
+Step service() {
+  if (!syncActive) return Step::Idle;
+  const SegmentedDownload::Step step = SegmentedDownload::service();
+  if (step == SegmentedDownload::Step::Progress) return Step::Progress;
+  if (step == SegmentedDownload::Step::Retry) return Step::Retry;
+  if (step != SegmentedDownload::Step::Complete) {
+    syncActive = false;
+    return Step::Failed;
+  }
+  uint32_t actualSize = 0;
+  const bool accepted = fileSize(TEMP_PATH, actualSize) && actualSize == activeAdvert.size && validHeader(TEMP_PATH);
+  if (!accepted) {
+    AgentLog::line("FONT", "pack validation failed after verified transfer: size=%lu/%lu", (unsigned long)actualSize,
+                   (unsigned long)activeAdvert.size);
+    Storage.remove(TEMP_PATH);
+    syncActive = false;
+    return Step::Failed;
+  }
+  if (!installCandidate(activeAdvert)) {
+    Storage.remove(TEMP_PATH);
+    syncActive = false;
+    return Step::Failed;
+  }
+  AgentLog::line("FONT", "installed %s v%lu (%lu bytes)", FAMILY_NAME, (unsigned long)activeAdvert.contentVersion,
+                 (unsigned long)activeAdvert.size);
+  syncActive = false;
+  return Step::Updated;
+}
+
+void cancel() {
+  if (syncActive) SegmentedDownload::cancel();
+  syncActive = false;
+}
+
+bool active() { return syncActive; }
+uint32_t downloadedBytes() { return syncActive ? SegmentedDownload::downloadedBytes() : 0; }
+uint32_t totalBytes() { return syncActive ? SegmentedDownload::totalBytes() : 0; }
 
 }  // namespace FontPackSync
 }  // namespace PocketDaily
