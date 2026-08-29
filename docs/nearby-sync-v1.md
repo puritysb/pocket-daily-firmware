@@ -1,7 +1,7 @@
 # Pocket Nearby Sync v1
 
 Pocket Nearby Sync is the account-free link between the Pocket app and a
-Crosspoint Pocket device. It is independent of AgentDeck and does not require
+Xteink X3 or X4 running Crosspoint Pocket firmware. It is independent of AgentDeck and does not require
 the phone and reader to be on the same infrastructure Wi-Fi network.
 
 ## Product contract
@@ -20,8 +20,8 @@ the phone and reader to be on the same infrastructure Wi-Fi network.
 
 The transport design selects the least expensive available link in this order:
 
-1. Existing LAN connection discovered through Bonjour (planned after the first
-   direct-link release; the manual current-hotspot path ships first).
+1. Existing LAN connection discovered through `_crosspoint._tcp` Bonjour,
+   with `crosspoint.local` and the direct-hotspot address as bounded fallbacks.
 2. BLE for discovery, authenticated status, and a request to start a temporary
    device hotspot.
 3. The temporary hotspot for files, fonts, content packs, screenshots, and
@@ -56,7 +56,9 @@ Status is readable only on an encrypted, authenticated connection:
 V=1;MODEL=X3;ID=89ABCDEF;FW=1.4.1;CAP=AP,WS,SD
 ```
 
-Unknown fields must be ignored. `V`, `MODEL`, `ID`, and `CAP` are required.
+`MODEL` is `X3` or `X4`; the app uses it to select the 528×792 X3 or 480×800
+X4 surface and matching physical-control geometry. Unknown fields must be
+ignored. `V`, `MODEL`, `ID`, and `CAP` are required.
 
 ### Commands
 
@@ -121,7 +123,7 @@ credentials.
 
 ## Memory and responsiveness gates
 
-Nearby Sync is not ready for release until measurements on X3 demonstrate:
+Nearby Sync is not ready for release until measurements on both X3 and X4 demonstrate:
 
 - BLE mode enters with at least 20 KiB minimum-ever free heap.
 - BLE deinitialization returns enough contiguous heap to start the existing AP
