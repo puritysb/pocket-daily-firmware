@@ -4317,12 +4317,18 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
 }
 
 bool PocketDailyActivity::paintSleepFrame() {
-  // A manual power-off is personal, not a stale dashboard snapshot: release
-  // ownership to SleepActivity, which shows the current cover full-screen or
-  // the AgentDeck compatibility page when no book is open. Automatic cadence
-  // sleep still calls renderGlance(TimedSleep) directly in beginTimedSleep().
-  AgentLog::line("POCKET", "power-off frame delegated to cover sleep screen");
-  return false;
+  // Pocket Daily owns its retained e-ink frame. Delegating to SleepActivity
+  // redraws the last book cover over the dashboard just before the panel powers
+  // down, which looks like Pocket Daily disappeared. Paint the already-designed
+  // powered-off Daily Brief instead; unlike a cadence frame it promises no next
+  // sync time and stays truthful if the device remains off for days.
+  sleepForSec = 0;
+  sleepNextHm[0] = '\0';
+  glanceReason = GlanceReason::PoweredOff;
+  sleepFramePending = true;
+  requestUpdateAndWait();
+  AgentLog::line("POCKET", "retaining powered-off Daily Brief frame");
+  return true;
 }
 
 void PocketDailyActivity::render(RenderLock&&) {
