@@ -6,6 +6,7 @@
 
 #include "NetworkModeSelectionActivity.h"
 #include "activities/Activity.h"
+#include "nearby_sync/NearbySyncService.h"
 #include "network/CrossPointWebServer.h"
 
 // Web server activity states
@@ -14,7 +15,10 @@ enum class WebServerActivityState {
   WIFI_SELECTION,  // WiFi selection subactivity is active (for Join Network mode)
   AP_STARTING,     // Starting Access Point mode
   SERVER_RUNNING,  // Web server is running and handling requests
-  SHUTTING_DOWN    // Shutting down server and WiFi
+  NEARBY_STARTING, // Initializing the BLE control plane
+  NEARBY_READY,    // Advertising or paired with the Pocket app
+  NEARBY_HANDOFF,  // BLE lease delivered; waiting before starting private AP
+  SHUTTING_DOWN    // Shutting down server and radios
 };
 
 /**
@@ -33,6 +37,14 @@ class CrossPointWebServerActivity final : public Activity {
   // Network mode
   NetworkMode networkMode = NetworkMode::JOIN_NETWORK;
   bool isApMode = false;
+  bool privateApMode = false;
+  char privateApSsid[20] = {};
+  char privateApPassword[16] = {};
+  unsigned long nearbyHandoffAt = 0;
+  unsigned long privateApStartedAt = 0;
+  bool lastNearbyAuthenticated = false;
+
+  Pocket::NearbySync::Service nearbySync;
 
   // Web server - owned by this activity
   std::unique_ptr<CrossPointWebServer> webServer;
@@ -59,6 +71,9 @@ class CrossPointWebServerActivity final : public Activity {
   void onWifiSelectionComplete(bool connected);
   void startAccessPoint();
   void startWebServer();
+  void startNearbySync();
+  void handleNearbySync();
+  void renderNearbySync() const;
 
  public:
   explicit CrossPointWebServerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -68,5 +83,7 @@ class CrossPointWebServerActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool skipLoopDelay() override { return webServer && webServer->isRunning(); }
-  bool preventAutoSleep() override { return webServer && webServer->isRunning(); }
+  bool preventAutoSleep() override {
+    return (webServer && webServer->isRunning()) || nearbySync.isRunning();
+  }
 };

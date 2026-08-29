@@ -52,3 +52,6 @@ jobs:
             .pio/build/gh_release_rc/firmware.elf
             .pio/build/gh_release_rc/firmware.map
             .pio/build/gh_release_rc/partitions.bin
+            LICENSE
+            licenses/NimBLE-Arduino-LICENSE.txt
+            licenses/NimBLE-Arduino-NOTICE.txt

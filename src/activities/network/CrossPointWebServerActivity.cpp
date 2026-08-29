@@ -3,8 +3,10 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <GfxRenderer.h>
+#include <HalGPIO.h>
 #include <I18n.h>
 #include <WiFi.h>
+#include <esp_system.h>
 #include <esp_task_wdt.h>
 
 #include <cstddef>
@@ -26,6 +28,9 @@ constexpr const char* AP_PASSWORD = nullptr;  // Open network for ease of use
 constexpr const char* AP_HOSTNAME = "crosspoint";
 constexpr uint8_t AP_CHANNEL = 1;
 constexpr uint8_t AP_MAX_CONNECTIONS = 4;
+constexpr uint8_t PRIVATE_AP_MAX_CONNECTIONS = 1;
+constexpr uint16_t PRIVATE_AP_LEASE_SECONDS = 300;
+constexpr unsigned long BLE_HANDOFF_DELAY_MS = 900;
 constexpr int QR_CODE_WIDTH = 198;
 constexpr int QR_CODE_HEIGHT = 198;
 
@@ -44,6 +49,7 @@ void stopDnsServer() {
 void restartMdns(const char* hostname, const char* tag) {
   MDNS.end();
   if (MDNS.begin(hostname)) {
+    MDNS.addService("crosspoint", "tcp", 80);
     LOG_DBG(tag, "mDNS started: http://%s.local/", hostname);
   } else {
     LOG_DBG(tag, "WARNING: mDNS failed to start");
@@ -70,6 +76,12 @@ void CrossPointWebServerActivity::onEnter() {
   state = WebServerActivityState::MODE_SELECTION;
   networkMode = NetworkMode::JOIN_NETWORK;
   isApMode = false;
+  privateApMode = false;
+  privateApSsid[0] = '\0';
+  privateApPassword[0] = '\0';
+  nearbyHandoffAt = 0;
+  privateApStartedAt = 0;
+  lastNearbyAuthenticated = false;
   connectedIP.clear();
   connectedSSID.clear();
   lastHandleClientTime = 0;
@@ -93,6 +105,7 @@ void CrossPointWebServerActivity::onExit() {
   LOG_DBG("WEBACT", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
 
   state = WebServerActivityState::SHUTTING_DOWN;
+  nearbySync.end();
   stopDnsServer();
   MDNS.end();
 
@@ -116,11 +129,14 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     modeName = "Connect to Calibre";
   } else if (mode == NetworkMode::CREATE_HOTSPOT) {
     modeName = "Create Hotspot";
+  } else if (mode == NetworkMode::NEARBY_SYNC) {
+    modeName = "Nearby Sync";
   }
   LOG_DBG("WEBACT", "Network mode selected: %s", modeName);
 
   networkMode = mode;
   isApMode = (mode == NetworkMode::CREATE_HOTSPOT);
+  privateApMode = false;
 
   if (mode == NetworkMode::CONNECT_CALIBRE) {
     startActivityForResult(
@@ -136,6 +152,11 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
                                    }
                                  });
         });
+    return;
+  }
+
+  if (mode == NetworkMode::NEARBY_SYNC) {
+    startNearbySync();
     return;
   }
 
@@ -190,6 +211,79 @@ void CrossPointWebServerActivity::onWifiSelectionComplete(const bool connected) 
   }
 }
 
+void CrossPointWebServerActivity::startNearbySync() {
+  state = WebServerActivityState::NEARBY_STARTING;
+  requestUpdate();
+
+  // Nearby Sync owns the radio in this activity. Do not let a previous station
+  // session coexist with NimBLE on the no-PSRAM device.
+  if (WiFi.getMode() != WIFI_MODE_NULL) {
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+  }
+
+  if (!nearbySync.begin(gpio.deviceIsX3() ? "X3" : "X4", CROSSPOINT_VERSION)) {
+    LOG_ERR("WEBACT", "Nearby Sync failed to start");
+    onGoHome();
+    return;
+  }
+
+  state = WebServerActivityState::NEARBY_READY;
+  lastNearbyAuthenticated = nearbySync.isAuthenticated();
+  requestUpdate();
+}
+
+void CrossPointWebServerActivity::handleNearbySync() {
+  const bool authenticated = nearbySync.isAuthenticated();
+  if (authenticated != lastNearbyAuthenticated) {
+    lastNearbyAuthenticated = authenticated;
+    requestUpdate();
+  }
+
+  if (state == WebServerActivityState::NEARBY_HANDOFF) {
+    if (millis() - nearbyHandoffAt < BLE_HANDOFF_DELAY_MS) return;
+
+    nearbySync.end();
+    isApMode = true;
+    privateApMode = true;
+    state = WebServerActivityState::AP_STARTING;
+    requestUpdate();
+    startAccessPoint();
+    return;
+  }
+
+  Pocket::NearbySync::Command command;
+  if (!nearbySync.takeCommand(command)) return;
+
+  switch (command.type) {
+    case Pocket::NearbySync::CommandType::PING:
+      nearbySync.notifyOk(command.requestId);
+      break;
+    case Pocket::NearbySync::CommandType::CANCEL:
+      nearbySync.notifyOk(command.requestId);
+      break;
+    case Pocket::NearbySync::CommandType::START_AP: {
+      const uint32_t secretA = esp_random();
+      const uint32_t secretB = esp_random();
+      snprintf(privateApSsid, sizeof(privateApSsid), "Pocket-%.4s", nearbySync.deviceId() + 4);
+      snprintf(privateApPassword, sizeof(privateApPassword), "%08lX%04lX", static_cast<unsigned long>(secretA),
+               static_cast<unsigned long>(secretB & 0xFFFFU));
+
+      if (!nearbySync.notifyHotspot(command.requestId, privateApSsid, privateApPassword, "192.168.4.1", 80, 81,
+                                    PRIVATE_AP_LEASE_SECONDS)) {
+        nearbySync.notifyError(command.requestId, "NOT_SUBSCRIBED");
+        break;
+      }
+      nearbyHandoffAt = millis();
+      state = WebServerActivityState::NEARBY_HANDOFF;
+      requestUpdate();
+      break;
+    }
+    case Pocket::NearbySync::CommandType::NONE:
+      break;
+  }
+}
+
 void CrossPointWebServerActivity::startAccessPoint() {
   LOG_DBG("WEBACT", "Starting Access Point mode...");
   LOG_DBG("WEBACT", "Free heap before AP start: %d bytes", ESP.getFreeHeap());
@@ -200,11 +294,14 @@ void CrossPointWebServerActivity::startAccessPoint() {
 
   // Start soft AP
   bool apStarted;
-  if (AP_PASSWORD && strlen(AP_PASSWORD) >= 8) {
-    apStarted = WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, false, AP_MAX_CONNECTIONS);
+  const char* ssid = privateApMode ? privateApSsid : AP_SSID;
+  const char* password = privateApMode ? privateApPassword : AP_PASSWORD;
+  const uint8_t maxConnections = privateApMode ? PRIVATE_AP_MAX_CONNECTIONS : AP_MAX_CONNECTIONS;
+  if (password && strlen(password) >= 8) {
+    apStarted = WiFi.softAP(ssid, password, AP_CHANNEL, false, maxConnections);
   } else {
     // Open network (no password)
-    apStarted = WiFi.softAP(AP_SSID, nullptr, AP_CHANNEL, false, AP_MAX_CONNECTIONS);
+    apStarted = WiFi.softAP(ssid, nullptr, AP_CHANNEL, false, maxConnections);
   }
 
   if (!apStarted) {
@@ -220,10 +317,11 @@ void CrossPointWebServerActivity::startAccessPoint() {
   char ipStr[16];
   snprintf(ipStr, sizeof(ipStr), "%d.%d.%d.%d", apIP[0], apIP[1], apIP[2], apIP[3]);
   connectedIP = ipStr;
-  connectedSSID = AP_SSID;
+  connectedSSID = ssid;
+  if (privateApMode) privateApStartedAt = millis();
 
   LOG_DBG("WEBACT", "Access Point started!");
-  LOG_DBG("WEBACT", "SSID: %s", AP_SSID);
+  LOG_DBG("WEBACT", "SSID: %s", ssid);
   LOG_DBG("WEBACT", "IP: %s", connectedIP.c_str());
 
   // Start mDNS for hostname resolution
@@ -280,8 +378,24 @@ void CrossPointWebServerActivity::startWebServer() {
 }
 
 void CrossPointWebServerActivity::loop() {
+  if (state == WebServerActivityState::NEARBY_READY || state == WebServerActivityState::NEARBY_HANDOFF) {
+    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+      onGoHome();
+      return;
+    }
+    handleNearbySync();
+    return;
+  }
+
   // Handle different states
   if (state == WebServerActivityState::SERVER_RUNNING) {
+    if (privateApMode && privateApStartedAt != 0 &&
+        millis() - privateApStartedAt >= static_cast<unsigned long>(PRIVATE_AP_LEASE_SECONDS) * 1000UL) {
+      LOG_INF("WEBACT", "Nearby Sync private AP lease expired");
+      onGoHome();
+      return;
+    }
+
     // Handle DNS requests for captive portal (AP mode only)
     if (isApMode && dnsServer) {
       dnsServer->processNextRequest();
@@ -378,6 +492,13 @@ void CrossPointWebServerActivity::loop() {
 }
 
 void CrossPointWebServerActivity::render(RenderLock&&) {
+  if (state == WebServerActivityState::NEARBY_STARTING || state == WebServerActivityState::NEARBY_READY ||
+      state == WebServerActivityState::NEARBY_HANDOFF) {
+    renderNearbySync();
+    renderer.displayBuffer();
+    return;
+  }
+
   // Only render our own UI when server is running
   // Subactivities handle their own rendering
   if (state == WebServerActivityState::SERVER_RUNNING || state == WebServerActivityState::AP_STARTING) {
@@ -424,7 +545,9 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     startY += height10 + metrics.verticalSpacing * 2;
 
     // Show QR code for Wifi
-    const std::string wifiConfig = std::string("WIFI:S:") + connectedSSID + ";;";
+    const std::string wifiConfig = privateApMode
+                                       ? std::string("WIFI:T:WPA;S:") + connectedSSID + ";P:" + privateApPassword + ";;"
+                                       : std::string("WIFI:S:") + connectedSSID + ";;";
     const Rect qrBoundsWifi(metrics.contentSidePadding, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
     QrUtils::drawQrCode(renderer, qrBoundsWifi, wifiConfig);
 
@@ -474,6 +597,42 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     // Also show hostname URL
     std::string hostnameUrl = std::string(tr(STR_OR_HTTP_PREFIX)) + AP_HOSTNAME + ".local/";
     renderer.drawCenteredText(SMALL_FONT_ID, startY, hostnameUrl.c_str(), true);
+  }
+
+  const auto labels = mappedInput.mapLabels(tr(STR_EXIT), "", "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
+
+void CrossPointWebServerActivity::renderNearbySync() const {
+  renderer.clearScreen();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int pageWidth = renderer.getScreenWidth();
+  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_NEARBY_SYNC), nullptr);
+
+  int y = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing * 4;
+  if (state == WebServerActivityState::NEARBY_STARTING) {
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_NEARBY_STARTING), true, EpdFontFamily::BOLD);
+  } else if (state == WebServerActivityState::NEARBY_HANDOFF) {
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_NEARBY_PREPARING), true, EpdFontFamily::BOLD);
+  } else {
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_NEARBY_OPEN_APP), true, EpdFontFamily::BOLD);
+    y += lineHeight + metrics.verticalSpacing * 3;
+    renderer.drawCenteredText(UI_10_FONT_ID, y, nearbySync.advertisedName(), true);
+    y += lineHeight + metrics.verticalSpacing * 4;
+
+    if (!nearbySync.isAuthenticated()) {
+      renderer.drawCenteredText(SMALL_FONT_ID, y, tr(STR_NEARBY_PAIR_CODE), true);
+      y += renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing;
+      char passkey[7];
+      snprintf(passkey, sizeof(passkey), "%06lu", static_cast<unsigned long>(nearbySync.passkey()));
+      renderer.drawCenteredText(UI_12_FONT_ID, y, passkey, true, EpdFontFamily::BOLD);
+      y += renderer.getLineHeight(UI_12_FONT_ID) + metrics.verticalSpacing * 3;
+      renderer.drawCenteredText(SMALL_FONT_ID, y, tr(STR_NEARBY_WAITING), true);
+    } else {
+      renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_NEARBY_CONNECTED), true, EpdFontFamily::BOLD);
+    }
   }
 
   const auto labels = mappedInput.mapLabels(tr(STR_EXIT), "", "", "");
