@@ -3,16 +3,15 @@
 CrossPoint renders bilingual EPUBs (original + translation in the same file) with an
 in-reader toggle that swaps between **Both**, **Original only**, and **Translation only**
 without leaving the page. This document defines the marker classes the parser looks for
-and how the book_translator pipeline (or any other producer) should emit them.
+and how any translation pipeline should emit them.
 
 > **This is a two-sided producer↔consumer contract.** This doc is the **SSOT** for the
 > bilingual-EPUB format. The **consumer** is this firmware's reader/parser
-> (`ChapterHtmlSlimParser`, `Section`); the **producer** is the `book_translator` pipeline
-> (its own repo, split out of OpenClaw), whose `assemble.py` emits `cp-original`/`cp-translation`
-> EPUBs against this spec. A change here is **breaking on both sides** — update the parser and
-> the pipeline together, and bump `SECTION_FILE_VERSION` (kept in this fork's reserved
-> **128–255** range, never onto upstream's line) so stale section caches invalidate. The
-> upstream-contribution branch `bilingual-toggle-upstream` uses `upstream + 1` instead.
+> (`ChapterHtmlSlimParser`, `Section`); the **producer** is any translation pipeline
+> that emits `cp-original`/`cp-translation` EPUBs against this spec. A change here is
+> **breaking on both sides** — update the parser and affected producers together, and
+> bump `SECTION_FILE_VERSION` (kept in this fork's reserved **128–255** range) so stale
+> section caches invalidate.
 
 ## Marker classes
 
@@ -30,14 +29,13 @@ is **not** matched (it would be invisible to the toggle and always rendered).
 
 ### Marker resolution is a hybrid (cp-* wins, xml:lang fallback)
 
-As of v28 the toggle resolves a paragraph's role with a two-tier strategy so the
-reader is interoperable with the wider bilingual-EPUB ecosystem, not just this
-repo's `book_translator` pipeline:
+The toggle resolves a paragraph's role with a two-tier strategy so the reader
+is interoperable with the wider bilingual-EPUB ecosystem, not just one
+producer:
 
 1. **Explicit cp-* tokens win first.** `class="cp-original"` / `class="cp-translation"`
-   (token-exact, see `hasCssClass`). This is the unambiguous path used by our
-   `book_translator` and the reference generator
-   (`scripts/generate_bilingual_test_epub.py`).
+   (token-exact, see `hasCssClass`). This is the unambiguous path used by the
+   reference generator (`scripts/generate_bilingual_test_epub.py`).
 2. **Standard `xml:lang` fallback.** When neither cp-* token is present, the
    parser reads the W3C/DAISY `xml:lang` attribute (or legacy `lang`). A
    paragraph whose **primary language subtag** matches the publication's
@@ -52,7 +50,7 @@ repo's `book_translator` pipeline:
 This means a producer can pick whichever standard it already follows:
 
 ```html
-<!-- Option A: explicit cp-* tokens (book_translator default) -->
+<!-- Option A: explicit cp-* tokens (reference generator default) -->
 <p class="cp-original">Hello world.</p>
 <p class="cp-translation">안녕하세요, 세계.</p>
 
@@ -72,7 +70,7 @@ the comparison.
 
 A foreign-language quotation inside a monolingual book (e.g. a French passage
 in an English novel, marked `xml:lang="fr"`) will be classified as a translation
-and hidden in Translation-only mode. cp-* override avoids this for our pipeline;
+and hidden in Translation-only mode. An explicit cp-* role avoids this ambiguity;
 books that rely on the xml:lang path should set `dc:language` to the work's true
 primary language so the source/translation split is unambiguous.
 
@@ -93,10 +91,10 @@ Both (0)  →  Original only (1)  →  Translation only (2)  →  Both (0)  → 
   (treated as `display:none` before block creation).
 - **Translation only** — elements carrying `cp-original` are dropped.
 
-The mode is stored in the section cache header (`SECTION_FILE_VERSION = 28`), so
+The mode is stored in the section cache header (`SECTION_FILE_VERSION = 129`), so
 switching modes invalidates the per-section cache and the current chapter re-parses
-on the next render. Section files written by older firmwares (v27 and below) are
-discarded automatically on first open after upgrade.
+on the next render. Section files written with a different cache version are discarded
+automatically on first open after upgrade.
 
 ## Required HTML shape
 
@@ -134,13 +132,11 @@ as long as the exact `cp-original` / `cp-translation` token appears.
   wired. If a translation tool emits `<span class="cp-original">` inside a paragraph,
   the toggle has no effect on it.
 
-## Producer-side configuration (book_translator pipeline)
+## Producer-side configuration
 
-Bilingual EPUBs are produced **off-device** by the `book_translator` pipeline in
-the OpenClaw repo (`~/github/OpenClaw/`), which finds the source, translates it
-with **GLM 5.2** (Zhipu AI, OpenAI-compatible chat API), and assembles the EPUB.
-See [bilingual-pipeline.md](./bilingual-pipeline.md) for the full request →
-translate → deliver flow (Booklore + Calibre Content Server → OPDS → device).
+Bilingual EPUBs are produced **off-device** by a translation pipeline. See
+[bilingual-pipeline.md](./bilingual-pipeline.md) for the full request → translate
+→ deliver flow.
 
 Whatever tooling generates the output, the only hard requirement is that every
 paragraph pair emits the marker classes above — `cp-original` on the source
@@ -162,8 +158,7 @@ python3 scripts/generate_bilingual_test_epub.py
 
 ## Testing the toggle end-to-end
 
-1. Flash a firmware built from `feature/bilingual-toggle` (or a release that contains
-   this feature) to the Xteink X3 / X4.
+1. Flash a firmware containing the bilingual toggle to the Xteink X3 / X4.
 2. Copy `bilingual-sample.epub` to the SD card and open it.
 3. Settings → Controls → Long-press Menu → choose **Bilingual Toggle**.
 4. Back in the reader, long-press Confirm (~0.4 s). The chapter should re-parse and:
