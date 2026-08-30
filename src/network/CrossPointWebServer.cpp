@@ -4,6 +4,7 @@
 #include <FsHelpers.h>
 #include <HalGPIO.h>
 #include <HalStorage.h>
+#include <HalSystem.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <WiFi.h>
@@ -31,6 +32,15 @@ namespace {
 constexpr const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
 constexpr uint16_t UDP_PORTS[] = {54982, 48123, 39001, 44044, 59678};
 constexpr uint16_t LOCAL_UDP_PORT = 8134;
+// Keep diagnostic responses below the Pocket private AP's scarce contiguous
+// heap and return to the global loop between every piece. The previous 512 B
+// write loop could block inside lwIP long enough to trip the task watchdog.
+constexpr size_t CRASH_REPORT_CHUNK_BYTES = 160;
+constexpr unsigned long UPLOAD_SOCKET_TIMEOUT_MS = 30 * 1000;
+constexpr unsigned long POCKET_STREAM_IDLE_TIMEOUT_MS = 30 * 1000;
+constexpr unsigned long POCKET_STREAM_REPLY_GRACE_MS = 1000;
+constexpr size_t POCKET_STREAM_READ_BYTES = 768;
+uint8_t pocketStreamReadBuffer[POCKET_STREAM_READ_BYTES];
 
 // Static pointer for WebSocket callback (WebSocketsServer requires C-style callback)
 CrossPointWebServer* wsInstance = nullptr;
@@ -87,6 +97,20 @@ uint32_t updateCrc32(uint32_t crc, const uint8_t* data, size_t length) {
     }
   }
   return crc;
+}
+
+bool parseUnsignedDecimal(const String& text, size_t& value) {
+  if (text.isEmpty()) return false;
+  size_t parsed = 0;
+  for (size_t i = 0; i < text.length(); ++i) {
+    const char c = text[i];
+    if (c < '0' || c > '9') return false;
+    const size_t digit = static_cast<size_t>(c - '0');
+    if (parsed > (SIZE_MAX - digit) / 10) return false;
+    parsed = parsed * 10 + digit;
+  }
+  value = parsed;
+  return true;
 }
 
 bool renameStorageFile(const String& from, const String& to) {
@@ -167,10 +191,18 @@ void CrossPointWebServer::begin() {
   // link therefore never turns a valid book or update.bin into a partial file.
   server->on("/api/pocket/v1/commit", HTTP_POST, [this] { handleCommitUpload(); });
 
-  // Settings endpoints
-  server->on("/settings", HTTP_GET, [this] { handleSettingsPage(); });
-  server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
-  server->on("/api/settings", HTTP_POST, [this] { handlePostSettings(); });
+  // Pocket only needs four preferences. Avoid constructing and streaming the
+  // full localized settings registry on the no-PSRAM private-AP path: that
+  // response can consume the last contiguous heap immediately after Wi-Fi
+  // starts and strand the X3 on its retained Hotspot Mode frame.
+  if (profile == CrossPointWebServerProfile::POCKET_SYNC) {
+    server->on("/api/pocket/v1/preferences", HTTP_GET, [this] { handleGetPocketPreferences(); });
+    server->on("/api/pocket/v1/preferences", HTTP_POST, [this] { handlePostPocketPreferences(); });
+  } else {
+    server->on("/settings", HTTP_GET, [this] { handleSettingsPage(); });
+    server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
+    server->on("/api/settings", HTTP_POST, [this] { handlePostSettings(); });
+  }
 
   // Pocket Sync deliberately exposes only the routes used by the companion
   // app. The full browser/File Transfer surface remains available as a
@@ -220,6 +252,17 @@ void CrossPointWebServer::begin() {
   }
 
   server->begin();
+
+  // X3/X4 Pocket uploads use one persistent, allocation-light connection.
+  // Keep the legacy HTTP upload route for browser clients and old companions.
+  pocketUploadServer = makeUniqueNoThrow<NetworkServer>(pocketUploadPort, 1);
+  if (pocketUploadServer) {
+    pocketUploadServer->setNoDelay(true);
+    pocketUploadServer->begin();
+    LOG_INF("WEB", "Pocket upload stream listening on port %u", (unsigned)pocketUploadPort);
+  } else {
+    LOG_ERR("WEB", "Could not allocate Pocket upload stream listener");
+  }
 
   if (profile == CrossPointWebServerProfile::FULL) {
     // The generic browser/File Transfer surface keeps its legacy WebSocket.
@@ -278,6 +321,12 @@ void CrossPointWebServer::stop() {
   running = false;  // Set this FIRST to prevent handleClient from using server
 
   LOG_DBG("WEB", "[MEM] Free heap before stop: %d bytes", ESP.getFreeHeap());
+
+  resetPocketUploadStream(true);
+  if (pocketUploadServer) {
+    pocketUploadServer->stop();
+    pocketUploadServer.reset();
+  }
 
   // Close any in-progress WebSocket upload and remove partial file
   if (wsUploadInProgress && wsUploadFile) {
@@ -338,6 +387,8 @@ void CrossPointWebServer::handleClient() {
 
   server->handleClient();
 
+  handlePocketUploadStream();
+
   // Handle WebSocket events
   if (wsServer) {
     wsServer->loop();
@@ -364,6 +415,178 @@ void CrossPointWebServer::handleClient() {
       }
     }
   }
+}
+
+void CrossPointWebServer::resetPocketUploadStream(const bool removePartial) {
+  if (pocketUploadFile) pocketUploadFile.close();
+  if (removePartial && !pocketUploadFullPath.isEmpty()) Storage.remove(pocketUploadFullPath.c_str());
+  if (pocketUploadClient) pocketUploadClient.stop();
+  pocketUploadClient = NetworkClient();
+  pocketUploadPhase = PocketUploadPhase::IDLE;
+  pocketUploadHeaderLength = 0;
+  pocketUploadHeader[0] = '\0';
+  pocketUploadFullPath = "";
+  pocketUploadExpected = 0;
+  pocketUploadReceived = 0;
+  pocketUploadCrc32 = 0xFFFFFFFFU;
+  pocketUploadLastActivity = 0;
+}
+
+void CrossPointWebServer::failPocketUploadStream(const char* message, const bool removePartial) {
+  LOG_ERR("PUPLOAD", "%s", message);
+  if (pocketUploadFile) pocketUploadFile.close();
+  if (removePartial && !pocketUploadFullPath.isEmpty()) Storage.remove(pocketUploadFullPath.c_str());
+  upload.success = false;
+  upload.error = message;
+  char response[112];
+  snprintf(response, sizeof(response), "ERROR %s\n", message);
+  if (pocketUploadClient) pocketUploadClient.write(reinterpret_cast<const uint8_t*>(response), strlen(response));
+  pocketUploadPhase = PocketUploadPhase::REPLIED;
+  pocketUploadLastActivity = millis();
+}
+
+bool CrossPointWebServer::beginPocketUploadFromHeader() {
+  pocketUploadHeader[pocketUploadHeaderLength] = '\0';
+  const String header = pocketUploadHeader;
+  constexpr const char* PREFIX = "POCKET-PUT/1\nPath: ";
+  constexpr const char* SIZE_MARKER = "\nSize: ";
+  if (!header.startsWith(PREFIX) || !header.endsWith("\n\n")) return false;
+
+  const int sizeMarker = header.indexOf(SIZE_MARKER, strlen(PREFIX));
+  if (sizeMarker < 0) return false;
+  const String requestedPath = header.substring(strlen(PREFIX), sizeMarker);
+  const String sizeToken = header.substring(sizeMarker + strlen(SIZE_MARKER), header.length() - 2);
+  size_t requestedSize = 0;
+  if (!parseUnsignedDecimal(sizeToken, requestedSize) || !requestedPath.startsWith("/") ||
+      requestedPath.indexOf('\r') >= 0 || requestedPath.indexOf('\n') >= 0 || requestedPath.indexOf("..") >= 0) {
+    return false;
+  }
+
+  const String normalized = normalizeWebPath(requestedPath);
+  const int slash = normalized.lastIndexOf('/');
+  const String name = normalized.substring(slash + 1);
+  if (normalized != requestedPath || slash < 0 || !name.startsWith(".pocket-") || !name.endsWith(".part")) {
+    return false;
+  }
+
+  if (upload.file) return false;
+  upload.buffer.reset();
+  upload.fileName = name;
+  upload.path = slash == 0 ? "/" : normalized.substring(0, slash);
+  upload.size = 0;
+  upload.crc32 = 0xFFFFFFFFU;
+  upload.success = false;
+  upload.error = "";
+  upload.chunked = false;
+
+  pocketUploadFullPath = normalized;
+  pocketUploadExpected = requestedSize;
+  pocketUploadReceived = 0;
+  pocketUploadCrc32 = 0xFFFFFFFFU;
+  esp_task_wdt_reset();
+  if (Storage.exists(normalized.c_str())) Storage.remove(normalized.c_str());
+  if (!Storage.openFileForWrite("PUPLOAD", normalized, pocketUploadFile)) return false;
+  esp_task_wdt_reset();
+
+  pocketUploadPhase = PocketUploadPhase::DATA;
+  LOG_INF("PUPLOAD", "Receiving %s (%u bytes)", normalized.c_str(), (unsigned)requestedSize);
+  if (requestedSize == 0) finishPocketUploadStream();
+  return true;
+}
+
+void CrossPointWebServer::finishPocketUploadStream() {
+  if (pocketUploadFile) pocketUploadFile.close();
+  upload.size = pocketUploadReceived;
+  upload.crc32 = pocketUploadCrc32;
+  upload.success = pocketUploadReceived == pocketUploadExpected;
+  if (!upload.success) {
+    failPocketUploadStream("Upload size mismatch");
+    return;
+  }
+
+  const uint32_t finalizedCrc = pocketUploadCrc32 ^ 0xFFFFFFFFU;
+  char response[72];
+  snprintf(response, sizeof(response), "OK %u %08lX\n", (unsigned)pocketUploadReceived,
+           (unsigned long)finalizedCrc);
+  pocketUploadClient.write(reinterpret_cast<const uint8_t*>(response), strlen(response));
+  pocketUploadPhase = PocketUploadPhase::REPLIED;
+  pocketUploadLastActivity = millis();
+  LOG_INF("PUPLOAD", "Received %s (%u bytes, crc32=%08lX)", pocketUploadFullPath.c_str(),
+          (unsigned)pocketUploadReceived, (unsigned long)finalizedCrc);
+}
+
+void CrossPointWebServer::handlePocketUploadStream() {
+  if (!pocketUploadServer) return;
+
+  if (pocketUploadPhase == PocketUploadPhase::IDLE) {
+    if (!pocketUploadServer->hasClient()) return;
+    pocketUploadClient = pocketUploadServer->accept();
+    if (!pocketUploadClient) return;
+    pocketUploadClient.setNoDelay(true);
+    pocketUploadPhase = PocketUploadPhase::HEADER;
+    pocketUploadHeaderLength = 0;
+    pocketUploadLastActivity = millis();
+    LOG_INF("PUPLOAD", "Client connected from %s", pocketUploadClient.remoteIP().toString().c_str());
+  }
+
+  if (pocketUploadPhase == PocketUploadPhase::REPLIED) {
+    if (!pocketUploadClient.connected() || millis() - pocketUploadLastActivity >= POCKET_STREAM_REPLY_GRACE_MS) {
+      resetPocketUploadStream(false);
+    }
+    return;
+  }
+
+  if (millis() - pocketUploadLastActivity >= POCKET_STREAM_IDLE_TIMEOUT_MS) {
+    failPocketUploadStream("Upload timed out");
+    return;
+  }
+
+  const int available = pocketUploadClient.available();
+  if (available <= 0) {
+    if (!pocketUploadClient.connected()) failPocketUploadStream("Upload disconnected");
+    return;
+  }
+
+  const size_t wanted = std::min(static_cast<size_t>(available), POCKET_STREAM_READ_BYTES);
+  const int count = pocketUploadClient.read(pocketStreamReadBuffer, wanted);
+  if (count <= 0) return;
+  pocketUploadLastActivity = millis();
+
+  size_t offset = 0;
+  if (pocketUploadPhase == PocketUploadPhase::HEADER) {
+    while (offset < static_cast<size_t>(count) && pocketUploadPhase == PocketUploadPhase::HEADER) {
+      if (pocketUploadHeaderLength + 1 >= sizeof(pocketUploadHeader)) {
+        failPocketUploadStream("Upload header too large", false);
+        return;
+      }
+      pocketUploadHeader[pocketUploadHeaderLength++] = static_cast<char>(pocketStreamReadBuffer[offset++]);
+      const size_t length = pocketUploadHeaderLength;
+      if (length >= 2 && pocketUploadHeader[length - 2] == '\n' && pocketUploadHeader[length - 1] == '\n') {
+        if (!beginPocketUploadFromHeader()) {
+          failPocketUploadStream("Invalid upload header");
+          return;
+        }
+      }
+    }
+  }
+
+  if (pocketUploadPhase != PocketUploadPhase::DATA || offset >= static_cast<size_t>(count)) return;
+  const size_t payloadBytes = static_cast<size_t>(count) - offset;
+  if (payloadBytes > pocketUploadExpected - pocketUploadReceived) {
+    failPocketUploadStream("Upload overflow");
+    return;
+  }
+
+  esp_task_wdt_reset();
+  const size_t written = pocketUploadFile.write(pocketStreamReadBuffer + offset, payloadBytes);
+  esp_task_wdt_reset();
+  if (written != payloadBytes) {
+    failPocketUploadStream("SD write failed");
+    return;
+  }
+  pocketUploadCrc32 = updateCrc32(pocketUploadCrc32, pocketStreamReadBuffer + offset, payloadBytes);
+  pocketUploadReceived += written;
+  if (pocketUploadReceived >= pocketUploadExpected) finishPocketUploadStream();
 }
 
 CrossPointWebServer::WsUploadStatus CrossPointWebServer::getWsUploadStatus() const {
@@ -412,6 +635,7 @@ void CrossPointWebServer::handleStatus() const {
   doc["freeHeap"] = ESP.getFreeHeap();
   doc["uptime"] = millis() / 1000;
   doc["device"] = gpio.deviceIsX3() ? "X3" : "X4";
+  if (pocketUploadServer) doc["uploadStreamPort"] = pocketUploadPort;
   if (Storage.exists("/crash_report.txt")) {
     HalFile report = Storage.open("/crash_report.txt");
     doc["crashReportAvailable"] = static_cast<bool>(report);
@@ -428,6 +652,7 @@ void CrossPointWebServer::handleStatus() const {
 }
 
 void CrossPointWebServer::handleCrashReport() const {
+  HalSystem::setCrashBreadcrumb("nearby:crash-chunk");
   HalFile report = Storage.open("/crash_report.txt");
   if (!report || report.isDirectory()) {
     if (report) report.close();
@@ -435,31 +660,48 @@ void CrossPointWebServer::handleCrashReport() const {
     return;
   }
 
-  const size_t reportSize = report.size();
-  server->setContentLength(reportSize);
-  server->sendHeader("Content-Disposition", "attachment; filename=crash_report.txt");
-  server->send(200, "text/plain; charset=utf-8", "");
+  if (!server->hasArg("offset")) {
+    report.close();
+    server->send(400, "text/plain", "Missing crash report offset");
+    return;
+  }
 
-  NetworkClient client = server->client();
-  uint8_t buffer[512];
-  bool streamOk = true;
-  while (streamOk && report.available()) {
-    const int count = report.read(buffer, sizeof(buffer));
-    if (count <= 0) break;
-    size_t sent = 0;
-    while (sent < static_cast<size_t>(count)) {
-      esp_task_wdt_reset();
-      const size_t wrote = client.write(buffer + sent, static_cast<size_t>(count) - sent);
-      if (wrote == 0) {
-        streamOk = false;
-        break;
-      }
-      sent += wrote;
+  const String offsetText = server->arg("offset");
+  if (offsetText.isEmpty()) {
+    report.close();
+    server->send(400, "text/plain", "Invalid crash report offset");
+    return;
+  }
+  for (size_t i = 0; i < offsetText.length(); i++) {
+    if (offsetText[i] < '0' || offsetText[i] > '9') {
+      report.close();
+      server->send(400, "text/plain", "Invalid crash report offset");
+      return;
     }
   }
-  client.clear();
+
+  const size_t reportSize = report.size();
+  const size_t offset = static_cast<size_t>(offsetText.toInt());
+  if (offset >= reportSize || !report.seek(offset)) {
+    report.close();
+    server->send(416, "text/plain", "Crash report offset out of range");
+    return;
+  }
+
+  char body[CRASH_REPORT_CHUNK_BYTES + 1];
+  const size_t remaining = reportSize - offset;
+  const size_t requested = std::min(remaining, CRASH_REPORT_CHUNK_BYTES);
+  const int count = report.read(reinterpret_cast<uint8_t*>(body), requested);
   report.close();
-  LOG_INF("WEB", "Crash report %s (%u bytes)", streamOk ? "served" : "interrupted", static_cast<unsigned>(reportSize));
+  if (count <= 0) {
+    server->send(500, "text/plain", "Could not read crash report chunk");
+    return;
+  }
+
+  body[count] = '\0';
+  server->send(200, "text/plain; charset=utf-8", body);
+  LOG_DBG("WEB", "Crash report chunk offset=%u bytes=%u total=%u", static_cast<unsigned>(offset),
+          static_cast<unsigned>(count), static_cast<unsigned>(reportSize));
 }
 
 void CrossPointWebServer::scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const {
@@ -701,14 +943,41 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
   if (upload.status == UPLOAD_FILE_START) {
     // Reset watchdog - this is the critical 1% crash point
     esp_task_wdt_reset();
+    server->client().setTimeout(UPLOAD_SOCKET_TIMEOUT_MS);
 
-    state.fileName = upload.filename;
-    state.size = 0;
-    state.crc32 = 0xFFFFFFFFU;
+    String requestedPath = server->hasArg("path") ? normalizeWebPath(server->arg("path")) : "/";
+    const String requestedName = upload.filename;
+    const bool chunked = server->hasArg("offset");
+    size_t requestedOffset = 0;
+    if (chunked && !parseUnsignedDecimal(server->arg("offset"), requestedOffset)) {
+      state.success = false;
+      state.error = "Invalid upload offset";
+      return;
+    }
+
+    if (chunked && requestedOffset > 0) {
+      // A continuation is accepted only for the exact in-memory upload that
+      // completed the preceding chunk. A process restart or mismatched client
+      // starts again at offset zero instead of appending to unknown bytes.
+      if (!state.chunked || !state.success || state.fileName != requestedName || state.path != requestedPath ||
+          state.size != requestedOffset) {
+        state.success = false;
+        state.error = "Upload offset does not match staged data";
+        return;
+      }
+    } else {
+      state.fileName = requestedName;
+      state.path = requestedPath;
+      state.size = 0;
+      state.crc32 = 0xFFFFFFFFU;
+    }
+
+    state.chunked = chunked;
+    state.chunkStart = requestedOffset;
     state.success = false;
     state.error = "";
     uploadStartTime = millis();
-    lastLoggedSize = 0;
+    lastLoggedSize = state.size;
     state.bufferPos = 0;
     totalWriteTime = 0;
     writeCount = 0;
@@ -716,31 +985,21 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     // Keep transfer buffers out of the idle server footprint. On X3 the Wi-Fi
     // driver dominates internal RAM; allocating only the active upload buffer
     // lets the Pocket profile and the legacy File Transfer profile coexist.
-    state.buffer = makeUniqueNoThrow<uint8_t[]>(UploadState::UPLOAD_BUFFER_SIZE);
-    if (!state.buffer) {
-      state.error = "Not enough memory to start upload";
-      LOG_ERR("WEB", "[UPLOAD] Could not allocate %u-byte buffer", (unsigned)UploadState::UPLOAD_BUFFER_SIZE);
-      return;
+    // Chunked Pocket requests already arrive in framework-owned 1,436-byte
+    // pieces and deliberately use direct writes, avoiding allocator churn
+    // between every short request.
+    state.buffer.reset();
+    if (!chunked) state.buffer = makeUniqueNoThrow<uint8_t[]>(UploadState::UPLOAD_BUFFER_SIZE);
+    if (!chunked && !state.buffer) {
+      // The framework-owned upload buffer remains valid for this callback, so
+      // a fragmented X3 can still stream each incoming piece straight to SD.
+      // Batching is an optimization, never a requirement for accepting data.
+      LOG_INF("WEB", "[UPLOAD] No %u-byte SD buffer; using direct writes",
+              (unsigned)UploadState::UPLOAD_BUFFER_SIZE);
     }
 
-    // Get upload path from query parameter (defaults to root if not specified)
-    // Note: We use query parameter instead of form data because multipart form
-    // fields aren't available until after file upload completes
-    if (server->hasArg("path")) {
-      state.path = server->arg("path");
-      // Ensure path starts with /
-      if (!state.path.startsWith("/")) {
-        state.path = "/" + state.path;
-      }
-      // Remove trailing slash unless it's root
-      if (state.path.length() > 1 && state.path.endsWith("/")) {
-        state.path = state.path.substring(0, state.path.length() - 1);
-      }
-    } else {
-      state.path = "/";
-    }
-
-    LOG_DBG("WEB", "[UPLOAD] START: %s to path: %s", state.fileName.c_str(), state.path.c_str());
+    LOG_DBG("WEB", "[UPLOAD] START: %s path=%s offset=%u", state.fileName.c_str(), state.path.c_str(),
+            static_cast<unsigned>(requestedOffset));
     LOG_DBG("WEB", "[UPLOAD] Free heap: %d bytes", ESP.getFreeHeap());
 
     // Create file path
@@ -748,21 +1007,27 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     if (!filePath.endsWith("/")) filePath += "/";
     filePath += state.fileName;
 
-    // Check if file already exists - SD operations can be slow
     esp_task_wdt_reset();
-    if (Storage.exists(filePath.c_str())) {
-      LOG_DBG("WEB", "[UPLOAD] Overwriting existing file: %s", filePath.c_str());
-      esp_task_wdt_reset();
-      Storage.remove(filePath.c_str());
-    }
-
-    // Open file for writing - this can be slow due to FAT cluster allocation
-    esp_task_wdt_reset();
-    if (!Storage.openFileForWrite("WEB", filePath, state.file)) {
-      state.error = "Failed to create file on SD card";
-      state.buffer.reset();
-      LOG_DBG("WEB", "[UPLOAD] FAILED to create file: %s", filePath.c_str());
-      return;
+    if (chunked && requestedOffset > 0) {
+      state.file = Storage.open(filePath.c_str(), O_RDWR);
+      if (!state.file || state.file.size() != requestedOffset || !state.file.seekSet(requestedOffset)) {
+        if (state.file) state.file.close();
+        state.error = "Staged upload size changed";
+        state.size = 0;
+        state.crc32 = 0xFFFFFFFFU;
+        Storage.remove(filePath.c_str());
+        return;
+      }
+    } else {
+      // Offset zero and legacy uploads both intentionally replace stale staging
+      // data. Final user-visible files are still protected by verified commit.
+      if (Storage.exists(filePath.c_str())) Storage.remove(filePath.c_str());
+      if (!Storage.openFileForWrite("WEB", filePath, state.file)) {
+        state.error = "Failed to create file on SD card";
+        state.buffer.reset();
+        LOG_DBG("WEB", "[UPLOAD] FAILED to create file: %s", filePath.c_str());
+        return;
+      }
     }
     esp_task_wdt_reset();
 
@@ -770,28 +1035,42 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
   } else if (upload.status == UPLOAD_FILE_WRITE) {
     if (state.file && state.error.isEmpty()) {
       state.crc32 = updateCrc32(state.crc32, upload.buf, upload.currentSize);
-      // Buffer incoming data and flush when buffer is full
-      // This reduces SD card write operations and improves throughput
       const uint8_t* data = upload.buf;
       size_t remaining = upload.currentSize;
 
-      while (remaining > 0) {
-        const size_t space = UploadState::UPLOAD_BUFFER_SIZE - state.bufferPos;
-        const size_t toCopy = (remaining < space) ? remaining : space;
+      if (state.buffer) {
+        // Batch small incoming pieces when contiguous heap is available.
+        while (remaining > 0) {
+          const size_t space = UploadState::UPLOAD_BUFFER_SIZE - state.bufferPos;
+          const size_t toCopy = (remaining < space) ? remaining : space;
 
-        memcpy(state.buffer.get() + state.bufferPos, data, toCopy);
-        state.bufferPos += toCopy;
-        data += toCopy;
-        remaining -= toCopy;
+          memcpy(state.buffer.get() + state.bufferPos, data, toCopy);
+          state.bufferPos += toCopy;
+          data += toCopy;
+          remaining -= toCopy;
 
-        // Flush buffer when full
-        if (state.bufferPos >= UploadState::UPLOAD_BUFFER_SIZE) {
-          if (!flushUploadBuffer(state)) {
-            state.error = "Failed to write to SD card - disk may be full";
-            state.file.close();
-            state.buffer.reset();
-            return;
+          if (state.bufferPos >= UploadState::UPLOAD_BUFFER_SIZE) {
+            if (!flushUploadBuffer(state)) {
+              state.error = "Failed to write to SD card - disk may be full";
+              state.file.close();
+              state.buffer.reset();
+              return;
+            }
           }
+        }
+      } else {
+        // Allocation-free fallback. WebServer owns `upload.buf` until this
+        // callback returns, so it is safe to write it synchronously.
+        esp_task_wdt_reset();
+        const unsigned long writeStart = millis();
+        const size_t written = state.file.write(data, remaining);
+        totalWriteTime += millis() - writeStart;
+        writeCount++;
+        esp_task_wdt_reset();
+        if (written != remaining) {
+          state.error = "Failed to write to SD card - disk may be full";
+          state.file.close();
+          return;
         }
       }
 
@@ -817,10 +1096,11 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
       if (state.error.isEmpty()) {
         state.success = true;
         const unsigned long elapsed = millis() - uploadStartTime;
-        const float avgKbps = (elapsed > 0) ? (state.size / 1024.0) / (elapsed / 1000.0) : 0;
+        const size_t requestBytes = state.size - state.chunkStart;
+        const float avgKbps = (elapsed > 0) ? (requestBytes / 1024.0) / (elapsed / 1000.0) : 0;
         const float writePercent = (elapsed > 0) ? (totalWriteTime * 100.0 / elapsed) : 0;
-        LOG_DBG("WEB", "[UPLOAD] Complete: %s (%d bytes in %lu ms, avg %.1f KB/s)", state.fileName.c_str(), state.size,
-                elapsed, avgKbps);
+        LOG_DBG("WEB", "[UPLOAD] Complete: %s chunk=%u total=%u in %lu ms, avg %.1f KB/s", state.fileName.c_str(),
+                static_cast<unsigned>(requestBytes), static_cast<unsigned>(state.size), elapsed, avgKbps);
         LOG_DBG("WEB", "[UPLOAD] Diagnostics: %d writes, total write time: %lu ms (%.1f%%)", writeCount, totalWriteTime,
                 writePercent);
 
@@ -828,7 +1108,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
         String filePath = state.path;
         if (!filePath.endsWith("/")) filePath += "/";
         filePath += state.fileName;
-        clearBookCache(filePath.c_str());
+        if (!state.chunked) clearBookCache(filePath.c_str());
       }
     }
     state.buffer.reset();
@@ -841,6 +1121,10 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
       if (!filePath.endsWith("/")) filePath += "/";
       filePath += state.fileName;
       Storage.remove(filePath.c_str());
+    }
+    if (state.chunked) {
+      state.size = 0;
+      state.crc32 = 0xFFFFFFFFU;
     }
     state.error = "Upload aborted";
     state.buffer.reset();
@@ -1469,6 +1753,71 @@ void CrossPointWebServer::handlePostSettings() {
 
   LOG_DBG("WEB", "Applied %d setting(s)", applied);
   server->send(200, "text/plain", String("Applied ") + String(applied) + " setting(s)");
+}
+
+void CrossPointWebServer::handleGetPocketPreferences() const {
+  char json[192];
+  const int written = snprintf(
+      json, sizeof(json),
+      "{\"startupApp\":%u,\"pocketDailySleepCover\":%u,\"sleepTimeoutMinutes\":%u,\"fontSize\":%u}",
+      static_cast<unsigned>(SETTINGS.startupApp), static_cast<unsigned>(SETTINGS.pocketDailySleepCover),
+      static_cast<unsigned>(SETTINGS.sleepTimeoutMinutes), static_cast<unsigned>(SETTINGS.fontSize));
+  if (written <= 0 || static_cast<size_t>(written) >= sizeof(json)) {
+    server->send(500, "text/plain", "Could not encode Pocket preferences");
+    return;
+  }
+  server->sendHeader("Connection", "close");
+  server->send(200, "application/json", json);
+}
+
+void CrossPointWebServer::handlePostPocketPreferences() {
+  if (!server->hasArg("plain")) {
+    server->send(400, "text/plain", "Missing JSON body");
+    return;
+  }
+
+  JsonDocument doc;
+  const DeserializationError err = deserializeJson(doc, server->arg("plain"));
+  if (err) {
+    server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
+    return;
+  }
+
+  if (!doc["startupApp"].isNull()) {
+    const int value = doc["startupApp"].as<int>();
+    if (value < 0 || value >= CrossPointSettings::STARTUP_APP_COUNT) {
+      server->send(400, "text/plain", "Invalid startupApp");
+      return;
+    }
+    SETTINGS.startupApp = static_cast<uint8_t>(value);
+  }
+  if (!doc["pocketDailySleepCover"].isNull()) {
+    SETTINGS.pocketDailySleepCover = doc["pocketDailySleepCover"].as<int>() ? 1 : 0;
+  }
+  if (!doc["sleepTimeoutMinutes"].isNull()) {
+    const int value = doc["sleepTimeoutMinutes"].as<int>();
+    if (value < CrossPointSettings::MIN_SLEEP_TIMEOUT_MINUTES ||
+        value > CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES) {
+      server->send(400, "text/plain", "Invalid sleepTimeoutMinutes");
+      return;
+    }
+    SETTINGS.sleepTimeoutMinutes = static_cast<uint8_t>(value);
+  }
+  if (!doc["fontSize"].isNull()) {
+    const int value = doc["fontSize"].as<int>();
+    if (value < 0 || value >= CrossPointSettings::FONT_SIZE_COUNT) {
+      server->send(400, "text/plain", "Invalid fontSize");
+      return;
+    }
+    SETTINGS.fontSize = static_cast<uint8_t>(value);
+  }
+
+  if (!SETTINGS.saveToFile()) {
+    server->send(500, "text/plain", "Could not save Pocket preferences");
+    return;
+  }
+  server->sendHeader("Connection", "close");
+  server->send(200, "application/json", "{\"saved\":true}");
 }
 
 // ---- OPDS Server API ----

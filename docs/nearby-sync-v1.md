@@ -120,20 +120,36 @@ automatic association fails.
 
 ## Hotspot and bulk transfer
 
-Nearby Sync uses a versioned, interruption-safe HTTP bulk API:
+Nearby Sync uses a versioned, interruption-safe bulk API:
 
 - `GET /api/status` on port 80 verifies identity and mode.
-- The app uploads a uniquely named hidden `.pocket-*.part` file with
-  `POST /upload?path=<directory>` and computes CRC32 while streaming.
+- `/api/status` advertises `uploadStreamPort` (currently TCP port 82). The app
+  opens that port once, sends `POCKET-PUT/1`, staging path, and byte length,
+  then streams the file on the same connection. The reader returns the received
+  length and CRC32 before the app is allowed to commit.
 - `POST /api/pocket/v1/commit` supplies the staging path, final path, byte
   length, and CRC32. The reader checks all four against the completed upload,
   then publishes it. A disconnect cannot overwrite the previous final file.
-- The private Pocket AP uses a minimal server profile: status, settings,
-  upload, and verified commit only. It does not start captive DNS, mDNS,
+- The private Pocket AP uses a minimal server profile: status, a compact
+  `/api/pocket/v1/preferences` resource for the companion's four settings,
+  upload, and verified commit only. It never constructs the full localized
+  `/api/settings` registry at the X3's lowest-heap point and does not start captive DNS, mDNS,
   discovery UDP, WebDAV, or the legacy WebSocket listener. The generic File
   Transfer screen retains the complete browser/WebSocket/WebDAV profile.
 - HTTP and font upload buffers are allocated only for the active transfer and
   released at completion, instead of permanently consuming 8 KiB of X3 heap.
+- File uploads use a 1 KiB second-stage SD buffer. The HTTP layer already
+  supplies roughly 1.4 KiB multipart pieces, while the previous 4 KiB
+  allocation could fail on a fragmented no-PSRAM X3 before the first byte was
+  accepted. If even the 1 KiB optimization cannot be allocated, the server
+  writes those framework-owned pieces directly to SD instead of rejecting the
+  transfer.
+- The stream listener reads and writes at most 768 bytes per activity-loop
+  pass, then returns to the global input loop. A firmware upload therefore uses
+  one TCP socket without blocking physical buttons. A disconnect or 30-second
+  idle timeout closes and deletes only the hidden staging file; the previous
+  published book or firmware remains intact. Older firmware still falls back
+  to its advertised HTTP upload capability.
 - A `.bin` is always published as `/update.bin`; transport never flashes it.
   The existing on-device validator and explicit user confirmation remain the
   installation boundary.
@@ -153,13 +169,16 @@ retained log ring, stack memory, and an allocation-free RTC breadcrumb for BLE
 initialization, connection, passkey, authentication, handoff, and shutdown
 checkpoints.
 
-Every HTTP profile exposes `GET /api/pocket/v1/crash-report`; `/api/status`
-advertises `crashReportAvailable` and `crashReportBytes`. Pocket fetches the
-report automatically after a connection, classifies common memory, stack,
+Every HTTP profile exposes `GET /api/pocket/v1/crash-report?offset=N`;
+`/api/status` advertises `crashReportAvailable` and `crashReportBytes`. Each
+request returns at most 160 bytes and then yields to the physical-button loop.
+Pocket reassembles the report, stores it in Application Support under a content
+hash so reconnects do not create duplicates, classifies common memory, stack,
 watchdog, and invalid-access failures, and offers both the raw report and export.
-The app independently persists its last 80 CoreBluetooth transitions in
-Application Support, so discovery and pairing failures remain inspectable even
-when the reader reboots before the HTTP handoff.
+The bounded response replaces the old single-request stream whose blocking
+socket write could trip the X3 task watchdog. The app independently persists its
+last 80 CoreBluetooth transitions so discovery and pairing failures remain
+inspectable even when the reader reboots before the HTTP handoff.
 
 ## Memory and responsiveness gates
 
@@ -177,6 +196,10 @@ Nearby Sync is not ready for release until measurements on both X3 and X4 demons
 - BLE callbacks contain no filesystem, rendering, Wi-Fi, or blocking work.
 - Back acknowledges immediately during radio startup and exits after the
   in-flight NimBLE initialization has safely unwound.
+- The private-AP loop is enrolled in the task watchdog. A non-returning network
+  handler therefore reboots into the retained crash-report screen instead of
+  leaving an unresponsive e-ink frame indefinitely; its last HTTP/idle
+  checkpoint is stored as the crash breadcrumb.
 - Before starting HTTP, the minimal Pocket and X3 browser File Transfer
   profiles require 18 KiB free and an 8 KiB largest block. X3 File Transfer
   retains browser HTTP upload/download and settings while omitting the legacy

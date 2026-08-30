@@ -521,6 +521,15 @@ void CrossPointWebServerActivity::startWebServer() {
   if (webServer->isRunning()) {
     state = WebServerActivityState::SERVER_RUNNING;
     LOG_DBG("WEBACT", "Web server started successfully");
+    if (privateApMode) {
+      // The Arduino loop task is not watched by default. Nearby Sync runs at
+      // the X3's tightest heap point and previously could retain a dead
+      // Hotspot Mode frame forever if a network handler stopped returning.
+      // Enrol it only for this bounded session; long transfer handlers already
+      // reset the task watchdog while making progress.
+      HalSystem::setCrashBreadcrumb("nearby:server-running");
+      enableLoopWDT();
+    }
     lastWifiBars = isApMode ? 0 : barsForRssi(WiFi.RSSI(), 0);
 
     // Force an immediate render since we're transitioning from a subactivity
@@ -628,13 +637,20 @@ void CrossPointWebServerActivity::loop() {
       }
 
       // Reset watchdog BEFORE processing - HTTP header parsing can be slow
+      if (privateApMode) HalSystem::setCrashBreadcrumb("nearby:http-handle");
       esp_task_wdt_reset();
 
       // Service a small bounded batch, then return to the global loop so GPIO
       // is sampled again. Upload bodies are consumed by WebServer itself; 500
       // back-to-back calls only starved buttons while the server was idle.
-      constexpr int MAX_ITERATIONS = 8;
-      for (int i = 0; i < MAX_ITERATIONS && webServer->isRunning(); i++) {
+      // A companion request already consumes its complete HTTP transaction in
+      // one call. Return immediately afterward in private-AP mode so the next
+      // global loop samples the physical buttons before accepting more work.
+      // X3 also owns the incremental Pocket upload listener in Join Network
+      // mode. Service one bounded network slice, then let the global loop
+      // sample GPIO before reading the next 768-byte SD chunk.
+      const int maxIterations = (privateApMode || gpio.deviceIsX3()) ? 1 : 8;
+      for (int i = 0; i < maxIterations && webServer->isRunning(); i++) {
         webServer->handleClient();
         if ((i & 0x03) == 0x03) {
           esp_task_wdt_reset();
@@ -642,6 +658,7 @@ void CrossPointWebServerActivity::loop() {
         }
       }
       lastHandleClientTime = millis();
+      if (privateApMode) HalSystem::setCrashBreadcrumb("nearby:server-idle");
     }
   }
 }

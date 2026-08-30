@@ -1,6 +1,8 @@
 #pragma once
 
 #include <HalStorage.h>
+#include <NetworkClient.h>
+#include <NetworkServer.h>
 #include <NetworkUdp.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
@@ -44,11 +46,15 @@ class CrossPointWebServer {
     uint32_t crc32 = 0xFFFFFFFFU;
     bool success = false;
     String error = "";
+    bool chunked = false;
+    size_t chunkStart = 0;
 
-    // Upload write buffer - batches small writes into larger SD card operations
-    // 4KB is a good balance: large enough to reduce syscall overhead, small enough
-    // to keep individual write times short and avoid watchdog issues
-    static constexpr size_t UPLOAD_BUFFER_SIZE = 4096;  // 4KB buffer
+    // Upload write buffer batches small writes into SD card operations.
+    // The HTTP layer already delivers multipart uploads in roughly 1.4 KiB
+    // pieces. A second 4 KiB allocation repeatedly failed after Wi-Fi startup
+    // on the no-PSRAM X3. Keep SD writes bounded without requiring that large
+    // contiguous heap block.
+    static constexpr size_t UPLOAD_BUFFER_SIZE = 1024;
     std::unique_ptr<uint8_t[]> buffer;
     size_t bufferPos = 0;
   } upload;
@@ -81,8 +87,33 @@ class CrossPointWebServer {
   CrossPointWebServerProfile profile;
   uint16_t port = 80;
   uint16_t wsPort = 81;  // WebSocket port
+  static constexpr uint16_t pocketUploadPort = 82;
   NetworkUDP udp;
   bool udpActive = false;
+
+  // Pocket's upload data plane uses one long-lived TCP connection. Arduino's
+  // WebServer closes every HTTP request, which leaves hundreds of lwIP sockets
+  // in TIME_WAIT for a multi-megabyte firmware upload on the no-PSRAM X3. This
+  // listener is deliberately tiny and is serviced incrementally from the
+  // activity loop so physical buttons remain responsive during SD writes.
+  enum class PocketUploadPhase : uint8_t { IDLE, HEADER, DATA, REPLIED };
+  std::unique_ptr<NetworkServer> pocketUploadServer = nullptr;
+  NetworkClient pocketUploadClient;
+  PocketUploadPhase pocketUploadPhase = PocketUploadPhase::IDLE;
+  HalFile pocketUploadFile;
+  char pocketUploadHeader[320] = {};
+  size_t pocketUploadHeaderLength = 0;
+  String pocketUploadFullPath;
+  size_t pocketUploadExpected = 0;
+  size_t pocketUploadReceived = 0;
+  uint32_t pocketUploadCrc32 = 0xFFFFFFFFU;
+  unsigned long pocketUploadLastActivity = 0;
+
+  void handlePocketUploadStream();
+  bool beginPocketUploadFromHeader();
+  void finishPocketUploadStream();
+  void failPocketUploadStream(const char* message, bool removePartial = true);
+  void resetPocketUploadStream(bool removePartial);
 
   // WebSocket upload state
   void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
@@ -115,6 +146,8 @@ class CrossPointWebServer {
   void handleSettingsPage() const;
   void handleGetSettings() const;
   void handlePostSettings();
+  void handleGetPocketPreferences() const;
+  void handlePostPocketPreferences();
 
   // Font management handlers
   void handleFontsPage() const;
