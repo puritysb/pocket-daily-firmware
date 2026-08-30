@@ -182,12 +182,22 @@ void ActivityManager::goToFileTransfer() {
 }
 
 void ActivityManager::goToPocketDaily() {
-  replaceActivity(std::make_unique<PocketDailyActivity>(renderer, mappedInput));
+  auto pocketDaily = makeUniqueNoThrow<PocketDailyActivity>(renderer, mappedInput);
+  if (!pocketDaily) {
+    LOG_ERR("ACT", "OOM: PocketDailyActivity");
+    return;
+  }
+  replaceActivity(std::move(pocketDaily));
 }
 
 void ActivityManager::goToPocketNearbySync() {
-  replaceActivity(
-      std::make_unique<CrossPointWebServerActivity>(renderer, mappedInput, WebServerLaunchMode::POCKET_NEARBY_SYNC));
+  auto nearbySync =
+      makeUniqueNoThrow<CrossPointWebServerActivity>(renderer, mappedInput, WebServerLaunchMode::POCKET_NEARBY_SYNC);
+  if (!nearbySync) {
+    LOG_ERR("ACT", "OOM: Pocket Nearby Sync activity");
+    return;
+  }
+  replaceActivity(std::move(nearbySync));
 }
 
 void ActivityManager::goToGames() {

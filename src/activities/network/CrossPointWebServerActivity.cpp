@@ -131,10 +131,18 @@ void CrossPointWebServerActivity::onEnter() {
 }
 
 void CrossPointWebServerActivity::returnToLaunchOrigin() {
-  if (launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC)
-    activityManager.goToPocketDaily();
-  else
-    onGoHome();
+  if (launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC) {
+    // goToPocketDaily() constructs the comparatively large PocketDailyActivity
+    // before ActivityManager can destroy this activity. On the no-PSRAM X3,
+    // the live Wi-Fi server leaves too little contiguous heap for that overlap;
+    // make_unique then terminates the no-exceptions build with abort(). Reboot
+    // directly while retaining the e-ink frame, as Nearby onExit already does.
+    state = WebServerActivityState::SHUTTING_DOWN;
+    HalSystem::setCrashBreadcrumb("nearby:return-restart");
+    silentRestartToPocketDaily();
+    return;  // ESP.restart() does not return.
+  }
+  onGoHome();
 }
 
 void CrossPointWebServerActivity::onExit() {
