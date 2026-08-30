@@ -4,7 +4,9 @@
 #include <ESPmDNS.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
+#include <HalSystem.h>
 #include <I18n.h>
+#include <Memory.h>
 #include <WiFi.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
@@ -31,6 +33,26 @@ constexpr uint8_t AP_MAX_CONNECTIONS = 4;
 constexpr uint8_t PRIVATE_AP_MAX_CONNECTIONS = 1;
 constexpr uint16_t PRIVATE_AP_LEASE_SECONDS = 300;
 constexpr unsigned long BLE_HANDOFF_DELAY_MS = 900;
+// NimBLE-Arduino needs a sizeable contiguous working set while it creates the
+// controller, host task, GATT database and advertising buffers.  The X3 has no
+// PSRAM, so refuse the transition before framework allocations can abort when
+// a reader cache has left the internal heap fragmented.
+constexpr uint32_t NEARBY_START_MIN_FREE = 64U * 1024U;
+constexpr uint32_t NEARBY_START_MIN_BLOCK = 32U * 1024U;
+// The preflight is measured before NimBLE allocates its controller, host task
+// and GATT database.  Guard the resulting steady state separately so a future
+// library/configuration change fails back to Pocket Daily instead of reaching
+// pairing with too little headroom and resetting the reader.
+constexpr uint32_t NEARBY_READY_MIN_FREE = 20U * 1024U;
+constexpr uint32_t NEARBY_READY_MIN_BLOCK = 8U * 1024U;
+// Measured X3 STA/AP operation leaves roughly 22-27 KB free after the Wi-Fi
+// driver starts. The Pocket profile omits WebDAV, WebSocket, discovery and
+// captive-portal services; the full profile retains them and gets the larger
+// guard. Upload buffers are allocated lazily after either gate.
+constexpr uint32_t POCKET_WEB_START_MIN_FREE = 18U * 1024U;
+constexpr uint32_t POCKET_WEB_START_MIN_BLOCK = 8U * 1024U;
+constexpr uint32_t FULL_WEB_START_MIN_FREE = 20U * 1024U;
+constexpr uint32_t FULL_WEB_START_MIN_BLOCK = 10U * 1024U;
 constexpr int QR_CODE_WIDTH = 198;
 constexpr int QR_CODE_HEIGHT = 198;
 
@@ -82,21 +104,37 @@ void CrossPointWebServerActivity::onEnter() {
   nearbyHandoffAt = 0;
   privateApStartedAt = 0;
   lastNearbyAuthenticated = false;
+  nearbyStartResult.store(NearbyStartResult::IDLE, std::memory_order_release);
+  nearbyCancelRequested.store(false, std::memory_order_release);
+  nearbyStartTask = nullptr;
   connectedIP.clear();
   connectedSSID.clear();
   lastHandleClientTime = 0;
   requestUpdate();
+
+  if (launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC) {
+    LOG_DBG("WEBACT", "Launching Pocket Nearby Sync directly...");
+    startNearbySync();
+    return;
+  }
 
   // Launch network mode selection subactivity
   LOG_DBG("WEBACT", "Launching NetworkModeSelectionActivity...");
   startActivityForResult(std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput),
                          [this](const ActivityResult& result) {
                            if (result.isCancelled) {
-                             onGoHome();
+                             returnToLaunchOrigin();
                            } else {
                              onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
                            }
                          });
+}
+
+void CrossPointWebServerActivity::returnToLaunchOrigin() {
+  if (launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC)
+    activityManager.goToPocketDaily();
+  else
+    onGoHome();
 }
 
 void CrossPointWebServerActivity::onExit() {
@@ -105,6 +143,34 @@ void CrossPointWebServerActivity::onExit() {
   LOG_DBG("WEBACT", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
 
   state = WebServerActivityState::SHUTTING_DOWN;
+
+  // Nearby Sync always leaves through a chip restart. Do not synchronously
+  // dismantle NimBLE, the HTTP server, DNS and the AP first: on X3 the AP can
+  // disappear while WiFi.softAPdisconnect(true) remains wedged, leaving the
+  // retained Hotspot Mode frame on screen and every button unresponsive.
+  // ESP.restart() tears all radio tasks down as part of reset, and doing it
+  // before any driver shutdown keeps this user action bounded.
+  if (launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC) {
+    HalSystem::setCrashBreadcrumb("nearby:exit-restart");
+    silentRestartToPocketDaily();
+    return;  // ESP.restart() does not return.
+  }
+
+  // Stop accepting work before tearing down either radio.  Wi-Fi activities
+  // normally reboot on exit, but explicitly closing the synchronous server
+  // keeps a pending client from delaying that hand-off and makes this cleanup
+  // correct if the reboot policy changes later.
+  if (webServer) {
+    webServer->stop();
+    webServer.reset();
+  }
+  // Normal Back handling waits for the worker before leaving. This bounded
+  // fallback also protects unusual global transitions from destroying the
+  // activity while NimBLE still holds a pointer to its Service.
+  nearbyCancelRequested.store(true, std::memory_order_release);
+  for (int i = 0; nearbyStartResult.load(std::memory_order_acquire) == NearbyStartResult::RUNNING && i < 1500; ++i) {
+    delay(10);
+  }
   nearbySync.end();
   stopDnsServer();
   MDNS.end();
@@ -129,8 +195,6 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     modeName = "Connect to Calibre";
   } else if (mode == NetworkMode::CREATE_HOTSPOT) {
     modeName = "Create Hotspot";
-  } else if (mode == NetworkMode::NEARBY_SYNC) {
-    modeName = "Nearby Sync";
   }
   LOG_DBG("WEBACT", "Network mode selected: %s", modeName);
 
@@ -146,17 +210,12 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
           startActivityForResult(std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput),
                                  [this](const ActivityResult& result) {
                                    if (result.isCancelled) {
-                                     onGoHome();
+                                     returnToLaunchOrigin();
                                    } else {
                                      onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
                                    }
                                  });
         });
-    return;
-  }
-
-  if (mode == NetworkMode::NEARBY_SYNC) {
-    startNearbySync();
     return;
   }
 
@@ -191,8 +250,9 @@ void CrossPointWebServerActivity::onWifiSelectionComplete(const bool connected) 
     // Get connection info before exiting subactivity
     isApMode = false;
 
-    // Start mDNS for hostname resolution
-    restartMdns(AP_HOSTNAME, "WEBACT");
+    // X3 exposes the IP and QR code directly. mDNS costs about 5.6 KB on this
+    // no-PSRAM board and is not worth running beside browser file transfer.
+    if (!gpio.deviceIsX3()) restartMdns(AP_HOSTNAME, "WEBACT");
 
     // Start the web server
     startWebServer();
@@ -203,7 +263,7 @@ void CrossPointWebServerActivity::onWifiSelectionComplete(const bool connected) 
     startActivityForResult(std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput),
                            [this](const ActivityResult& result) {
                              if (result.isCancelled) {
-                               onGoHome();
+                               returnToLaunchOrigin();
                              } else {
                                onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
                              }
@@ -213,7 +273,11 @@ void CrossPointWebServerActivity::onWifiSelectionComplete(const bool connected) 
 
 void CrossPointWebServerActivity::startNearbySync() {
   state = WebServerActivityState::NEARBY_STARTING;
-  requestUpdate();
+  // Paint acknowledgement before entering the radio stack.  E-ink refresh is
+  // slow and NimBLE initialization is synchronous, so a deferred paint made a
+  // healthy transition look like an ignored button press and left no useful
+  // feedback if the radio ran out of heap.
+  requestUpdateAndWait();
 
   // Nearby Sync owns the radio in this activity. Do not let a previous station
   // session coexist with NimBLE on the no-PSRAM device.
@@ -222,15 +286,79 @@ void CrossPointWebServerActivity::startNearbySync() {
     WiFi.mode(WIFI_OFF);
   }
 
-  if (!nearbySync.begin(gpio.deviceIsX3() ? "X3" : "X4", CROSSPOINT_VERSION)) {
-    LOG_ERR("WEBACT", "Nearby Sync failed to start");
-    onGoHome();
+  // The multilingual reader family keeps interval tables, decompression pages
+  // and glyph caches in internal RAM.  It is reloadable from SD and must not be
+  // resident while BLE is active (docs/nearby-sync-v1.md memory gate).  Hold the
+  // render mutex while removing it so a queued paint cannot use the family
+  // after it has been unloaded.
+  const uint32_t heapBeforeFontRelease = ESP.getFreeHeap();
+  {
+    RenderLock fontRenderLock(*this);
+    sdFontSystem.releaseLoaded(renderer);
+  }
+  const uint32_t heapAfterFontRelease = ESP.getFreeHeap();
+  const uint32_t largestBlock = ESP.getMaxAllocHeap();
+  LOG_INF("NEARBY", "preflight heap=%lu->%lu largest=%lu", static_cast<unsigned long>(heapBeforeFontRelease),
+          static_cast<unsigned long>(heapAfterFontRelease), static_cast<unsigned long>(largestBlock));
+
+  if (heapAfterFontRelease < NEARBY_START_MIN_FREE || largestBlock < NEARBY_START_MIN_BLOCK) {
+    LOG_ERR("NEARBY", "start refused: heap free=%lu largest=%lu", static_cast<unsigned long>(heapAfterFontRelease),
+            static_cast<unsigned long>(largestBlock));
+    returnToLaunchOrigin();
     return;
   }
 
-  state = WebServerActivityState::NEARBY_READY;
-  lastNearbyAuthenticated = nearbySync.isAuthenticated();
-  requestUpdate();
+  nearbyModel = gpio.deviceIsX3() ? "X3" : "X4";
+  nearbyCancelRequested.store(false, std::memory_order_release);
+  nearbyStartResult.store(NearbyStartResult::RUNNING, std::memory_order_release);
+  if (xTaskCreate(nearbyStartTaskTrampoline, "PocketBLEStart", 6144, this, 1, &nearbyStartTask) != pdPASS) {
+    nearbyStartResult.store(NearbyStartResult::FAILED, std::memory_order_release);
+    nearbyStartTask = nullptr;
+    LOG_ERR("WEBACT", "Could not create Nearby Sync startup task");
+  }
+}
+
+void CrossPointWebServerActivity::nearbyStartTaskTrampoline(void* context) {
+  auto* activity = static_cast<CrossPointWebServerActivity*>(context);
+  const bool started = activity->nearbySync.begin(activity->nearbyModel, CROSSPOINT_VERSION);
+  activity->nearbyStartResult.store(started ? NearbyStartResult::SUCCEEDED : NearbyStartResult::FAILED,
+                                    std::memory_order_release);
+  vTaskDelete(nullptr);
+}
+
+void CrossPointWebServerActivity::handleNearbyStartup() {
+  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    nearbyCancelRequested.store(true, std::memory_order_release);
+    requestUpdate();
+  }
+
+  const NearbyStartResult result = nearbyStartResult.load(std::memory_order_acquire);
+  if (result == NearbyStartResult::RUNNING) return;
+  nearbyStartTask = nullptr;
+
+  if (result == NearbyStartResult::SUCCEEDED && !nearbyCancelRequested.load(std::memory_order_acquire)) {
+    const uint32_t freeHeap = ESP.getFreeHeap();
+    const uint32_t largestBlock = ESP.getMaxAllocHeap();
+    LOG_INF("NEARBY", "ready heap=%lu largest=%lu", static_cast<unsigned long>(freeHeap),
+            static_cast<unsigned long>(largestBlock));
+    if (freeHeap < NEARBY_READY_MIN_FREE || largestBlock < NEARBY_READY_MIN_BLOCK) {
+      LOG_ERR("NEARBY", "ready refused: heap free=%lu largest=%lu", static_cast<unsigned long>(freeHeap),
+              static_cast<unsigned long>(largestBlock));
+      HalSystem::setCrashBreadcrumb("nearby:ready-low-memory");
+      nearbySync.end();
+      returnToLaunchOrigin();
+      return;
+    }
+    HalSystem::setCrashBreadcrumb("nearby:ready-for-pairing");
+    state = WebServerActivityState::NEARBY_READY;
+    lastNearbyAuthenticated = nearbySync.isAuthenticated();
+    requestUpdate();
+    return;
+  }
+
+  if (result == NearbyStartResult::SUCCEEDED) nearbySync.end();
+  if (result == NearbyStartResult::FAILED) LOG_ERR("WEBACT", "Nearby Sync failed to start");
+  returnToLaunchOrigin();
 }
 
 void CrossPointWebServerActivity::handleNearbySync() {
@@ -269,7 +397,7 @@ void CrossPointWebServerActivity::handleNearbySync() {
       snprintf(privateApPassword, sizeof(privateApPassword), "%08lX%04lX", static_cast<unsigned long>(secretA),
                static_cast<unsigned long>(secretB & 0xFFFFU));
 
-      if (!nearbySync.notifyHotspot(command.requestId, privateApSsid, privateApPassword, "192.168.4.1", 80, 81,
+      if (!nearbySync.notifyHotspot(command.requestId, privateApSsid, privateApPassword, "192.168.4.1", 80, 0,
                                     PRIVATE_AP_LEASE_SECONDS)) {
         nearbySync.notifyError(command.requestId, "NOT_SUBSCRIBED");
         break;
@@ -306,7 +434,7 @@ void CrossPointWebServerActivity::startAccessPoint() {
 
   if (!apStarted) {
     LOG_ERR("WEBACT", "ERROR: Failed to start Access Point!");
-    onGoHome();
+    returnToLaunchOrigin();
     return;
   }
 
@@ -324,16 +452,21 @@ void CrossPointWebServerActivity::startAccessPoint() {
   LOG_DBG("WEBACT", "SSID: %s", ssid);
   LOG_DBG("WEBACT", "IP: %s", connectedIP.c_str());
 
-  // Start mDNS for hostname resolution
-  restartMdns(AP_HOSTNAME, "WEBACT");
-
-  // Start DNS server for captive portal behavior
-  // This redirects all DNS queries to our IP, making any domain typed resolve to us
-  stopDnsServer();
-  dnsServer = new DNSServer();
-  dnsServer->setErrorReplyCode(DNSReplyCode::NoError);
-  dnsServer->start(DNS_PORT, "*", apIP);
-  LOG_DBG("WEBACT", "DNS server started for captive portal");
+  if (!privateApMode && !gpio.deviceIsX3()) {
+    // Generic File Transfer remains discoverable and captive-portal friendly.
+    // Pocket already received 192.168.4.1 over authenticated BLE, so these
+    // services would only consume scarce X3 heap on its private AP.
+    restartMdns(AP_HOSTNAME, "WEBACT");
+    stopDnsServer();
+    dnsServer = new (std::nothrow) DNSServer();
+    if (dnsServer) {
+      dnsServer->setErrorReplyCode(DNSReplyCode::NoError);
+      dnsServer->start(DNS_PORT, "*", apIP);
+      LOG_DBG("WEBACT", "DNS server started for captive portal");
+    } else {
+      LOG_ERR("WEBACT", "Could not allocate captive-portal DNS server");
+    }
+  }
 
   LOG_DBG("WEBACT", "Free heap after AP start: %d bytes", ESP.getFreeHeap());
 
@@ -344,6 +477,9 @@ void CrossPointWebServerActivity::startAccessPoint() {
 void CrossPointWebServerActivity::startWebServer() {
   LOG_DBG("WEBACT", "Starting web server...");
 
+  state = WebServerActivityState::SERVER_STARTING;
+  requestUpdateAndWait();
+
   // X3/X4 have no PSRAM. A resident .cpfont keeps its interval tables,
   // decompression pages and glyph caches in internal RAM; leaving it loaded
   // while WebServer + WebSocketsServer allocate their TCP buffers reduced the
@@ -353,12 +489,33 @@ void CrossPointWebServerActivity::startWebServer() {
   // the saved selection. The next reader activity reloads it on demand (and
   // leaving this activity already performs a clean restart after Wi-Fi use).
   const uint32_t heapBeforeFontRelease = ESP.getFreeHeap();
-  sdFontSystem.releaseLoaded(renderer);
+  {
+    RenderLock fontRenderLock(*this);
+    sdFontSystem.releaseLoaded(renderer);
+  }
   LOG_DBG("WEBACT", "Released resident SD font: heap %u -> %u (largest %u)", (unsigned)heapBeforeFontRelease,
           (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 
+  const auto profile = privateApMode ? CrossPointWebServerProfile::POCKET_SYNC
+                                     : (gpio.deviceIsX3() ? CrossPointWebServerProfile::FILE_TRANSFER
+                                                          : CrossPointWebServerProfile::FULL);
+  const bool lightweightProfile = profile != CrossPointWebServerProfile::FULL;
+  const uint32_t minFree = lightweightProfile ? POCKET_WEB_START_MIN_FREE : FULL_WEB_START_MIN_FREE;
+  const uint32_t minBlock = lightweightProfile ? POCKET_WEB_START_MIN_BLOCK : FULL_WEB_START_MIN_BLOCK;
+  if (ESP.getFreeHeap() < minFree || ESP.getMaxAllocHeap() < minBlock) {
+    LOG_ERR("WEBACT", "Web server start refused: heap free=%u largest=%u", (unsigned)ESP.getFreeHeap(),
+            (unsigned)ESP.getMaxAllocHeap());
+    returnToLaunchOrigin();
+    return;
+  }
+
   // Create the web server instance
-  webServer.reset(new CrossPointWebServer());
+  webServer = makeUniqueNoThrow<CrossPointWebServer>(profile);
+  if (!webServer) {
+    LOG_ERR("WEBACT", "Could not allocate web server");
+    returnToLaunchOrigin();
+    return;
+  }
   webServer->begin();
 
   if (webServer->isRunning()) {
@@ -373,14 +530,19 @@ void CrossPointWebServerActivity::startWebServer() {
     LOG_ERR("WEBACT", "ERROR: Failed to start web server!");
     webServer.reset();
     // Go back on error
-    onGoHome();
+    returnToLaunchOrigin();
   }
 }
 
 void CrossPointWebServerActivity::loop() {
+  if (state == WebServerActivityState::NEARBY_STARTING) {
+    handleNearbyStartup();
+    return;
+  }
+
   if (state == WebServerActivityState::NEARBY_READY || state == WebServerActivityState::NEARBY_HANDOFF) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-      onGoHome();
+      returnToLaunchOrigin();
       return;
     }
     handleNearbySync();
@@ -389,10 +551,20 @@ void CrossPointWebServerActivity::loop() {
 
   // Handle different states
   if (state == WebServerActivityState::SERVER_RUNNING) {
+    // gpio.update() already ran once at the start of the global loop. Consume
+    // its edge before any synchronous network work. Calling mappedInput.update
+    // again in this activity clears pressedEvents and used to erase Back here.
+    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+      LOG_INF("WEBACT", "Exit requested while web server is running");
+      state = WebServerActivityState::SHUTTING_DOWN;
+      returnToLaunchOrigin();
+      return;
+    }
+
     if (privateApMode && privateApStartedAt != 0 &&
         millis() - privateApStartedAt >= static_cast<unsigned long>(PRIVATE_AP_LEASE_SECONDS) * 1000UL) {
       LOG_INF("WEBACT", "Nearby Sync private AP lease expired");
-      onGoHome();
+      returnToLaunchOrigin();
       return;
     }
 
@@ -421,7 +593,7 @@ void CrossPointWebServerActivity::loop() {
           if (millis() - firstDisconnectAt > WIFI_ABANDON_MS) {
             LOG_DBG("WEBACT", "WiFi unavailable for >%lu s; returning to network selection", WIFI_ABANDON_MS / 1000UL);
             state = WebServerActivityState::SHUTTING_DOWN;
-            onGoHome();
+            returnToLaunchOrigin();
             return;
           }
         } else {
@@ -458,35 +630,18 @@ void CrossPointWebServerActivity::loop() {
       // Reset watchdog BEFORE processing - HTTP header parsing can be slow
       esp_task_wdt_reset();
 
-      // Process HTTP requests in tight loop for maximum throughput
-      // More iterations = more data processed per main loop cycle
-      constexpr int MAX_ITERATIONS = 500;
+      // Service a small bounded batch, then return to the global loop so GPIO
+      // is sampled again. Upload bodies are consumed by WebServer itself; 500
+      // back-to-back calls only starved buttons while the server was idle.
+      constexpr int MAX_ITERATIONS = 8;
       for (int i = 0; i < MAX_ITERATIONS && webServer->isRunning(); i++) {
         webServer->handleClient();
-        // Reset watchdog every 32 iterations
-        if ((i & 0x1F) == 0x1F) {
+        if ((i & 0x03) == 0x03) {
           esp_task_wdt_reset();
-        }
-        // Yield and check for exit button every 64 iterations
-        if ((i & 0x3F) == 0x3F) {
           yield();
-          // Force trigger an update of which buttons are being pressed so be have accurate state
-          // for back button checking
-          mappedInput.update();
-          // Check for exit button inside loop for responsiveness
-          if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-            onGoHome();
-            return;
-          }
         }
       }
       lastHandleClientTime = millis();
-    }
-
-    // Handle exit on Back button (also check outside loop)
-    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-      onGoHome();
-      return;
     }
   }
 }
@@ -501,7 +656,8 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
 
   // Only render our own UI when server is running
   // Subactivities handle their own rendering
-  if (state == WebServerActivityState::SERVER_RUNNING || state == WebServerActivityState::AP_STARTING) {
+  if (state == WebServerActivityState::SERVER_RUNNING || state == WebServerActivityState::AP_STARTING ||
+      state == WebServerActivityState::SERVER_STARTING) {
     renderer.clearScreen();
     const auto& metrics = UITheme::getInstance().getMetrics();
     const auto pageWidth = renderer.getScreenWidth();
@@ -517,7 +673,9 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
     } else {
       const auto height = renderer.getLineHeight(UI_10_FONT_ID);
       const auto top = (pageHeight - height) / 2;
-      renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_STARTING_HOTSPOT));
+      renderer.drawCenteredText(
+          UI_10_FONT_ID, top,
+          state == WebServerActivityState::AP_STARTING ? tr(STR_STARTING_HOTSPOT) : tr(STR_STARTING_FILE_TRANSFER));
     }
     renderer.displayBuffer();
   }
@@ -563,17 +721,21 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     startY += height10 + metrics.verticalSpacing * 2;
 
     std::string hostnameUrl = std::string("http://") + AP_HOSTNAME + ".local/";
-    std::string ipUrl = tr(STR_OR_HTTP_PREFIX) + connectedIP + "/";
+    std::string ipUrl = "http://" + connectedIP + "/";
+    const std::string& primaryUrl = gpio.deviceIsX3() ? ipUrl : hostnameUrl;
 
     // Show QR code for URL
     const Rect qrBoundsUrl(metrics.contentSidePadding, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
-    QrUtils::drawQrCode(renderer, qrBoundsUrl, hostnameUrl);
+    QrUtils::drawQrCode(renderer, qrBoundsUrl, primaryUrl);
 
     // Show IP address as fallback
     renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 80,
-                      hostnameUrl.c_str());
-    renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 100,
-                      ipUrl.c_str());
+                      primaryUrl.c_str());
+    if (!gpio.deviceIsX3()) {
+      const std::string fallbackUrl = std::string(tr(STR_OR_HTTP_PREFIX)) + connectedIP + "/";
+      renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing,
+                        startY + 100, fallbackUrl.c_str());
+    }
   } else {
     startY += metrics.verticalSpacing * 2;
 
@@ -594,9 +756,11 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     renderer.drawCenteredText(UI_10_FONT_ID, startY, webInfo.c_str(), true);
     startY += height10 + 5;
 
-    // Also show hostname URL
-    std::string hostnameUrl = std::string(tr(STR_OR_HTTP_PREFIX)) + AP_HOSTNAME + ".local/";
-    renderer.drawCenteredText(SMALL_FONT_ID, startY, hostnameUrl.c_str(), true);
+    // X4 retains mDNS; X3 intentionally spends that heap on the transfer.
+    if (!gpio.deviceIsX3()) {
+      std::string hostnameUrl = std::string(tr(STR_OR_HTTP_PREFIX)) + AP_HOSTNAME + ".local/";
+      renderer.drawCenteredText(SMALL_FONT_ID, startY, hostnameUrl.c_str(), true);
+    }
   }
 
   const auto labels = mappedInput.mapLabels(tr(STR_EXIT), "", "", "");
@@ -613,7 +777,10 @@ void CrossPointWebServerActivity::renderNearbySync() const {
 
   int y = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing * 4;
   if (state == WebServerActivityState::NEARBY_STARTING) {
-    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_NEARBY_STARTING), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(
+        UI_10_FONT_ID, y,
+        nearbyCancelRequested.load(std::memory_order_acquire) ? tr(STR_NEARBY_CANCELLING) : tr(STR_NEARBY_STARTING),
+        true, EpdFontFamily::BOLD);
   } else if (state == WebServerActivityState::NEARBY_HANDOFF) {
     renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_NEARBY_PREPARING), true, EpdFontFamily::BOLD);
   } else {

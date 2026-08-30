@@ -22,8 +22,20 @@ AgentDeck baseline migrates to header negotiation.
 
 Pocket Daily owns local books and progress, the daily-card model, cached glance,
 the decision outbox, button grammar, sleep rendering, product strings, fonts,
-and OTA policy. A Companion provider owns discovery, authentication, transport,
-and conversion of its remote data into that bounded contract.
+and update policy. The Pocket Apple app is the normal account-free management
+channel: BLE authorizes a temporary device hotspot, then verified HTTP staging
+publishes content or `/update.bin` to SD. A Companion provider owns only its
+optional remote dashboard transport and conversion into the bounded surface
+contract.
+
+The two local transfer interfaces share storage and validation code but not a
+runtime footprint. Pocket's authenticated private hotspot starts a minimal HTTP
+profile with no WebSocket, WebDAV, discovery, mDNS, or captive DNS. Manual File
+Transfer on X3 keeps the complete browser file/settings routes but omits
+WebSocket, WebDAV, UDP discovery, mDNS, and captive DNS; the browser falls back
+to its HTTP uploader. X4 retains the full legacy profile. Transfer buffers are
+lazy, so keeping both interfaces available does not charge their memory costs
+at the same time.
 
 The Pocket Daily UI and models live under `src/activities/pocket_daily/` and
 `src/pocket_daily/`. Some storage implementations remain physically under
@@ -42,12 +54,21 @@ The firmware continues accepting the AgentDeck feed baseline. It requests the
 legacy `surface=pocket-reader` projection while declaring
 `portable-reader/v1` in the stable headers and client registration. Local
 behavior remains available when discovery, Wi-Fi, or the provider is absent.
+AgentDeck networking is default-off behind the new
+`agentDeckCompanionEnabled` preference. This is intentionally distinct from
+the legacy scheduled-pull preference so existing settings cannot silently
+start Wi-Fi and discovery on ordinary Pocket Daily entry. When enabled, a feed
+pull also tears down discovery first and refuses HTTP below the measured X3
+heap floor instead of risking a firmware abort.
 
-OTA fails closed: a Feed or WebSocket update is accepted only when
+The optional Companion OTA path fails closed: a Feed or WebSocket update is accepted only when
 `productId=io.pocketdaily.reader`, the detected `board` (`xteink_x3` or
 `xteink_x4`), and `updateChannel=stable` are all present and match exactly.
 Older board-only staging is therefore ignored by this firmware; SD recovery
 remains available while a Companion runtime upgrades to tuple-aware staging.
+Pocket app updates do not use this pull path: the reader verifies byte length
+and CRC before publishing `/update.bin`, then the existing on-device updater
+validates the image and requires explicit confirmation before flashing.
 
 Provider discovery is service-based, not a fixed `localhost` or `.local`
 hostname. Pocket browses `_agentdeck._tcp.local`, retains up to four IPv4 A

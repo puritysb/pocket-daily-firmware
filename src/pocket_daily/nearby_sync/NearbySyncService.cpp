@@ -1,6 +1,7 @@
 #include "NearbySyncService.h"
 
 #include <Arduino.h>
+#include <HalSystem.h>
 #include <Logging.h>
 #include <NimBLEDevice.h>
 #include <esp_system.h>
@@ -24,20 +25,27 @@ bool validRequestId(const char* value) {
 
 class ServerCallbacks final : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer*, NimBLEConnInfo& info) override {
+    HalSystem::setCrashBreadcrumb(info.isAuthenticated() ? "nearby:connected-authenticated"
+                                                         : "nearby:connected-awaiting-auth");
     if (activeService) activeService->onConnected(true, info.isAuthenticated() && info.isEncrypted());
   }
 
   void onDisconnect(NimBLEServer*, NimBLEConnInfo&, int) override {
+    HalSystem::setCrashBreadcrumb("nearby:disconnected");
     if (activeService) {
       activeService->onConnected(false, false);
       if (NimBLEDevice::isInitialized()) NimBLEDevice::startAdvertising();
     }
   }
 
-  uint32_t onPassKeyDisplay() override { return activeService ? activeService->passkey() : 0; }
+  uint32_t onPassKeyDisplay() override {
+    HalSystem::setCrashBreadcrumb("nearby:passkey-display");
+    return activeService ? activeService->passkey() : 0;
+  }
 
   void onAuthenticationComplete(NimBLEConnInfo& info) override {
     const bool accepted = info.isAuthenticated() && info.isEncrypted();
+    HalSystem::setCrashBreadcrumb(accepted ? "nearby:authentication-complete" : "nearby:authentication-rejected");
     if (activeService) activeService->onConnected(true, accepted);
     if (!accepted && NimBLEDevice::getServer()) NimBLEDevice::getServer()->disconnect(info.getConnHandle());
   }
@@ -64,6 +72,7 @@ bool Service::begin(const char* model, const char* firmware) {
   passkey_ = 100000U + (esp_random() % 900000U);
 
   const uint32_t heapBefore = ESP.getFreeHeap();
+  HalSystem::setCrashBreadcrumb("nearby:nimble-init");
   if (!NimBLEDevice::init(advertisedName_)) {
     LOG_ERR("NEARBY", "NimBLE init failed");
     return false;
@@ -95,8 +104,8 @@ bool Service::begin(const char* model, const char* firmware) {
       COMMAND_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC | NIMBLE_PROPERTY::WRITE_AUTHEN,
       MAX_RECORD_BYTES);
   eventCharacteristic_ = service->createCharacteristic(
-      EVENT_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ_ENC |
-                      NIMBLE_PROPERTY::READ_AUTHEN,
+      EVENT_UUID,
+      NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ_ENC | NIMBLE_PROPERTY::READ_AUTHEN,
       MAX_RECORD_BYTES);
   if (!status || !command || !eventCharacteristic_) {
     end();
@@ -104,8 +113,9 @@ bool Service::begin(const char* model, const char* firmware) {
   }
 
   char statusRecord[MAX_RECORD_BYTES + 1];
-  const int statusLength = snprintf(statusRecord, sizeof(statusRecord), "V=1;MODEL=%s;ID=%s;FW=%s;CAP=AP,WS,SD",
-                                    model ? model : "X4", deviceId_, firmware ? firmware : "unknown");
+  const int statusLength =
+      snprintf(statusRecord, sizeof(statusRecord), "V=1;MODEL=%s;ID=%s;FW=%s;CAP=AP,HTTP,SD,COMMIT1",
+               model ? model : "X4", deviceId_, firmware ? firmware : "unknown");
   if (statusLength <= 0 || static_cast<size_t>(statusLength) > MAX_RECORD_BYTES) {
     end();
     return false;
@@ -124,6 +134,7 @@ bool Service::begin(const char* model, const char* firmware) {
   }
 
   running_ = true;
+  HalSystem::setCrashBreadcrumb("nearby:advertising");
   connected_.store(false, std::memory_order_release);
   authenticated_.store(false, std::memory_order_release);
   LOG_INF("NEARBY", "started name=%s heap=%lu->%lu", advertisedName_, static_cast<unsigned long>(heapBefore),
@@ -132,6 +143,7 @@ bool Service::begin(const char* model, const char* firmware) {
 }
 
 void Service::end() {
+  HalSystem::setCrashBreadcrumb("nearby:shutdown");
   pendingLength_.store(0, std::memory_order_release);
   connected_.store(false, std::memory_order_release);
   authenticated_.store(false, std::memory_order_release);
@@ -183,9 +195,12 @@ bool Service::takeCommand(Command& command) {
     return false;
   }
 
-  if (strcmp(verb, "PING") == 0) command.type = CommandType::PING;
-  else if (strcmp(verb, "START_AP") == 0) command.type = CommandType::START_AP;
-  else if (strcmp(verb, "CANCEL") == 0) command.type = CommandType::CANCEL;
+  if (strcmp(verb, "PING") == 0)
+    command.type = CommandType::PING;
+  else if (strcmp(verb, "START_AP") == 0)
+    command.type = CommandType::START_AP;
+  else if (strcmp(verb, "CANCEL") == 0)
+    command.type = CommandType::CANCEL;
   else {
     notifyError(requestId, "UNKNOWN_COMMAND");
     return false;

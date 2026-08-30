@@ -9,24 +9,27 @@ the phone and reader to be on the same infrastructure Wi-Fi network.
 - The SD card is the source of truth for device content.
 - The Apple app keeps a local mirror and can operate without a Pocket server.
 - Bluetooth LE is a bounded control plane, not the bulk file transport.
-- Existing CrossPoint HTTP, WebSocket, WebDAV, and SD-card formats remain the
-  bulk and recovery paths.
+- Pocket's verified HTTP commit API is the normal bulk path. Existing
+  CrossPoint WebSocket, WebDAV, and direct SD-card formats remain compatible
+  recovery paths.
 - AgentDeck Dashboard is an optional provider and is not involved in pairing,
   content, learning state, or firmware updates.
 - Deep sleep turns both radios off. Nearby Sync therefore starts only after the
-  person wakes the device and explicitly opens the sync screen.
+  person wakes the device, opens Pocket Daily, and presses its `Sync` action.
+- Nearby Sync belongs to Pocket Daily and is not shown in CrossPoint's generic
+  File Transfer mode selector. File Transfer remains the manual recovery path.
 
 ## Transport selection
 
-The transport design selects the least expensive available link in this order:
+The transport design has one reliable path and two optional shortcuts:
 
-1. Existing LAN connection discovered through `_crosspoint._tcp` Bonjour,
-   with `crosspoint.local` and the direct-hotspot address as bounded fallbacks.
-2. BLE for discovery, authenticated status, and a request to start a temporary
+1. BLE performs discovery, authenticated status, and requests a temporary
    device hotspot.
-3. The temporary hotspot for files, fonts, content packs, screenshots, and
+2. The temporary hotspot carries files, fonts, content packs, screenshots, and
    firmware.
-4. User-selected SD-card access on macOS as the offline and recovery path.
+3. Existing LAN discovery through `_crosspoint._tcp` is an opportunistic fast
+   path only; failure never prevents BLE/private-hotspot sync.
+4. User-selected SD-card access on macOS is the offline and bootstrap path.
 
 BLE and Wi-Fi are never kept active together on the no-PSRAM ESP32-C3. The
 device sends the hotspot lease over the encrypted BLE connection, stops and
@@ -34,7 +37,8 @@ deinitializes BLE, and only then starts Wi-Fi AP mode.
 
 ## BLE service
 
-Pocket advertises only while the Nearby Sync screen is visible.
+Pocket advertises only after the Pocket Daily `Sync` action opens its dedicated
+Nearby Sync screen.
 
 | Item | Value |
 | --- | --- |
@@ -53,7 +57,7 @@ on the BLE path.
 Status is readable only on an encrypted, authenticated connection:
 
 ```text
-V=1;MODEL=X3;ID=89ABCDEF;FW=1.4.1;CAP=AP,WS,SD
+V=1;MODEL=X3;ID=89ABCDEF;FW=1.4.1;CAP=AP,HTTP,SD,COMMIT1
 ```
 
 `MODEL` is `X3` or `X4`; the app uses it to select the 528×792 X3 or 480×800
@@ -81,24 +85,33 @@ The encrypted event characteristic supports notifications:
 ```text
 OK <request-id>
 ERR <request-id> <code>
-AP <request-id> <ssid> <passphrase> <ipv4> <http-port> <ws-port> <lease-seconds>
+AP <request-id> <ssid> <passphrase> <ipv4> <http-port> <legacy-ws-port> <lease-seconds>
 ```
 
 Fields never contain spaces. The v1 hotspot passphrase is 12 uppercase
 hexadecimal characters. The app must treat it as ephemeral and must not sync it
-to cloud storage or diagnostics.
+to cloud storage or diagnostics. `legacy-ws-port` is `0` for the verified HTTP
+Pocket path; the field remains in v1 so older parsers retain record alignment.
 
 The device sends `AP`, waits long enough for the notification to be delivered,
 disconnects BLE, releases the Bluetooth controller memory, and starts the AP.
 The app then joins the SSID with the platform hotspot configuration API and
 verifies `GET /api/status` before transferring any data.
 
+On iOS/iPadOS the app uses `NEHotspotConfiguration` with `joinOnce`. On macOS,
+where that API is unavailable, Pocket uses the public CoreWLAN client API to
+scan for the advertised SSID and associate with the one-time passphrase. Modern
+macOS gates Wi-Fi scanning behind Location Services, so the first sync asks for
+location permission once; Pocket does not request coordinates or persist SSID,
+BSSID, or passphrase data. Manual SSID/password entry remains visible only when
+automatic association fails.
+
 ## Pairing and authorization
 
 - BLE Secure Connections, MITM protection, and bonding are required.
 - Pocket acts as display-only and shows a random six-digit passkey.
 - The app asks the person to enter the displayed passkey.
-- Entering Nearby Sync is the physical-presence authorization window. The
+- Pressing `Sync` in Pocket Daily is the physical-presence authorization window. The
   device advertises for at most two minutes without a connection.
 - A bonded client still cannot start a hotspot unless the Nearby Sync screen is
   currently open.
@@ -107,32 +120,69 @@ verifies `GET /api/status` before transferring any data.
 
 ## Hotspot and bulk transfer
 
-Nearby Sync uses the existing CrossPoint bulk API unchanged:
+Nearby Sync uses a versioned, interruption-safe HTTP bulk API:
 
 - `GET /api/status` on port 80 verifies identity and mode.
-- HTTP/WebDAV is used for metadata and small administrative operations.
-- WebSocket port 81 uses `START:<filename>:<size>:<path>`, binary chunks,
-  progress records, and `DONE` for files.
-- Firmware and Pocket content packs keep their existing digest and atomic
-  install checks; successful transport never implies successful installation.
+- The app uploads a uniquely named hidden `.pocket-*.part` file with
+  `POST /upload?path=<directory>` and computes CRC32 while streaming.
+- `POST /api/pocket/v1/commit` supplies the staging path, final path, byte
+  length, and CRC32. The reader checks all four against the completed upload,
+  then publishes it. A disconnect cannot overwrite the previous final file.
+- The private Pocket AP uses a minimal server profile: status, settings,
+  upload, and verified commit only. It does not start captive DNS, mDNS,
+  discovery UDP, WebDAV, or the legacy WebSocket listener. The generic File
+  Transfer screen retains the complete browser/WebSocket/WebDAV profile.
+- HTTP and font upload buffers are allocated only for the active transfer and
+  released at completion, instead of permanently consuming 8 KiB of X3 heap.
+- A `.bin` is always published as `/update.bin`; transport never flashes it.
+  The existing on-device validator and explicit user confirmation remain the
+  installation boundary.
 
 The product hotspot is WPA2 protected, permits one client, and shuts down after
 the lease or when the person leaves the transfer screen. Manual `Create Hotspot`
 remains available for compatibility, but the app-assisted path uses per-session
 credentials.
 
+## Crash diagnostics
+
+A panic, CPU lockup, watchdog, brownout, eFuse, or power-glitch reboot writes
+`/crash_report.txt` automatically and rotates the three previous reports as
+`crash_report.1.txt` through `crash_report.3.txt`. The latest report includes
+the firmware version, hardware reset reason, panic reason when one exists,
+retained log ring, stack memory, and an allocation-free RTC breadcrumb for BLE
+initialization, connection, passkey, authentication, handoff, and shutdown
+checkpoints.
+
+Every HTTP profile exposes `GET /api/pocket/v1/crash-report`; `/api/status`
+advertises `crashReportAvailable` and `crashReportBytes`. Pocket fetches the
+report automatically after a connection, classifies common memory, stack,
+watchdog, and invalid-access failures, and offers both the raw report and export.
+The app independently persists its last 80 CoreBluetooth transitions in
+Application Support, so discovery and pairing failures remain inspectable even
+when the reader reboots before the HTTP handoff.
+
 ## Memory and responsiveness gates
 
 Nearby Sync is not ready for release until measurements on both X3 and X4 demonstrate:
 
 - BLE mode enters with at least 20 KiB minimum-ever free heap.
+- NimBLE retains its supported 4 KiB host-task stack, and a second post-init
+  gate requires 20 KiB free heap plus an 8 KiB contiguous block before pairing.
 - BLE deinitialization returns enough contiguous heap to start the existing AP
   and web server with the current measured safety margin.
 - No reader fonts, parsed books, AgentDeck sockets, mDNS, or Wi-Fi clients are
   alive while BLE is active.
-- Button input is serviced on every activity loop iteration.
+- NimBLE initialization runs in a bounded worker, leaving button input and
+  e-ink status rendering on the activity loop.
 - BLE callbacks contain no filesystem, rendering, Wi-Fi, or blocking work.
-- Back exits within 250 ms when no pairing or transition is in progress.
+- Back acknowledges immediately during radio startup and exits after the
+  in-flight NimBLE initialization has safely unwound.
+- Before starting HTTP, the minimal Pocket and X3 browser File Transfer
+  profiles require 18 KiB free and an 8 KiB largest block. X3 File Transfer
+  retains browser HTTP upload/download and settings while omitting the legacy
+  WebSocket, WebDAV, UDP, mDNS, and captive-DNS allocations. The full X4 profile
+  requires 20 KiB free and a 10 KiB largest block; allocation failures return
+  to the UI rather than aborting the firmware.
 
 If those gates cannot be met, the shipping fallback is still serverless:
 `Create Hotspot` plus a one-tap app connection, with BLE disabled at build time.
@@ -146,8 +196,8 @@ a user-operated server.
 - The first iPhone/iPad slice provides Nearby discovery, secure hotspot handoff,
   connection verification, and file transfer. Content browsing and a share
   extension build on that transport.
-- The first macOS slice provides the same transfer functions with a manual Wi-Fi
-  join fallback. SD-card library management later uses the system folder picker
+- The first macOS slice provides the same transfer functions with automatic
+  CoreWLAN association and a manual Wi-Fi join fallback. SD-card library management later uses the system folder picker
   and security-scoped bookmarks.
 - A user-started transfer may finish in background time; periodic background
   execution is never presented as guaranteed.

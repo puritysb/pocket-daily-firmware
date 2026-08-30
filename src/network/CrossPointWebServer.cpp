@@ -5,6 +5,7 @@
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <WiFi.h>
 #include <esp_task_wdt.h>
 
@@ -77,13 +78,34 @@ bool isProtectedItemName(const String& name) {
   }
   return false;
 }
+
+uint32_t updateCrc32(uint32_t crc, const uint8_t* data, size_t length) {
+  while (length-- > 0) {
+    crc ^= *data++;
+    for (uint8_t bit = 0; bit < 8; ++bit) {
+      crc = (crc >> 1U) ^ (0xEDB88320U & (0U - (crc & 1U)));
+    }
+  }
+  return crc;
+}
+
+bool renameStorageFile(const String& from, const String& to) {
+  HalFile file = Storage.open(from.c_str());
+  if (!file || file.isDirectory()) {
+    if (file) file.close();
+    return false;
+  }
+  const bool renamed = file.rename(to.c_str());
+  file.close();
+  return renamed;
+}
 }  // namespace
 
 // File listing page template - now using generated headers:
 // - HomePageHtml (from html/HomePage.html)
 // - FilesPageHeaderHtml (from html/FilesPageHeader.html)
 // - FilesPageFooterHtml (from html/FilesPageFooter.html)
-CrossPointWebServer::CrossPointWebServer() {}
+CrossPointWebServer::CrossPointWebServer(const CrossPointWebServerProfile profile) : profile(profile) {}
 
 CrossPointWebServer::~CrossPointWebServer() { stop(); }
 
@@ -110,7 +132,12 @@ void CrossPointWebServer::begin() {
   LOG_DBG("WEB", "Network mode: %s", apMode ? "AP" : "STA");
 
   LOG_DBG("WEB", "Creating web server on port %d...", port);
-  server.reset(new WebServer(port));
+  server = makeUniqueNoThrow<WebServer>(port);
+
+  if (!server) {
+    LOG_ERR("WEB", "Failed to create WebServer!");
+    return;
+  }
 
   // Disable WiFi sleep to improve responsiveness and prevent 'unreachable' errors.
   // This is critical for reliable web server operation on ESP32.
@@ -124,78 +151,96 @@ void CrossPointWebServer::begin() {
 
   LOG_DBG("WEB", "[MEM] Free heap after WebServer allocation: %d bytes", ESP.getFreeHeap());
 
-  if (!server) {
-    LOG_ERR("WEB", "Failed to create WebServer!");
-    return;
-  }
-
   // Setup routes
   LOG_DBG("WEB", "Setting up routes...");
   server->on("/", HTTP_GET, [this] { handleRoot(); });
-  server->on("/files", HTTP_GET, [this] { handleFileList(); });
-  server->on("/js/jszip.min.js", HTTP_GET, [this] { handleJszip(); });
-
   server->on("/api/status", HTTP_GET, [this] { handleStatus(); });
-  server->on("/api/files", HTTP_GET, [this] { handleFileListData(); });
-  server->on("/download", HTTP_GET, [this] { handleDownload(); });
+  // Diagnostics is available in every profile so a phone can retrieve the
+  // previous panic after the reader has recovered, without exposing arbitrary
+  // hidden files or requiring the SD card to be removed.
+  server->on("/api/pocket/v1/crash-report", HTTP_GET, [this] { handleCrashReport(); });
 
   // Upload endpoint with special handling for multipart form data
   server->on("/upload", HTTP_POST, [this] { handleUploadPost(upload); }, [this] { handleUpload(upload); });
-
-  // Create folder endpoint
-  server->on("/mkdir", HTTP_POST, [this] { handleCreateFolder(); });
-
-  // Rename file endpoint
-  server->on("/rename", HTTP_POST, [this] { handleRename(); });
-
-  // Move file endpoint
-  server->on("/move", HTTP_POST, [this] { handleMove(); });
-
-  // Delete file/folder endpoint
-  server->on("/delete", HTTP_POST, [this] { handleDelete(); });
+  // Pocket clients upload to a unique hidden .part file, then ask the reader
+  // to verify size + CRC and atomically publish it. A dropped phone or Wi-Fi
+  // link therefore never turns a valid book or update.bin into a partial file.
+  server->on("/api/pocket/v1/commit", HTTP_POST, [this] { handleCommitUpload(); });
 
   // Settings endpoints
   server->on("/settings", HTTP_GET, [this] { handleSettingsPage(); });
   server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
   server->on("/api/settings", HTTP_POST, [this] { handlePostSettings(); });
 
-  // Font management endpoints
-  server->on("/fonts", HTTP_GET, [this] { handleFontsPage(); });
-  server->on("/api/fonts", HTTP_GET, [this] { handleFontList(); });
-  server->on("/api/fonts/upload", HTTP_POST, [this] { handleFontUpload(); }, [this] { handleFontUploadData(); });
-  server->on("/api/fonts/delete", HTTP_POST, [this] { handleFontDelete(); });
+  // Pocket Sync deliberately exposes only the routes used by the companion
+  // app. The full browser/File Transfer surface remains available as a
+  // separate profile without imposing WebDAV/WebSocket/discovery allocations
+  // on the X3 private-AP path.
+  if (profile != CrossPointWebServerProfile::POCKET_SYNC) {
+    server->on("/files", HTTP_GET, [this] { handleFileList(); });
+    server->on("/js/jszip.min.js", HTTP_GET, [this] { handleJszip(); });
+    server->on("/api/files", HTTP_GET, [this] { handleFileListData(); });
+    server->on("/download", HTTP_GET, [this] { handleDownload(); });
+    server->on("/mkdir", HTTP_POST, [this] { handleCreateFolder(); });
+    server->on("/rename", HTTP_POST, [this] { handleRename(); });
+    server->on("/move", HTTP_POST, [this] { handleMove(); });
+    server->on("/delete", HTTP_POST, [this] { handleDelete(); });
 
-  // OPDS server endpoints
-  server->on("/api/opds", HTTP_GET, [this] { handleGetOpdsServers(); });
-  server->on("/api/opds", HTTP_POST, [this] { handlePostOpdsServer(); });
-  server->on("/api/opds/delete", HTTP_POST, [this] { handleDeleteOpdsServer(); });
+    // Font management endpoints
+    server->on("/fonts", HTTP_GET, [this] { handleFontsPage(); });
+    server->on("/api/fonts", HTTP_GET, [this] { handleFontList(); });
+    server->on("/api/fonts/upload", HTTP_POST, [this] { handleFontUpload(); }, [this] { handleFontUploadData(); });
+    server->on("/api/fonts/delete", HTTP_POST, [this] { handleFontDelete(); });
 
-  // Wi-Fi credential endpoints
-  server->on("/api/wifi", HTTP_GET, [this] { handleGetWifiNetworks(); });
-  server->on("/api/wifi", HTTP_POST, [this] { handlePostWifiNetwork(); });
-  server->on("/api/wifi/delete", HTTP_POST, [this] { handleDeleteWifiNetwork(); });
+    // OPDS server endpoints
+    server->on("/api/opds", HTTP_GET, [this] { handleGetOpdsServers(); });
+    server->on("/api/opds", HTTP_POST, [this] { handlePostOpdsServer(); });
+    server->on("/api/opds/delete", HTTP_POST, [this] { handleDeleteOpdsServer(); });
+
+    // Wi-Fi credential endpoints
+    server->on("/api/wifi", HTTP_GET, [this] { handleGetWifiNetworks(); });
+    server->on("/api/wifi", HTTP_POST, [this] { handlePostWifiNetwork(); });
+    server->on("/api/wifi/delete", HTTP_POST, [this] { handleDeleteWifiNetwork(); });
+  }
 
   server->onNotFound([this] { handleNotFound(); });
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
 
-  // Collect WebDAV headers and register handler
-  const char* davHeaders[] = {"Depth", "Destination", "Overwrite", "If", "Lock-Token", "Timeout"};
-  server->collectHeaders(davHeaders, 6);
-  server->addHandler(new WebDAVHandler());  // Note: WebDAVHandler will be deleted by WebServer when server is stopped
-  LOG_DBG("WEB", "WebDAV handler initialized");
+  if (profile == CrossPointWebServerProfile::FULL) {
+    // Collect WebDAV headers and register handler
+    const char* davHeaders[] = {"Depth", "Destination", "Overwrite", "If", "Lock-Token", "Timeout"};
+    server->collectHeaders(davHeaders, 6);
+    auto* webDav = new (std::nothrow) WebDAVHandler();
+    if (webDav) {
+      server->addHandler(webDav);  // Deleted by WebServer when the server is stopped.
+      LOG_DBG("WEB", "WebDAV handler initialized");
+    } else {
+      LOG_ERR("WEB", "Could not allocate WebDAV handler");
+    }
+  }
 
   server->begin();
 
-  // Start WebSocket server for fast binary uploads
-  LOG_DBG("WEB", "Starting WebSocket server on port %d...", wsPort);
-  wsServer.reset(new WebSocketsServer(wsPort));
-  wsInstance = const_cast<CrossPointWebServer*>(this);
-  wsServer->begin();
-  wsServer->onEvent(wsEventCallback);
-  LOG_DBG("WEB", "WebSocket server started");
+  if (profile == CrossPointWebServerProfile::FULL) {
+    // The generic browser/File Transfer surface keeps its legacy WebSocket.
+    // Pocket's private AP uses verified HTTP commits and skips this second
+    // listener, preserving contiguous heap on X3.
+    LOG_DBG("WEB", "Starting WebSocket server on port %d...", wsPort);
+    wsServer = makeUniqueNoThrow<WebSocketsServer>(wsPort);
+    if (wsServer) {
+      wsInstance = const_cast<CrossPointWebServer*>(this);
+      wsServer->begin();
+      wsServer->onEvent(wsEventCallback);
+      LOG_DBG("WEB", "WebSocket server started");
+    } else {
+      LOG_ERR("WEB", "Could not allocate WebSocket server; HTTP File Transfer remains available");
+    }
+  }
 
-  udpActive = udp.begin(LOCAL_UDP_PORT);
-  LOG_DBG("WEB", "Discovery UDP %s on port %d", udpActive ? "enabled" : "failed", LOCAL_UDP_PORT);
+  if (profile == CrossPointWebServerProfile::FULL) {
+    udpActive = udp.begin(LOCAL_UDP_PORT);
+    LOG_DBG("WEB", "Discovery UDP %s on port %d", udpActive ? "enabled" : "failed", LOCAL_UDP_PORT);
+  }
 
   running = true;
 
@@ -203,7 +248,7 @@ void CrossPointWebServer::begin() {
   // Show the correct IP based on network mode
   const String ipAddr = apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString();
   LOG_DBG("WEB", "Access at http://%s/", ipAddr.c_str());
-  LOG_DBG("WEB", "WebSocket at ws://%s:%d/", ipAddr.c_str(), wsPort);
+  if (profile == CrossPointWebServerProfile::FULL) LOG_DBG("WEB", "WebSocket at ws://%s:%d/", ipAddr.c_str(), wsPort);
   LOG_DBG("WEB", "[MEM] Free heap after server.begin(): %d bytes", ESP.getFreeHeap());
 }
 
@@ -367,10 +412,54 @@ void CrossPointWebServer::handleStatus() const {
   doc["freeHeap"] = ESP.getFreeHeap();
   doc["uptime"] = millis() / 1000;
   doc["device"] = gpio.deviceIsX3() ? "X3" : "X4";
+  if (Storage.exists("/crash_report.txt")) {
+    HalFile report = Storage.open("/crash_report.txt");
+    doc["crashReportAvailable"] = static_cast<bool>(report);
+    doc["crashReportBytes"] = report ? report.size() : 0;
+    if (report) report.close();
+  } else {
+    doc["crashReportAvailable"] = false;
+    doc["crashReportBytes"] = 0;
+  }
 
   String json;
   serializeJson(doc, json);
   server->send(200, "application/json", json);
+}
+
+void CrossPointWebServer::handleCrashReport() const {
+  HalFile report = Storage.open("/crash_report.txt");
+  if (!report || report.isDirectory()) {
+    if (report) report.close();
+    server->send(404, "text/plain", "No crash report recorded");
+    return;
+  }
+
+  const size_t reportSize = report.size();
+  server->setContentLength(reportSize);
+  server->sendHeader("Content-Disposition", "attachment; filename=crash_report.txt");
+  server->send(200, "text/plain; charset=utf-8", "");
+
+  NetworkClient client = server->client();
+  uint8_t buffer[512];
+  bool streamOk = true;
+  while (streamOk && report.available()) {
+    const int count = report.read(buffer, sizeof(buffer));
+    if (count <= 0) break;
+    size_t sent = 0;
+    while (sent < static_cast<size_t>(count)) {
+      esp_task_wdt_reset();
+      const size_t wrote = client.write(buffer + sent, static_cast<size_t>(count) - sent);
+      if (wrote == 0) {
+        streamOk = false;
+        break;
+      }
+      sent += wrote;
+    }
+  }
+  client.clear();
+  report.close();
+  LOG_INF("WEB", "Crash report %s (%u bytes)", streamOk ? "served" : "interrupted", static_cast<unsigned>(reportSize));
 }
 
 void CrossPointWebServer::scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const {
@@ -546,7 +635,9 @@ void CrossPointWebServer::handleDownload() const {
   server->send(200, contentType.c_str(), "");
 
   NetworkClient client = server->client();
-  const size_t chunkSize = 4096;
+  // Keep the main-loop stack and lwIP heap from competing over a 4 KiB burst.
+  // Downloads are throughput-insensitive compared with surviving the transfer.
+  constexpr size_t chunkSize = 1024;
   uint8_t buffer[chunkSize];
 
   bool downloadOk = true;
@@ -578,7 +669,7 @@ static bool flushUploadBuffer(CrossPointWebServer::UploadState& state) {
   if (state.bufferPos > 0 && state.file) {
     esp_task_wdt_reset();  // Reset watchdog before potentially slow SD write
     const unsigned long writeStart = millis();
-    const size_t written = state.file.write(state.buffer.data(), state.bufferPos);
+    const size_t written = state.file.write(state.buffer.get(), state.bufferPos);
     totalWriteTime += millis() - writeStart;
     writeCount++;
     esp_task_wdt_reset();  // Reset watchdog after SD write
@@ -613,6 +704,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
 
     state.fileName = upload.filename;
     state.size = 0;
+    state.crc32 = 0xFFFFFFFFU;
     state.success = false;
     state.error = "";
     uploadStartTime = millis();
@@ -620,6 +712,16 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     state.bufferPos = 0;
     totalWriteTime = 0;
     writeCount = 0;
+
+    // Keep transfer buffers out of the idle server footprint. On X3 the Wi-Fi
+    // driver dominates internal RAM; allocating only the active upload buffer
+    // lets the Pocket profile and the legacy File Transfer profile coexist.
+    state.buffer = makeUniqueNoThrow<uint8_t[]>(UploadState::UPLOAD_BUFFER_SIZE);
+    if (!state.buffer) {
+      state.error = "Not enough memory to start upload";
+      LOG_ERR("WEB", "[UPLOAD] Could not allocate %u-byte buffer", (unsigned)UploadState::UPLOAD_BUFFER_SIZE);
+      return;
+    }
 
     // Get upload path from query parameter (defaults to root if not specified)
     // Note: We use query parameter instead of form data because multipart form
@@ -658,6 +760,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     esp_task_wdt_reset();
     if (!Storage.openFileForWrite("WEB", filePath, state.file)) {
       state.error = "Failed to create file on SD card";
+      state.buffer.reset();
       LOG_DBG("WEB", "[UPLOAD] FAILED to create file: %s", filePath.c_str());
       return;
     }
@@ -666,6 +769,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     LOG_DBG("WEB", "[UPLOAD] File created successfully: %s", filePath.c_str());
   } else if (upload.status == UPLOAD_FILE_WRITE) {
     if (state.file && state.error.isEmpty()) {
+      state.crc32 = updateCrc32(state.crc32, upload.buf, upload.currentSize);
       // Buffer incoming data and flush when buffer is full
       // This reduces SD card write operations and improves throughput
       const uint8_t* data = upload.buf;
@@ -675,7 +779,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
         const size_t space = UploadState::UPLOAD_BUFFER_SIZE - state.bufferPos;
         const size_t toCopy = (remaining < space) ? remaining : space;
 
-        memcpy(state.buffer.data() + state.bufferPos, data, toCopy);
+        memcpy(state.buffer.get() + state.bufferPos, data, toCopy);
         state.bufferPos += toCopy;
         data += toCopy;
         remaining -= toCopy;
@@ -685,6 +789,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
           if (!flushUploadBuffer(state)) {
             state.error = "Failed to write to SD card - disk may be full";
             state.file.close();
+            state.buffer.reset();
             return;
           }
         }
@@ -726,6 +831,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
         clearBookCache(filePath.c_str());
       }
     }
+    state.buffer.reset();
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
     state.bufferPos = 0;  // Discard buffered data
     if (state.file) {
@@ -737,6 +843,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
       Storage.remove(filePath.c_str());
     }
     state.error = "Upload aborted";
+    state.buffer.reset();
     LOG_DBG("WEB", "Upload aborted");
   }
 }
@@ -748,6 +855,79 @@ void CrossPointWebServer::handleUploadPost(UploadState& state) const {
     const String error = state.error.isEmpty() ? "Unknown error during upload" : state.error;
     server->send(400, "text/plain", error);
   }
+}
+
+void CrossPointWebServer::handleCommitUpload() {
+  if (!server->hasArg("plain")) {
+    server->send(400, "text/plain", "Missing JSON body");
+    return;
+  }
+
+  JsonDocument doc;
+  const DeserializationError error = deserializeJson(doc, server->arg("plain"));
+  if (error || !doc["staging"].is<const char*>() || !doc["target"].is<const char*>() || !doc["size"].is<size_t>() ||
+      !doc["crc32"].is<const char*>()) {
+    server->send(400, "text/plain", "Invalid commit request");
+    return;
+  }
+
+  const String staging = normalizeWebPath(doc["staging"].as<const char*>());
+  const String target = normalizeWebPath(doc["target"].as<const char*>());
+  const size_t expectedSize = doc["size"].as<size_t>();
+  const String expectedCrcText = doc["crc32"].as<const char*>();
+  char* crcEnd = nullptr;
+  const uint32_t expectedCrc = strtoul(expectedCrcText.c_str(), &crcEnd, 16);
+
+  const int stagingSlash = staging.lastIndexOf('/');
+  const int targetSlash = target.lastIndexOf('/');
+  const String stagingName = staging.substring(stagingSlash + 1);
+  const String targetName = target.substring(targetSlash + 1);
+  const String stagingParent = staging.substring(0, stagingSlash + 1);
+  const String targetParent = target.substring(0, targetSlash + 1);
+  if (!stagingName.startsWith(".pocket-") || !stagingName.endsWith(".part") || stagingParent != targetParent ||
+      targetName.isEmpty() || isProtectedItemName(targetName) || !crcEnd || *crcEnd != '\0' ||
+      expectedCrcText.length() != 8) {
+    server->send(400, "text/plain", "Unsafe commit path or checksum");
+    return;
+  }
+
+  String uploadedPath = normalizeWebPath(upload.path + "/" + upload.fileName);
+  const uint32_t uploadedCrc = upload.crc32 ^ 0xFFFFFFFFU;
+  if (!upload.success || uploadedPath != staging || upload.size != expectedSize || uploadedCrc != expectedCrc ||
+      !Storage.exists(staging.c_str())) {
+    server->send(409, "text/plain", "Staged upload verification failed");
+    return;
+  }
+
+  HalFile stagedFile = Storage.open(staging.c_str());
+  const bool stagedSizeMatches = stagedFile && !stagedFile.isDirectory() && stagedFile.size() == expectedSize;
+  if (stagedFile) stagedFile.close();
+  if (!stagedSizeMatches) {
+    server->send(409, "text/plain", "Staged file size mismatch");
+    return;
+  }
+
+  const String backup = stagingParent + ".pocket-backup.part";
+  Storage.remove(backup.c_str());
+  const bool hadTarget = Storage.exists(target.c_str());
+  if (hadTarget && !renameStorageFile(target, backup)) {
+    server->send(500, "text/plain", "Could not preserve existing target");
+    return;
+  }
+  if (!renameStorageFile(staging, target)) {
+    if (hadTarget) renameStorageFile(backup, target);
+    server->send(500, "text/plain", "Could not publish staged upload");
+    return;
+  }
+  if (hadTarget) Storage.remove(backup.c_str());
+
+  clearBookCache(target.c_str());
+  char response[80];
+  snprintf(response, sizeof(response), "{\"size\":%u,\"crc32\":\"%08lX\"}", static_cast<unsigned>(expectedSize),
+           static_cast<unsigned long>(uploadedCrc));
+  server->send(200, "application/json", response);
+  LOG_INF("WEB", "Committed Pocket upload %s (%u bytes, crc32=%08lX)", target.c_str(),
+          static_cast<unsigned>(expectedSize), static_cast<unsigned long>(uploadedCrc));
 }
 
 void CrossPointWebServer::handleCreateFolder() const {
@@ -1790,6 +1970,7 @@ void CrossPointWebServer::handleFontUploadData() {
       fontUpload.magicChecked = false;
       fontUpload.bytesWritten = 0;
       fontUpload.bufferPos = 0;
+      fontUpload.buffer.reset();
 
       if (!FontInstaller::isValidFamilyName(family.c_str())) {
         LOG_ERR("WEB", "Invalid font family name: %s", family.c_str());
@@ -1820,7 +2001,14 @@ void CrossPointWebServer::handleFontUploadData() {
       FontInstaller::buildFontPath(family.c_str(), filename.c_str(), path, sizeof(path));
       fontUpload.filePath = path;
 
+      fontUpload.buffer = makeUniqueNoThrow<uint8_t[]>(FontUploadState::BUFFER_SIZE);
+      if (!fontUpload.buffer) {
+        LOG_ERR("WEB", "Not enough memory for font upload buffer");
+        break;
+      }
+
       if (!Storage.openFileForWrite("WEB", path, fontUpload.file)) {
+        fontUpload.buffer.reset();
         LOG_ERR("WEB", "Failed to open font file for write: %s", path);
         break;
       }
@@ -1850,13 +2038,13 @@ void CrossPointWebServer::handleFontUploadData() {
       while (remaining > 0) {
         size_t space = FontUploadState::BUFFER_SIZE - fontUpload.bufferPos;
         size_t chunk = (remaining < space) ? remaining : space;
-        memcpy(fontUpload.buffer.data() + fontUpload.bufferPos, src, chunk);
+        memcpy(fontUpload.buffer.get() + fontUpload.bufferPos, src, chunk);
         fontUpload.bufferPos += chunk;
         src += chunk;
         remaining -= chunk;
 
         if (fontUpload.bufferPos >= FontUploadState::BUFFER_SIZE) {
-          fontUpload.file.write(fontUpload.buffer.data(), fontUpload.bufferPos);
+          fontUpload.file.write(fontUpload.buffer.get(), fontUpload.bufferPos);
           fontUpload.bytesWritten += fontUpload.bufferPos;
           fontUpload.bufferPos = 0;
           esp_task_wdt_reset();
@@ -1868,7 +2056,7 @@ void CrossPointWebServer::handleFontUploadData() {
     case UPLOAD_FILE_END: {
       // Flush remaining buffer
       if (fontUpload.valid && fontUpload.bufferPos > 0) {
-        fontUpload.file.write(fontUpload.buffer.data(), fontUpload.bufferPos);
+        fontUpload.file.write(fontUpload.buffer.get(), fontUpload.bufferPos);
         fontUpload.bytesWritten += fontUpload.bufferPos;
         fontUpload.bufferPos = 0;
       }
@@ -1879,6 +2067,7 @@ void CrossPointWebServer::handleFontUploadData() {
       if (!fontUpload.valid && !fontUpload.filePath.empty()) {
         Storage.remove(fontUpload.filePath.c_str());
       }
+      fontUpload.buffer.reset();
 
       LOG_DBG("WEB", "Font upload end: valid=%d, %zu bytes", fontUpload.valid, fontUpload.bytesWritten);
       break;
@@ -1891,6 +2080,7 @@ void CrossPointWebServer::handleFontUploadData() {
       if (!fontUpload.filePath.empty()) {
         Storage.remove(fontUpload.filePath.c_str());
       }
+      fontUpload.buffer.reset();
       fontUpload.valid = false;
       LOG_DBG("WEB", "Font upload aborted");
       break;

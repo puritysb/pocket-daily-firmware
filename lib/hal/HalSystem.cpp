@@ -14,6 +14,9 @@
 
 RTC_NOINIT_ATTR char panicMessage[256];
 RTC_NOINIT_ATTR HalSystem::StackFrame panicStack[MAX_PANIC_STACK_DEPTH];
+RTC_NOINIT_ATTR char crashBreadcrumb[96];
+RTC_NOINIT_ATTR uint32_t crashBreadcrumbMagic;
+static constexpr uint32_t CRASH_BREADCRUMB_MAGIC = 0x43504243;  // CPBC
 
 extern "C" {
 
@@ -70,11 +73,54 @@ void IRAM_ATTR __wrap_panic_print_backtrace(const void* frame, int core) {
 
 namespace HalSystem {
 
+namespace {
+constexpr const char* CRASH_REPORT_PATH = "/crash_report.txt";
+constexpr const char* CRASH_REPORT_HISTORY[] = {
+    "/crash_report.1.txt",
+    "/crash_report.2.txt",
+    "/crash_report.3.txt",
+};
+
+void rotateCrashReports() {
+  // Preserve the most recent four reports. Fixed paths avoid timestamps (the
+  // RTC may not be valid at panic reboot) and keep recovery deterministic.
+  Storage.remove(CRASH_REPORT_HISTORY[2]);
+  for (int i = 2; i > 0; --i) {
+    if (Storage.exists(CRASH_REPORT_HISTORY[i - 1])) {
+      Storage.rename(CRASH_REPORT_HISTORY[i - 1], CRASH_REPORT_HISTORY[i]);
+    }
+  }
+  if (Storage.exists(CRASH_REPORT_PATH)) Storage.rename(CRASH_REPORT_PATH, CRASH_REPORT_HISTORY[0]);
+}
+
+const char* resetReasonName(const esp_reset_reason_t reason) {
+  switch (reason) {
+    case ESP_RST_POWERON: return "power-on";
+    case ESP_RST_EXT: return "external pin";
+    case ESP_RST_SW: return "software restart";
+    case ESP_RST_PANIC: return "panic";
+    case ESP_RST_INT_WDT: return "interrupt watchdog";
+    case ESP_RST_TASK_WDT: return "task watchdog";
+    case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_DEEPSLEEP: return "deep-sleep wake";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_SDIO: return "SDIO";
+    case ESP_RST_USB: return "USB";
+    case ESP_RST_JTAG: return "JTAG";
+    case ESP_RST_EFUSE: return "eFuse error";
+    case ESP_RST_PWR_GLITCH: return "power glitch";
+    case ESP_RST_CPU_LOCKUP: return "CPU lockup";
+    case ESP_RST_UNKNOWN:
+    default: return "unknown";
+  }
+}
+}  // namespace
+
 void begin() {
   // This is mostly for the first boot, we need to initialize the panic info and logs to empty state
   // If we reboot from a panic state, we want to keep the panic info until we successfully dump it to the SD card, use
   // `clearPanic()` to clear it after dumping
-  if (!isRebootFromPanic()) {
+  if (!isRebootFromCrash()) {
     clearPanic();
   } else {
     // Panic reboot: preserve logs and panic info, but clamp logHead in case the
@@ -88,9 +134,10 @@ void begin() {
 }
 
 void checkPanic() {
-  if (isRebootFromPanic()) {
+  if (isRebootFromCrash()) {
     auto panicInfo = getPanicInfo(true);
-    auto file = Storage.open("/crash_report.txt", O_WRITE | O_CREAT | O_TRUNC);
+    rotateCrashReports();
+    auto file = Storage.open(CRASH_REPORT_PATH, O_WRITE | O_CREAT | O_TRUNC);
     if (file) {
       file.write(panicInfo.c_str(), panicInfo.size());
       file.close();
@@ -106,17 +153,36 @@ void clearPanic() {
   for (size_t i = 0; i < MAX_PANIC_STACK_DEPTH; i++) {
     panicStack[i].sp = 0;
   }
+  crashBreadcrumb[0] = '\0';
+  crashBreadcrumbMagic = CRASH_BREADCRUMB_MAGIC;
   clearLastLogs();
+}
+
+void setCrashBreadcrumb(const char* value) {
+  crashBreadcrumbMagic = 0;
+  size_t i = 0;
+  if (value) {
+    for (; i < sizeof(crashBreadcrumb) - 1 && value[i]; ++i) crashBreadcrumb[i] = value[i];
+  }
+  crashBreadcrumb[i] = '\0';
+  crashBreadcrumbMagic = CRASH_BREADCRUMB_MAGIC;
 }
 
 std::string getPanicInfo(bool full) {
   if (!full) {
-    return panicMessage;
+    if (panicMessage[0]) return panicMessage;
+    if (isRebootFromCrash()) return std::string("Reset: ") + resetReasonName(esp_reset_reason());
+    return {};
   } else {
     std::string info;
 
     info += "CrossPoint version: " CROSSPOINT_VERSION;
+    info += "\n\nReset reason: ";
+    info += resetReasonName(esp_reset_reason());
     info += "\n\nPanic reason: " + std::string(panicMessage);
+    if (crashBreadcrumbMagic == CRASH_BREADCRUMB_MAGIC && crashBreadcrumb[0]) {
+      info += "\n\nRuntime breadcrumb: " + std::string(crashBreadcrumb);
+    }
     info += "\n\nLast logs:\n" + getLastLogs();
     info += "\n\nStack memory:\n";
 
@@ -143,6 +209,20 @@ std::string getPanicInfo(bool full) {
 bool isRebootFromPanic() {
   const auto resetReason = esp_reset_reason();
   return resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP;
+}
+
+bool isRebootFromCrash() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_PANIC:
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:
+    case ESP_RST_BROWNOUT:
+    case ESP_RST_EFUSE:
+    case ESP_RST_PWR_GLITCH:
+    case ESP_RST_CPU_LOCKUP: return true;
+    default: return false;
+  }
 }
 
 }  // namespace HalSystem

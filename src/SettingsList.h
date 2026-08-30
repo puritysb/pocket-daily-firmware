@@ -191,6 +191,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         // --- System ---
         SettingInfo::Enum(StrId::STR_STARTUP_APP, &CrossPointSettings::startupApp,
                           {StrId::STR_STARTUP_HOME, StrId::STR_POCKET_DAILY_APP}, "startupApp", StrId::STR_CAT_SYSTEM),
+        SettingInfo::Toggle(StrId::STR_AGENTDECK_COMPANION_MODE, &CrossPointSettings::agentDeckCompanionEnabled,
+                            "agentDeckCompanionEnabled", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_POCKET_BACKGROUND_SYNC, &CrossPointSettings::agentPullSyncEnabled,
                             "agentPullSyncEnabled", StrId::STR_CAT_SYSTEM),
         SettingInfo::Value(

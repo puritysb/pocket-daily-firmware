@@ -5,9 +5,15 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 
+#include <cstdint>
 #include <memory>
 #include <string>
-#include <vector>
+
+enum class CrossPointWebServerProfile : uint8_t {
+  FULL,
+  FILE_TRANSFER,
+  POCKET_SYNC,
+};
 
 // Structure to hold file information
 struct FileInfo {
@@ -35,6 +41,7 @@ class CrossPointWebServer {
     String fileName;
     String path = "/";
     size_t size = 0;
+    uint32_t crc32 = 0xFFFFFFFFU;
     bool success = false;
     String error = "";
 
@@ -42,13 +49,11 @@ class CrossPointWebServer {
     // 4KB is a good balance: large enough to reduce syscall overhead, small enough
     // to keep individual write times short and avoid watchdog issues
     static constexpr size_t UPLOAD_BUFFER_SIZE = 4096;  // 4KB buffer
-    std::vector<uint8_t> buffer;
+    std::unique_ptr<uint8_t[]> buffer;
     size_t bufferPos = 0;
-
-    UploadState() { buffer.resize(UPLOAD_BUFFER_SIZE); }
   } upload;
 
-  CrossPointWebServer();
+  explicit CrossPointWebServer(CrossPointWebServerProfile profile = CrossPointWebServerProfile::FULL);
   ~CrossPointWebServer();
 
   // Start the web server (call after WiFi is connected)
@@ -73,6 +78,7 @@ class CrossPointWebServer {
   std::unique_ptr<WebSocketsServer> wsServer = nullptr;
   bool running = false;
   bool apMode = false;  // true when running in AP mode, false for STA mode
+  CrossPointWebServerProfile profile;
   uint16_t port = 80;
   uint16_t wsPort = 81;  // WebSocket port
   NetworkUDP udp;
@@ -93,11 +99,13 @@ class CrossPointWebServer {
   void handleJszip() const;
   void handleNotFound() const;
   void handleStatus() const;
+  void handleCrashReport() const;
   void handleFileList() const;
   void handleFileListData() const;
   void handleDownload() const;
   void handleUpload(UploadState& state) const;
   void handleUploadPost(UploadState& state) const;
+  void handleCommitUpload();
   void handleCreateFolder() const;
   void handleRename() const;
   void handleMove() const;
@@ -124,10 +132,8 @@ class CrossPointWebServer {
     bool magicChecked = false;
     size_t bytesWritten = 0;
     static constexpr size_t BUFFER_SIZE = 4096;
-    std::vector<uint8_t> buffer;
+    std::unique_ptr<uint8_t[]> buffer;
     size_t bufferPos = 0;
-
-    FontUploadState() { buffer.resize(BUFFER_SIZE); }
   } fontUpload;
 
   // OPDS server handlers

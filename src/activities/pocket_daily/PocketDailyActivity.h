@@ -209,6 +209,12 @@ class PocketDailyActivity final : public Activity {
   // between the two observed bands.
   static constexpr uint32_t kWifiBringUpMinBlock = 4096;
   static constexpr uint32_t kWifiBringUpMinFree = 12288;
+  // esp_http_client plus JSON parsing needs breathing room beyond the radio
+  // driver's own allocations. At 6 KB free / 2.4 KB largest the C library
+  // aborted while creating a stdio lock, so optional AgentDeck work must fail
+  // closed before entering HTTP on a fragmented X3 heap.
+  static constexpr uint32_t kAgentSyncMinBlock = 6144;
+  static constexpr uint32_t kAgentSyncMinFree = 14336;
   // Latched by the gate above. Callers must not "helpfully" escalate a heap
   // refusal into the interactive picker: WifiSelectionActivity scans too, so
   // that would walk straight back into the abort we just declined. Also keeps
@@ -360,6 +366,7 @@ class PocketDailyActivity final : public Activity {
   // Confirm on the glance face: onExit restarts into the reader
   // (silentRestartToReader) instead of Home.
   bool exitToReader = false;
+  bool exitToNearbySync = false;
   bool sleepFramePending = false;  // render() must paint the sleep glance
   uint32_t pullSyncedAtMs = 0;
   uint32_t pullNextSec = 0;  // daemon's nextPullSec hint (0 → default)

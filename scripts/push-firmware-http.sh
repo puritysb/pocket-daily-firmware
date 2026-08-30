@@ -63,7 +63,8 @@ RESPONSE=$(curl -sS --fail-with-body \
   "http://$IP/upload?path=/" 2>&1) || {
   echo
   echo "upload failed: $RESPONSE" >&2
-  echo "the SD card keeps whatever was already there — the device is untouched." >&2
+  echo "the running firmware is untouched, but update.bin on SD may be incomplete." >&2
+  echo "do not flash it; reopen File Transfer and retry until size verification passes." >&2
   exit 1
 }
 echo "server   : $RESPONSE"
@@ -89,7 +90,6 @@ cat <<EOF
 next, on the device:
   Settings → System → Update firmware   (or hold UP + POWER at boot, pick update.bin)
 
-then verify the running build from the daemon side:
-  curl -s "http://127.0.0.1:9120/devices?token=\$(curl -s http://127.0.0.1:9120/health | python3 -c 'import sys,json;print(json.load(sys.stdin)["pairingToken"])')" \\
-    | python3 -c 'import sys,json;[print(d["board"],d.get("buildHash"),d.get("ip")) for g in json.load(sys.stdin)["devices"] if g.get("type")=="esp32-wifi" for d in g.get("devices") or []]'
+after reboot, open Pocket Daily and check the build shown by the Pocket app.
+AgentDeck is not required for firmware installation or verification.
 EOF

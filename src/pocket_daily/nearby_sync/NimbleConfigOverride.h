@@ -27,4 +27,9 @@
 #define CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU 247
 
 #undef CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE
-#define CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE 3072
+// Keep the upstream NimBLE-Arduino default.  A previous X3 optimization
+// reduced this to 3072 bytes, but authenticated pairing then reset the device
+// immediately after displaying its passkey.  Pairing performs substantially
+// more host work than advertising, so this stack is not a safe place to reclaim
+// the final kilobyte of RAM.
+#define CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE 4096

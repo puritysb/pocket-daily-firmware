@@ -801,9 +801,11 @@ void PocketDailyActivity::onEnter() {
   // when the preceding reader page used a rotated orientation.
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
-  dashState = DashState::WifiSelection;
+  const bool agentDeckEnabled = SETTINGS.agentDeckCompanionEnabled != 0;
+  dashState = agentDeckEnabled ? DashState::WifiSelection : DashState::Offline;
   localIp.clear();
   exitRequested = false;
+  exitToNearbySync = false;
   registered = false;
   lastSignature = 0;
   savedWifiJoinFailed = false;
@@ -811,12 +813,13 @@ void PocketDailyActivity::onEnter() {
   savedWifiPickerOnFailure = false;
   joiningSsid[0] = '\0';
 
-  // Bring the networking module up from a clean slate.
+  // The shared state also carries cached Pocket cards, so its mutex exists in
+  // offline mode. The sockets do not: AgentDeck is an explicit opt-in plane.
   AgentDeck::ensureStateMutex();
   AgentDeck::lockState();
   AgentDeck::g_state.reset();
   AgentDeck::unlockState();
-  AgentDeck::Net::wsInit();
+  if (agentDeckEnabled) AgentDeck::Net::wsInit();
 
   // Load the persisted Pocket BEFORE the first paint so boot lands on carried
   // content, not an empty screen. Its choices remain actionable through the SD
@@ -854,8 +857,8 @@ void PocketDailyActivity::onEnter() {
   // HTTP and deep-sleeps again; any button press cancels into interactive mode.
   // USB power means docked — stay in the live WS mode regardless of the timer.
   enterMs = millis();
-  pullMode = SETTINGS.agentPullSyncEnabled != 0 && gpio.getWakeupReason() == HalGPIO::WakeupReason::Timer &&
-             !gpio.isUsbConnected();
+  pullMode = agentDeckEnabled && SETTINGS.agentPullSyncEnabled != 0 &&
+             gpio.getWakeupReason() == HalGPIO::WakeupReason::Timer && !gpio.isUsbConnected();
   pullSynced = false;
   pullEndpointTried = false;
   manualSyncQueued = false;
@@ -897,6 +900,20 @@ void PocketDailyActivity::onEnter() {
   // Paint Pocket immediately — local reading and cached cards do not wait for
   // Wi-Fi, discovery, or a daemon.
   requestUpdate();
+
+  // Local books, study packs, cards and games are the product. Keep every
+  // normal Pocket entry radio-free unless the user explicitly enabled the
+  // optional AgentDeck dashboard in Settings. This early return also migrates
+  // existing devices safely: the new key is absent from their JSON and loads
+  // as false even if the legacy scheduled-sync key was true.
+  if (!agentDeckEnabled) {
+    if (WiFi.getMode() != WIFI_MODE_NULL) {
+      WiFi.disconnect(true);
+      WiFi.mode(WIFI_OFF);
+    }
+    AgentLog::line("POCKET", "local-first mode; AgentDeck companion disabled");
+    return;
+  }
 
   // WifiSelectionActivity used to be the only owner that loaded this store.
   // Pocket can now join without ever opening that activity, so load the tiny
@@ -1262,8 +1279,7 @@ void PocketDailyActivity::loop() {
   // body is serviced separately in bounded chunks so input is polled between
   // every network burst.
   if (manualOtaIncrementalActive && !manualAssetSyncActive && !AgentDeck::OtaWs::receiving() &&
-      !AgentDeck::OtaWs::flashPending() &&
-      (int32_t)(millis() - manualOtaResumeAtMs) >= 0) {
+      !AgentDeck::OtaWs::flashPending() && (int32_t)(millis() - manualOtaResumeAtMs) >= 0) {
     if (WiFi.status() != WL_CONNECTED) {
       AgentDeck::OtaPull::cancelInteractive();
       manualOtaIncrementalActive = false;
@@ -1806,8 +1822,7 @@ void PocketDailyActivity::serviceManualAssetSync() {
       progressed = step == PocketDaily::LearningPackSync::Step::Progress;
       retry = step == PocketDaily::LearningPackSync::Step::Retry;
       updated = step == PocketDaily::LearningPackSync::Step::Updated;
-      failed = step == PocketDaily::LearningPackSync::Step::Failed ||
-               step == PocketDaily::LearningPackSync::Step::Idle;
+      failed = step == PocketDaily::LearningPackSync::Step::Failed || step == PocketDaily::LearningPackSync::Step::Idle;
       manualAssetDownloadedBytes = updated ? manualAssetTotalBytes : PocketDaily::LearningPackSync::downloadedBytes();
     } else if (stage == AssetSyncStage::Font) {
       const PocketDaily::FontPackSync::Step step = PocketDaily::FontPackSync::service();
@@ -1824,9 +1839,8 @@ void PocketDailyActivity::serviceManualAssetSync() {
   if (progressed) {
     manualAssetRetryCount = 0;
     manualAssetNextAtMs = millis() + 40;
-    const int bucket = manualAssetTotalBytes
-                           ? (int)((uint64_t)manualAssetDownloadedBytes * 20 / manualAssetTotalBytes)
-                           : 0;
+    const int bucket =
+        manualAssetTotalBytes ? (int)((uint64_t)manualAssetDownloadedBytes * 20 / manualAssetTotalBytes) : 0;
     if (bucket != manualAssetPctBucket) {
       manualAssetPctBucket = bucket;
       requestUpdate();
@@ -1893,6 +1907,23 @@ bool PocketDailyActivity::attemptManualSync() {
   // released; this is the crash barrier for the no-PSRAM X3.
   RenderLock fontRenderLock(*this);
   sdFontSystem.releaseLoaded(renderer);
+
+  // Discovery is only an address lookup. Keeping mDNS and UDP alive while
+  // allocating the HTTP/TLS-independent feed client consumed ~7 KB on X3 and
+  // produced the observed 6 KB/2.4 KB abort. Recreate discovery on demand if
+  // the cached endpoint later fails.
+  AgentDeck::Net::udpStop();
+  AgentDeck::Net::mdnsStop();
+  discoveryServicesUp = false;
+  if (ESP.getFreeHeap() < kAgentSyncMinFree || ESP.getMaxAllocHeap() < kAgentSyncMinBlock) {
+    lastSyncOutcome = SyncOutcome::Unreachable;
+    lastSyncOutcomeMs = millis();
+    dashState = DashState::Online;
+    manualSyncNeedsDiscovery = false;
+    AgentLog::line("AGENT", "sync refused: heap free=%u largest=%u", (unsigned)ESP.getFreeHeap(),
+                   (unsigned)ESP.getMaxAllocHeap());
+    return false;
+  }
   AgentDeck::Feed::SyncTelemetry tel;
   tel.battPct = (int)powerManager.getBatteryPercentage();
   tel.rssiDbm = (int)WiFi.RSSI();
@@ -2138,7 +2169,7 @@ void PocketDailyActivity::servicePullSync() {
 }
 
 void PocketDailyActivity::serviceIdleCadence() {
-  if (SETTINGS.agentPullSyncEnabled == 0) return;
+  if (SETTINGS.agentDeckCompanionEnabled == 0 || SETTINGS.agentPullSyncEnabled == 0) return;
   if (gpio.isUsbConnected()) return;              // docked → stay in the live WS mode
   if (dashState != DashState::Connected) return;  // pre-connected states keep their own budgets
   if (viewMode != ViewMode::Overview) return;     // never sleep under a Card/Detail
@@ -2209,6 +2240,22 @@ void PocketDailyActivity::onExit() {
   AgentDeck::Net::udpStop();
   AgentDeck::Net::mdnsStop();
   MDNS.end();
+
+  // Pocket Daily's reader/font/network lifetime fragments the X3's internal
+  // heap even after every reloadable owner is released. Starting NimBLE in the
+  // same process can therefore fail its contiguous-allocation preflight and
+  // appear to bounce straight back to Pocket. Reboot directly into the Nearby
+  // activity: the retained e-ink popup hides the short reset, while the clean
+  // heap makes BLE startup deterministic.
+  if (exitToNearbySync) {
+    if (WiFi.getMode() != WIFI_MODE_NULL) {
+      WiFi.disconnect(true);
+      WiFi.mode(WIFI_OFF);
+      delay(30);
+    }
+    silentRestartToPocketNearbySync();
+    return;  // ESP.restart() does not return; keeps static analysis honest.
+  }
 
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
@@ -2613,32 +2660,9 @@ void PocketDailyActivity::handleButtons() {
     const bool syncReleased =
         gpio.wasReleased(HalGPIO::BTN_RIGHT) || (gpio.wasReleased(HalGPIO::BTN_CONFIRM) && n == 0);
     if (syncReleased && manualAssetSyncActive) return;
-    if (syncReleased && WiFi.status() != WL_CONNECTED) {
-      // A failed HTTP/OTA socket can drop STA while the presentation state is
-      // still Online. Sync is a connectivity action, so key it from the radio
-      // truth rather than the last painted label; otherwise the button is a
-      // silent no-op until the user exits and re-enters Pocket Daily.
-      if (dashState != DashState::WifiJoining && dashState != DashState::WifiSelection) {
-        // A heap refusal must stay refused — the picker scans too.
-        if (!startSavedWifiJoin(true) && !wifiHeapBlocked) launchWifiPicker();
-      }
-      return;
-    }
-    if (gpio.wasReleased(HalGPIO::BTN_RIGHT) && WiFi.status() == WL_CONNECTED) {
-      if (manualSyncNeedsDiscovery) {
-        manualSyncNeedsDiscovery = false;
-        manualSyncDiscoveryRetryActive = true;
-        AgentDeck::Net::mdnsRefresh();
-        dashState = DashState::Discovering;
-        discoveryStartMs = millis();
-        discoveryNoticeShown = false;
-      } else {
-        manualSyncDiscoveryRetryActive = false;
-        manualOtaResumeStartedMs = millis();
-        manualOtaNoProgressRetries = 0;
-        manualSyncQueued = true;
-      }
-      requestUpdate();
+    if (syncReleased) {
+      exitToNearbySync = true;
+      activityManager.goToPocketNearbySync();
       return;
     }
     if (ambientGlanceShown && gpio.wasReleased(HalGPIO::BTN_CONFIRM) && !APP_STATE.openEpubPath.empty()) {
@@ -2830,18 +2854,8 @@ void PocketDailyActivity::handleButtons() {
   }
   if (gpio.wasReleased(HalGPIO::BTN_RIGHT) || (gpio.wasReleased(HalGPIO::BTN_CONFIRM) && n == 0)) {
     if (manualAssetSyncActive) return;
-    if (manualSyncNeedsDiscovery) {
-      manualSyncNeedsDiscovery = false;
-      AgentDeck::Net::mdnsRefresh();
-      dashState = DashState::Discovering;
-      discoveryStartMs = millis();
-      discoveryNoticeShown = false;
-    } else {
-      manualOtaResumeStartedMs = millis();
-      manualOtaNoProgressRetries = 0;
-      manualSyncQueued = true;
-    }
-    requestUpdate();
+    exitToNearbySync = true;
+    activityManager.goToPocketNearbySync();
     return;
   }
 
@@ -3249,9 +3263,9 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
       activeCells = std::max(
           1, std::min(4, (int)(((uint64_t)pullOtaDownloadedBytes * 4 + pullOtaTotalBytes - 1) / pullOtaTotalBytes)));
     else if (manualAssetSyncActive && manualAssetTotalBytes)
-      activeCells = std::max(
-          1, std::min(4, (int)(((uint64_t)manualAssetDownloadedBytes * 4 + manualAssetTotalBytes - 1) /
-                               manualAssetTotalBytes)));
+      activeCells =
+          std::max(1, std::min(4, (int)(((uint64_t)manualAssetDownloadedBytes * 4 + manualAssetTotalBytes - 1) /
+                                        manualAssetTotalBytes)));
     const int cellsX = w - pad - cellsW - 7;
     for (int i = 0; i < 4; i++) {
       const int cellX = cellsX + i * (cellW + cellGap);
@@ -3464,8 +3478,8 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
 
   if (sidePaging) drawPocketSideChevrons(renderer);
 
-  // Confirm selects the current carousel item; Read and Study no longer need
-  // dedicated keys. Right remains explicit manual sync for offline recovery.
+  // Confirm selects the current carousel item. Right opens Pocket's account-free
+  // nearby transport; optional AgentDeck refresh continues automatically.
   drawPocketActionStrip(renderer, tr(STR_POCKET_LIBRARY), tr(STR_SELECT), tr(STR_POCKET_SYNC));
   renderer.displayBuffer();
 }

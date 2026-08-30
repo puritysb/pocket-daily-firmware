@@ -185,6 +185,11 @@ void ActivityManager::goToPocketDaily() {
   replaceActivity(std::make_unique<PocketDailyActivity>(renderer, mappedInput));
 }
 
+void ActivityManager::goToPocketNearbySync() {
+  replaceActivity(
+      std::make_unique<CrossPointWebServerActivity>(renderer, mappedInput, WebServerLaunchMode::POCKET_NEARBY_SYNC));
+}
+
 void ActivityManager::goToGames() {
   auto games = makeUniqueNoThrow<GamesActivity>(renderer, mappedInput);
   if (!games) {
@@ -240,7 +245,7 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
       initialMenuItem = HomeMenuItem::OPDS_BROWSER;
     } else if (activityName == "CrossPointWebServer") {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
-    } else if (activityName == "PocketDaily") {
+    } else if (activityName == "PocketDaily" || activityName == "PocketNearbySync") {
       initialMenuItem = HomeMenuItem::POCKET_DAILY;
     } else if (activityName == "Games") {
       initialMenuItem = HomeMenuItem::GAMES;

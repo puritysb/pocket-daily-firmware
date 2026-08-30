@@ -1,25 +1,32 @@
 #pragma once
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string>
 
 #include "NetworkModeSelectionActivity.h"
 #include "activities/Activity.h"
-#include "nearby_sync/NearbySyncService.h"
 #include "network/CrossPointWebServer.h"
+#include "pocket_daily/nearby_sync/NearbySyncService.h"
 
 // Web server activity states
 enum class WebServerActivityState {
-  MODE_SELECTION,  // Choosing between Join Network and Create Hotspot
-  WIFI_SELECTION,  // WiFi selection subactivity is active (for Join Network mode)
-  AP_STARTING,     // Starting Access Point mode
-  SERVER_RUNNING,  // Web server is running and handling requests
-  NEARBY_STARTING, // Initializing the BLE control plane
-  NEARBY_READY,    // Advertising or paired with the Pocket app
-  NEARBY_HANDOFF,  // BLE lease delivered; waiting before starting private AP
-  SHUTTING_DOWN    // Shutting down server and radios
+  MODE_SELECTION,   // Choosing between Join Network and Create Hotspot
+  WIFI_SELECTION,   // WiFi selection subactivity is active (for Join Network mode)
+  AP_STARTING,      // Starting Access Point mode
+  SERVER_STARTING,  // Reclaiming heap and constructing the transfer server
+  SERVER_RUNNING,   // Web server is running and handling requests
+  NEARBY_STARTING,  // Initializing the BLE control plane
+  NEARBY_READY,     // Advertising or paired with the Pocket app
+  NEARBY_HANDOFF,   // BLE lease delivered; waiting before starting private AP
+  SHUTTING_DOWN     // Shutting down server and radios
 };
+
+enum class WebServerLaunchMode { FILE_TRANSFER, POCKET_NEARBY_SYNC };
 
 /**
  * CrossPointWebServerActivity is the entry point for file transfer functionality.
@@ -32,6 +39,7 @@ enum class WebServerActivityState {
  * - Cleans up the server and shuts down WiFi on exit
  */
 class CrossPointWebServerActivity final : public Activity {
+  WebServerLaunchMode launchMode;
   WebServerActivityState state = WebServerActivityState::MODE_SELECTION;
 
   // Network mode
@@ -45,6 +53,11 @@ class CrossPointWebServerActivity final : public Activity {
   bool lastNearbyAuthenticated = false;
 
   Pocket::NearbySync::Service nearbySync;
+  enum class NearbyStartResult : uint8_t { IDLE, RUNNING, SUCCEEDED, FAILED };
+  std::atomic<NearbyStartResult> nearbyStartResult{NearbyStartResult::IDLE};
+  std::atomic<bool> nearbyCancelRequested{false};
+  TaskHandle_t nearbyStartTask = nullptr;
+  const char* nearbyModel = "X4";
 
   // Web server - owned by this activity
   std::unique_ptr<CrossPointWebServer> webServer;
@@ -72,18 +85,25 @@ class CrossPointWebServerActivity final : public Activity {
   void startAccessPoint();
   void startWebServer();
   void startNearbySync();
+  void handleNearbyStartup();
+  static void nearbyStartTaskTrampoline(void* context);
   void handleNearbySync();
   void renderNearbySync() const;
+  void returnToLaunchOrigin();
 
  public:
-  explicit CrossPointWebServerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("CrossPointWebServer", renderer, mappedInput) {}
+  explicit CrossPointWebServerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                       WebServerLaunchMode launchMode = WebServerLaunchMode::FILE_TRANSFER)
+      : Activity(launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC ? "PocketNearbySync" : "CrossPointWebServer",
+                 renderer, mappedInput),
+        launchMode(launchMode) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
   bool skipLoopDelay() override { return webServer && webServer->isRunning(); }
   bool preventAutoSleep() override {
-    return (webServer && webServer->isRunning()) || nearbySync.isRunning();
+    return state == WebServerActivityState::NEARBY_STARTING || state == WebServerActivityState::NEARBY_HANDOFF ||
+           (webServer && webServer->isRunning()) || nearbySync.isRunning();
   }
 };

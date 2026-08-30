@@ -6,3 +6,5 @@
 
 void silentRestart();          // home screen
 void silentRestartToReader();  // currently-open EPUB (APP_STATE.openEpubPath)
+void silentRestartToPocketDaily();  // Pocket Daily product shell
+void silentRestartToPocketNearbySync();  // clean-heap Pocket Nearby Sync
