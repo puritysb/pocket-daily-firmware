@@ -49,7 +49,7 @@ class CrossPointWebServerActivity final : public Activity {
   char privateApSsid[20] = {};
   char privateApPassword[16] = {};
   unsigned long nearbyHandoffAt = 0;
-  unsigned long privateApStartedAt = 0;
+  unsigned long privateApLastActivityAt = 0;
   bool lastNearbyAuthenticated = false;
 
   Pocket::NearbySync::Service nearbySync;

@@ -74,6 +74,11 @@ class CrossPointWebServer {
   // Check if server is running
   bool isRunning() const { return running; }
 
+  // Last accepted HTTP request or Pocket upload-stream activity. The private
+  // AP activity uses this timestamp to expire idle sessions without cutting
+  // off a transfer that is still making progress.
+  unsigned long lastClientActivityAt() const { return clientActivityAt; }
+
   WsUploadStatus getWsUploadStatus() const;
 
   // Get the port number
@@ -108,7 +113,9 @@ class CrossPointWebServer {
   size_t pocketUploadReceived = 0;
   uint32_t pocketUploadCrc32 = 0xFFFFFFFFU;
   unsigned long pocketUploadLastActivity = 0;
+  mutable unsigned long clientActivityAt = 0;
 
+  void noteClientActivity() const;
   void handlePocketUploadStream();
   bool beginPocketUploadFromHeader();
   void finishPocketUploadStream();

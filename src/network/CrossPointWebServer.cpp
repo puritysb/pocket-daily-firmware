@@ -177,27 +177,54 @@ void CrossPointWebServer::begin() {
 
   // Setup routes
   LOG_DBG("WEB", "Setting up routes...");
-  server->on("/", HTTP_GET, [this] { handleRoot(); });
-  server->on("/api/status", HTTP_GET, [this] { handleStatus(); });
+  server->on("/", HTTP_GET, [this] {
+    noteClientActivity();
+    handleRoot();
+  });
+  server->on("/api/status", HTTP_GET, [this] {
+    noteClientActivity();
+    handleStatus();
+  });
   // Diagnostics is available in every profile so a phone can retrieve the
   // previous panic after the reader has recovered, without exposing arbitrary
   // hidden files or requiring the SD card to be removed.
-  server->on("/api/pocket/v1/crash-report", HTTP_GET, [this] { handleCrashReport(); });
+  server->on("/api/pocket/v1/crash-report", HTTP_GET, [this] {
+    noteClientActivity();
+    handleCrashReport();
+  });
 
   // Upload endpoint with special handling for multipart form data
-  server->on("/upload", HTTP_POST, [this] { handleUploadPost(upload); }, [this] { handleUpload(upload); });
+  server->on(
+      "/upload", HTTP_POST,
+      [this] {
+        noteClientActivity();
+        handleUploadPost(upload);
+      },
+      [this] {
+        noteClientActivity();
+        handleUpload(upload);
+      });
   // Pocket clients upload to a unique hidden .part file, then ask the reader
   // to verify size + CRC and atomically publish it. A dropped phone or Wi-Fi
   // link therefore never turns a valid book or update.bin into a partial file.
-  server->on("/api/pocket/v1/commit", HTTP_POST, [this] { handleCommitUpload(); });
+  server->on("/api/pocket/v1/commit", HTTP_POST, [this] {
+    noteClientActivity();
+    handleCommitUpload();
+  });
 
   // Pocket only needs four preferences. Avoid constructing and streaming the
   // full localized settings registry on the no-PSRAM private-AP path: that
   // response can consume the last contiguous heap immediately after Wi-Fi
   // starts and strand the X3 on its retained Hotspot Mode frame.
   if (profile == CrossPointWebServerProfile::POCKET_SYNC) {
-    server->on("/api/pocket/v1/preferences", HTTP_GET, [this] { handleGetPocketPreferences(); });
-    server->on("/api/pocket/v1/preferences", HTTP_POST, [this] { handlePostPocketPreferences(); });
+    server->on("/api/pocket/v1/preferences", HTTP_GET, [this] {
+      noteClientActivity();
+      handleGetPocketPreferences();
+    });
+    server->on("/api/pocket/v1/preferences", HTTP_POST, [this] {
+      noteClientActivity();
+      handlePostPocketPreferences();
+    });
   } else {
     server->on("/settings", HTTP_GET, [this] { handleSettingsPage(); });
     server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
@@ -286,6 +313,7 @@ void CrossPointWebServer::begin() {
   }
 
   running = true;
+  clientActivityAt = 0;
 
   LOG_DBG("WEB", "Web server started on port %d", port);
   // Show the correct IP based on network mode
@@ -417,6 +445,8 @@ void CrossPointWebServer::handleClient() {
   }
 }
 
+void CrossPointWebServer::noteClientActivity() const { clientActivityAt = millis(); }
+
 void CrossPointWebServer::resetPocketUploadStream(const bool removePartial) {
   if (pocketUploadFile) pocketUploadFile.close();
   if (removePartial && !pocketUploadFullPath.isEmpty()) Storage.remove(pocketUploadFullPath.c_str());
@@ -526,6 +556,7 @@ void CrossPointWebServer::handlePocketUploadStream() {
     pocketUploadPhase = PocketUploadPhase::HEADER;
     pocketUploadHeaderLength = 0;
     pocketUploadLastActivity = millis();
+    noteClientActivity();
     LOG_INF("PUPLOAD", "Client connected from %s", pocketUploadClient.remoteIP().toString().c_str());
   }
 
@@ -551,6 +582,7 @@ void CrossPointWebServer::handlePocketUploadStream() {
   const int count = pocketUploadClient.read(pocketStreamReadBuffer, wanted);
   if (count <= 0) return;
   pocketUploadLastActivity = millis();
+  noteClientActivity();
 
   size_t offset = 0;
   if (pocketUploadPhase == PocketUploadPhase::HEADER) {

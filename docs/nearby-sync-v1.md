@@ -154,10 +154,14 @@ Nearby Sync uses a versioned, interruption-safe bulk API:
   The existing on-device validator and explicit user confirmation remain the
   installation boundary.
 
-The product hotspot is WPA2 protected, permits one client, and shuts down after
-the lease or when the person leaves the transfer screen. Manual `Create Hotspot`
-remains available for compatibility, but the app-assisted path uses per-session
-credentials.
+The product hotspot is WPA2 protected and permits one client. Its advertised
+lease is an idle lease: each recognized companion HTTP request and each
+upload-stream progress slice restarts the 300-second countdown. Pocket checks
+status every 15 seconds while connected, so an open companion session remains
+available; three consecutive failures clear the app's connected state. The AP
+shuts down after 300 seconds without companion activity or immediately when the
+person leaves the transfer screen. Manual `Create Hotspot` remains available
+for compatibility, but the app-assisted path uses per-session credentials.
 
 ## Crash diagnostics
 

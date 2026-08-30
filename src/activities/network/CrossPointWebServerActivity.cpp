@@ -102,7 +102,7 @@ void CrossPointWebServerActivity::onEnter() {
   privateApSsid[0] = '\0';
   privateApPassword[0] = '\0';
   nearbyHandoffAt = 0;
-  privateApStartedAt = 0;
+  privateApLastActivityAt = 0;
   lastNearbyAuthenticated = false;
   nearbyStartResult.store(NearbyStartResult::IDLE, std::memory_order_release);
   nearbyCancelRequested.store(false, std::memory_order_release);
@@ -446,7 +446,7 @@ void CrossPointWebServerActivity::startAccessPoint() {
   snprintf(ipStr, sizeof(ipStr), "%d.%d.%d.%d", apIP[0], apIP[1], apIP[2], apIP[3]);
   connectedIP = ipStr;
   connectedSSID = ssid;
-  if (privateApMode) privateApStartedAt = millis();
+  if (privateApMode) privateApLastActivityAt = millis();
 
   LOG_DBG("WEBACT", "Access Point started!");
   LOG_DBG("WEBACT", "SSID: %s", ssid);
@@ -570,9 +570,12 @@ void CrossPointWebServerActivity::loop() {
       return;
     }
 
-    if (privateApMode && privateApStartedAt != 0 &&
-        millis() - privateApStartedAt >= static_cast<unsigned long>(PRIVATE_AP_LEASE_SECONDS) * 1000UL) {
-      LOG_INF("WEBACT", "Nearby Sync private AP lease expired");
+    if (privateApMode && webServer && webServer->lastClientActivityAt() != 0) {
+      privateApLastActivityAt = webServer->lastClientActivityAt();
+    }
+    if (privateApMode && privateApLastActivityAt != 0 &&
+        millis() - privateApLastActivityAt >= static_cast<unsigned long>(PRIVATE_AP_LEASE_SECONDS) * 1000UL) {
+      LOG_INF("WEBACT", "Nearby Sync private AP idle lease expired");
       returnToLaunchOrigin();
       return;
     }
