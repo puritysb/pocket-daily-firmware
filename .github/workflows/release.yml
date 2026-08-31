@@ -2,7 +2,10 @@ name: Compile Release
 on:
   push:
     tags:
-      - '*'
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
   build-release:
@@ -32,13 +35,13 @@ jobs:
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-${{ runner.os }}-
 
-      - name: Build CrossPoint
+      - name: Build Pocket Daily Firmware
         run: pio run -e gh_release
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
-          name: CrossPoint-${{ github.ref_name }}
+          name: Pocket-Daily-Firmware-${{ github.ref_name }}
           path: |
             .pio/build/gh_release/bootloader.bin
             .pio/build/gh_release/firmware.bin
@@ -48,3 +51,21 @@ jobs:
             LICENSE
             licenses/NimBLE-Arduino-LICENSE.txt
             licenses/NimBLE-Arduino-NOTICE.txt
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            .pio/build/gh_release/bootloader.bin \
+            .pio/build/gh_release/firmware.bin \
+            .pio/build/gh_release/firmware.elf \
+            .pio/build/gh_release/firmware.map \
+            .pio/build/gh_release/partitions.bin \
+            LICENSE \
+            licenses/NimBLE-Arduino-LICENSE.txt \
+            licenses/NimBLE-Arduino-NOTICE.txt \
+            --verify-tag \
+            --latest \
+            --generate-notes \
+            --title "Pocket Daily Firmware ${GITHUB_REF_NAME}"

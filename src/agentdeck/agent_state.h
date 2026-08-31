@@ -192,7 +192,7 @@ struct DashboardState {
   bool dataReceived;  // true after first state_update / sessions_list
 
   void reset() {
-    memset(this, 0, sizeof(DashboardState));
+    *this = DashboardState{};
     state = AgentState::DISCONNECTED;
     navigable = false;
     cursorIndex = 0;

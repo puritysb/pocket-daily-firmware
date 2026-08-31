@@ -88,6 +88,6 @@ back into `render()` locals: the former 8 KB stack overflowed on X3 at boot.
 
 ## Delivery
 
-Every successful `pio run -e default` stages `firmware/update.bin`. Read
+Every successful `./scripts/pio.sh run -e default` stages `firmware/update.bin`. Read
 `firmware/LATEST_BUILD.txt` before claiming installation. X3's reliable fallback
 is SD recovery: copy `update.bin` to the SD root, then boot with **UP + POWER**.

@@ -5,21 +5,21 @@ description: Getting a built firmware image onto the device. Use when flashing, 
 
 # Firmware Deploy
 
-Two paths onto the device: USB (`pio run -t upload`) and SD card. The SD path exists because
+Two paths onto the device: USB (`./scripts/pio.sh run -t upload`) and SD card. The SD path exists because
 USB iteration is slow and the cable is often not where the device is — prefer it once the
 build is stable.
 
 ## USB
 
 ```bash
-pio run -t upload                        # build + flash over USB
-pio run -t upload && pio device monitor  # flash, then watch serial
-pio run -t uploadfs                      # filesystem image only (SPIFFS/LittleFS)
+./scripts/pio.sh run -t upload                              # build + flash over USB
+./scripts/pio.sh run -t upload && ./scripts/pio.sh device monitor  # flash, then monitor
+./scripts/pio.sh run -t uploadfs                            # filesystem image only
 ```
 
 ## SD card (no USB)
 
-Every successful `pio run` auto-stages the binary via `scripts/stage_firmware.py`:
+Every successful `./scripts/pio.sh run` auto-stages the binary via `scripts/stage_firmware.py`:
 
 ```
 firmware/                                      # gitignored

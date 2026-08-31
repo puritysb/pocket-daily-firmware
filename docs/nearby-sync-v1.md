@@ -151,8 +151,11 @@ Nearby Sync uses a versioned, interruption-safe bulk API:
   published book or firmware remains intact. Older firmware still falls back
   to its advertised HTTP upload capability.
 - A `.bin` is always published as `/update.bin`; transport never flashes it.
-  The existing on-device validator and explicit user confirmation remain the
-  installation boundary.
+  Before publication, the Apple companion requires an ESP32-C3 application
+  image with valid segment bounds, XOR checksum, optional appended SHA-256, and
+  both the `CrossPoint version:` and `PocketNearbySync` product markers. Release
+  builds must retain those stable markers. The existing on-device validator and
+  explicit user confirmation remain the installation boundary.
 
 The product hotspot is WPA2 protected and permits one client. Its advertised
 lease is an idle lease: each recognized companion HTTP request and each

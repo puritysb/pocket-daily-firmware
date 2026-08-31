@@ -209,15 +209,18 @@ git submodule update --init --recursive
 ### Build / flash / monitor
 
 ```bash
-pio run --target upload
+./scripts/pio.sh run --target upload
 ```
 
 ### Contributor pre-PR checks
 
 ```bash
 ./bin/clang-format-fix
-pio check -e default
-pio run -e default
+./scripts/pio.sh check -e default
+./scripts/pio.sh run -e default
+cmake -S test -B build/host-tests -DCMAKE_BUILD_TYPE=Release
+cmake --build build/host-tests
+ctest --test-dir build/host-tests --output-on-failure -j
 ```
 
 ### Debugging

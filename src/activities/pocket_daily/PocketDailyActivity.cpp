@@ -294,6 +294,8 @@ int drawWeatherPoster(const GfxRenderer& renderer, const PocketDaily::Weather& w
   const bool hasRain = AgentDeck::GlanceFormat::formatRainLine(rain, sizeof(rain), weather) > 0;
   const int rainH = hasRain ? renderer.getLineHeight(SMALL_FONT_ID) + 4 : 0;
   const int heroH = maxHeight - rainH;
+  // Runtime font metrics can make the rain line taller than cppcheck infers.
+  // cppcheck-suppress knownConditionTrueFalse
   if (heroH < 44) return 0;
 
   // Size the number to the room available, then shrink until the right-hand
@@ -452,16 +454,14 @@ struct PocketHardwareGeometry {
   int frontCenters[4];
   int previousSideY;
   int nextSideY;
-  int powerAxis;
-  bool powerOnTop;
 };
 
 const PocketHardwareGeometry& pocketHardwareGeometry() {
   // Physical portrait-panel coordinates: X3 has two front rockers and
   // opposed side keys; X4 has four narrower front keys plus a right-side
   // power/page stack. Do not replace these with framebuffer fractions.
-  static constexpr PocketHardwareGeometry x3{{91, 207, 321, 437}, 194, 194, 473, true};
-  static constexpr PocketHardwareGeometry x4{{78, 183, 298, 403}, 385, 465, 74, false};
+  static constexpr PocketHardwareGeometry x3{{91, 207, 321, 437}, 194, 194};
+  static constexpr PocketHardwareGeometry x4{{78, 183, 298, 403}, 385, 465};
   return gpio.deviceIsX3() ? x3 : x4;
 }
 
@@ -1420,9 +1420,9 @@ void PocketDailyActivity::loop() {
       if (scanResult == WIFI_SCAN_RUNNING && millis() - wifiJoinStartMs <= kWifiJoinTimeoutMs) return;
 
       char bestSsid[33] = {0};
-      int bestScore = -1000;
       const std::string& lastSsid = WIFI_STORE.getLastConnectedSsid();
       if (scanResult >= 0) {
+        int bestScore = -1000;
         for (int i = 0; i < scanResult; i++) {
           const String found = WiFi.SSID(i);
           if (found.isEmpty() || !WIFI_STORE.hasSavedCredential(found.c_str())) continue;
@@ -2942,6 +2942,9 @@ void PocketDailyActivity::dismissPocketCard(const char* cardId) {
     // normal five-second throttle and snapshot the now-updated live deck.
     lastDeckSaveMs = 0;
     serviceDeckPersist();
+    // cachedDeck is populated during onEnter(); cppcheck loses that member state
+    // across the lock boundary above.
+    // cppcheck-suppress knownConditionTrueFalse
   } else if (cachedDeck && cachedCardRemoved && !PocketDaily::DeckStore::save(*cachedDeck)) {
     AgentLog::line("POCKET", "card cache removal not persisted: %s", cardId);
   }
@@ -3410,7 +3413,6 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
     const bool hasEvent = renderGlanceSnapshot.eventCount > 0;
     const int eventH = hasEvent ? line10 + line12 + 18 : 0;
     const int weatherBottom = panelBottom - 9 - eventH;
-    char line[96];
     if (renderGlanceSnapshot.weather.valid) {
       const char* place =
           renderGlanceSnapshot.weather.place[0] ? renderGlanceSnapshot.weather.place : tr(STR_POCKET_WEATHER);
@@ -3439,6 +3441,7 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
     }
 
     if (hasEvent) {
+      char line[96];
       const int eventTop = panelBottom - eventH;
       renderer.drawLine(x, eventTop, x + cw, eventTop);
       int ey = sectionHeader(x, eventTop + 5, cw, tr(STR_POCKET_NEXT_EVENT), nullptr);
@@ -3951,7 +3954,7 @@ void PocketDailyActivity::renderCard() {
   const int qAdvance = renderer.getLineHeight(qFont) + 4;
   {
     auto qLines = renderer.wrappedText(qFont, q, w - pad * 2, 6);
-    for (auto& ql : qLines) {
+    for (const auto& ql : qLines) {
       if (y + qAdvance > optionsTop - lineS - 8) break;  // keep room for context
       renderer.drawText(qFont, pad, y, ql.c_str(), true, EpdFontFamily::BOLD);
       y += qAdvance;
@@ -3968,7 +3971,7 @@ void PocketDailyActivity::renderCard() {
   y = optionsTop;
   if (note) {
     auto nLines = renderer.wrappedText(SMALL_FONT_ID, note, w - pad * 2, noteLines);
-    for (auto& nl : nLines) {
+    for (const auto& nl : nLines) {
       renderer.drawText(SMALL_FONT_ID, pad, y, nl.c_str(), true);
       y += lineS + 2;
     }
@@ -4055,12 +4058,12 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
   // in the bottom line. Ambient uses the snapshot's date/time instead of a
   // clock that would become false on a retained e-ink frame.
   char glanceHeaderMeta[40] = {0};
-  char snapshotDate[8] = {0};
-  int metaChars = 0;
   // A powered-off frame may remain unchanged for days. Date and Sync time add
   // little value there and eventually become misleading, so reserve metadata
   // for the automatic cadence snapshot only.
   if (reason != GlanceReason::PoweredOff) {
+    char snapshotDate[8] = {0};
+    int metaChars = 0;
     if (formatWeatherSnapshotDate(snapshotDate, sizeof(snapshotDate), g.weather))
       metaChars = snprintf(glanceHeaderMeta, sizeof(glanceHeaderMeta), "%s", snapshotDate);
     if (syncedHm[0] && metaChars < (int)sizeof(glanceHeaderMeta))
@@ -4314,9 +4317,8 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
   renderer.drawText(SMALL_FONT_ID, pad, statusY,
                     renderer.truncatedText(SMALL_FONT_ID, status, w - pad * 2, EpdFontFamily::BOLD).c_str(), true,
                     EpdFontFamily::BOLD);
-  if (isSleep) PowerWakeCue::draw(renderer);
-
   if (isSleep) {
+    PowerWakeCue::draw(renderer);
     // Ghost management: fast refreshes accumulate residue on a frame the panel
     // will hold for hours — insert a full waveform every Nth sleep paint.
     const bool fullClean = (timedSleepPaintSerial() % kGlanceFullRefreshEvery) == 0;

@@ -9,8 +9,8 @@ If needed, see [Getting Started](./getting-started.md).
 
 ```sh
 ./bin/clang-format-fix
-pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
-pio run
+./scripts/pio.sh check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
+./scripts/pio.sh run
 ```
 
 ## Flash and monitor
@@ -18,13 +18,13 @@ pio run
 Flash firmware:
 
 ```sh
-pio run --target upload
+./scripts/pio.sh run --target upload
 ```
 
 Open serial monitor:
 
 ```sh
-pio device monitor
+./scripts/pio.sh device monitor
 ```
 
 Optional enhanced monitor:

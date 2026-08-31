@@ -12,25 +12,25 @@ This repo syncs in **two directions**, and confusing them is the main failure mo
 - **Downstream axis** — the **AgentDeck** repo's ESP32 wire contract → `src/agentdeck/*`.
   A hand-port, not a dependency. Nothing flows back this way.
 
-`origin` = your fork (`puritysb/crosspoint-reader`), `upstream` = the parent project. Local
-`master` intentionally carries the private **"AgentDeck Decision Card"** stack
-(`src/agentdeck/`, `AgentDashboardActivity`, agentdeck icons — ~2,700 lines) on top of
-upstream. **The AgentDeck code is fork-only and never goes upstream.**
+`origin` = the Pocket Daily firmware product (`puritysb/pocket-daily-firmware`),
+`upstream` = the parent project. Local `main` intentionally carries the Pocket Daily product
+stack, including the optional AgentDeck companion provider, on top of upstream. **Pocket
+Daily product code is downstream-only and never goes upstream.**
 
 ## Pulling upstream — merge, never rebase
 
 ```bash
-./scripts/sync-upstream.sh           # fetch + report + merge upstream/master into master
+./scripts/sync-upstream.sh           # fetch + report + merge upstream/master into main
 ./scripts/sync-upstream.sh --check   # report pending upstream commits only, don't merge
-# then: pio run  (verify build) && git push origin master
+# then: ./scripts/pio.sh run  (verify build) && git push origin main
 ```
 
 Upstream's stable line is **`master`**, not `main`; releases land there. Upstream also has
 `develop` (a few commits ahead) — pull that only when you explicitly want pre-release work.
 
-Our `master` being far ahead of `upstream/master` is **expected, not drift**.
+Our `main` being far ahead of `upstream/master` is **expected, not drift**.
 
-Why merge: `master` has ~20 AgentDeck commits on top. A rebase replays all of them and forces
+Why merge: `main` has Pocket Daily product commits on top. A rebase replays all of them and forces
 re-resolving the same conflicts every sync; a merge resolves once and preserves the history.
 Conflicts land almost exclusively on the **AgentDeck-touched shared files** (`ActivityManager`,
 `HomeActivity`, `WifiSelectionActivity`, theme files) — **resolve by keeping BOTH sides**. New
@@ -49,9 +49,9 @@ The PR must contain **zero AgentDeck files**. That is only cheap if you plan for
    ```
 3. Touching a cache format? On the **upstream branch** bump the version to
    **upstream's current value + 1** (e.g. `SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
-   On **fork `master`** the same constant stays in the reserved 128–255 range — the two
+   On **product `main`** the same constant stays in the reserved 128–255 range — the two
    branches deliberately number differently. See `lib/Epub/CLAUDE.md`.
-4. `pio run`, push to `origin`, open a **draft** PR (public third-party repo — discuss with
+4. `./scripts/pio.sh run`, push to `origin`, open a **draft** PR (public third-party repo — discuss with
    maintainers before marking ready):
    ```bash
    gh pr create --repo crosspoint-reader/crosspoint-reader \
@@ -100,4 +100,4 @@ invariant, not a sync step — it lives in `src/agentdeck/CLAUDE.md`.
 - Upstream PR: `git diff --stat upstream/master...HEAD` — does any `src/agentdeck/` path appear?
   If yes, the branch is not ready.
 - Cache version bumped on the correct numbering line for the branch you are on?
-- `pio run` clean before pushing.
+- `./scripts/pio.sh run` clean before pushing.
