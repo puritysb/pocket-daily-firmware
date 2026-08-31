@@ -17,7 +17,7 @@
 #include <string>
 
 namespace {
-constexpr char latestReleaseUrl[] = "https://api.github.com/repos/puritysb/pocket-daily-reader/releases/latest";
+constexpr char latestReleaseUrl[] = "https://api.github.com/repos/puritysb/pocket-daily-firmware/releases/latest";
 
 esp_err_t http_client_set_header_cb(esp_http_client_handle_t http_client) {
   return esp_http_client_set_header(http_client, "User-Agent", "PocketDaily-ESP32-" CROSSPOINT_VERSION);

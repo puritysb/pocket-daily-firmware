@@ -1,7 +1,9 @@
 # Pocket Daily product architecture
 
-Pocket Daily Reader is the firmware product. CrossPoint is its reader/runtime
-foundation, and AgentDeck is an optional Companion provider.
+Pocket Daily Firmware is the device-side product. CrossPoint is its
+reader/runtime foundation, the independent
+[Pocket Daily app](https://github.com/puritysb/pocket-daily) is its normal
+management channel, and AgentDeck is an optional Companion provider.
 
 ## Stable identity
 
@@ -22,7 +24,7 @@ AgentDeck baseline migrates to header negotiation.
 
 Pocket Daily owns local books and progress, the daily-card model, cached glance,
 the decision outbox, button grammar, sleep rendering, product strings, fonts,
-and update policy. The Pocket Apple app is the normal account-free management
+and update policy. The Pocket Daily app is the normal account-free management
 channel: BLE authorizes a temporary device hotspot, then verified HTTP staging
 publishes content or `/update.bin` to SD. A Companion provider owns only its
 optional remote dashboard transport and conversion into the bounded surface

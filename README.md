@@ -1,4 +1,4 @@
-# Pocket Daily Reader
+# Pocket Daily Firmware
 
 Pocket Daily is offline-first firmware for Xteink X3/X4: resume the book already
 on the device, carry a small daily study deck, retain last-synced weather and
@@ -12,6 +12,10 @@ Outbox, Glance, and OTA contract. See [`agentdeck-surface.json`](./agentdeck-sur
 
 Pocket Daily is built on the open-source [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader)
 engine and preserves its reader, storage, format, and recovery foundations.
+
+The independent [Pocket Daily app](https://github.com/puritysb/pocket-daily)
+provides the account-free iOS and macOS management experience for books,
+learning packs, firmware, diagnostics, and direct SD-card transfers.
 
 ## Pocket Daily additions
 
@@ -192,8 +196,8 @@ Conversion runs the firmware repo's `lib/EpdFont/scripts/fontconvert_sdcard.py` 
 ### Setup
 
 ```bash
-git clone --recursive https://github.com/puritysb/pocket-daily-reader
-cd pocket-daily-reader
+git clone --recursive https://github.com/puritysb/pocket-daily-firmware
+cd pocket-daily-firmware
 
 # keep the reader-engine source available for controlled merges
 git remote add upstream https://github.com/crosspoint-reader/crosspoint-reader.git

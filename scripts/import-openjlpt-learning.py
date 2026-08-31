@@ -233,7 +233,7 @@ def build(openjlpt: Path, translations_path: Path, output: Path) -> None:
                 },
                 {
                     "name": "Pocket Daily Korean adaptations",
-                    "url": "https://github.com/puritysb/pocket-daily-reader",
+                    "url": "https://github.com/puritysb/pocket-daily-firmware",
                     "revision": "pocket-ko-2026-08-29",
                     "licenseSpdx": "CC-BY-SA-4.0",
                     "attribution": "Korean meanings and translations by Pocket Daily contributors",

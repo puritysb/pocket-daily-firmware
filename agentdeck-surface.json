@@ -10,13 +10,13 @@
     "type": "independent",
     "owner": "Pocket Daily Reader maintainers"
   },
-  "repository": "https://github.com/puritysb/pocket-daily-reader",
-  "issues": "https://github.com/puritysb/pocket-daily-reader/issues",
+  "repository": "https://github.com/puritysb/pocket-daily-firmware",
+  "issues": "https://github.com/puritysb/pocket-daily-firmware/issues",
   "license": "MIT",
   "maintainers": [
     {
       "name": "Pocket Daily Reader maintainers",
-      "url": "https://github.com/puritysb/pocket-daily-reader"
+      "url": "https://github.com/puritysb/pocket-daily-firmware"
     }
   ],
   "profiles": [
