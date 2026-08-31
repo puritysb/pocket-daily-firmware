@@ -61,16 +61,18 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
       // activity (it owns the device identity: mac + screen dims).
       break;
 
-    case WStype_TEXT:
+    case WStype_TEXT: {
       // OTA frames are consumed before the filtered protocol parser: chunk
       // payloads must reach the flash path verbatim, not be filter-dropped.
-      if (!OtaWs::maybeHandleFrame((const char*)payload, length)) {
-        Protocol::parseMessage((const char*)payload, length);
+      const auto* textPayload = reinterpret_cast<const char*>(payload);
+      if (!OtaWs::maybeHandleFrame(textPayload, length)) {
+        Protocol::parseMessage(textPayload, length);
       }
       lockState();
       g_state.lastMessageMs = millis();
       unlockState();
       break;
+    }
 
     case WStype_ERROR:
       AgentLog::line("WS", "error");

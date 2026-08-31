@@ -348,8 +348,3 @@ void SleepActivity::renderLastScreenSleepScreen() const {
   renderer.drawImage(MoonIcon, 0, pageHeight - MOONICON_HEIGHT, MOONICON_WIDTH, MOONICON_HEIGHT);
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
-
-void SleepActivity::renderBlankSleepScreen() const {
-  renderer.clearScreen();
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-}

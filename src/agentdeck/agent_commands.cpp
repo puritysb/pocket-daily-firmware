@@ -11,12 +11,12 @@ namespace Commands {
 bool buildPermissionDecision(char* out, size_t cap, const char* requestId, const char* decision) {
   if (!out || cap == 0) return false;
   if (!requestId || !requestId[0] || !decision || !decision[0]) {
-    if (cap) out[0] = '\0';
+    out[0] = '\0';
     return false;
   }
   int n = snprintf(out, cap, "{\"type\":\"permission_decision\",\"requestId\":\"%s\",\"decision\":\"%s\"}", requestId,
                    decision);
-  return n > 0 && (size_t)n < cap;
+  return n > 0 && static_cast<size_t>(n) < cap;
 }
 
 bool buildSelectOption(char* out, size_t cap, const char* sid, int index) {
@@ -26,7 +26,7 @@ bool buildSelectOption(char* out, size_t cap, const char* sid, int index) {
     n = snprintf(out, cap, "{\"type\":\"select_option\",\"index\":%d,\"sessionId\":\"%s\"}", index, sid);
   else
     n = snprintf(out, cap, "{\"type\":\"select_option\",\"index\":%d}", index);
-  return n > 0 && (size_t)n < cap;
+  return n > 0 && static_cast<size_t>(n) < cap;
 }
 
 bool buildRespond(char* out, size_t cap, const char* value) {
@@ -65,7 +65,7 @@ bool buildSessionEscape(char* out, size_t cap, const char* sid) {
   }
   int n =
       snprintf(out, cap, "{\"type\":\"session_command\",\"sessionId\":\"%s\",\"command\":{\"type\":\"escape\"}}", sid);
-  return n > 0 && (size_t)n < cap;
+  return n > 0 && static_cast<size_t>(n) < cap;
 }
 
 bool buildQuerySessionTimeline(char* out, size_t cap, const char* sid) {
@@ -75,7 +75,7 @@ bool buildQuerySessionTimeline(char* out, size_t cap, const char* sid) {
     return false;
   }
   int n = snprintf(out, cap, "{\"type\":\"query_session_timeline\",\"sessionId\":\"%s\"}", sid);
-  return n > 0 && (size_t)n < cap;
+  return n > 0 && static_cast<size_t>(n) < cap;
 }
 
 void sendPermissionDecision(const char* requestId, const char* decision) {
