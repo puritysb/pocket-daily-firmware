@@ -1,0 +1,5 @@
+# Project-scoped Codex configuration. Authentication and machine-specific
+# settings belong in the user's Codex configuration, not in this repository.
+
+[features]
+memories = true

@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide helps you build and run CrossPoint locally.
+This guide helps you build and run Pocket Daily Firmware locally.
 
 ## Prerequisites
 
@@ -43,8 +43,8 @@ The reported major version must be 21 or newer.
 ## Clone and initialize
 
 ```sh
-git clone --recursive https://github.com/crosspoint-reader/crosspoint-reader
-cd crosspoint-reader
+git clone --recursive https://github.com/puritysb/pocket-daily-firmware
+cd pocket-daily-firmware
 ```
 
 If you already cloned without submodules:
@@ -63,21 +63,21 @@ chmod +x .githooks/pre-commit
 ## Build
 
 ```sh
-pio run
+./scripts/pio.sh run
 ```
 
 ## Flash
 
 ```sh
-pio run --target upload
+./scripts/pio.sh run --target upload
 ```
 
 ## First checks before opening a PR
 
 ```sh
 ./bin/clang-format-fix
-pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
-pio run
+./scripts/pio.sh check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
+./scripts/pio.sh run
 ```
 
 ## What to read next

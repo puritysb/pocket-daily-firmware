@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# sync-upstream.sh — pull the upstream stable line into our fork's master.
+# sync-upstream.sh — pull the upstream stable line into Pocket Daily's main.
 #
 # Pocket Daily is an independent product built on the upstream CrossPoint
 # reader engine. AgentDeck is one optional Companion provider. We follow
@@ -11,17 +11,17 @@
 # every sync. A merge resolves once and preserves the AgentDeck history.
 #
 # This script only fetches + merges on a local branch. It does NOT push — review
-# the merge and build first, then `git push origin master` yourself.
+# the merge and build first, then `git push origin main` yourself.
 #
 # Usage:
-#   ./scripts/sync-upstream.sh            # sync master with upstream/master
+#   ./scripts/sync-upstream.sh            # sync main with upstream/master
 #   ./scripts/sync-upstream.sh --check    # only report pending upstream commits
 #
 set -euo pipefail
 
 UPSTREAM_REMOTE="upstream"
 UPSTREAM_BRANCH="master"   # upstream's stable/default line (releases land here)
-LOCAL_BRANCH="master"      # our personal main line
+LOCAL_BRANCH="main"        # Pocket Daily product line
 
 CHECK_ONLY=0
 [[ "${1:-}" == "--check" ]] && CHECK_ONLY=1
@@ -69,7 +69,7 @@ echo "==> Merging $UPSTREAM_REMOTE/$UPSTREAM_BRANCH into $LOCAL_BRANCH ..."
 if git merge --no-edit "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH"; then
   echo
   echo "==> Merge complete. Next steps:"
-  echo "    1. pio run                 # verify the firmware still builds"
+  echo "    1. ./scripts/pio.sh run    # verify the firmware still builds"
   echo "    2. git push origin $LOCAL_BRANCH"
   echo
   echo "    Conflicts usually hit Pocket Daily-touched shared files"
@@ -78,7 +78,7 @@ else
   echo
   echo "==> MERGE CONFLICT. Resolve preserving BOTH sides:" >&2
   echo "    - keep upstream's fixes AND Pocket Daily changes in the shared files" >&2
-  echo "    - git add <resolved>; git commit   (then: pio run; git push origin $LOCAL_BRANCH)" >&2
+  echo "    - git add <resolved>; git commit   (then: ./scripts/pio.sh run; git push origin $LOCAL_BRANCH)" >&2
   echo "    - to bail out: git merge --abort" >&2
   exit 1
 fi

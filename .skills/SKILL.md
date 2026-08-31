@@ -417,13 +417,13 @@ a font costs DRAM at runtime, not just flash. Font IDs are in [src/fontIds.h](..
 
 ### Getting a build onto the device
 
-`pio run -t upload` over USB, or the SD-card path — every successful `pio run` auto-stages
+`./scripts/pio.sh run -t upload` over USB, or the SD-card path — every successful build auto-stages
 `firmware/update.bin`. Full procedure: **`firmware-deploy` skill**.
 
 ### Code Quality
 
 ```bash
-pio check                                                    # static analysis (cppcheck)
+./scripts/pio.sh check                                       # static analysis (cppcheck)
 find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i  # format (portable form)
 ```
 
@@ -442,19 +442,20 @@ cache, or a watchdog timeout. Diagnosis procedure and instrumentation for each:
 **CRITICAL**: verify repository context before any git operation — never assume. This clone
 may be a fork (`origin` = personal, `upstream` = parent), a direct clone, or carry extra
 collaborator remotes. Check `git remote -v` and `git branch --show-current` first. The main
-branch here is **`master`**, not `main`. See the fork section below for what that means in
+branch here is **`main`**. See the fork section below for what that means in
 practice.
 
 ### Pocket Daily Fork: two sync axes
 
-**This repo is a personal fork.** `origin` = your fork (`puritysb/pocket-daily-reader`),
-`upstream` = the parent project (`crosspoint-reader/crosspoint-reader`). Local `master`
+**This repo is a personal fork.** `origin` = the firmware product repository
+(`puritysb/pocket-daily-firmware`), `upstream` = the parent project
+(`crosspoint-reader/crosspoint-reader`). Local `main`
 intentionally carries the **Pocket Daily** product stack — the offline-first Pocket shell
 (`src/pocket_daily/`, `src/activities/pocket_daily/`), the bundled games
 (`src/games/`, `src/activities/games/`), and the AgentDeck Companion provider
 (`src/agentdeck/`) — layered on top of upstream. AgentDeck is one optional sync
 provider for that product, not the product itself. **None of this stack goes
-upstream.** Our `master` being far ahead of `upstream/master` is expected, not drift.
+upstream.** Our `main` being far ahead of `upstream/master` is expected, not drift.
 
 - **Pulling upstream**: `./scripts/sync-upstream.sh` — **merge, never rebase**.
 - **Contributing upstream**: the PR must contain **zero** product-stack files
@@ -540,7 +541,7 @@ Tested in all 4 orientations with 5MB+ files.
 - Feature is complete and tested on device
 - Bug fix is verified working
 - Refactoring preserves all functionality
-- All tests pass (`pio run` succeeds)
+- All tests pass (`./scripts/pio.sh run` succeeds)
 
 **DO NOT commit when**:
 - Changes are untested on actual hardware
@@ -606,8 +607,8 @@ overrides `platformio.ini`.
 ### Testing Checklist
 
 **AI agent scope** (what you CAN verify):
-1. ✅ **Build**: `pio run -t clean && pio run` (0 errors/warnings)
-2. ✅ **Quality**: `pio check` + `find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i`
+1. ✅ **Build**: `./scripts/pio.sh run -t clean && ./scripts/pio.sh run` (0 errors/warnings)
+2. ✅ **Quality**: `./scripts/pio.sh check` + `find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i`
 3. ✅ **Format**: Commit messages (`feat:`/`fix:`), no `.gitignore`-excluded files staged (e.g., `*.generated.h`, `.pio/`, `platformio.local.ini`)
 4. ✅ **CI**: Fix GitHub Actions failures before review
 5. ✅ **Code review**: Ensure orientation-aware logic is correct in all 4 modes by inspecting switch/case coverage
