@@ -58,6 +58,15 @@ Result flashFromSdPath(const char* sdPath, ProgressCb onProgress, void* ctx, boo
 // success so the caller can immediately reread it for flashing.
 Result validateImageFile(const char* sdPath, size_t partitionSize);
 
+// The flasher's 4 KiB static staging buffer, lent to the Pocket upload stream
+// and the diagnostic HTTP handlers. Those run inside the web-server activity,
+// which never validates or flashes an image, so the buffer is idle there. The
+// no-PSRAM X3 keeps only ~6 KB of heap on its private AP, which is why the
+// transfer path borrows static RAM instead of allocating a transient batch.
+// Never keep the pointer across an activity change.
+constexpr size_t STAGING_BUFFER_BYTES = 4096;
+uint8_t* sharedStagingBuffer();
+
 const char* resultName(Result r);
 
 }  // namespace firmware_flash

@@ -144,12 +144,28 @@ Nearby Sync uses a versioned, interruption-safe bulk API:
   accepted. If even the 1 KiB optimization cannot be allocated, the server
   writes those framework-owned pieces directly to SD instead of rejecting the
   transfer.
-- The stream listener reads and writes at most 768 bytes per activity-loop
-  pass, then returns to the global input loop. A firmware upload therefore uses
-  one TCP socket without blocking physical buttons. A disconnect or 30-second
-  idle timeout closes and deletes only the hidden staging file; the previous
-  published book or firmware remains intact. Older firmware still falls back
-  to its advertised HTTP upload capability.
+- The stream listener services one bounded slice per activity-loop pass, then
+  returns to the global input loop, so a firmware upload uses one TCP socket
+  without blocking physical buttons. Socket bytes are batched into a transient
+  4 KiB buffer (allocated only for the active transfer; a 768-byte static
+  buffer is the allocation-free fallback) so every SD flush is one
+  sector-aligned multi-block write instead of a sub-sector read-modify-write,
+  and the loop watchdog is suspended once per flush instead of once per
+  768-byte read. The staging file is preallocated to its final size when the
+  card can provide a contiguous span, which removes mid-transfer cluster
+  allocation stalls and leaves `update.bin` contiguous for the flasher.
+- The request header accepts an optional `Resume: 1` line. A disconnect or
+  30-second idle timeout during payload keeps the hidden staging file and the
+  verified prefix (path, size, flushed byte count, running CRC) in RAM for the
+  rest of the AP session; protocol and SD failures still delete it. A resume
+  request for the same path and size is answered with `RESUME <received>`
+  before any payload is read, and the companion sends only the remainder while
+  rebuilding the CRC over the retained prefix. `/api/status` advertises
+  `uploadStreamResume` so older readers keep receiving the v1 header. Stale
+  `.pocket-*.part` leftovers in the destination directory are removed when a
+  new transfer begins; `.pocket-backup.part` is never touched. The previous
+  published book or firmware remains intact in every case. Older firmware
+  still falls back to its advertised HTTP upload capability.
 - A `.bin` is always published as `/update.bin`; transport never flashes it.
   Before publication, the Apple companion requires an ESP32-C3 application
   image with valid segment bounds, XOR checksum, optional appended SHA-256, and
@@ -178,7 +194,9 @@ checkpoints.
 
 Every HTTP profile exposes `GET /api/pocket/v1/crash-report?offset=N`;
 `/api/status` advertises `crashReportAvailable` and `crashReportBytes`. Each
-request returns at most 160 bytes and then yields to the physical-button loop.
+request returns at most 1 KiB (160 bytes when the transient batch cannot be
+allocated) and then yields to the physical-button loop; the screen preview uses
+the same pattern with 4 KiB batches and a 1 KiB fallback.
 Pocket reassembles the report, stores it in Application Support under a content
 hash so reconnects do not create duplicates, classifies common memory, stack,
 watchdog, and invalid-access failures, and offers both the raw report and export.

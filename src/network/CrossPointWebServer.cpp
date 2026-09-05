@@ -13,6 +13,7 @@
 #include <algorithm>
 
 #include "CrossPointSettings.h"
+#include "FirmwareFlasher.h"
 #include "FontInstaller.h"
 #include "OpdsServerStore.h"
 #include "SdCardFontSystem.h"
@@ -24,6 +25,8 @@
 #include "html/HomePageHtml.generated.h"
 #include "html/SettingsPageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
+#include "pocket_daily/PocketScreenPreview.h"
+#include "pocket_daily/upload_stream_protocol.h"
 #include "util/BookCacheUtils.h"
 
 namespace {
@@ -35,12 +38,34 @@ constexpr uint16_t LOCAL_UDP_PORT = 8134;
 // Keep diagnostic responses below the Pocket private AP's scarce contiguous
 // heap and return to the global loop between every piece. The previous 512 B
 // write loop could block inside lwIP long enough to trip the task watchdog.
-constexpr size_t CRASH_REPORT_CHUNK_BYTES = 160;
+// Each diagnostic request reads one chunk into the shared static staging
+// buffer and answers with one bounded socket write. A 53 KB X3 frame needs
+// ~13 requests instead of ~52.
+constexpr size_t CRASH_REPORT_CHUNK_BYTES = 1024;
+constexpr size_t SCREEN_PREVIEW_CHUNK_BYTES = firmware_flash::STAGING_BUFFER_BYTES;
 constexpr unsigned long UPLOAD_SOCKET_TIMEOUT_MS = 30 * 1000;
 constexpr unsigned long POCKET_STREAM_IDLE_TIMEOUT_MS = 30 * 1000;
 constexpr unsigned long POCKET_STREAM_REPLY_GRACE_MS = 1000;
+// A diagnostic chunk send blocks the loop task. Unlike an SD write it can
+// hang forever if the peer vanishes, so the loop watchdog must stay armed;
+// bounding the socket below the 5 s task-WDT window guarantees the send
+// returns (completed or aborted) before the watchdog could fire.
+constexpr unsigned long DIAGNOSTIC_SEND_TIMEOUT_MS = 3000;
+// Header reads and the allocation-free fallback use this static buffer. An
+// active transfer batches into the flasher's idle 4 KiB static staging buffer
+// so each SD flush is a sector-aligned multi-block write instead of a
+// sub-sector read-modify-write, with no heap involved; 4 KiB also keeps one
+// activity-loop pass short enough for the physical buttons.
 constexpr size_t POCKET_STREAM_READ_BYTES = 768;
+constexpr size_t POCKET_STREAM_BATCH_BYTES = firmware_flash::STAGING_BUFFER_BYTES;
 uint8_t pocketStreamReadBuffer[POCKET_STREAM_READ_BYTES];
+// Measured X3 private AP: ~6-7 KB free heap. Serving a 53 KB screen preview
+// there tripped the task watchdog inside lwIP (crash breadcrumb
+// nearby:screen-preview). Below this free-heap floor the reader reports the
+// diagnostics as unavailable and answers 503 so the companion never queues
+// dozens of requests at a starved reader; transfers remain available.
+constexpr uint32_t DIAGNOSTIC_MIN_FREE_HEAP = 10U * 1024U;
+bool diagnosticsAffordable() { return ESP.getFreeHeap() >= DIAGNOSTIC_MIN_FREE_HEAP; }
 
 // Static pointer for WebSocket callback (WebSocketsServer requires C-style callback)
 CrossPointWebServer* wsInstance = nullptr;
@@ -90,13 +115,7 @@ bool isProtectedItemName(const String& name) {
 }
 
 uint32_t updateCrc32(uint32_t crc, const uint8_t* data, size_t length) {
-  while (length-- > 0) {
-    crc ^= *data++;
-    for (uint8_t bit = 0; bit < 8; ++bit) {
-      crc = (crc >> 1U) ^ (0xEDB88320U & (0U - (crc & 1U)));
-    }
-  }
-  return crc;
+  return PocketDaily::UploadStream::updateCrc32(crc, data, length);
 }
 
 bool parseUnsignedDecimal(const String& text, size_t& value) {
@@ -217,6 +236,10 @@ void CrossPointWebServer::begin() {
   // response can consume the last contiguous heap immediately after Wi-Fi
   // starts and strand the X3 on its retained Hotspot Mode frame.
   if (profile == CrossPointWebServerProfile::POCKET_SYNC) {
+    server->on("/api/pocket/v1/screen-preview", HTTP_GET, [this] {
+      noteClientActivity();
+      handlePocketScreenPreview();
+    });
     server->on("/api/pocket/v1/preferences", HTTP_GET, [this] {
       noteClientActivity();
       handleGetPocketPreferences();
@@ -351,6 +374,7 @@ void CrossPointWebServer::stop() {
   LOG_DBG("WEB", "[MEM] Free heap before stop: %d bytes", ESP.getFreeHeap());
 
   resetPocketUploadStream(true);
+  discardPocketResume();
   if (pocketUploadServer) {
     pocketUploadServer->stop();
     pocketUploadServer.reset();
@@ -447,9 +471,37 @@ void CrossPointWebServer::handleClient() {
 
 void CrossPointWebServer::noteClientActivity() const { clientActivityAt = millis(); }
 
+void CrossPointWebServer::suspendLoopWatchdog(const char* breadcrumb) const {
+  // X3 SD cluster allocation or a multi-sector flush can occasionally block a
+  // valid storage call longer than the private Nearby Sync loop-watchdog
+  // window. Keep the watchdog around network parsing, but suspend this task's
+  // registration only while the synchronous storage call is in progress. File
+  // Transfer in STA mode never enrols the loop task, which is why the same
+  // large image is reliable there.
+  if (profile != CrossPointWebServerProfile::POCKET_SYNC) return;
+  HalSystem::setCrashBreadcrumb(breadcrumb);
+  disableLoopWDT();
+}
+
+void CrossPointWebServer::resumeLoopWatchdog() const {
+  if (profile != CrossPointWebServerProfile::POCKET_SYNC) return;
+  enableLoopWDT();
+  esp_task_wdt_reset();
+  HalSystem::setCrashBreadcrumb("nearby:upload-stream");
+}
+
+void CrossPointWebServer::discardPocketResume() {
+  if (!pocketResume.path.isEmpty() && Storage.exists(pocketResume.path.c_str())) {
+    Storage.remove(pocketResume.path.c_str());
+  }
+  pocketResume.clear();
+}
+
 void CrossPointWebServer::resetPocketUploadStream(const bool removePartial) {
   if (pocketUploadFile) pocketUploadFile.close();
-  if (removePartial && !pocketUploadFullPath.isEmpty()) Storage.remove(pocketUploadFullPath.c_str());
+  if (removePartial && !pocketUploadFullPath.isEmpty() && pocketUploadFullPath != pocketResume.path) {
+    Storage.remove(pocketUploadFullPath.c_str());
+  }
   if (pocketUploadClient) pocketUploadClient.stop();
   pocketUploadClient = NetworkClient();
   pocketUploadPhase = PocketUploadPhase::IDLE;
@@ -458,74 +510,247 @@ void CrossPointWebServer::resetPocketUploadStream(const bool removePartial) {
   pocketUploadFullPath = "";
   pocketUploadExpected = 0;
   pocketUploadReceived = 0;
-  pocketUploadCrc32 = 0xFFFFFFFFU;
+  pocketUploadCrc32 = PocketDaily::UploadStream::CRC32_INITIAL;
   pocketUploadLastActivity = 0;
+  pocketStreamBatch = nullptr;
+  pocketStreamBatchFill = 0;
 }
 
 void CrossPointWebServer::failPocketUploadStream(const char* message, const bool removePartial) {
   LOG_ERR("PUPLOAD", "%s", message);
-  if (pocketUploadFile) pocketUploadFile.close();
-  if (removePartial && !pocketUploadFullPath.isEmpty()) Storage.remove(pocketUploadFullPath.c_str());
+  pocketStreamBatch = nullptr;
+  pocketStreamBatchFill = 0;
+  if (pocketUploadFile) {
+    suspendLoopWatchdog("nearby:upload-close");
+    pocketUploadFile.close();
+    resumeLoopWatchdog();
+  }
+  if (removePartial && !pocketUploadFullPath.isEmpty()) {
+    Storage.remove(pocketUploadFullPath.c_str());
+    if (pocketResume.path == pocketUploadFullPath) pocketResume.clear();
+  }
   upload.success = false;
   upload.error = message;
   char response[112];
-  snprintf(response, sizeof(response), "ERROR %s\n", message);
-  if (pocketUploadClient) pocketUploadClient.write(reinterpret_cast<const uint8_t*>(response), strlen(response));
+  const size_t length = PocketDaily::UploadStream::formatErrorReply(response, sizeof(response), message);
+  if (pocketUploadClient && length > 0) {
+    pocketUploadClient.write(reinterpret_cast<const uint8_t*>(response), length);
+  }
   pocketUploadPhase = PocketUploadPhase::REPLIED;
   pocketUploadLastActivity = millis();
 }
 
+void CrossPointWebServer::suspendPocketUploadStream(const char* message) {
+  // Transport failure while payload was flowing. Flush what already arrived,
+  // keep the hidden staging file on the card and remember the verified prefix
+  // so a reconnecting companion sends only the remainder. RAM cost is one path
+  // string plus three integers; the bytes themselves stay on the SD card.
+  const bool flushed = flushPocketStreamBatch();
+  pocketStreamBatch = nullptr;
+  pocketStreamBatchFill = 0;
+  if (pocketUploadFile) {
+    suspendLoopWatchdog("nearby:upload-close");
+    pocketUploadFile.close();
+    resumeLoopWatchdog();
+  }
+  if (flushed && pocketUploadReceived > 0 && pocketUploadReceived < pocketUploadExpected) {
+    pocketResume.path = pocketUploadFullPath;
+    pocketResume.expected = pocketUploadExpected;
+    pocketResume.received = pocketUploadReceived;
+    pocketResume.crc32 = pocketUploadCrc32;
+    LOG_INF("PUPLOAD", "%s; retaining %u of %u bytes of %s for resume", message, (unsigned)pocketUploadReceived,
+            (unsigned)pocketUploadExpected, pocketUploadFullPath.c_str());
+  } else {
+    LOG_ERR("PUPLOAD", "%s", message);
+    if (!pocketUploadFullPath.isEmpty()) Storage.remove(pocketUploadFullPath.c_str());
+    pocketResume.clear();
+  }
+  upload.success = false;
+  upload.error = message;
+  char response[112];
+  const size_t length = PocketDaily::UploadStream::formatErrorReply(response, sizeof(response), message);
+  if (pocketUploadClient && pocketUploadClient.connected() && length > 0) {
+    pocketUploadClient.write(reinterpret_cast<const uint8_t*>(response), length);
+  }
+  pocketUploadPhase = PocketUploadPhase::REPLIED;
+  pocketUploadLastActivity = millis();
+}
+
+void CrossPointWebServer::removeStaleStagingFiles(const String& directory, const String& keepName) const {
+  // A reboot or power loss during a transfer leaves a hidden `.pocket-*.part`
+  // file that may hold a preallocated multi-megabyte span. Sweep only the
+  // destination directory of the new transfer. `.pocket-backup.part` is never
+  // touched: a commit uses it to preserve the previously published file.
+  constexpr size_t MAX_VICTIMS = 4;
+  constexpr int MAX_ENTRIES = 256;
+  for (int round = 0; round < 3; ++round) {
+    String victims[MAX_VICTIMS];
+    size_t victimCount = 0;
+    {
+      HalFile dir = Storage.open(directory.c_str());
+      if (!dir || !dir.isDirectory()) {
+        if (dir) dir.close();
+        return;
+      }
+      for (int i = 0; i < MAX_ENTRIES && victimCount < MAX_VICTIMS; ++i) {
+        HalFile entry = dir.openNextFile();
+        if (!entry) break;
+        char name[96] = {};
+        entry.getName(name, sizeof(name));
+        const bool isDir = entry.isDirectory();
+        entry.close();
+        if (isDir || strncmp(name, ".pocket-", 8) != 0) continue;
+        const size_t nameLength = strlen(name);
+        if (nameLength < 14 || strcmp(name + nameLength - 5, ".part") != 0) continue;
+        if (keepName == name || strcmp(name, ".pocket-backup.part") == 0) continue;
+        victims[victimCount++] = name;
+      }
+      dir.close();
+    }
+    if (victimCount == 0) return;
+    for (size_t i = 0; i < victimCount; ++i) {
+      const String path = directory == "/" ? "/" + victims[i] : directory + "/" + victims[i];
+      if (Storage.remove(path.c_str())) LOG_INF("PUPLOAD", "Removed stale staging file %s", path.c_str());
+    }
+    if (victimCount < MAX_VICTIMS) return;
+  }
+}
+
+bool CrossPointWebServer::createPocketStagingFile(const String& path, const size_t expected) {
+  suspendLoopWatchdog("nearby:upload-create");
+  if (Storage.exists(path.c_str())) Storage.remove(path.c_str());
+  const bool opened = Storage.openFileForWrite("PUPLOAD", path, pocketUploadFile);
+  if (opened && expected > 0) {
+    // Contiguous clusters turn every later flush into one multi-sector write
+    // with no FAT walk in the middle of the transfer, and leave update.bin
+    // contiguous for the flasher. Failure is not fatal: SdFat then allocates
+    // clusters as data arrives, exactly as before.
+    if (!pocketUploadFile.preAllocate(expected)) {
+      LOG_DBG("PUPLOAD", "No contiguous span for %u bytes; allocating during transfer", (unsigned)expected);
+    }
+  }
+  resumeLoopWatchdog();
+  return opened;
+}
+
+bool CrossPointWebServer::reopenPocketStagingFile(const String& path, const size_t received) {
+  suspendLoopWatchdog("nearby:upload-reopen");
+  bool ok = false;
+  if (Storage.exists(path.c_str())) {
+    pocketUploadFile = Storage.open(path.c_str(), O_RDWR);
+    // A preallocated file already reports its final size; a plain file reports
+    // exactly the flushed prefix. Both must at least cover the retained prefix.
+    ok = pocketUploadFile && !pocketUploadFile.isDirectory() && pocketUploadFile.size() >= received &&
+         pocketUploadFile.seekSet(received);
+    if (!ok && pocketUploadFile) pocketUploadFile.close();
+  }
+  resumeLoopWatchdog();
+  return ok;
+}
+
 bool CrossPointWebServer::beginPocketUploadFromHeader() {
-  pocketUploadHeader[pocketUploadHeaderLength] = '\0';
-  const String header = pocketUploadHeader;
-  constexpr const char* PREFIX = "POCKET-PUT/1\nPath: ";
-  constexpr const char* SIZE_MARKER = "\nSize: ";
-  if (!header.startsWith(PREFIX) || !header.endsWith("\n\n")) return false;
+  PocketDaily::UploadStream::Request request;
+  if (!PocketDaily::UploadStream::parseHeader(pocketUploadHeader, pocketUploadHeaderLength, request)) return false;
 
-  const int sizeMarker = header.indexOf(SIZE_MARKER, strlen(PREFIX));
-  if (sizeMarker < 0) return false;
-  const String requestedPath = header.substring(strlen(PREFIX), sizeMarker);
-  const String sizeToken = header.substring(sizeMarker + strlen(SIZE_MARKER), header.length() - 2);
-  size_t requestedSize = 0;
-  if (!parseUnsignedDecimal(sizeToken, requestedSize) || !requestedPath.startsWith("/") ||
-      requestedPath.indexOf('\r') >= 0 || requestedPath.indexOf('\n') >= 0 || requestedPath.indexOf("..") >= 0) {
-    return false;
-  }
-
+  const String requestedPath = request.path;
   const String normalized = normalizeWebPath(requestedPath);
+  if (normalized != requestedPath) return false;
   const int slash = normalized.lastIndexOf('/');
+  if (slash < 0) return false;
   const String name = normalized.substring(slash + 1);
-  if (normalized != requestedPath || slash < 0 || !name.startsWith(".pocket-") || !name.endsWith(".part")) {
-    return false;
-  }
+  const String directory = slash == 0 ? "/" : normalized.substring(0, slash);
 
-  if (upload.file) return false;
+  if (upload.file) return false;  // A legacy HTTP upload owns the shared commit state.
   upload.buffer.reset();
   upload.fileName = name;
-  upload.path = slash == 0 ? "/" : normalized.substring(0, slash);
+  upload.path = directory;
   upload.size = 0;
-  upload.crc32 = 0xFFFFFFFFU;
+  upload.crc32 = PocketDaily::UploadStream::CRC32_INITIAL;
   upload.success = false;
   upload.error = "";
   upload.chunked = false;
 
   pocketUploadFullPath = normalized;
-  pocketUploadExpected = requestedSize;
+  pocketUploadExpected = request.size;
   pocketUploadReceived = 0;
-  pocketUploadCrc32 = 0xFFFFFFFFU;
-  esp_task_wdt_reset();
-  if (Storage.exists(normalized.c_str())) Storage.remove(normalized.c_str());
-  if (!Storage.openFileForWrite("PUPLOAD", normalized, pocketUploadFile)) return false;
-  esp_task_wdt_reset();
+  pocketUploadCrc32 = PocketDaily::UploadStream::CRC32_INITIAL;
+  pocketStreamBatchFill = 0;
+  pocketStreamBatch = firmware_flash::sharedStagingBuffer();
+
+  bool resumed = false;
+  if (request.resume && pocketResume.valid() && pocketResume.path == normalized &&
+      pocketResume.expected == request.size) {
+    resumed = reopenPocketStagingFile(normalized, pocketResume.received);
+    if (resumed) {
+      pocketUploadReceived = pocketResume.received;
+      pocketUploadCrc32 = pocketResume.crc32;
+    }
+  }
+  if (!resumed && !pocketResume.path.isEmpty()) discardPocketResume();
+  pocketResume.clear();
+  if (!resumed) {
+    removeStaleStagingFiles(directory, name);
+    if (!createPocketStagingFile(normalized, request.size)) return false;
+  }
+
+  if (request.resume) {
+    // The companion waits for this line before sending any payload byte, so
+    // the retained prefix is never overwritten with duplicate data.
+    char reply[32];
+    const size_t length = PocketDaily::UploadStream::formatResumeReply(reply, sizeof(reply), pocketUploadReceived);
+    if (length == 0 || pocketUploadClient.write(reinterpret_cast<const uint8_t*>(reply), length) != length) {
+      suspendPocketUploadStream("Upload disconnected");
+      return true;
+    }
+  }
 
   pocketUploadPhase = PocketUploadPhase::DATA;
-  LOG_INF("PUPLOAD", "Receiving %s (%u bytes)", normalized.c_str(), (unsigned)requestedSize);
-  if (requestedSize == 0) finishPocketUploadStream();
+  LOG_INF("PUPLOAD", "%s %s (%u/%u bytes, batch=%u)", resumed ? "Resuming" : "Receiving", normalized.c_str(),
+          (unsigned)pocketUploadReceived, (unsigned)request.size,
+          (unsigned)(pocketStreamBatch ? POCKET_STREAM_BATCH_BYTES : POCKET_STREAM_READ_BYTES));
+  if (pocketUploadReceived >= pocketUploadExpected) finishPocketUploadStream();
+  return true;
+}
+
+bool CrossPointWebServer::flushPocketStreamBatch() {
+  if (pocketStreamBatchFill == 0) return true;
+  const uint8_t* batch = pocketStreamBatch ? pocketStreamBatch : pocketStreamReadBuffer;
+  const size_t count = pocketStreamBatchFill;
+  suspendLoopWatchdog("nearby:upload-write");
+  const size_t written = pocketUploadFile ? pocketUploadFile.write(batch, count) : 0;
+  resumeLoopWatchdog();
+  if (written != count) return false;
+  // Only flushed bytes count toward the verified prefix a resume may reuse.
+  pocketUploadCrc32 = PocketDaily::UploadStream::updateCrc32(pocketUploadCrc32, batch, count);
+  pocketUploadReceived += count;
+  pocketStreamBatchFill = 0;
+  return true;
+}
+
+bool CrossPointWebServer::appendPocketStreamPayload(const uint8_t* data, size_t count) {
+  uint8_t* batch = pocketStreamBatch ? pocketStreamBatch : pocketStreamReadBuffer;
+  const size_t capacity = pocketStreamBatch ? POCKET_STREAM_BATCH_BYTES : POCKET_STREAM_READ_BYTES;
+  while (count > 0) {
+    const size_t toCopy = std::min(capacity - pocketStreamBatchFill, count);
+    // memmove: in the static fallback the payload tail of a header read lives
+    // in the same buffer it is being compacted into.
+    memmove(batch + pocketStreamBatchFill, data, toCopy);
+    pocketStreamBatchFill += toCopy;
+    data += toCopy;
+    count -= toCopy;
+    if (pocketStreamBatchFill == capacity && !flushPocketStreamBatch()) return false;
+  }
   return true;
 }
 
 void CrossPointWebServer::finishPocketUploadStream() {
-  if (pocketUploadFile) pocketUploadFile.close();
+  if (pocketUploadFile) {
+    suspendLoopWatchdog("nearby:upload-close");
+    pocketUploadFile.close();
+    resumeLoopWatchdog();
+  }
+  pocketStreamBatch = nullptr;
+  pocketStreamBatchFill = 0;
   upload.size = pocketUploadReceived;
   upload.crc32 = pocketUploadCrc32;
   upload.success = pocketUploadReceived == pocketUploadExpected;
@@ -534,11 +759,11 @@ void CrossPointWebServer::finishPocketUploadStream() {
     return;
   }
 
-  const uint32_t finalizedCrc = pocketUploadCrc32 ^ 0xFFFFFFFFU;
-  char response[72];
-  snprintf(response, sizeof(response), "OK %u %08lX\n", (unsigned)pocketUploadReceived,
-           (unsigned long)finalizedCrc);
-  pocketUploadClient.write(reinterpret_cast<const uint8_t*>(response), strlen(response));
+  const uint32_t finalizedCrc = PocketDaily::UploadStream::finalizeCrc32(pocketUploadCrc32);
+  char response[48];
+  const size_t length =
+      PocketDaily::UploadStream::formatOkReply(response, sizeof(response), pocketUploadReceived, finalizedCrc);
+  if (length > 0) pocketUploadClient.write(reinterpret_cast<const uint8_t*>(response), length);
   pocketUploadPhase = PocketUploadPhase::REPLIED;
   pocketUploadLastActivity = millis();
   LOG_INF("PUPLOAD", "Received %s (%u bytes, crc32=%08lX)", pocketUploadFullPath.c_str(),
@@ -567,58 +792,92 @@ void CrossPointWebServer::handlePocketUploadStream() {
     return;
   }
 
+  const bool receivingPayload = pocketUploadPhase == PocketUploadPhase::DATA;
   if (millis() - pocketUploadLastActivity >= POCKET_STREAM_IDLE_TIMEOUT_MS) {
-    failPocketUploadStream("Upload timed out");
+    if (receivingPayload) {
+      suspendPocketUploadStream("Upload timed out");
+    } else {
+      failPocketUploadStream("Upload timed out");
+    }
     return;
   }
 
   const int available = pocketUploadClient.available();
   if (available <= 0) {
-    if (!pocketUploadClient.connected()) failPocketUploadStream("Upload disconnected");
+    if (!pocketUploadClient.connected()) {
+      if (receivingPayload) {
+        suspendPocketUploadStream("Upload disconnected");
+      } else {
+        failPocketUploadStream("Upload disconnected");
+      }
+    }
     return;
   }
 
-  const size_t wanted = std::min(static_cast<size_t>(available), POCKET_STREAM_READ_BYTES);
-  const int count = pocketUploadClient.read(pocketStreamReadBuffer, wanted);
-  if (count <= 0) return;
-  pocketUploadLastActivity = millis();
-  noteClientActivity();
-
-  size_t offset = 0;
   if (pocketUploadPhase == PocketUploadPhase::HEADER) {
+    const size_t wanted = std::min(static_cast<size_t>(available), POCKET_STREAM_READ_BYTES);
+    const int count = pocketUploadClient.read(pocketStreamReadBuffer, wanted);
+    if (count <= 0) return;
+    pocketUploadLastActivity = millis();
+    noteClientActivity();
+
+    size_t offset = 0;
     while (offset < static_cast<size_t>(count) && pocketUploadPhase == PocketUploadPhase::HEADER) {
       if (pocketUploadHeaderLength + 1 >= sizeof(pocketUploadHeader)) {
         failPocketUploadStream("Upload header too large", false);
         return;
       }
       pocketUploadHeader[pocketUploadHeaderLength++] = static_cast<char>(pocketStreamReadBuffer[offset++]);
-      const size_t length = pocketUploadHeaderLength;
-      if (length >= 2 && pocketUploadHeader[length - 2] == '\n' && pocketUploadHeader[length - 1] == '\n') {
+      pocketUploadHeader[pocketUploadHeaderLength] = '\0';
+      if (PocketDaily::UploadStream::headerStatus(pocketUploadHeader, pocketUploadHeaderLength,
+                                                  sizeof(pocketUploadHeader)) ==
+          PocketDaily::UploadStream::HeaderStatus::Complete) {
         if (!beginPocketUploadFromHeader()) {
           failPocketUploadStream("Invalid upload header");
           return;
         }
       }
     }
+
+    if (pocketUploadPhase != PocketUploadPhase::DATA || offset >= static_cast<size_t>(count)) return;
+    const size_t leftover = static_cast<size_t>(count) - offset;
+    if (leftover > pocketUploadExpected - pocketUploadReceived - pocketStreamBatchFill) {
+      failPocketUploadStream("Upload overflow");
+      return;
+    }
+    if (!appendPocketStreamPayload(pocketStreamReadBuffer + offset, leftover)) {
+      failPocketUploadStream("SD write failed");
+      return;
+    }
+  } else {
+    // Drain the socket straight into the batch. One activity-loop pass moves
+    // at most one batch, so physical buttons are sampled between SD writes.
+    uint8_t* batch = pocketStreamBatch ? pocketStreamBatch : pocketStreamReadBuffer;
+    const size_t capacity = pocketStreamBatch ? POCKET_STREAM_BATCH_BYTES : POCKET_STREAM_READ_BYTES;
+    const size_t outstanding = pocketUploadExpected - pocketUploadReceived - pocketStreamBatchFill;
+    if (static_cast<size_t>(available) > outstanding) {
+      failPocketUploadStream("Upload overflow");
+      return;
+    }
+    const size_t wanted = std::min({static_cast<size_t>(available), capacity - pocketStreamBatchFill, outstanding});
+    const int count = pocketUploadClient.read(batch + pocketStreamBatchFill, wanted);
+    if (count <= 0) return;
+    pocketUploadLastActivity = millis();
+    noteClientActivity();
+    pocketStreamBatchFill += static_cast<size_t>(count);
+    if (pocketStreamBatchFill == capacity && !flushPocketStreamBatch()) {
+      failPocketUploadStream("SD write failed");
+      return;
+    }
   }
 
-  if (pocketUploadPhase != PocketUploadPhase::DATA || offset >= static_cast<size_t>(count)) return;
-  const size_t payloadBytes = static_cast<size_t>(count) - offset;
-  if (payloadBytes > pocketUploadExpected - pocketUploadReceived) {
-    failPocketUploadStream("Upload overflow");
-    return;
+  if (pocketUploadReceived + pocketStreamBatchFill >= pocketUploadExpected) {
+    if (!flushPocketStreamBatch()) {
+      failPocketUploadStream("SD write failed");
+      return;
+    }
+    finishPocketUploadStream();
   }
-
-  esp_task_wdt_reset();
-  const size_t written = pocketUploadFile.write(pocketStreamReadBuffer + offset, payloadBytes);
-  esp_task_wdt_reset();
-  if (written != payloadBytes) {
-    failPocketUploadStream("SD write failed");
-    return;
-  }
-  pocketUploadCrc32 = updateCrc32(pocketUploadCrc32, pocketStreamReadBuffer + offset, payloadBytes);
-  pocketUploadReceived += written;
-  if (pocketUploadReceived >= pocketUploadExpected) finishPocketUploadStream();
 }
 
 CrossPointWebServer::WsUploadStatus CrossPointWebServer::getWsUploadStatus() const {
@@ -667,8 +926,29 @@ void CrossPointWebServer::handleStatus() const {
   doc["freeHeap"] = ESP.getFreeHeap();
   doc["uptime"] = millis() / 1000;
   doc["device"] = gpio.deviceIsX3() ? "X3" : "X4";
-  if (pocketUploadServer) doc["uploadStreamPort"] = pocketUploadPort;
-  if (Storage.exists("/crash_report.txt")) {
+  // Diagnoses a silent reboot during private-AP startup: the last runtime
+  // checkpoint from the boot that just ended, readable over the LAN even when
+  // no crash report was written (clean returnToLaunchOrigin).
+  doc["lastBootBreadcrumb"] = HalSystem::getPreviousBootBreadcrumb();
+  doc["lastResetReason"] = HalSystem::getResetReasonName();
+  if (pocketUploadServer) {
+    doc["uploadStreamPort"] = pocketUploadPort;
+    // The stream keeps an interrupted staging file and accepts `Resume: 1`.
+    doc["uploadStreamResume"] = true;
+  }
+  const bool affordable = diagnosticsAffordable();
+  doc["diagnosticsAffordable"] = affordable;
+  if (profile == CrossPointWebServerProfile::POCKET_SYNC && affordable &&
+      Storage.exists(PocketDaily::SCREEN_PREVIEW_PATH)) {
+    HalFile preview = Storage.open(PocketDaily::SCREEN_PREVIEW_PATH);
+    doc["screenPreviewAvailable"] = static_cast<bool>(preview) && !preview.isDirectory();
+    doc["screenPreviewBytes"] = preview ? preview.size() : 0;
+    if (preview) preview.close();
+  } else {
+    doc["screenPreviewAvailable"] = false;
+    doc["screenPreviewBytes"] = 0;
+  }
+  if (affordable && Storage.exists("/crash_report.txt")) {
     HalFile report = Storage.open("/crash_report.txt");
     doc["crashReportAvailable"] = static_cast<bool>(report);
     doc["crashReportBytes"] = report ? report.size() : 0;
@@ -685,6 +965,10 @@ void CrossPointWebServer::handleStatus() const {
 
 void CrossPointWebServer::handleCrashReport() const {
   HalSystem::setCrashBreadcrumb("nearby:crash-chunk");
+  if (!diagnosticsAffordable()) {
+    server->send(503, "text/plain", "Reader memory is too low for diagnostics right now");
+    return;
+  }
   HalFile report = Storage.open("/crash_report.txt");
   if (!report || report.isDirectory()) {
     if (report) report.close();
@@ -720,20 +1004,94 @@ void CrossPointWebServer::handleCrashReport() const {
     return;
   }
 
-  char body[CRASH_REPORT_CHUNK_BYTES + 1];
+  uint8_t* body = firmware_flash::sharedStagingBuffer();
   const size_t remaining = reportSize - offset;
   const size_t requested = std::min(remaining, CRASH_REPORT_CHUNK_BYTES);
-  const int count = report.read(reinterpret_cast<uint8_t*>(body), requested);
+  const int count = report.read(body, requested);
   report.close();
   if (count <= 0) {
     server->send(500, "text/plain", "Could not read crash report chunk");
     return;
   }
 
-  body[count] = '\0';
-  server->send(200, "text/plain; charset=utf-8", body);
+  server->client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
+  feedLoopWDT();
+  server->setContentLength(static_cast<size_t>(count));
+  server->sendHeader("Cache-Control", "no-store");
+  server->send(200, "text/plain; charset=utf-8", "");
+  server->sendContent(reinterpret_cast<const char*>(body), static_cast<size_t>(count));
+  feedLoopWDT();
   LOG_DBG("WEB", "Crash report chunk offset=%u bytes=%u total=%u", static_cast<unsigned>(offset),
           static_cast<unsigned>(count), static_cast<unsigned>(reportSize));
+}
+
+void CrossPointWebServer::handlePocketScreenPreview() const {
+  HalSystem::setCrashBreadcrumb("nearby:screen-preview");
+  if (!diagnosticsAffordable()) {
+    server->send(503, "text/plain", "Reader memory is too low for diagnostics right now");
+    return;
+  }
+  HalFile preview = Storage.open(PocketDaily::SCREEN_PREVIEW_PATH);
+  if (!preview || preview.isDirectory()) {
+    if (preview) preview.close();
+    server->send(404, "text/plain", "No Pocket Daily screen preview available");
+    return;
+  }
+
+  if (!server->hasArg("offset")) {
+    preview.close();
+    server->send(400, "text/plain", "Missing screen preview offset");
+    return;
+  }
+
+  const String offsetText = server->arg("offset");
+  if (offsetText.isEmpty()) {
+    preview.close();
+    server->send(400, "text/plain", "Invalid screen preview offset");
+    return;
+  }
+  for (size_t i = 0; i < offsetText.length(); i++) {
+    if (offsetText[i] < '0' || offsetText[i] > '9') {
+      preview.close();
+      server->send(400, "text/plain", "Invalid screen preview offset");
+      return;
+    }
+  }
+
+  const size_t previewSize = preview.size();
+  const size_t offset = static_cast<size_t>(offsetText.toInt());
+  if (offset >= previewSize || !preview.seek(offset)) {
+    preview.close();
+    server->send(416, "text/plain", "Screen preview offset out of range");
+    return;
+  }
+
+  uint8_t* body = firmware_flash::sharedStagingBuffer();
+  const size_t requested = std::min(previewSize - offset, SCREEN_PREVIEW_CHUNK_BYTES);
+  const int count = preview.read(body, requested);
+  preview.close();
+  if (count <= 0) {
+    server->send(500, "text/plain", "Could not read screen preview chunk");
+    return;
+  }
+
+  // The blocking TCP send can exceed the private-AP loop watchdog window on a
+  // weak link (measured: a task-watchdog reset at nearby:screen-preview while
+  // streaming 4 KiB chunks). Suspend the loop task's watchdog around the send,
+  // exactly as the SD upload path does, and bound the peer wait so a vanished
+  // companion cannot hang the reader while the watchdog is off.
+  // Keep the watchdog armed; the bounded socket timeout, not a WDT suspension,
+  // is what prevents a stuck send from either hanging the reader or tripping
+  // the 5 s task watchdog.
+  server->client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
+  feedLoopWDT();
+  server->setContentLength(static_cast<size_t>(count));
+  server->sendHeader("Cache-Control", "no-store");
+  server->send(200, "application/octet-stream", "");
+  server->sendContent(reinterpret_cast<const char*>(body), static_cast<size_t>(count));
+  feedLoopWDT();
+  LOG_DBG("WEB", "Pocket screen preview offset=%u bytes=%u total=%u", static_cast<unsigned>(offset),
+          static_cast<unsigned>(count), static_cast<unsigned>(previewSize));
 }
 
 void CrossPointWebServer::scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const {
@@ -1026,8 +1384,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
       // The framework-owned upload buffer remains valid for this callback, so
       // a fragmented X3 can still stream each incoming piece straight to SD.
       // Batching is an optimization, never a requirement for accepting data.
-      LOG_INF("WEB", "[UPLOAD] No %u-byte SD buffer; using direct writes",
-              (unsigned)UploadState::UPLOAD_BUFFER_SIZE);
+      LOG_INF("WEB", "[UPLOAD] No %u-byte SD buffer; using direct writes", (unsigned)UploadState::UPLOAD_BUFFER_SIZE);
     }
 
     LOG_DBG("WEB", "[UPLOAD] START: %s path=%s offset=%u", state.fileName.c_str(), state.path.c_str(),
@@ -1790,8 +2147,7 @@ void CrossPointWebServer::handlePostSettings() {
 void CrossPointWebServer::handleGetPocketPreferences() const {
   char json[192];
   const int written = snprintf(
-      json, sizeof(json),
-      "{\"startupApp\":%u,\"pocketDailySleepCover\":%u,\"sleepTimeoutMinutes\":%u,\"fontSize\":%u}",
+      json, sizeof(json), "{\"startupApp\":%u,\"pocketDailySleepCover\":%u,\"sleepTimeoutMinutes\":%u,\"fontSize\":%u}",
       static_cast<unsigned>(SETTINGS.startupApp), static_cast<unsigned>(SETTINGS.pocketDailySleepCover),
       static_cast<unsigned>(SETTINGS.sleepTimeoutMinutes), static_cast<unsigned>(SETTINGS.fontSize));
   if (written <= 0 || static_cast<size_t>(written) >= sizeof(json)) {

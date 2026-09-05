@@ -87,7 +87,7 @@ WeatherGlyph weatherGlyphFor(int16_t code, const char* summary) {
   return WeatherGlyph::PartlyCloudy;
 }
 
-void drawCircleOutline(const GfxRenderer& renderer, int cx, int cy, int radius, int stroke = 2) {
+void drawCircleOutline(const GfxRenderer& renderer, int cx, int cy, int radius, int stroke) {
   renderer.drawArc(radius, cx, cy, -1, -1, stroke, true);
   renderer.drawArc(radius, cx, cy, 1, -1, stroke, true);
   renderer.drawArc(radius, cx, cy, -1, 1, stroke, true);
@@ -95,29 +95,32 @@ void drawCircleOutline(const GfxRenderer& renderer, int cx, int cy, int radius, 
 }
 
 void drawSunGlyph(const GfxRenderer& renderer, int cx, int cy, int radius, int stroke) {
+  // A complete eight-ray mark keeps the restrained outline language of the
+  // Pocket face while surviving both small forecast cells and X3 fast refresh.
   drawCircleOutline(renderer, cx, cy, radius, stroke);
-  const int ray0 = radius + 4;
-  const int ray1 = radius + std::max(8, radius / 2);
+  const int ray0 = radius + std::max(3, stroke);
+  const int ray1 = ray0 + std::max(6, radius / 2);
   renderer.drawLine(cx, cy - ray0, cx, cy - ray1, stroke, true);
   renderer.drawLine(cx, cy + ray0, cx, cy + ray1, stroke, true);
   renderer.drawLine(cx - ray0, cy, cx - ray1, cy, stroke, true);
   renderer.drawLine(cx + ray0, cy, cx + ray1, cy, stroke, true);
-  const int d0 = radius * 3 / 4 + 3;
-  const int d1 = radius + 8;
+  const int d0 = radius * 3 / 4 + std::max(2, stroke);
+  const int d1 = d0 + std::max(4, radius / 3);
   renderer.drawLine(cx - d0, cy - d0, cx - d1, cy - d1, stroke, true);
   renderer.drawLine(cx + d0, cy - d0, cx + d1, cy - d1, stroke, true);
+  renderer.drawLine(cx - d0, cy + d0, cx - d1, cy + d1, stroke, true);
+  renderer.drawLine(cx + d0, cy + d0, cx + d1, cy + d1, stroke, true);
 }
 
 int drawCloudGlyph(const GfxRenderer& renderer, int x, int y, int w, int h, int stroke) {
-  const int baseY = y + h * 63 / 100;
+  const int baseY = y + h * 62 / 100;
   const int left = x + w * 13 / 100;
   const int right = x + w * 88 / 100;
-  const int smallR = std::max(7, std::min(w, h) * 15 / 100);
-  const int bigR = std::max(10, std::min(w, h) * 23 / 100);
+  const int smallR = std::max(4, std::min(w, h) * 15 / 100);
+  const int bigR = std::max(6, std::min(w, h) * 23 / 100);
   const int c1x = left + smallR;
   const int c2x = x + w * 51 / 100;
   const int c3x = right - smallR;
-  // Only the upper halves are drawn; the shared baseline closes the cloud.
   renderer.drawArc(smallR, c1x, baseY, -1, -1, stroke, true);
   renderer.drawArc(smallR, c1x, baseY, 1, -1, stroke, true);
   renderer.drawArc(bigR, c2x, baseY, -1, -1, stroke, true);
@@ -131,14 +134,15 @@ int drawCloudGlyph(const GfxRenderer& renderer, int x, int y, int w, int h, int 
 void drawWeatherGlyph(const GfxRenderer& renderer, int x, int y, int w, int h, int16_t code, const char* summary) {
   if (w < 24 || h < 24) return;
   const WeatherGlyph glyph = weatherGlyphFor(code, summary);
-  const int stroke = std::max(2, std::min(w, h) / 28);
+  const int minDimension = std::min(w, h);
+  const int stroke = std::max(2, (minDimension + 15) / 20);
   if (glyph == WeatherGlyph::Clear) {
-    drawSunGlyph(renderer, x + w / 2, y + h / 2, std::min(w, h) / 5, stroke);
+    drawSunGlyph(renderer, x + w / 2, y + h / 2, minDimension / 4, stroke);
     return;
   }
 
   if (glyph == WeatherGlyph::PartlyCloudy) {
-    drawSunGlyph(renderer, x + w * 67 / 100, y + h * 31 / 100, std::min(w, h) / 7, stroke);
+    drawSunGlyph(renderer, x + w * 68 / 100, y + h * 29 / 100, std::max(4, minDimension / 6), stroke);
   }
   const int baseY = drawCloudGlyph(renderer, x, y + h / 12, w, h * 3 / 4, stroke);
   if (glyph == WeatherGlyph::Fog) {
@@ -153,8 +157,9 @@ void drawWeatherGlyph(const GfxRenderer& renderer, int x, int y, int w, int h, i
     for (int i = 0; i < 3; i++) {
       const int sx = x + w * (27 + i * 23) / 100;
       const int sy = baseY + h / 7;
-      renderer.drawLine(sx - 4, sy, sx + 4, sy, stroke, true);
-      renderer.drawLine(sx, sy - 4, sx, sy + 4, stroke, true);
+      const int arm = std::max(3, minDimension / 11);
+      renderer.drawLine(sx - arm, sy, sx + arm, sy, stroke, true);
+      renderer.drawLine(sx, sy - arm, sx, sy + arm, stroke, true);
     }
   } else if (glyph == WeatherGlyph::Storm) {
     const int bx = x + w / 2;
@@ -264,17 +269,6 @@ int drawPosterNumber(const GfxRenderer& renderer, int x, int y, int capHeight, c
   return cursor - gap - x;
 }
 
-// Condition mark inside a ring, as in the approved concept. The ring gives the
-// thin glyph a defined edge, which matters on a panel with no greys to lean on.
-void drawRingedWeatherGlyph(const GfxRenderer& renderer, int cx, int cy, int diameter, int16_t code,
-                            const char* summary) {
-  const int r = diameter / 2;
-  const int ring = std::max(2, diameter / 18);
-  renderer.drawRoundedRect(cx - r, cy - r, diameter, diameter, ring, r, true);
-  const int inner = diameter - ring * 2 - diameter / 8;
-  drawWeatherGlyph(renderer, cx - inner / 2, cy - inner / 2, inner, inner, code, summary);
-}
-
 // Hero row: place-scale temperature on the left, condition and today's range on
 // the right. Replaces the old icon+18px+H/L cluster, which competed with the
 // forecast strip instead of leading it.
@@ -314,8 +308,10 @@ int drawWeatherPoster(const GfxRenderer& renderer, const PocketDaily::Weather& w
   const int rightX = x + numberW + degD / 3 + degD + cap / 5;
   const int rightW = x + width - rightX;
   if (rightW >= 60) {
-    const int iconD = std::min(cap * 5 / 8, std::max(30, rightW / 3));
-    drawRingedWeatherGlyph(renderer, rightX + iconD / 2, y + iconD / 2, iconD, weather.code, weather.summary);
+    // Use the available cap height for the condition itself. The old ring and
+    // one-third-column cap reduced the meaningful mark to roughly 45 px on X3.
+    const int iconD = std::min(cap * 4 / 5, std::max(42, rightW / 2));
+    drawWeatherGlyph(renderer, rightX, y, iconD, iconD, weather.code, weather.summary);
 
     int ry = y + iconD + 4;
     if (weather.summary[0] && ry + renderer.getLineHeight(SMALL_FONT_ID) <= y + heroH) {
@@ -392,7 +388,7 @@ int drawForecastGrid(const GfxRenderer& renderer, const PocketDaily::Weather& we
   const int dayLine = renderer.getLineHeight(SMALL_FONT_ID);
   const int tempLine = renderer.getLineHeight(UI_10_FONT_ID);
   const int colW = width / count;
-  const int glyphSize = std::min(30, std::max(22, colW * 42 / 100));
+  const int glyphSize = std::min(38, std::max(26, colW * 55 / 100));
   const int height = std::min(maxHeight, dayLine + glyphSize + tempLine * 2 + 20);
 
   // Emphasise the wettest day, but only when it is actually worth a warning.

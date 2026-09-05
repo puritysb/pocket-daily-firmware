@@ -34,6 +34,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
+#include "pocket_daily/PocketScreenPreview.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 
@@ -213,6 +214,7 @@ void silentRestartToReader() {
 
 void silentRestartToPocketDaily() {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
+  if (Storage.exists(PocketDaily::SCREEN_PREVIEW_PATH)) Storage.remove(PocketDaily::SCREEN_PREVIEW_PATH);
   silentRebootTarget = SILENT_REBOOT_TARGET_POCKET_DAILY;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
   LOG_DBG("MAIN", "Silent restart (target=Pocket Daily)");
@@ -223,6 +225,13 @@ void silentRestartToPocketDaily() {
 
 void silentRestartToPocketNearbySync() {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
+  // Preserve the exact Pocket Daily surface before the loading popup replaces
+  // it. Writing the BMP row-by-row costs no framebuffer-sized allocation and
+  // gives the Apple companion a pixel-identical preview after the clean reboot.
+  const bool previewSaved =
+      ScreenshotUtil::saveFramebufferAsBmp(PocketDaily::SCREEN_PREVIEW_PATH, renderer.getFrameBuffer(),
+                                           renderer.getDisplayWidth(), renderer.getDisplayHeight());
+  LOG_DBG("MAIN", "Pocket screen preview %s", previewSaved ? "saved" : "unavailable");
   silentRebootTarget = SILENT_REBOOT_TARGET_POCKET_NEARBY_SYNC;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
   LOG_DBG("MAIN", "Silent restart (target=Pocket Nearby Sync)");

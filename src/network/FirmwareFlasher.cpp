@@ -36,7 +36,10 @@ constexpr size_t SEG_HEADER_SIZE = 8;
 // because a failed flash does not reboot, every retry hit the same fragmented
 // heap. 4 KiB of static RAM buys a flash path with no runtime allocation.
 uint8_t g_stagingBuf[CHUNK];
+static_assert(CHUNK == STAGING_BUFFER_BYTES, "shared staging buffer size drifted");
 }  // namespace
+
+uint8_t* sharedStagingBuffer() { return g_stagingBuf; }
 
 const char* resultName(Result r) {
   switch (r) {

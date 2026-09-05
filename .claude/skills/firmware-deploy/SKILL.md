@@ -46,6 +46,39 @@ machine-specific):
 firmware_staging_dir = /Volumes/SDCARD
 ```
 
+## Over Wi-Fi from the Mac (preferred for iteration)
+
+The reader's own transfer path is the fastest way to get a build onto it and
+doubles as a transport test. Card swapping is the fallback, not the default.
+
+1. On the reader: File Transfer → Join a Network (STA on the home Wi-Fi).
+   The X3 profile has no mDNS, so find it by probing `/api/status`:
+   ```bash
+   python3 - <<'EOF'
+   import concurrent.futures, urllib.request
+   def p(ip):
+       try: return ip, urllib.request.urlopen(f"http://{ip}/api/status", timeout=1.2).read(200)
+       except Exception: return None
+   hosts=[f"192.168.{n}.{i}" for n in (68,69,70,71) for i in range(1,255)]
+   with concurrent.futures.ThreadPoolExecutor(256) as ex:
+       print([r for r in ex.map(p, hosts) if r])
+   EOF
+   ```
+2. Push and commit the staged image with the repository tool, which prints
+   every reader reply verbatim (`RESUME`, `OK`, `ERROR`, commit JSON):
+   ```bash
+   python3 scripts/pocket_put.py firmware/update.bin --target update.bin --host <reader-ip>
+   ```
+   `published /update.bin` is success. After an interruption, rerun with the
+   printed `--resume --staging …` options (firmware with `uploadStreamResume`).
+3. On the reader: Settings → System → Update firmware, then reboot.
+4. Verify: `/api/status` `version` must end with the `-w<fingerprint>` of the
+   image you pushed (`strings firmware/update.bin | grep 'Starting CrossPoint version'`).
+
+Do not use the Pocket Daily Sync hotspot for this on firmware older than
+2026-09-03: its private AP left ~6 KB of heap and the companion's diagnostic
+fetches tripped the task watchdog (`nearby:screen-preview`).
+
 ## Before handing off
 
 - Did the build actually succeed? A stale `update.bin` from a previous run looks identical.

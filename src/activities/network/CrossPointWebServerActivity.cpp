@@ -4,6 +4,7 @@
 #include <ESPmDNS.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
+#include <HalStorage.h>
 #include <HalSystem.h>
 #include <I18n.h>
 #include <Memory.h>
@@ -24,6 +25,22 @@
 #include "util/QrUtils.h"
 
 namespace {
+// Private-AP startup leaves a power-loss-durable trail on the SD card. The X3
+// hangs hard during web-server startup at its tightest heap (no crash report,
+// RTC breadcrumb lost on the power cycle needed to recover), so each step is
+// flushed to this file and read back over File Transfer afterwards. Diagnostic
+// only; cheap one-time writes on the Sync path.
+constexpr const char* AP_BOOT_LOG_PATH = "/nearby_ap_log.txt";
+void apBootLog(const char* step, const bool reset = false) {
+  if (reset && Storage.exists(AP_BOOT_LOG_PATH)) Storage.remove(AP_BOOT_LOG_PATH);
+  HalFile f = Storage.open(AP_BOOT_LOG_PATH, O_WRONLY | O_CREAT | O_APPEND);
+  if (!f) return;
+  char line[96];
+  const int n = snprintf(line, sizeof(line), "%lu %s heap=%u largest=%u\n", (unsigned long)millis(), step,
+                         (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+  if (n > 0) f.write(reinterpret_cast<const uint8_t*>(line), (size_t)n);
+  f.close();  // flush each step so a hard hang still leaves the trail
+}
 // AP Mode configuration
 constexpr const char* AP_SSID = "CrossPoint-Reader";
 constexpr const char* AP_PASSWORD = nullptr;  // Open network for ease of use
@@ -299,6 +316,10 @@ void CrossPointWebServerActivity::startNearbySync() {
   // resident while BLE is active (docs/nearby-sync-v1.md memory gate).  Hold the
   // render mutex while removing it so a queued paint cannot use the family
   // after it has been unloaded.
+  if (privateApMode) {
+    HalSystem::setCrashBreadcrumb("nearby:web-preflight");
+    apBootLog("web-preflight");
+  }
   const uint32_t heapBeforeFontRelease = ESP.getFreeHeap();
   {
     RenderLock fontRenderLock(*this);
@@ -421,6 +442,10 @@ void CrossPointWebServerActivity::handleNearbySync() {
 }
 
 void CrossPointWebServerActivity::startAccessPoint() {
+  if (privateApMode) {
+    HalSystem::setCrashBreadcrumb("nearby:ap-begin");
+    apBootLog("ap-begin", true);
+  }
   LOG_DBG("WEBACT", "Starting Access Point mode...");
   LOG_DBG("WEBACT", "Free heap before AP start: %d bytes", ESP.getFreeHeap());
 
@@ -454,7 +479,11 @@ void CrossPointWebServerActivity::startAccessPoint() {
   snprintf(ipStr, sizeof(ipStr), "%d.%d.%d.%d", apIP[0], apIP[1], apIP[2], apIP[3]);
   connectedIP = ipStr;
   connectedSSID = ssid;
-  if (privateApMode) privateApLastActivityAt = millis();
+  if (privateApMode) {
+    privateApLastActivityAt = millis();
+    HalSystem::setCrashBreadcrumb("nearby:ap-up");
+    apBootLog("ap-up");
+  }
 
   LOG_DBG("WEBACT", "Access Point started!");
   LOG_DBG("WEBACT", "SSID: %s", ssid);
@@ -503,6 +532,7 @@ void CrossPointWebServerActivity::startWebServer() {
   }
   LOG_DBG("WEBACT", "Released resident SD font: heap %u -> %u (largest %u)", (unsigned)heapBeforeFontRelease,
           (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+  if (privateApMode) apBootLog("web-fontfreed");
 
   const auto profile = privateApMode ? CrossPointWebServerProfile::POCKET_SYNC
                                      : (gpio.deviceIsX3() ? CrossPointWebServerProfile::FILE_TRANSFER
@@ -513,16 +543,28 @@ void CrossPointWebServerActivity::startWebServer() {
   if (ESP.getFreeHeap() < minFree || ESP.getMaxAllocHeap() < minBlock) {
     LOG_ERR("WEBACT", "Web server start refused: heap free=%u largest=%u", (unsigned)ESP.getFreeHeap(),
             (unsigned)ESP.getMaxAllocHeap());
+    if (privateApMode) {
+      HalSystem::setCrashBreadcrumb("nearby:web-refused-heap");
+      apBootLog("web-refused-heap");
+    }
     returnToLaunchOrigin();
     return;
   }
 
   // Create the web server instance
+  if (privateApMode) {
+    HalSystem::setCrashBreadcrumb("nearby:web-alloc");
+    apBootLog("web-alloc");
+  }
   webServer = makeUniqueNoThrow<CrossPointWebServer>(profile);
   if (!webServer) {
     LOG_ERR("WEBACT", "Could not allocate web server");
     returnToLaunchOrigin();
     return;
+  }
+  if (privateApMode) {
+    HalSystem::setCrashBreadcrumb("nearby:web-begin");
+    apBootLog("web-begin");
   }
   webServer->begin();
 
@@ -536,7 +578,22 @@ void CrossPointWebServerActivity::startWebServer() {
       // Enrol it only for this bounded session; long transfer handlers already
       // reset the task watchdog while making progress.
       HalSystem::setCrashBreadcrumb("nearby:server-running");
+      apBootLog("server-running");
       enableLoopWDT();
+      // WebServer bounds each chunk send to HTTP_MAX_SEND_WAIT (5 s) waiting
+      // for the client ACK. On a weak link the exact-screen preview's 4 KiB
+      // sends approach that, and with the loop task watchdog also at 5 s the
+      // two race and reset the reader mid-preview (observed breadcrumb
+      // nearby:screen-preview). Widen the watchdog for this bounded private-AP
+      // session so a legitimate slow send cannot trip it, while a true hang is
+      // still caught. Only the loop task is subscribed here (idle task is not
+      // watched), and Nearby Sync always exits through a chip restart, which
+      // restores the sdkconfig 5 s default.
+      const esp_task_wdt_config_t apWdt = {.timeout_ms = 12000, .idle_core_mask = 0, .trigger_panic = true};
+      if (esp_task_wdt_reconfigure(&apWdt) != ESP_OK) {
+        LOG_ERR("WEBACT", "Could not widen task watchdog for private AP session");
+      }
+      apBootLog("wdt-armed");
     }
     lastWifiBars = isApMode ? 0 : barsForRssi(WiFi.RSSI(), 0);
 
@@ -658,8 +715,8 @@ void CrossPointWebServerActivity::loop() {
       // one call. Return immediately afterward in private-AP mode so the next
       // global loop samples the physical buttons before accepting more work.
       // X3 also owns the incremental Pocket upload listener in Join Network
-      // mode. Service one bounded network slice, then let the global loop
-      // sample GPIO before reading the next 768-byte SD chunk.
+      // mode. Service one bounded network slice (at most one batched SD
+      // flush), then let the global loop sample GPIO before the next slice.
       const int maxIterations = (privateApMode || gpio.deviceIsX3()) ? 1 : 8;
       for (int i = 0; i < maxIterations && webServer->isRunning(); i++) {
         webServer->handleClient();

@@ -16,6 +16,8 @@ RTC_NOINIT_ATTR char panicMessage[256];
 RTC_NOINIT_ATTR HalSystem::StackFrame panicStack[MAX_PANIC_STACK_DEPTH];
 RTC_NOINIT_ATTR char crashBreadcrumb[96];
 RTC_NOINIT_ATTR uint32_t crashBreadcrumbMagic;
+// Snapshot of the previous boot's last breadcrumb, taken before clearPanic().
+static char previousBootBreadcrumb[96];
 static constexpr uint32_t CRASH_BREADCRUMB_MAGIC = 0x43504243;  // CPBC
 
 extern "C" {
@@ -95,28 +97,56 @@ void rotateCrashReports() {
 
 const char* resetReasonName(const esp_reset_reason_t reason) {
   switch (reason) {
-    case ESP_RST_POWERON: return "power-on";
-    case ESP_RST_EXT: return "external pin";
-    case ESP_RST_SW: return "software restart";
-    case ESP_RST_PANIC: return "panic";
-    case ESP_RST_INT_WDT: return "interrupt watchdog";
-    case ESP_RST_TASK_WDT: return "task watchdog";
-    case ESP_RST_WDT: return "watchdog";
-    case ESP_RST_DEEPSLEEP: return "deep-sleep wake";
-    case ESP_RST_BROWNOUT: return "brownout";
-    case ESP_RST_SDIO: return "SDIO";
-    case ESP_RST_USB: return "USB";
-    case ESP_RST_JTAG: return "JTAG";
-    case ESP_RST_EFUSE: return "eFuse error";
-    case ESP_RST_PWR_GLITCH: return "power glitch";
-    case ESP_RST_CPU_LOCKUP: return "CPU lockup";
+    case ESP_RST_POWERON:
+      return "power-on";
+    case ESP_RST_EXT:
+      return "external pin";
+    case ESP_RST_SW:
+      return "software restart";
+    case ESP_RST_PANIC:
+      return "panic";
+    case ESP_RST_INT_WDT:
+      return "interrupt watchdog";
+    case ESP_RST_TASK_WDT:
+      return "task watchdog";
+    case ESP_RST_WDT:
+      return "watchdog";
+    case ESP_RST_DEEPSLEEP:
+      return "deep-sleep wake";
+    case ESP_RST_BROWNOUT:
+      return "brownout";
+    case ESP_RST_SDIO:
+      return "SDIO";
+    case ESP_RST_USB:
+      return "USB";
+    case ESP_RST_JTAG:
+      return "JTAG";
+    case ESP_RST_EFUSE:
+      return "eFuse error";
+    case ESP_RST_PWR_GLITCH:
+      return "power glitch";
+    case ESP_RST_CPU_LOCKUP:
+      return "CPU lockup";
     case ESP_RST_UNKNOWN:
-    default: return "unknown";
+    default:
+      return "unknown";
   }
 }
 }  // namespace
 
 void begin() {
+  // Preserve the breadcrumb from the boot that just ended before any clear path
+  // wipes it. This is the only trace of a clean restart (no crash report), such
+  // as a private-AP startup that returned to the launcher.
+  if (crashBreadcrumbMagic == CRASH_BREADCRUMB_MAGIC && crashBreadcrumb[0]) {
+    size_t i = 0;
+    for (; i < sizeof(previousBootBreadcrumb) - 1 && crashBreadcrumb[i]; ++i)
+      previousBootBreadcrumb[i] = crashBreadcrumb[i];
+    previousBootBreadcrumb[i] = '\0';
+  } else {
+    previousBootBreadcrumb[0] = '\0';
+  }
+
   // This is mostly for the first boot, we need to initialize the panic info and logs to empty state
   // If we reboot from a panic state, we want to keep the panic info until we successfully dump it to the SD card, use
   // `clearPanic()` to clear it after dumping
@@ -167,6 +197,10 @@ void setCrashBreadcrumb(const char* value) {
   crashBreadcrumb[i] = '\0';
   crashBreadcrumbMagic = CRASH_BREADCRUMB_MAGIC;
 }
+
+const char* getPreviousBootBreadcrumb() { return previousBootBreadcrumb; }
+
+const char* getResetReasonName() { return resetReasonName(esp_reset_reason()); }
 
 std::string getPanicInfo(bool full) {
   if (!full) {
@@ -220,8 +254,10 @@ bool isRebootFromCrash() {
     case ESP_RST_BROWNOUT:
     case ESP_RST_EFUSE:
     case ESP_RST_PWR_GLITCH:
-    case ESP_RST_CPU_LOCKUP: return true;
-    default: return false;
+    case ESP_RST_CPU_LOCKUP:
+      return true;
+    default:
+      return false;
   }
 }
 

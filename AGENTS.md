@@ -80,6 +80,9 @@ SD-card, OTA, recovery, watchdog, or heap behavior from a host build.
 
 Use `.claude/skills/firmware-deploy/SKILL.md` for deployment. An agent may stage
 an artifact, but the user installs it and confirms physical-device results.
+For iteration, prefer the reader's File Transfer → Join a Network mode plus
+`scripts/pocket_put.py` over SD-card swapping; the user has asked that hardware
+tests go through that path.
 
 ## Git and release hygiene
 

@@ -81,6 +81,11 @@ class HalFile : public Print {
   bool seek64(uint64_t pos);
   bool seekCur(int64_t offset);
   bool seekSet(size_t offset);
+  // Reserve `length` contiguous bytes for an empty, writable file so a large
+  // sequential transfer allocates clusters once instead of on every write.
+  // Returns false (and leaves the file usable) when the card cannot provide
+  // the contiguous span. Reported size() becomes `length` immediately.
+  bool preAllocate(size_t length);
   int available() const;
   size_t position() const;
   int read(void* buf, size_t count);

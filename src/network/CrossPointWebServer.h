@@ -110,17 +110,52 @@ class CrossPointWebServer {
   size_t pocketUploadHeaderLength = 0;
   String pocketUploadFullPath;
   size_t pocketUploadExpected = 0;
-  size_t pocketUploadReceived = 0;
+  size_t pocketUploadReceived = 0;  // bytes flushed to SD and covered by pocketUploadCrc32
   uint32_t pocketUploadCrc32 = 0xFFFFFFFFU;
   unsigned long pocketUploadLastActivity = 0;
   mutable unsigned long clientActivityAt = 0;
 
+  // Socket bytes are batched into sector-aligned SD writes. During a
+  // transfer this points at the flasher's idle 4 KiB static staging buffer
+  // (firmware_flash::sharedStagingBuffer): the X3 private AP keeps ~6 KB of
+  // heap, so a transient allocation would fail exactly where it matters. The
+  // small static read buffer remains the fallback so a transfer is never
+  // refused for lack of the optimization.
+  uint8_t* pocketStreamBatch = nullptr;
+  size_t pocketStreamBatchFill = 0;
+
+  // A transport failure (disconnect, idle timeout) keeps the hidden staging
+  // file and this verified prefix so the companion can reconnect and send
+  // only the remainder. Protocol and SD failures discard it.
+  struct PocketResumeState {
+    String path;
+    size_t expected = 0;
+    size_t received = 0;
+    uint32_t crc32 = 0xFFFFFFFFU;
+    bool valid() const { return received > 0 && !path.isEmpty(); }
+    void clear() {
+      path = "";
+      expected = 0;
+      received = 0;
+      crc32 = 0xFFFFFFFFU;
+    }
+  } pocketResume;
+
   void noteClientActivity() const;
   void handlePocketUploadStream();
   bool beginPocketUploadFromHeader();
+  bool createPocketStagingFile(const String& path, size_t expected);
+  bool reopenPocketStagingFile(const String& path, size_t received);
+  void removeStaleStagingFiles(const String& directory, const String& keepName) const;
+  bool appendPocketStreamPayload(const uint8_t* data, size_t count);
+  bool flushPocketStreamBatch();
   void finishPocketUploadStream();
   void failPocketUploadStream(const char* message, bool removePartial = true);
+  void suspendPocketUploadStream(const char* message);
   void resetPocketUploadStream(bool removePartial);
+  void discardPocketResume();
+  void suspendLoopWatchdog(const char* breadcrumb) const;
+  void resumeLoopWatchdog() const;
 
   // WebSocket upload state
   void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
@@ -138,6 +173,7 @@ class CrossPointWebServer {
   void handleNotFound() const;
   void handleStatus() const;
   void handleCrashReport() const;
+  void handlePocketScreenPreview() const;
   void handleFileList() const;
   void handleFileListData() const;
   void handleDownload() const;
