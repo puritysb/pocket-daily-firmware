@@ -8,7 +8,7 @@ stale layout instead of failing loudly.
 
 **Location**: `.crosspoint/` at the SD card root.
 
-**Layout**: `.crosspoint/epub_<hash>/{book.bin, progress.bin, cover.bmp, sections/*.bin}`
+**Layout**: `.crosspoint/epub_<hash>/{book.bin, progress.bin, cover.bmp, html/*.html, sections/*.bin}`
 
 **Hash**: `std::hash<std::string>{}(filepath)` — so moving or renaming a book yields a new
 hash, a new cache, and **lost reading progress**. That is expected behaviour, not a bug.
@@ -20,8 +20,8 @@ hash, a new cache, and **lost reading progress**. That is expected behaviour, no
 | File | Version |
 |---|---|
 | `book.bin` | **7** (metadata structure) |
-| `section.bin` — upstream baseline | **27** (layout structure) |
-| `section.bin` — **this fork** | **129** |
+| `section.bin` — incremental upstream baseline | **28** (layout structure) |
+| `section.bin` — **this fork** | **130** |
 
 The fork adds a `bilingualViewMode` header field and numbers itself in the **reserved 128–255
 range** rather than `upstream + 1`. Upstream keeps incrementing 27→28→…; a
@@ -29,9 +29,15 @@ same-numbered-but-different-layout header would defeat the `version != SECTION_F
 check and feed stale caches to the reader. See the `SECTION_FILE_VERSION` comment in
 `Section.cpp`.
 
-v129 also stores a `BILINGUAL_MODE_ANY` sentinel for chapters with no bilingual markers, so
+v129 stores a `BILINGUAL_MODE_ANY` sentinel for chapters with no bilingual markers, so
 cycling view modes reuses their cache instead of forcing a full re-parse
 (`Section::bilingualModeAgnostic`).
+
+v130 adds incremental layout generation. A build writes to `sections/<index>.bin.part`,
+commits completed sections atomically, and persists an interrupted build as a fork-private
+partial section (version `0xFF`) with its parse watermark. Inflated chapter HTML is retained
+under `html/` so reopening or repagination does not repeat ZIP inflation. Partial bilingual
+sections retain the requested view mode; only a completed parse may be marked mode-agnostic.
 
 **Rules**:
 1. **ALWAYS increment the version BEFORE changing binary structure.** Not after, not in the
@@ -42,15 +48,8 @@ cycling view modes reuses their cache instead of forcing a full re-parse
    it), never onto upstream's line. The upstream-contribution branch
    (`bilingual-toggle-upstream`) uses `upstream + 1` instead. See the `fork-sync` skill.
 
-```cpp
-// lib/Epub/Epub/Section.cpp — fork line
-static constexpr uint8_t SECTION_FILE_VERSION = 130;  // was 129; bump within 128–255
-
-struct PageLine {
-  // ... existing fields ...
-  uint16_t newField;  // new field added — hence the bump above
-};
-```
+The next fork-specific finalized format must use `131`, not an upstream version number or
+the `0xFF` partial sentinel.
 
 ## What else invalidates a cache
 

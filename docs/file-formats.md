@@ -93,16 +93,22 @@ if (parsedSize != fileSize) {
 ### Version 25
 
 > **Note**: The ImHex pattern below documents the v25 layout for historical reference.
-> The current format is **v28** (see `SECTION_FILE_VERSION` in
-> `lib/Epub/Epub/Section.cpp`). v28 adds one `u8 bilingualViewMode` field to the
-> header (between `focusReadingEnabled` and the `pageCount` placeholder) so that
-> Bilingual View Mode changes invalidate the per-section cache. All other fields are
-> unchanged from v27. See [`docs/bilingual-epub.md`](bilingual-epub.md) for the
-> marker classes that drive the new mode.
+> Pocket Daily currently writes finalized sections as fork-private **v130** (see
+> `SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`). It includes one
+> `u8 bilingualViewMode` field between `focusReadingEnabled` and `pageCount`.
+> Incremental builds use an incomplete `.bin.part` file and may be committed as a
+> fork-private `0xFF` partial section with an eight-byte
+> `{bytesConsumed, totalBytes}` trailer after the list-item LUT. Finalized v130 files
+> omit that trailer. See [`docs/bilingual-epub.md`](bilingual-epub.md) for the marker
+> classes that drive the view mode.
 
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
 current reader settings, the section is discarded and rebuilt.
+
+The corresponding inflated spine HTML may be retained in `html/<index>.html`.
+This cache is independent of render settings and avoids repeating EPUB ZIP inflation
+when a section must be repaginated.
 
 Version 25 includes:
 

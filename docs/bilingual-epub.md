@@ -91,7 +91,7 @@ Both (0)  →  Original only (1)  →  Translation only (2)  →  Both (0)  → 
   (treated as `display:none` before block creation).
 - **Translation only** — elements carrying `cp-original` are dropped.
 
-The mode is stored in the section cache header (`SECTION_FILE_VERSION = 129`), so
+The mode is stored in the section cache header (`SECTION_FILE_VERSION = 130`), so
 switching modes invalidates the per-section cache and the current chapter re-parses
 on the next render. Section files written with a different cache version are discarded
 automatically on first open after upgrade.
