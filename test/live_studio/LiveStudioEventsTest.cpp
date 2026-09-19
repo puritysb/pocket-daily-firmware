@@ -68,8 +68,7 @@ TEST(LiveStudioEvents, ParsesSubscribeWithClamping) {
   EXPECT_EQ(slow.minIntervalMs, 5000u);
 
   Subscription absurd;
-  EXPECT_EQ(ClientMessage::Subscribe, parse("{\"subscribe\":{\"frames\":true,\"minIntervalMs\":999999999}}",
-                                            &absurd));
+  EXPECT_EQ(ClientMessage::Subscribe, parse("{\"subscribe\":{\"frames\":true,\"minIntervalMs\":999999999}}", &absurd));
   EXPECT_EQ(absurd.minIntervalMs, 60000u);
 }
 
