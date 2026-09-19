@@ -215,6 +215,23 @@ verified baseline.
   `libpdui_host.a` with provenance — an approved exception to the
   no-binaries-cross boundary rule for this one artifact.
 
+## Evening radio degradation curve — 2026-09-19
+
+- Same firmware build that moved 6 MB repeatedly in the morning degraded
+  monotonically through the evening: mode re-entry recovery window shrank
+  from minutes to one request, then cold boots gave only 1-2 requests
+  before the radio went deaf (ARP unanswered). Heap at cold boot also
+  settled ~9.8-10 KB on LS-3 builds vs 13-16 KB on LS-2 builds - a real
+  LS-3 heap regression (pack override buffers + boot fragmentation),
+  partially addressed by the shared scratch buffer in `fbadf188`, but the
+  radio death is environmental: firmware state resets on cold boot while
+  the death returned faster each time.
+- Most likely: router/AP-side state or evening 2.4 GHz congestion. Next
+  device session: reboot the ROUTER first, cold-boot the reader, then push
+  + dev/flash `fbadf188` and run the pack demo. The LS-3 heap baseline
+  (~10 KB) still needs a diet - audit UITheme pack buffers and boot-time
+  malloc/free fragmentation if the listener gate keeps poll-only.
+
 ## M2/M3/LS-3 complete in code — 2026-09-19 late session
 
 - LS-3 shipped: generated field registry (63 fields), .uipack container
