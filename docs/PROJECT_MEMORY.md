@@ -197,6 +197,24 @@ stale notes rather than accumulating contradictions. A memory entry must be
 committed together with the change it describes; uncommitted work is not a
 verified baseline.
 
+## Live studio direction — 2026-09-19
+
+- Agreed direction with the companion app: a live studio over the reader —
+  WS event push on STA (>= 40 KB free heap), throttled `screen-live` frame
+  capture under `RenderLock` (pure `LiveFramePolicy`, >= 10 KB heap gate),
+  and a validated `.uipack` format (ThemeMetrics field-id whitelist,
+  string/font overrides, hash-verified, atomic install, apply via
+  `UITheme::reload()` metrics-source swap). Reading path stays native.
+- Design docs committed, nothing implemented yet:
+  `docs/live-studio-v1.md` (this repo, the contract) and
+  `docs/LIVE_STUDIO_DESIGN.md` in the sibling app repo. Firmware phases
+  LS-1 (WS + events) → LS-2 (screen-live) → LS-3 (pack loader) → LS-4
+  (host renderer C ABI + golden parity). Flash contingency: builtin fonts
+  (2.43 MB, `OMIT_FONTS` hook exists) move to SD if the engine needs room.
+- The host renderer is also built here and consumed by the app as
+  `libpdui_host.a` with provenance — an approved exception to the
+  no-binaries-cross boundary rule for this one artifact.
+
 ## Multi-agent collaboration — 2026-09-19
 
 - OpenCode, Claude Code, and Codex all work in this repository and in the

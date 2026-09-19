@@ -29,6 +29,9 @@ repository and release context lives in `docs/PROJECT_MEMORY.md`.
    `.claude/skills/`.
 4. Read `docs/PROJECT_MEMORY.md` for repository boundaries and durable state.
 5. Read `docs/release-checklist.md` before declaring a release complete.
+6. For live-studio, live sync, or UI-pack work, read `docs/live-studio-v1.md`
+   and the companion design `docs/LIVE_STUDIO_DESIGN.md` in the sibling app
+   repository.
 
 ## Repository identity and boundaries
 
