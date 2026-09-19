@@ -29,6 +29,7 @@
 #include "html/js/jszip_minJs.generated.h"
 #include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/live_studio/DevTrace.h"
+#include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/live_studio/UiPackStore.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include "pocket_daily/product_identity.h"
@@ -333,6 +334,14 @@ void CrossPointWebServer::begin() {
     DEV_TRACE(PocketDaily::DevTrace::RENDER_REQ);
     requestRepaint();
     server->send(204, "text/plain", "");
+  });
+  // Developer builds only: network stability post-mortem log
+  // (docs/network-stability-analysis.md). Readable after the radio died.
+  server->on("/api/pocket/v1/dev/net-health", HTTP_GET, [this] {
+    noteClientActivity();
+    static char tail[4096];
+    const size_t n = PocketDaily::NetHealth::tail(tail, sizeof(tail));
+    server->send(200, "text/plain; charset=utf-8", n ? String(tail) : "no net-health log yet");
   });
   // Developer builds only: dump the live-studio trace ring (text lines
   // "ms tag aux"), oldest first. A gap between heartbeats is the stall.

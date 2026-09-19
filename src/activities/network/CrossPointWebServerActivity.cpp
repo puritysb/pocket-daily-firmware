@@ -22,6 +22,7 @@
 #include "activities/network/CalibreConnectActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "pocket_daily/live_studio/NetHealth.h"
 #include "util/QrUtils.h"
 
 namespace {
@@ -686,6 +687,7 @@ void CrossPointWebServerActivity::loop() {
             repaint = true;
           }
           consecutiveDisconnects++;
+          PocketDaily::NetHealth::note("loop_no_wifi", consecutiveDisconnects);
           LOG_DBG("WEBACT", "WiFi not connected (status=%d, consecutive=%d, total=%lu ms)", wifiStatus,
                   consecutiveDisconnects, millis() - firstDisconnectAt);
           if (millis() - firstDisconnectAt > WIFI_ABANDON_MS) {

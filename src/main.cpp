@@ -35,6 +35,7 @@
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
 #include "pocket_daily/PocketScreenPreview.h"
+#include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/live_studio/UiPackStore.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include "pocket_daily/product_identity.h"
@@ -548,6 +549,7 @@ void setup() {
 
   HalSystem::checkPanic();
 
+  PocketDaily::NetHealth::begin();
   SETTINGS.loadFromFile();
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();

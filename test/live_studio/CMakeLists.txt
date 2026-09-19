@@ -1,6 +1,7 @@
 add_executable(LiveStudioEventsTest
   LiveStudioEventsTest.cpp
   ${REPO_ROOT}/src/pocket_daily/live_studio/LiveStudioEvents.cpp
+  ${REPO_ROOT}/src/pocket_daily/live_studio/NetHealth.cpp
 )
 
 target_include_directories(LiveStudioEventsTest PRIVATE

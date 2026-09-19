@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "pocket_daily/live_studio/LiveStudioEvents.h"
+#include "pocket_daily/live_studio/NetHealth.h"
 
 namespace {
 
@@ -107,3 +108,14 @@ TEST(LiveStudioEvents, FrameCapturePolicy) {
 }
 
 }  // namespace
+
+TEST(NetHealth, FormatsAndNamesReasons) {
+  EXPECT_STREQ(PocketDaily::NetHealth::reasonName(200), "beacon_timeout");
+  EXPECT_STREQ(PocketDaily::NetHealth::reasonName(8), "assoc_leave");
+  EXPECT_STREQ(PocketDaily::NetHealth::reasonName(999), "other");
+  char line[96];
+  PocketDaily::NetHealth::formatHeartbeat(line, sizeof(line), 61, 9820, 7168, -62);
+  EXPECT_STREQ(line, "H 61 9820 7168 -62");
+  PocketDaily::NetHealth::formatEvent(line, sizeof(line), 120, "sta_disc", 200);
+  EXPECT_STREQ(line, "E 120 sta_disc 200");
+}
