@@ -186,6 +186,7 @@ class CrossPointWebServer {
   bool liveStudioPush = false;
   bool liveStudioSubscribed = false;
   bool liveStudioClientAttached = false;
+  uint8_t liveStudioClientNum = 255;
   uint32_t liveStudioLastSendMs = 0;
   uint32_t liveStudioLastCheckMs = 0;
   uint32_t liveStudioLastSignatureMs = 0;

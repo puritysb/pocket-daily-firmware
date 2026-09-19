@@ -1,7 +1,5 @@
 #include "CrossPointWebServer.h"
 
-#include "pocket_daily/live_studio/DevTrace.h"
-
 #include <ArduinoJson.h>
 #include <FsHelpers.h>
 #include <HalGPIO.h>
@@ -29,6 +27,7 @@
 #include "html/SettingsPageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
 #include "pocket_daily/PocketScreenPreview.h"
+#include "pocket_daily/live_studio/DevTrace.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include "pocket_daily/product_identity.h"
 #endif
@@ -1077,8 +1076,20 @@ String CrossPointWebServer::buildStatusJson() const {
 
 void CrossPointWebServer::sendLiveStudioLine(const char* line) {
   if (!wsServer || !liveStudioPush) return;
+  // Guard before sending: links2004's send path blocks on a peer that died
+  // without a close handshake, and the 15 s keepalive kept feeding those
+  // dead sends - the activity loop crawled at ~one pass per TCP retransmit
+  // cycle (~30 s) until power cycle. Verify the client, send to the single
+  // subscribed client only, and tear the subscription down on a miss.
+  if (liveStudioClientNum == 255 || !wsServer->clientIsConnected(liveStudioClientNum)) {
+    liveStudioSubscribed = false;
+    liveStudioClientAttached = false;
+    liveStudioClientNum = 255;
+    PocketDaily::LiveFrameCapture::clear();
+    return;
+  }
   DEV_TRACE(PocketDaily::DevTrace::SEND_START);
-  wsServer->broadcastTXT(line);
+  wsServer->sendTXT(liveStudioClientNum, line);
   DEV_TRACE(PocketDaily::DevTrace::SEND_DONE);
 }
 
@@ -1103,11 +1114,13 @@ void CrossPointWebServer::pushLiveStudioStatusIfChanged() {
   snprintf(signature, sizeof(signature), "%s|%s|%s|%s|%d", CROSSPOINT_VERSION, apMode ? "AP" : "STA",
            gpio.deviceIsX3() ? "X3" : "X4", deviceId, pocketUploadServer ? 1 : 0);
   const bool changed = strcmp(signature, liveStudioSignature) != 0;
-  const bool keepalive =
-      static_cast<uint32_t>(now - liveStudioLastSignatureMs) >= PocketDaily::LiveStudio::kKeepaliveIntervalMs;
+  // No periodic keepalive re-send: a dead WS peer turns every queued send
+  // into a multi-second TCP retransmit stall on this no-PSRAM loop (see
+  // sendLiveStudioLine). Live values (uptime, heap, rssi) are the app's job
+  // to poll over HTTP; the WS push exists for change events.
   const bool spaced =
       static_cast<uint32_t>(now - liveStudioLastSendMs) >= PocketDaily::LiveStudio::kMinStatusIntervalMs;
-  if ((!changed && !keepalive) || !spaced) return;
+  if (!changed || !spaced) return;
 
   const String json = buildStatusJson();
   char event[1024];
@@ -2745,9 +2758,12 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
   switch (type) {
     case WStype_DISCONNECTED:
       LOG_DBG("WS", "Client %u disconnected", num);
-      liveStudioClientAttached = false;
-      liveStudioSubscribed = false;
-      PocketDaily::LiveFrameCapture::clear();
+      if (num == liveStudioClientNum) {
+        liveStudioClientAttached = false;
+        liveStudioSubscribed = false;
+        liveStudioClientNum = 255;
+        PocketDaily::LiveFrameCapture::clear();
+      }
       // Only clean up if this is the client that owns the active upload.
       // A new client may have already started a fresh upload before this
       // DISCONNECTED event fires (race condition on quick cancel + retry).
@@ -2755,11 +2771,11 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
         abortWsUpload("WS");
       }
       break;
-
     case WStype_CONNECTED: {
       LOG_DBG("WS", "Client %u connected", num);
       if (liveStudioPush) {
         liveStudioClientAttached = true;
+        liveStudioClientNum = num;
         char deviceId[9];
         snprintf(deviceId, sizeof(deviceId), "%08lX", static_cast<unsigned long>(ESP.getEfuseMac() & 0xFFFFFFFFUL));
         char hello[192];

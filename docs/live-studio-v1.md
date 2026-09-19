@@ -42,9 +42,11 @@ Reader → app:
 
 - `hello` — `{proto:"live-studio/1", deviceID, version, caps}` on connect.
 - `status` — the full `/api/status` body, embedded verbatim under `status`.
-  Sent when a stable field changes (identity, mode, capabilities; uptime,
-  rssi, and freeHeap do not trigger a send) with a minimum 500 ms spacing,
-  plus a 15 s keepalive that refreshes the live values.
+  Sent only when a stable field changes (identity, mode, capabilities;
+  uptime, rssi, and freeHeap do not trigger a send) with a minimum 500 ms
+  spacing. No periodic keepalive: live values are the app's job to poll over
+  HTTP, because a dead WS peer turns every queued send into a multi-second
+  TCP retransmit stall on the reader's single loop.
 - `frame` — `{seq, bytes}` notification only. The image body is
   fetched over HTTP (below), reusing the proven chunked transport instead of
   WS binary framing. A per-frame content hash was deliberately left out of
