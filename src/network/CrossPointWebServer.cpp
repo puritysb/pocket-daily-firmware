@@ -8,6 +8,7 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <WiFi.h>
+#include <esp_ota_ops.h>
 #include <esp_task_wdt.h>
 
 #include <algorithm>
@@ -26,6 +27,9 @@
 #include "html/SettingsPageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
 #include "pocket_daily/PocketScreenPreview.h"
+#ifdef ENABLE_DEV_REMOTE_FLASH
+#include "pocket_daily/product_identity.h"
+#endif
 #include "pocket_daily/upload_stream_protocol.h"
 #include "util/BookCacheUtils.h"
 
@@ -303,6 +307,15 @@ void CrossPointWebServer::begin() {
   }
 
   server->onNotFound([this] { handleNotFound(); });
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  // Developer builds only: flash the staged /update.bin over the LAN so
+  // iteration does not walk the on-device Settings menus. Absent from
+  // gh_release builds by build flag, not by request filtering.
+  server->on("/api/pocket/v1/dev/flash", HTTP_POST, [this] {
+    noteClientActivity();
+    handleDevRemoteFlash();
+  });
+#endif
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
 
   if (profile == CrossPointWebServerProfile::FULL) {
@@ -1118,6 +1131,50 @@ void CrossPointWebServer::handlePocketScreenLive() const {
   server->sendContent(reinterpret_cast<const char*>(body), static_cast<size_t>(count));
   feedLoopWDT();
 }
+
+#ifdef ENABLE_DEV_REMOTE_FLASH
+// Developer builds only. Validates and flashes the staged /update.bin, then
+// reboots; a marker makes the next boot land in the File Transfer menu where
+// one Confirm rejoins the saved network. The 200 response is sent before
+// flashing because the loop blocks for the erase/write and ends in a chip
+// restart.
+void CrossPointWebServer::handleDevRemoteFlash() {
+  HalSystem::setCrashBreadcrumb("dev:remote-flash");
+  if (apMode) {
+    server->send(403, "text/plain", "Dev flash runs on the STA profile only");
+    return;
+  }
+  if (!Storage.exists("/update.bin")) {
+    server->send(404, "text/plain", "No /update.bin staged on the reader");
+    return;
+  }
+  const esp_partition_t* dest = esp_ota_get_next_update_partition(nullptr);
+  if (!dest) {
+    server->send(500, "text/plain", "No OTA partition available");
+    return;
+  }
+  if (firmware_flash::validateImageFile("/update.bin", dest->size) != firmware_flash::Result::OK) {
+    server->send(422, "text/plain", "Staged /update.bin failed image validation");
+    return;
+  }
+  server->sendHeader("Connection", "close");
+  server->send(200, "text/plain", "Flashing /update.bin (dev build). Reader reboots to File Transfer.");
+  {
+    HalFile marker;
+    if (Storage.openFileForWrite("DEV", PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER, marker) && marker) {
+      marker.write(reinterpret_cast<const uint8_t*>("1"), 1);
+      marker.close();
+    }
+  }
+  delay(750);  // Put the response on the wire before the loop disappears.
+  if (firmware_flash::flashFromSdPath("/update.bin", nullptr, nullptr, true) != firmware_flash::Result::OK) {
+    LOG_ERR("WEB", "Dev remote flash failed; staying up");
+    Storage.remove(PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER);
+    return;
+  }
+  ESP.restart();
+}
+#endif
 
 void CrossPointWebServer::handleCrashReport() const {
   HalSystem::setCrashBreadcrumb("nearby:crash-chunk");

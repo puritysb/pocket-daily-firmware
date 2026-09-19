@@ -35,6 +35,9 @@
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
 #include "pocket_daily/PocketScreenPreview.h"
+#ifdef ENABLE_DEV_REMOTE_FLASH
+#include "pocket_daily/product_identity.h"
+#endif
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 
@@ -655,6 +658,18 @@ void setup() {
     // Panic, watchdog and power-fault resets all leave an SD report. Surface it
     // immediately instead of silently resuming into the failing interaction.
     activityManager.goToCrashReport();
+  } else if (
+#ifdef ENABLE_DEV_REMOTE_FLASH
+      Storage.exists(PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER)
+#else
+      false
+#endif
+  ) {
+    // Dev loop only: a remote-triggered flash asked to land back in the
+    // File Transfer menu, where one Confirm rejoins the saved network.
+    LOG_INF("MAIN", "Dev boot: returning to File Transfer");
+    Storage.remove(PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER);
+    activityManager.goToFileTransfer();
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
              !APP_STATE.openEpubPath.empty()) {
     activityManager.goToReader(APP_STATE.openEpubPath);

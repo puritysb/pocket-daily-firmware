@@ -6,6 +6,13 @@
 // AgentDeck is currently one provider; it is deliberately not the product.
 namespace PocketDaily {
 
+// Developer iteration loop only (`ENABLE_DEV_REMOTE_FLASH` builds, never
+// gh_release): marker written before a remote-triggered flash so the next
+// boot lands straight back in the File Transfer menu.
+#ifdef ENABLE_DEV_REMOTE_FLASH
+inline constexpr const char* DEV_BOOT_FILE_TRANSFER_MARKER = "/.crosspoint/dev-boot-file-transfer";
+#endif
+
 inline constexpr const char* PRODUCT_ID = "io.pocketdaily.reader";
 inline constexpr const char* PRODUCT_NAME = "Pocket Daily";
 inline constexpr const char* CLIENT_ID = "io.pocketdaily.reader";

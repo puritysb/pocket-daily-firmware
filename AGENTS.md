@@ -105,6 +105,13 @@ For iteration, prefer the reader's File Transfer → Join a Network mode plus
 `scripts/pocket_put.py` over SD-card swapping; the user has asked that hardware
 tests go through that path.
 
+Developer flash loop (`env:default` builds only, `ENABLE_DEV_REMOTE_FLASH`):
+after `./scripts/pio.sh run` and a `scripts/pocket_put.py` push of
+`firmware/update.bin`, `curl -X POST http://<reader>/api/pocket/v1/dev/flash`
+validates and flashes the staged image and reboots the reader straight into
+the File Transfer menu; one Confirm rejoins the saved network. The endpoint
+and its boot marker are compiled out of `gh_release` builds.
+
 ## Git and release hygiene
 
 - Inspect `git status`, the current branch, and remotes before Git operations.

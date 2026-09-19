@@ -187,6 +187,11 @@ class CrossPointWebServer {
   void sendLiveStudioLine(const char* line);
   void pushLiveStudioStatusIfChanged();
   void handlePocketScreenLive() const;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  // Developer builds only (`env:default`): network-reachable flash of the
+  // staged /update.bin. Never compiled into release builds.
+  void handleDevRemoteFlash();
+#endif
 
   // File scanning
   void scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const;
