@@ -718,6 +718,11 @@ void CrossPointWebServerActivity::loop() {
 
     // Handle web server requests - maximize throughput with watchdog safety
     if (webServer && webServer->isRunning()) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+      // Dev loop: a remote repaint request forces one render pass so the
+      // live frame stream can be exercised without touching the reader.
+      if (webServer->consumeRepaintRequest()) requestUpdate();
+#endif
       const unsigned long timeSinceLastHandleClient = millis() - lastHandleClientTime;
 
       // Log if there's a significant gap between handleClient calls (>100ms)

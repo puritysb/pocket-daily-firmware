@@ -315,6 +315,12 @@ void CrossPointWebServer::begin() {
     noteClientActivity();
     handleDevRemoteFlash();
   });
+  // Developer builds only: force one repaint (live-frame debugging).
+  server->on("/api/pocket/v1/dev/render", HTTP_POST, [this] {
+    noteClientActivity();
+    requestRepaint();
+    server->send(204, "text/plain", "");
+  });
 #endif
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
 
@@ -1131,6 +1137,12 @@ void CrossPointWebServer::handlePocketScreenLive() const {
   server->sendContent(reinterpret_cast<const char*>(body), static_cast<size_t>(count));
   feedLoopWDT();
 }
+
+#ifdef ENABLE_DEV_REMOTE_FLASH
+void CrossPointWebServer::requestRepaint() { repaintRequested.store(true); }
+
+bool CrossPointWebServer::consumeRepaintRequest() { return repaintRequested.exchange(false); }
+#endif
 
 #ifdef ENABLE_DEV_REMOTE_FLASH
 // Developer builds only. Validates and flashes the staged /update.bin, then
