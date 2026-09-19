@@ -5,10 +5,15 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
-- Firmware: `/Users/puritysb/github/pocket-daily-firmware`
-  (`https://github.com/puritysb/pocket-daily-firmware`)
-- App Store app: `/Users/puritysb/github/pocket-daily`
-  (`https://github.com/puritysb/pocket-daily`)
+- Firmware: this repository (`https://github.com/puritysb/pocket-daily-firmware`),
+  checked out on this host at `/Users/puritysb/git/pocket-daily-firmware`
+- App Store app: sibling directory `pocket-daily` next to this clone
+  (`https://github.com/puritysb/pocket-daily`), on this host at
+  `/Users/puritysb/git/pocket-daily`
+
+The host checkout root moved from `~/github/` to `~/git/` (noted 2026-09-19).
+Absolute `~/github/` paths in either repository's older notes are stale;
+resolve the sibling repository relative to this checkout.
 
 The firmware repository owns device behavior, endpoints, local persistence,
 memory gates, and flashing. The app repository owns the Apple-platform client.
@@ -188,7 +193,26 @@ the freeze and the abort are fixed in code review and host tests only.
 
 Record only durable decisions, verified baselines, protocol contracts, and
 release evidence. Date mutable facts, name their source of truth, and replace
-stale notes rather than accumulating contradictions.
+stale notes rather than accumulating contradictions. A memory entry must be
+committed together with the change it describes; uncommitted work is not a
+verified baseline.
+
+## Multi-agent collaboration — 2026-09-19
+
+- OpenCode, Claude Code, and Codex all work in this repository and in the
+  sibling app repository. Each repository's `AGENTS.md` is the single
+  operational entry point for every agent, `CLAUDE.md` holds the shared
+  constraints, and this file is the shared cross-agent memory. No agent keeps
+  a private instruction file or separate memory.
+- Cross-repository protocol work (Nearby Sync v1, upload stream, direct
+  sessions) proceeds on both sides in one coordinated effort: verify the
+  companion implementation whenever an endpoint, record, or file layout
+  changes, and record the paired commits here.
+- On 2026-09-19 the previously uncommitted working tree (reader partial-build
+  fixes, companion transport sessions, OPDS panic repair) was re-verified
+  (default build, strict cppcheck 2.11, 140/140 host tests) and committed as
+  `5f1806a3`, `3ddfe641`, and `3d690840`; the app-side counterpart landed in
+  `pocket-daily` as direct reader sessions.
 
 ## Companion transport sessions — 2026-09-09
 

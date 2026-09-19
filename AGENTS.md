@@ -1,9 +1,25 @@
 # Pocket Daily Firmware Agent Guide
 
-This is the shared entry point for coding agents in the firmware repository.
-The detailed embedded constraints live in `CLAUDE.md` (a link to
-`.skills/SKILL.md`). Durable repository and release context lives in
-`docs/PROJECT_MEMORY.md`.
+This is the single operational entry point for every coding agent working in
+this repository — OpenCode, Codex, and Claude Code alike. The detailed embedded
+constraints live in `CLAUDE.md` (a link to `.skills/SKILL.md`). Durable
+repository and release context lives in `docs/PROJECT_MEMORY.md`.
+
+## Agent entry points and shared memory
+
+- `AGENTS.md` (this file) is the operational contract for all agents. OpenCode
+  and Codex read it natively; Claude Code reaches it through the cross-agent
+  conventions recorded here and in the app repository's guide. Do not fork
+  agent-specific workflows into separate files.
+- `CLAUDE.md` is Claude Code's native entry point and the embedded-constraints
+  constitution for everyone.
+- `docs/PROJECT_MEMORY.md` is the shared cross-session, cross-agent memory.
+  Any agent appends durable facts there, and a memory entry must land in the
+  same change as the work it describes, so memory never gets ahead of the
+  tree.
+- The sibling app repository `pocket-daily` follows the same contract from its
+  own `AGENTS.md`; protocol changes must be verified on both sides regardless
+  of which agent or repository starts the work.
 
 ## Read in this order
 
@@ -19,7 +35,9 @@ The detailed embedded constraints live in `CLAUDE.md` (a link to
 - Repository: `puritysb/pocket-daily-firmware`
 - Default product branch: `main`
 - Foundation remote: `upstream` → `crosspoint-reader/crosspoint-reader`
-- App repository: sibling `/Users/puritysb/github/pocket-daily`
+- App repository: sibling `pocket-daily` directory next to this clone (on this
+  host `/Users/puritysb/git/pocket-daily`). Absolute `~/github/` paths in older
+  notes are stale; resolve the sibling relative to this checkout.
 
 This repository owns reader behavior, device endpoints, on-device validation,
 and flashing. The app repository owns iOS/iPadOS/macOS code and App Store
