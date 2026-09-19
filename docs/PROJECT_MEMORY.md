@@ -215,6 +215,23 @@ verified baseline.
   `libpdui_host.a` with provenance — an approved exception to the
   no-binaries-cross boundary rule for this one artifact.
 
+## LS-1 hardware sign-off — 2026-09-19
+
+- X3 (`5B09AF70`) installed `1.4.1-dev-main-df75f78d` and joined STA File
+  Transfer: `/api/status` advertised `liveStudio {mode:"push", wsPort:81}`
+  with ~14 KB free. A raw WebSocket client verified hello (proto live-studio/1
+  + deviceID), ping→pong, subscribe→immediate status snapshot, and repeated
+  status pushes; unsubscribe + close were clean. `df75f78d` also lowered the
+  listener gate to 12 KB after the draft 40 KB gate never opened (measured
+  ~15 KB free in this profile) and suspended pushes during active uploads.
+- Post-install boot returns to the Pocket Daily shell with Wi-Fi off —
+  intended: the radio is powered only inside network activities, so push
+  exists only while the reader sits in a network mode.
+- Not exercisable on STA: the `prefs` event. `/api/pocket/v1/preferences` is
+  registered for POCKET_SYNC only, so a FILE_TRANSFER client gets 404.
+  Extending preferences (or a studio read path) to FILE_TRANSFER is a
+  candidate LS-2-adjacent change; the event itself is covered by host tests.
+
 ## LS-1 live-studio event push — 2026-09-19
 
 - `src/pocket_daily/live_studio/LiveStudioEvents.{h,cpp}` implements the
