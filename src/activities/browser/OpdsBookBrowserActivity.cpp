@@ -3,7 +3,7 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
-#include <OpdsStream.h>
+#include <OpdsParser.h>
 #include <WiFi.h>
 
 #include "MappedInputManager.h"
@@ -199,34 +199,78 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
 
   std::string url = (path.find("http") == 0) ? path : UrlUtils::buildUrl(server.url, path);
   LOG_DBG("OPDS", "Fetching: %s", url.c_str());
-  OpdsParser parser;
+  // Do not hold the Expat parser and an expanding catalog beside HTTP buffers.
+  // SD is bounded scratch storage; the response is never buffered in RAM.
+  constexpr const char* feedPath = "/.crosspoint/opds-feed.tmp";
+  constexpr size_t maxFeedBytes = 1024 * 1024;
+  std::vector<OpdsEntry>().swap(entries);
+  searchTemplate.clear();
+  Storage.mkdir("/.crosspoint");
+  bool downloaded = false;
   {
-    OpdsParserStream stream{parser};
-    if (!HttpDownloader::fetchUrl(url, stream, server.username, server.password)) {
-      state = BrowserState::ERROR;
-      errorMessage = tr(STR_FETCH_FEED_FAILED);
-      requestUpdate();
-      return;
+    HalFile feed;
+    if (Storage.openFileForWrite("OPDS", feedPath, feed)) {
+      size_t received = 0;
+      downloaded = HttpDownloader::fetchUrl(
+          url,
+          [&feed, &received](const uint8_t* data, size_t length) {
+            // Bound chunked responses too, without relying on Content-Length.
+            if (length > maxFeedBytes - received || feed.write(data, length) != length) return false;
+            received += length;
+            return true;
+          },
+          server.username, server.password);
     }
   }
-
-  if (!parser) {
+  if (!downloaded) {
+    Storage.remove(feedPath);
     state = BrowserState::ERROR;
-    errorMessage = tr(STR_PARSE_FEED_FAILED);
+    errorMessage = tr(STR_FETCH_FEED_FAILED);
     requestUpdate();
     return;
   }
 
-  searchTemplate = parser.getSearchTemplate();
-  const auto& nextUrl = parser.getNextPageUrl();
-  const auto& prevUrl = parser.getPrevPageUrl();
+  OpdsParser parser;
+  bool readOK = false;
+  {
+    HalFile feed;
+    if (Storage.openFileForRead("OPDS", feedPath, feed)) {
+      // 128 bytes on stack; no persistent RAM buffer competes with the radio.
+      uint8_t chunk[128];
+      size_t remaining = feed.size();
+      readOK = remaining <= maxFeedBytes;
+      while (remaining > 0 && readOK && !parser.error()) {
+        const auto count = feed.read(chunk, std::min(remaining, sizeof(chunk)));
+        if (count <= 0) {
+          readOK = false;
+          break;
+        }
+        remaining -= count;
+        readOK = parser.write(chunk, count) == static_cast<size_t>(count);
+        delay(1);
+      }
+    }
+  }
+  Storage.remove(feedPath);  // The file handle is closed before removing scratch data.
+  parser.flush();
+  if (!readOK || !parser || !parser.reserveNavigationEntries()) {
+    state = BrowserState::ERROR;
+    errorMessage = parser.resourceLimitReached() ? tr(STR_MEMORY_ERROR) : tr(STR_PARSE_FEED_FAILED);
+    requestUpdate();
+    return;
+  }
+
+  searchTemplate = parser.takeSearchTemplate();
+  auto nextUrl = parser.takeNextPageUrl();
+  auto prevUrl = parser.takePrevPageUrl();
   entries = std::move(parser).getEntries();
 
   if (!prevUrl.empty()) {
-    entries.insert(entries.begin(), OpdsEntry{OpdsEntryType::NAVIGATION, tr(STR_PREV_PAGE), "", prevUrl, ""});
+    entries.insert(entries.begin(),
+                   OpdsEntry{OpdsEntryType::NAVIGATION, tr(STR_PREV_PAGE), "", std::move(prevUrl), ""});
   }
   if (!nextUrl.empty()) {
-    entries.push_back(OpdsEntry{OpdsEntryType::NAVIGATION, tr(STR_NEXT_PAGE), "", nextUrl, ""});
+    entries.push_back(OpdsEntry{OpdsEntryType::NAVIGATION, tr(STR_NEXT_PAGE), "", std::move(nextUrl), ""});
   }
 
   selectorIndex = 0;

@@ -45,13 +45,22 @@ using OpdsBook = OpdsEntry;
  */
 class OpdsParser final : public Print {
  public:
-  OpdsParser();
+  using AllocationCheck = bool (*)(size_t);
+  explicit OpdsParser(AllocationCheck allocationCheck = nullptr);
+  static constexpr size_t MAX_ENTRIES = 128;
+  static constexpr size_t MAX_FIELD_BYTES = 2048;
+  bool resourceLimitReached() const { return resourceLimited; }
+  // Reserve two browser pagination rows before moving the vector out.
+  bool reserveNavigationEntries();
   ~OpdsParser();
 
   // Disable copy
   const std::string& getSearchTemplate() const { return searchTemplate; }
   const std::string& getNextPageUrl() const { return nextPageUrl; }
   const std::string& getPrevPageUrl() const { return prevPageUrl; }
+  std::string takeSearchTemplate() { return std::move(searchTemplate); }
+  std::string takeNextPageUrl() { return std::move(nextPageUrl); }
+  std::string takePrevPageUrl() { return std::move(prevPageUrl); }
   OpdsParser(const OpdsParser&) = delete;
   OpdsParser& operator=(const OpdsParser&) = delete;
 
@@ -107,4 +116,11 @@ class OpdsParser final : public Print {
   bool inId = false;
 
   bool errorOccured = false;
+  bool resourceLimited = false;
+  AllocationCheck allocationCheck;
+  bool ensureAllocation(size_t bytes);
+  bool reserveText(std::string& text, size_t length);
+  bool assignText(std::string& text, const char* value);
+  bool reserveEntries(size_t count);
+  void failResourceLimit();
 };

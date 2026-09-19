@@ -216,3 +216,25 @@ stale notes rather than accumulating contradictions.
   present; port 82 and resume remained available. Direct AP and updated iPhone
   app verification are still pending.
 
+## OPDS catalog allocation panic — 2026-09-11
+
+- User-reported crash report from installed `1.4.1-dev-main-fa92806c-wf9376b5a`
+  showed `panic`/`abort`. Symbolization against the preserved matching ELF reached
+  `OpdsParser::endElement` vector reallocation/copy while parsing an HTTP feed;
+  HTTP-open log showed 9,420 B free / 6,900 B largest block. This report does not
+  implicate the user's PDF transfer. Raw report and ELF remain in ignored build/.
+- OPDS fetch now streams at most 1 MiB to `/.crosspoint/opds-feed.tmp`, closes
+  HTTP and file handles, then parses in 128-byte reads. Scratch is removed on
+  completion/failure. Old catalog capacity is released before fetching.
+- Parser bounds fields to 2,048 bytes and catalogs to 128 entries, moves entry
+  strings, checks contiguous/free heap before growth (4 KiB headroom), and stops
+  with an error rather than claiming success with a truncated catalog. Pagination
+  capacity is reserved before transferring ownership to the browser.
+- Scope is crash repair first; PDF rendering remains unsupported. Host tests use
+  bundled Expat with firmware XML flags. Hardware OPDS retry/sign-off is pending.
+- Verification: default build, strict cppcheck 2.11 and 140/140 host tests passed.
+  Staged `1.4.1-dev-main-fa92806c-w8ea71718` to the X3 over STA: first stream
+  interrupted; resume acknowledged offset 1,201,932; final OK/commit 200 matched
+  6,023,216 bytes and CRC32 DDC8E685, publishing `/update.bin`. SHA-256:
+  `38795190893c922299a92422e3c9170a02827fc5429d2e00fc4558713dbb6635`.
+  This proves staging, not installation or a hardware crash fix.

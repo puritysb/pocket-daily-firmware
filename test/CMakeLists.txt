@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(crosspoint_reader_tests CXX)
+project(crosspoint_reader_tests C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -51,3 +51,5 @@ add_subdirectory(pocket_daily_identity)
 add_subdirectory(pocket_daily_learning_pack)
 add_subdirectory(pocket_daily_upload_stream)
 add_subdirectory(games)
+
+add_subdirectory(opds_parser)
