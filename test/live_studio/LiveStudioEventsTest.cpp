@@ -1,8 +1,8 @@
-#include "pocket_daily/live_studio/LiveStudioEvents.h"
+#include <gtest/gtest.h>
 
 #include <cstring>
 
-#include <gtest/gtest.h>
+#include "pocket_daily/live_studio/LiveStudioEvents.h"
 
 namespace {
 

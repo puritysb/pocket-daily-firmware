@@ -7,9 +7,9 @@ namespace PocketDaily::LiveStudio {
 
 bool encodeHello(char* out, size_t cap, const char* deviceId, const char* version) {
   if (!out || cap == 0) return false;
-  const int written =
-      std::snprintf(out, cap, "{\"hello\":{\"proto\":\"%s\",\"deviceID\":\"%s\",\"version\":\"%s\",\"caps\":[\"status\",\"prefs\"]}}",
-                    kProtocol, deviceId ? deviceId : "", version ? version : "");
+  const int written = std::snprintf(
+      out, cap, "{\"hello\":{\"proto\":\"%s\",\"deviceID\":\"%s\",\"version\":\"%s\",\"caps\":[\"status\",\"prefs\"]}}",
+      kProtocol, deviceId ? deviceId : "", version ? version : "");
   return written > 0 && static_cast<size_t>(written) < cap;
 }
 
