@@ -168,6 +168,8 @@ void CrossPointWebServer::begin() {
     return;
   }
 
+  sessionEndRequested = false;
+
   // Store AP mode flag for later use (e.g., in handleStatus)
   apMode = isInApMode;
 
@@ -200,10 +202,19 @@ void CrossPointWebServer::begin() {
     noteClientActivity();
     handleRoot();
   });
-  server->on("/api/status", HTTP_GET, [this] {
-    noteClientActivity();
-    handleStatus();
-  });
+  // A phone heartbeat must not hold an otherwise idle direct session forever.
+  server->on("/api/status", HTTP_GET, [this] { handleStatus(); });
+  if (profile == CrossPointWebServerProfile::POCKET_SYNC && apMode) {
+    server->on("/api/pocket/v1/session/end", HTTP_POST, [this] {
+      if (upload.file || pocketUploadClient) {
+        server->send(409, "application/json", "{\"error\":\"transfer active\"}");
+        return;
+      }
+      server->send(200, "application/json", "{\"ended\":true}");
+      sessionEndRequestedAt = millis();
+      sessionEndRequested = true;
+    });
+  }
   // Diagnostics is available in every profile so a phone can retrieve the
   // previous panic after the reader has recovered, without exposing arbitrary
   // hidden files or requiring the SD card to be removed.
@@ -919,6 +930,10 @@ void CrossPointWebServer::handleStatus() const {
   const String ipAddr = apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString();
 
   JsonDocument doc;
+  char deviceId[9];
+  snprintf(deviceId, sizeof(deviceId), "%08lX", static_cast<unsigned long>(ESP.getEfuseMac() & 0xFFFFFFFFUL));
+  doc["deviceID"] = deviceId;
+  doc["sessionEnd"] = profile == CrossPointWebServerProfile::POCKET_SYNC && apMode;
   doc["version"] = CROSSPOINT_VERSION;
   doc["ip"] = ipAddr;
   doc["mode"] = apMode ? "AP" : "STA";

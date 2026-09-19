@@ -131,7 +131,20 @@ void CrossPointWebServerActivity::onEnter() {
 
   if (launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC) {
     LOG_DBG("WEBACT", "Launching Pocket Nearby Sync directly...");
-    startNearbySync();
+    // One transient menu replaces the normal File Transfer chooser; it is
+    // released before either radio starts. No persistent radio-time allocation.
+    auto menu = makeUniqueNoThrow<NetworkModeSelectionActivity>(renderer, mappedInput, true);
+    if (!menu) {
+      LOG_ERR("WEBACT", "Could not allocate sync mode menu");
+      returnToLaunchOrigin();
+      return;
+    }
+    startActivityForResult(std::move(menu), [this](const ActivityResult& result) {
+      if (result.isCancelled)
+        returnToLaunchOrigin();
+      else
+        onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
+    });
     return;
   }
 
@@ -215,6 +228,10 @@ void CrossPointWebServerActivity::onExit() {
 }
 
 void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) {
+  if (launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC && mode == NetworkMode::CREATE_HOTSPOT) {
+    startNearbySync();
+    return;
+  }
   const char* modeName = "Join Network";
   if (mode == NetworkMode::CONNECT_CALIBRE) {
     modeName = "Connect to Calibre";
@@ -625,6 +642,10 @@ void CrossPointWebServerActivity::loop() {
 
   // Handle different states
   if (state == WebServerActivityState::SERVER_RUNNING) {
+    if (privateApMode && webServer && webServer->shouldEndSession()) {
+      returnToLaunchOrigin();
+      return;
+    }
     // gpio.update() already ran once at the start of the global loop. Consume
     // its edge before any synchronous network work. Calling mappedInput.update
     // again in this activity clears pressedEvents and used to erase Back here.

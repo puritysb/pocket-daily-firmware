@@ -20,10 +20,12 @@ class NetworkModeSelectionActivity final : public Activity {
   ButtonNavigator buttonNavigator;
 
   int selectedIndex = 0;
+  const bool pocketSync;
+  int itemCount() const { return pocketSync ? 2 : 3; }
 
  public:
-  explicit NetworkModeSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("NetworkModeSelection", renderer, mappedInput) {}
+  explicit NetworkModeSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool pocketSync = false)
+      : Activity("NetworkModeSelection", renderer, mappedInput), pocketSync(pocketSync) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;

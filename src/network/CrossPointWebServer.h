@@ -11,6 +11,8 @@
 #include <memory>
 #include <string>
 
+#include "pocket_daily/direct_session.h"
+
 enum class CrossPointWebServerProfile : uint8_t {
   FULL,
   FILE_TRANSFER,
@@ -79,6 +81,10 @@ class CrossPointWebServer {
   // off a transfer that is still making progress.
   unsigned long lastClientActivityAt() const { return clientActivityAt; }
 
+  bool shouldEndSession() const {
+    return PocketDaily::DirectSession::shouldEnd(sessionEndRequested, sessionEndRequestedAt, millis());
+  }
+
   WsUploadStatus getWsUploadStatus() const;
 
   // Get the port number
@@ -87,6 +93,8 @@ class CrossPointWebServer {
  private:
   std::unique_ptr<WebServer> server = nullptr;
   std::unique_ptr<WebSocketsServer> wsServer = nullptr;
+  bool sessionEndRequested = false;
+  unsigned long sessionEndRequestedAt = 0;
   bool running = false;
   bool apMode = false;  // true when running in AP mode, false for STA mode
   CrossPointWebServerProfile profile;

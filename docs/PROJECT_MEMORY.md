@@ -190,3 +190,29 @@ Record only durable decisions, verified baselines, protocol contracts, and
 release evidence. Date mutable facts, name their source of truth, and replace
 stale notes rather than accumulating contradictions.
 
+## Companion transport sessions — 2026-09-09
+
+- Pocket Sync offers Join a Network (saved reader Wi-Fi) and Nearby Sync
+  (existing BLE/private AP). The original STA server profile is preserved.
+- `/api/status` adds optional `deviceID` matching BLE and `sessionEnd` for the
+  private AP only. POST `/api/pocket/v1/session/end` rejects active transfers,
+  responds, then returns to Pocket Daily through the existing low-memory restart.
+  Status heartbeats no longer keep an idle AP alive; no automatic flashing occurs.
+- The app queues local copies before AP handoff, keys retry UUIDs and installation
+  checks by device identity, and defers automatic diagnostics on the private AP.
+  Resume state remains RAM-only; reader restart falls back to RESUME 0.
+- Default firmware build and 132 host tests passed. Physical iPhone/X3 no-router
+  transfer, heap/watchdog, interruption/retry, and install confirmation remain
+  pending; see the companion's `docs/CONNECTIVITY_VALIDATION.md`.
+
+- Strict cppcheck passed using a native build of the pinned 2.11 upstream release
+  through ignored build/native-check.ini; the registry mirror was unavailable.
+
+## X3 installation verified — 2026-09-09
+
+- After user-side installation, live STA /api/status reported
+  `1.4.1-dev-main-fa92806c-wf9376b5a`, matching the staged image exactly, with
+  a fresh software restart. New deviceID and sessionEnd=false fields were
+  present; port 82 and resume remained available. Direct AP and updated iPhone
+  app verification are still pending.
+

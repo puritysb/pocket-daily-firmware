@@ -86,3 +86,14 @@ TEST(UploadStreamProtocol, FormatsBoundedReplies) {
   EXPECT_STREQ(out, "ERROR SD write failed\n");
   EXPECT_EQ(formatErrorReply(out, 8, "SD write failed"), 0U);
 }
+
+#include "pocket_daily/direct_session.h"
+
+TEST(DirectSession, ResponseMustDrainBeforeShutdown) {
+  using PocketDaily::DirectSession::shouldEnd;
+  EXPECT_FALSE(shouldEnd(false, 100, 10000));
+  EXPECT_FALSE(shouldEnd(true, 100, 599));
+  EXPECT_TRUE(shouldEnd(true, 100, 600));
+  EXPECT_FALSE(shouldEnd(true, UINT32_MAX - 100, 398));
+  EXPECT_TRUE(shouldEnd(true, UINT32_MAX - 100, 399));
+}

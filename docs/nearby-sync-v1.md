@@ -249,3 +249,33 @@ a user-operated server.
   and security-scoped bookmarks.
 - A user-started transfer may finish in background time; periodic background
   execution is never presented as guaranteed.
+
+## Companion session extension (2026-09-09)
+
+Pocket Sync now opens a two-route chooser: Join a Network (saved credentials,
+STA) or Nearby Sync (existing authenticated BLE → private AP). The private BLE
+wire grammar is unchanged. STA retains the existing File Transfer server profile and its verified transfer
+path; private AP retains the lightweight POCKET_SYNC profile.
+
+GET /api/status adds deviceID, the same uppercase eight-hex-digit chip ID as BLE,
+and sessionEnd, true only for the private POCKET_SYNC AP. This ID is not a LAN
+authentication mechanism. Existing clients ignore the extra fields.
+
+When sessionEnd is true, POST /api/pocket/v1/session/end returns 200
+{"ended":true}, or 409 while an HTTP/stream upload is active. The activity waits
+at least 500 ms after replying before returning to Pocket Daily through its
+existing low-memory restart path. No flashing is triggered. No endpoint is
+registered for full/open AP or STA profiles. Status polling no longer renews the
+private AP's idle lease; file/settings traffic still does.
+
+The companion prepares files locally before switching networks, preserves staging
+UUIDs for identified readers, and skips optional diagnostics during direct transfer.
+Resume is bounded by the existing in-memory pocketResume state; after reader
+restart, RESUME 0 safely restarts the file. No new persistent payload buffer is
+allocated by this extension. A transient route menu replaces the regular chooser;
+HTTP route registration and two small status fields add bounded server overhead.
+
+Hardware sign-off still required: iPhone + X3 with no router/internet, AP pairing,
+large firmware staging, content batch, lock/background interruption and retry,
+explicit/end-of-batch shutdown, user Wi-Fi change, reader reboot and installation
+version verification. Measure free heap/largest block and watchdog behavior.
