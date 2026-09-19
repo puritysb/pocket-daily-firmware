@@ -84,11 +84,10 @@ class CrossPointWebServer {
   // off a transfer that is still making progress.
   unsigned long lastClientActivityAt() const { return clientActivityAt; }
 
-#ifdef ENABLE_DEV_REMOTE_FLASH
-  // Developer builds only: true once until the activity consumes it with a
-  // forced render pass (see CrossPointWebServerActivity::loop).
+  // Live Studio LS-3: ask the hosting activity for one render pass after a
+  // UI pack apply (and by the dev-only render trigger).
+  void requestRepaint();
   bool consumeRepaintRequest();
-#endif
 
   bool shouldEndSession() const {
     return PocketDaily::DirectSession::shouldEnd(sessionEndRequested, sessionEndRequestedAt, millis());
@@ -191,9 +190,9 @@ class CrossPointWebServer {
   uint32_t liveStudioLastCheckMs = 0;
   uint32_t liveStudioLastSignatureMs = 0;
   char liveStudioSignature[128] = {};
-#ifdef ENABLE_DEV_REMOTE_FLASH
   mutable std::atomic<bool> repaintRequested{false};
-#endif
+  char activePackName[33] = {};
+  char activePackVersion[17] = {};
   String buildStatusJson() const;
   void sendLiveStudioLine(const char* line);
   void pushLiveStudioStatusIfChanged();
@@ -202,10 +201,9 @@ class CrossPointWebServer {
   // Developer builds only (`env:default`): network-reachable flash of the
   // staged /update.bin. Never compiled into release builds.
   void handleDevRemoteFlash();
-  // Developer builds only: force one repaint of the current activity so the
-  // live frame stream can be exercised without touching the reader.
-  void requestRepaint();
 #endif
+  void handleUiPackList() const;
+  void handleUiPackApply();
 
   // File scanning
   void scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const;

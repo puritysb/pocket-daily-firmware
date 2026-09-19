@@ -21,6 +21,7 @@
 #include "SettingsList.h"
 #include "WebDAVHandler.h"
 #include "WifiCredentialStore.h"
+#include "components/UITheme.h"
 #include "html/FilesPageHtml.generated.h"
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
@@ -28,6 +29,7 @@
 #include "html/js/jszip_minJs.generated.h"
 #include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/live_studio/DevTrace.h"
+#include "pocket_daily/live_studio/UiPackStore.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include "pocket_daily/product_identity.h"
 #endif
@@ -265,11 +267,20 @@ void CrossPointWebServer::begin() {
       handlePostPocketPreferences();
     });
   } else {
-    // Live Studio LS-2: chunked fetch of the latest captured frame, served
-    // wherever the WS push listener can run (STA profiles).
+    // Live Studio LS-2/LS-3: chunked fetch of the latest captured frame and
+    // the UI-pack endpoints, served wherever the WS push listener can run
+    // (STA profiles).
     server->on("/api/pocket/v1/screen-live", HTTP_GET, [this] {
       noteClientActivity();
       handlePocketScreenLive();
+    });
+    server->on("/api/pocket/v1/ui-packs", HTTP_GET, [this] {
+      noteClientActivity();
+      handleUiPackList();
+    });
+    server->on("/api/pocket/v1/ui-pack/apply", HTTP_POST, [this] {
+      noteClientActivity();
+      handleUiPackApply();
     });
     server->on("/settings", HTTP_GET, [this] { handleSettingsPage(); });
     server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
@@ -398,6 +409,9 @@ void CrossPointWebServer::begin() {
 
   running = true;
   clientActivityAt = 0;
+  // LS-3: surface the persisted pack selection in every status advertisement.
+  PocketDaily::LiveStudio::readState(activePackName, sizeof(activePackName), activePackVersion,
+                                     sizeof(activePackVersion));
 
   LOG_DBG("WEB", "Web server started on port %d", port);
   // Show the correct IP based on network mode
@@ -1064,9 +1078,9 @@ String CrossPointWebServer::buildStatusJson() const {
     live["mode"] = liveStudioPush ? "push" : "poll";
     if (liveStudioPush) live["wsPort"] = wsPort;
     live["frameStream"] = liveStudioPush;  // LS-2: live capture while subscribed
-    live["uiPacks"] = false;               // LS-3: .uipack apply
-    live["activePack"] = nullptr;
-    live["activePackVersion"] = nullptr;
+    live["uiPacks"] = true;                // LS-3: .uipack apply
+    live["activePack"] = activePackName[0] ? activePackName : nullptr;
+    live["activePackVersion"] = activePackVersion[0] ? activePackVersion : nullptr;
   }
 
   String json;
@@ -1190,11 +1204,76 @@ void CrossPointWebServer::handlePocketScreenLive() const {
   feedLoopWDT();
 }
 
-#ifdef ENABLE_DEV_REMOTE_FLASH
 void CrossPointWebServer::requestRepaint() { repaintRequested.store(true); }
 
 bool CrossPointWebServer::consumeRepaintRequest() { return repaintRequested.exchange(false); }
-#endif
+
+void CrossPointWebServer::handleUiPackList() const {
+  server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server->send(200, "application/json", "");
+  server->sendContent("[");
+  char line[160];
+  bool first = true;
+  scanFiles(PocketDaily::LiveStudio::UIPACK_DIR, [this, &line, &first](const FileInfo& info) mutable {
+    if (info.isDirectory || !info.name.endsWith(".uipack")) return;
+    // Strip the extension for the pack name the apply endpoint expects.
+    const std::string name = std::string(info.name.c_str(), info.name.length() - 7);
+    const bool active = name == activePackName;
+    const int n = snprintf(line, sizeof(line), R"({"name":"%.32s","size":%u,"active":%s})", name.c_str(),
+                           static_cast<unsigned>(info.size), active ? "true" : "false");
+    if (n <= 0 || static_cast<size_t>(n) >= sizeof(line)) return;
+    if (!first) server->sendContent(",");
+    first = false;
+    server->sendContent(line);
+  });
+  server->sendContent("]");
+  server->sendContent("");
+}
+
+// LS-3 apply: load + validate + layer over the current theme, persist the
+// choice, and ask for a repaint so the live frame shows the result. An empty
+// name reverts to the theme's own metrics.
+void CrossPointWebServer::handleUiPackApply() {
+  JsonDocument doc;
+  const DeserializationError err = deserializeJson(doc, server->arg("plain"));
+  if (err) {
+    server->send(400, "text/plain", "Invalid JSON");
+    return;
+  }
+  const char* name = doc["name"] | "";
+  if (name[0] == '\0') {
+    PocketDaily::LiveStudio::ThemeOverride none{};
+    UITheme::getInstance().applyPackMetrics(&none, 0);
+    PocketDaily::LiveStudio::clearState();
+    activePackName[0] = '\0';
+    activePackVersion[0] = '\0';
+    requestRepaint();
+    server->send(200, "application/json", "{\"applied\":false}");
+    return;
+  }
+  PocketDaily::LiveStudio::UiPackInfo info;
+  static PocketDaily::LiveStudio::ThemeOverride overrides[PocketDaily::LiveStudio::UIPACK_MAX_THEME_OVERRIDES];
+  PocketDaily::LiveStudio::UiPackResult validateError = PocketDaily::LiveStudio::UiPackResult::Ok;
+  const auto result = PocketDaily::LiveStudio::loadPackFromSd(
+      name, &info, overrides, PocketDaily::LiveStudio::UIPACK_MAX_THEME_OVERRIDES, &validateError);
+  if (result != PocketDaily::LiveStudio::StoreResult::Ok) {
+    const int code = result == PocketDaily::LiveStudio::StoreResult::OpenFail ? 404 : 422;
+    char body[128];
+    snprintf(body, sizeof(body), "{\"applied\":false,\"error\":\"%s\"}",
+             PocketDaily::LiveStudio::storeResultName(result));
+    server->send(code, "application/json", body);
+    return;
+  }
+  UITheme::getInstance().applyPackMetrics(overrides, info.themeOverrideCount);
+  PocketDaily::LiveStudio::writeState(info.name, info.packVersion);
+  strlcpy(activePackName, info.name, sizeof(activePackName));
+  strlcpy(activePackVersion, info.packVersion, sizeof(activePackVersion));
+  requestRepaint();
+  char body[128];
+  snprintf(body, sizeof(body), "{\"applied\":true,\"name\":\"%.32s\",\"version\":\"%.16s\",\"overrides\":%u}",
+           info.name, info.packVersion, static_cast<unsigned>(info.themeOverrideCount));
+  server->send(200, "application/json", body);
+}
 
 #ifdef ENABLE_DEV_REMOTE_FLASH
 // Developer builds only. Validates and flashes the staged /update.bin, then

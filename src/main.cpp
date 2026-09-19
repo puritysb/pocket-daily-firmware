@@ -35,6 +35,7 @@
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
 #include "pocket_daily/PocketScreenPreview.h"
+#include "pocket_daily/live_studio/UiPackStore.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include "pocket_daily/product_identity.h"
 #endif
@@ -554,6 +555,9 @@ void setup() {
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
   UITheme::getInstance().reload();
+  // Live Studio LS-3: layer the persisted UI pack over the selected theme
+  // before any surface renders.
+  PocketDaily::LiveStudio::applyStartupPack();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
   // Prewarm the static settings metadata before the web server/File Transfer

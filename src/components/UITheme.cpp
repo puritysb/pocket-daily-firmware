@@ -12,6 +12,7 @@
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "components/themes/roundedraff/RoundedRaffTheme.h"
+#include "pocket_daily/live_studio/ThemeFieldIds.h"
 
 UITheme UITheme::instance;
 
@@ -48,6 +49,28 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
       currentMetrics = &Lyra3CoversMetrics::values;
       break;
   }
+  reapplyPackAfterThemeChange();
+}
+
+void UITheme::applyPackMetrics(const PocketDaily::LiveStudio::ThemeOverride* overrides, size_t count) {
+  if (count > PocketDaily::LiveStudio::UIPACK_MAX_THEME_OVERRIDES)
+    count = PocketDaily::LiveStudio::UIPACK_MAX_THEME_OVERRIDES;
+  packOverrideCount = count;
+  for (size_t i = 0; i < count; i++) packOverrides[i] = overrides[i];
+  reapplyPackAfterThemeChange();
+}
+
+// Rebuilds the packed metrics copy over whatever theme is currently active,
+// so a settings theme change keeps the pack applied (the pack layers on top
+// of the selected theme, it does not replace it).
+void UITheme::reapplyPackAfterThemeChange() {
+  if (packOverrideCount == 0 || currentMetrics == nullptr) return;
+  packedMetrics = *currentMetrics;
+  for (size_t i = 0; i < packOverrideCount; i++) {
+    PocketDaily::LiveStudio::ThemeField::applyOverride(packedMetrics, packOverrides[i].fieldId, packOverrides[i].type,
+                                                       packOverrides[i].value);
+  }
+  currentMetrics = &packedMetrics;
 }
 
 int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,

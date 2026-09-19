@@ -1,0 +1,256 @@
+{
+  "fields": [
+    {
+      "name": "batteryWidth",
+      "type": 1
+    },
+    {
+      "name": "batteryHeight",
+      "type": 1
+    },
+    {
+      "name": "topPadding",
+      "type": 1
+    },
+    {
+      "name": "batteryBarHeight",
+      "type": 1
+    },
+    {
+      "name": "headerHeight",
+      "type": 1
+    },
+    {
+      "name": "verticalSpacing",
+      "type": 1
+    },
+    {
+      "name": "previewPadding",
+      "type": 1
+    },
+    {
+      "name": "previewHeightPercent",
+      "type": 1
+    },
+    {
+      "name": "contentSidePadding",
+      "type": 1
+    },
+    {
+      "name": "listRowHeight",
+      "type": 1
+    },
+    {
+      "name": "listWithSubtitleRowHeight",
+      "type": 1
+    },
+    {
+      "name": "menuRowHeight",
+      "type": 1
+    },
+    {
+      "name": "menuSpacing",
+      "type": 1
+    },
+    {
+      "name": "tabSpacing",
+      "type": 1
+    },
+    {
+      "name": "tabBarHeight",
+      "type": 1
+    },
+    {
+      "name": "scrollBarWidth",
+      "type": 1
+    },
+    {
+      "name": "scrollBarRightOffset",
+      "type": 1
+    },
+    {
+      "name": "homeTopPadding",
+      "type": 1
+    },
+    {
+      "name": "homeCoverHeight",
+      "type": 1
+    },
+    {
+      "name": "homeCoverTileHeight",
+      "type": 1
+    },
+    {
+      "name": "homeRecentBooksCount",
+      "type": 1
+    },
+    {
+      "name": "homeContinueReadingInMenu",
+      "type": 2
+    },
+    {
+      "name": "homeMenuTopOffset",
+      "type": 1
+    },
+    {
+      "name": "buttonHintsHeight",
+      "type": 1
+    },
+    {
+      "name": "sideButtonHintsWidth",
+      "type": 1
+    },
+    {
+      "name": "progressBarHeight",
+      "type": 1
+    },
+    {
+      "name": "progressBarMarginTop",
+      "type": 1
+    },
+    {
+      "name": "statusBarHorizontalMargin",
+      "type": 1
+    },
+    {
+      "name": "statusBarVerticalMargin",
+      "type": 1
+    },
+    {
+      "name": "keyboardKeyWidth",
+      "type": 1
+    },
+    {
+      "name": "keyboardKeyHeight",
+      "type": 1
+    },
+    {
+      "name": "keyboardKeySpacing",
+      "type": 1
+    },
+    {
+      "name": "keyboardBottomKeyHeight",
+      "type": 1
+    },
+    {
+      "name": "keyboardBottomKeySpacing",
+      "type": 1
+    },
+    {
+      "name": "keyboardBottomAligned",
+      "type": 2
+    },
+    {
+      "name": "keyboardCenteredText",
+      "type": 2
+    },
+    {
+      "name": "keyboardVerticalOffset",
+      "type": 1
+    },
+    {
+      "name": "keyboardTextFieldWidthPercent",
+      "type": 1
+    },
+    {
+      "name": "keyboardWidthPercent",
+      "type": 1
+    },
+    {
+      "name": "keyboardKeyCornerRadius",
+      "type": 1
+    },
+    {
+      "name": "keyboardFillUnselected",
+      "type": 2
+    },
+    {
+      "name": "keyboardOutlineAllUnselected",
+      "type": 2
+    },
+    {
+      "name": "keyboardDrawSpecialOutlineWhenUnselected",
+      "type": 2
+    },
+    {
+      "name": "keyboardSecondaryLabelRightPadding",
+      "type": 1
+    },
+    {
+      "name": "keyboardSecondaryLabelTopPadding",
+      "type": 1
+    },
+    {
+      "name": "keyboardMinArrowHeadSize",
+      "type": 1
+    },
+    {
+      "name": "popupTopOffsetRatio",
+      "type": 3
+    },
+    {
+      "name": "popupMarginX",
+      "type": 1
+    },
+    {
+      "name": "popupMarginY",
+      "type": 1
+    },
+    {
+      "name": "popupFrameThickness",
+      "type": 1
+    },
+    {
+      "name": "popupCornerRadius",
+      "type": 1
+    },
+    {
+      "name": "popupTextBold",
+      "type": 2
+    },
+    {
+      "name": "popupTextInverted",
+      "type": 2
+    },
+    {
+      "name": "popupTextBaselineOffsetY",
+      "type": 1
+    },
+    {
+      "name": "popupProgressBarHeight",
+      "type": 1
+    },
+    {
+      "name": "popupProgressDrawOutline",
+      "type": 2
+    },
+    {
+      "name": "popupProgressClampPercent",
+      "type": 2
+    },
+    {
+      "name": "popupProgressFillInverted",
+      "type": 2
+    },
+    {
+      "name": "popupProgressOutlineInverted",
+      "type": 2
+    },
+    {
+      "name": "textFieldHorizontalPadding",
+      "type": 1
+    },
+    {
+      "name": "textFieldNormalThickness",
+      "type": 1
+    },
+    {
+      "name": "textFieldCursorThickness",
+      "type": 1
+    },
+    {
+      "name": "textFieldLineEndOffset",
+      "type": 1
+    }
+  ]
+}
