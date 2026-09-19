@@ -235,6 +235,10 @@ verified baseline.
   persists at ignored `build/native-cppcheck` and
   `pio check -c build/native-check.ini` points there — temp-dir overrides
   get wiped between sessions.
+- Format note: the host `bin/clang-format-fix` (v23) wraps long string-literal
+  calls and include blocks differently from CI's LLVM-21 clang-format. For
+  new files with long literals, expect CI to reject the local output; apply
+  CI's diff or update the local pinned formatter before pushing.
 
 ## Multi-agent collaboration — 2026-09-19
 
