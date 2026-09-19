@@ -215,6 +215,29 @@ verified baseline.
   `libpdui_host.a` with provenance — an approved exception to the
   no-binaries-cross boundary rule for this one artifact.
 
+## M2/M3/LS-3 complete in code — 2026-09-19 late session
+
+- LS-3 shipped: generated field registry (63 fields), .uipack container
+  validation (host-tested), SD store with optional SHA-256, boot apply,
+  list/apply endpoints, liveStudio advertisement with active pack. App side
+  M2 (LiveSyncClient + frame canvas) and M3 (UiPackEncoder + ThemePackInspector
+  with Apply live / Revert) landed in pocket-daily (`9e0e4ef`, `34b5dc4`).
+- A layout bug shipped in the first pass and was caught by the APP encoder
+  crashing: counts/payloadLen/crc/sha sat at 64/72/76/80 in a 100-byte
+  header, overlapping minFirmware and truncating SHA. Fixed to the
+  documented 120-byte layout everywhere (`d03558de`); host tests and the
+  Python builder updated; app tests 65/65.
+- DEVICE SIGN-OFF PENDING for LS-3: the offsets-fix build (`d03558de`) is
+  NOT yet flashed - the staged /update.bin on the reader holds the
+  pre-fix LS-3 worktree build (offsets wrong; do not apply packs from the
+  app until reflashed). Blocked by the radio: after a mode re-entry the
+  reader answered exactly one HTTP request and went deaf again, worse than
+  the morning zombie. Environmental suspect (AP/router-side session or
+  power-save mismatch); re-verify on a stable link before blaming firmware.
+- Next device session: power-cycle, confirm .64, push + dev/flash
+  `d03558de`, Confirm once, then the end-to-end pack demo (upload -> apply
+  -> frame diff -> revert).
+
 ## LS-2 wrap-up — 2026-09-19 (end of session)
 
 - FULLY VERIFIED end-to-end: complete multi-chunk `screen-live` fetch of the
