@@ -17,6 +17,7 @@
 #include "home/RecentBooksActivity.h"
 #include "network/CrossPointWebServerActivity.h"
 #include "pocket_daily/PocketDailyActivity.h"
+#include "pocket_daily/live_studio/DevTrace.h"
 #include "pocket_daily/live_studio/LiveFrameCapture.h"
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
@@ -46,7 +47,9 @@ void ActivityManager::renderTaskLoop() {
     RenderLock lock;
     if (currentActivity) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
+      DEV_TRACE(PocketDaily::DevTrace::RENDER_START);
       currentActivity->render(std::move(lock));
+      DEV_TRACE(PocketDaily::DevTrace::RENDER_DONE);
       // Live Studio LS-2: publish the just-rendered 1-bit frame while a
       // companion is subscribed. Cheap no-op otherwise; the capture policy
       // bounds heap use and cadence (docs/live-studio-v1.md).

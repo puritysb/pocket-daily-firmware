@@ -5,6 +5,7 @@
 
 #include <atomic>
 
+#include "DevTrace.h"
 #include "LiveStudioEvents.h"
 #include "util/ScreenshotUtil.h"
 
@@ -27,13 +28,14 @@ void setRequested(bool on, uint32_t minIntervalMs) {
 }
 
 bool requested() { return gRequested.load(); }
-
 void maybeCapture(const uint8_t* framebuffer, int width, int height) {
   if (!gRequested.load()) return;
+  DEV_TRACE(PocketDaily::DevTrace::CAPTURE_ENTER);
   const uint32_t now = millis();
   if (!LiveStudio::shouldCaptureFrameAt(ESP.getFreeHeap(), now, gLastCaptureMs.load(), gMinIntervalMs.load())) {
     return;
   }
+  DEV_TRACE(PocketDaily::DevTrace::CAPTURE_WRITE);
   if (ScreenshotUtil::saveFramebufferAsBmp(LIVE_FRAME_PATH, framebuffer, width, height)) {
     gSeq.fetch_add(1);
     gBytes.store(0);
@@ -44,6 +46,9 @@ void maybeCapture(const uint8_t* framebuffer, int width, int height) {
       gReady.store(true);
     }
     if (file) file.close();
+    DEV_TRACE(PocketDaily::DevTrace::CAPTURE_DONE, 1);
+  } else {
+    DEV_TRACE(PocketDaily::DevTrace::CAPTURE_DONE, 0);
   }
 }
 

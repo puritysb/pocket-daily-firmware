@@ -1,5 +1,7 @@
 #include "CrossPointWebServer.h"
 
+#include "pocket_daily/live_studio/DevTrace.h"
+
 #include <ArduinoJson.h>
 #include <FsHelpers.h>
 #include <HalGPIO.h>
@@ -318,8 +320,29 @@ void CrossPointWebServer::begin() {
   // Developer builds only: force one repaint (live-frame debugging).
   server->on("/api/pocket/v1/dev/render", HTTP_POST, [this] {
     noteClientActivity();
+    DEV_TRACE(PocketDaily::DevTrace::RENDER_REQ);
     requestRepaint();
     server->send(204, "text/plain", "");
+  });
+  // Developer builds only: dump the live-studio trace ring (text lines
+  // "ms tag aux"), oldest first. A gap between heartbeats is the stall.
+  server->on("/api/pocket/v1/dev/live-debug", HTTP_GET, [this] {
+    noteClientActivity();
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "text/plain", "");
+    static const char* names[] = {"HEARTBEAT",    "RENDER_START", "RENDER_DONE", "CAPTURE_ENTER", "CAPTURE_WRITE",
+                                  "CAPTURE_DONE", "SEND_START",   "SEND_DONE",   "RENDER_REQ",    "TICK"};
+    const size_t next = PocketDaily::DevTrace::gNext.load();
+    char line[48];
+    for (size_t k = 0; k < PocketDaily::DevTrace::CAPACITY; k++) {
+      const auto& e = PocketDaily::DevTrace::gEntries[(next + k) % PocketDaily::DevTrace::CAPACITY];
+      if (e.tag == 0 && e.ms == 0) continue;
+      snprintf(line, sizeof(line), "%lu %s %u", static_cast<unsigned long>(e.ms),
+               e.tag < sizeof(names) / sizeof(names[0]) ? names[e.tag] : "?", e.aux);
+      server->sendContent(line);
+      server->sendContent("\n");
+    }
+    server->sendContent("");
   });
 #endif
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
@@ -470,6 +493,14 @@ void CrossPointWebServer::stop() {
 
 void CrossPointWebServer::handleClient() {
   static unsigned long lastDebugPrint = 0;
+  static unsigned long lastTraceHeartbeat = 0;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  // Dev trace heartbeat: a missing heartbeat in the dump is the stall window.
+  if (millis() - lastTraceHeartbeat >= 1000) {
+    lastTraceHeartbeat = millis();
+    DEV_TRACE(PocketDaily::DevTrace::HEARTBEAT);
+  }
+#endif
 
   // Check running flag FIRST before accessing server
   if (!running) {
@@ -1046,7 +1077,9 @@ String CrossPointWebServer::buildStatusJson() const {
 
 void CrossPointWebServer::sendLiveStudioLine(const char* line) {
   if (!wsServer || !liveStudioPush) return;
+  DEV_TRACE(PocketDaily::DevTrace::SEND_START);
   wsServer->broadcastTXT(line);
+  DEV_TRACE(PocketDaily::DevTrace::SEND_DONE);
 }
 
 void CrossPointWebServer::pushLiveStudioStatusIfChanged() {
@@ -1057,6 +1090,7 @@ void CrossPointWebServer::pushLiveStudioStatusIfChanged() {
   const uint32_t now = millis();
   if (static_cast<uint32_t>(now - liveStudioLastCheckMs) < 1000) return;
   liveStudioLastCheckMs = now;
+  DEV_TRACE(PocketDaily::DevTrace::TICK);
 
   // Fast-moving fields (uptime, rssi, freeHeap) do not trigger a send; the
   // signature covers the stable identity/capability fields the studio reacts
