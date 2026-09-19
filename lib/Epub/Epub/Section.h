@@ -127,6 +127,23 @@ class Section {
   void suspendBuild();
   // True when a partial file was loaded: pageCount is a watermark, not the chapter total.
   bool isPartial() const { return partial_; }
+  // True while a rebuild over a loaded partial has not yet laid out more pages than the
+  // partial covers. pageCount stays pinned at the partial's watermark during that phase, so
+  // a caller pacing the background build on pageCount alone would stall right at the
+  // watermark and then have to rebuild the whole prefix synchronously on the next turn.
+  bool isCatchingUp() const { return build_ && partial_ && builtPageCount_ <= partialPageCount_; }
+  // True when pages beyond pageCount may still exist: a build is running, or a suspended
+  // partial's watermark trailer shows unparsed bytes remain. Distinguishes "the chapter
+  // continues past this watermark" from "this is the chapter's last page", which decides
+  // whether a forward turn extends the build or moves to the next spine.
+  bool mayHaveMorePages() const {
+    if (build_) return true;
+    return partial_ && partialBytesConsumed_ < partialTotalBytes_;
+  }
+  // True when a bilingual view-mode change cannot alter this section's layout: either the
+  // committed cache is mode-agnostic, or the in-progress parse has not met a bilingual marker
+  // yet (every page laid out so far is identical in every mode).
+  bool currentlyModeAgnostic() const;
 
   // Unified page read: from the active build if it has reached the page, otherwise from
   // the on-disk file (finalized section, or a partial the rebuild hasn't caught up to).

@@ -190,7 +190,12 @@ void ChapterHtmlSlimParser::flushPendingAnchor() {
     if (currentPage && !currentPage->elements.empty()) {
       completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex);
       completedPageCount++;
-      currentPage.reset(new Page());
+      currentPage.reset(new (std::nothrow) Page());
+      if (!currentPage) {
+        LOG_ERR("EHP", "OOM: page after TOC boundary break");
+        outOfMemory_ = true;
+        return;
+      }
       currentPageNextY = 0;
     }
   }
@@ -254,7 +259,13 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   // If the pending anchor is a TOC chapter boundary, force a page break after the previous
   // block is flushed so the chapter starts on a fresh page.
   flushPendingAnchor();
-  currentTextBlock.reset(new ParsedText(extraParagraphSpacing, hyphenationEnabled, focusReadingEnabled, blockStyle));
+  currentTextBlock.reset(new (std::nothrow)
+                             ParsedText(extraParagraphSpacing, hyphenationEnabled, focusReadingEnabled, blockStyle));
+  if (!currentTextBlock) {
+    LOG_ERR("EHP", "OOM: ParsedText block");
+    outOfMemory_ = true;
+    return;
+  }
   wordsExtractedInBlock = 0;
 }
 
@@ -731,16 +742,18 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                   self->completePageFn(std::move(self->currentPage), self->xpathParagraphIndex,
                                        self->xpathListItemIndex);
                   self->completedPageCount++;
-                  self->currentPage.reset(new Page());
+                  self->currentPage.reset(new (std::nothrow) Page());
                   if (!self->currentPage) {
-                    LOG_ERR("EHP", "Failed to create new page");
+                    LOG_ERR("EHP", "OOM: page after image break");
+                    self->outOfMemory_ = true;
                     return;
                   }
                   self->currentPageNextY = 0;
                 } else if (!self->currentPage) {
-                  self->currentPage.reset(new Page());
+                  self->currentPage.reset(new (std::nothrow) Page());
                   if (!self->currentPage) {
-                    LOG_ERR("EHP", "Failed to create initial page");
+                    LOG_ERR("EHP", "OOM: initial page for image");
+                    self->outOfMemory_ = true;
                     return;
                   }
                   self->currentPageNextY = 0;
@@ -1429,6 +1442,13 @@ ChapterHtmlSlimParser::ParseStatus ChapterHtmlSlimParser::parseStep() {
     return ParseStatus::Error;
   }
 
+  // An allocation failed inside a handler: fail the build rather than commit a cache that
+  // silently omits the text those handlers could not lay out.
+  if (outOfMemory_) {
+    LOG_ERR("EHP", "Aborting parse: layout ran out of heap");
+    return ParseStatus::Error;
+  }
+
   return done ? ParseStatus::Done : ParseStatus::More;
 }
 
@@ -1464,7 +1484,7 @@ bool ChapterHtmlSlimParser::finishParse() {
     currentTextBlock.reset();
   }
 
-  return true;
+  return !outOfMemory_;
 }
 
 bool ChapterHtmlSlimParser::parseAndBuildPages() {
@@ -1488,14 +1508,24 @@ void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
   const int lineHeight = renderer.getLineHeight(fontId) * lineCompression;
 
   if (!currentPage) {
-    currentPage.reset(new Page());
+    currentPage.reset(new (std::nothrow) Page());
+    if (!currentPage) {
+      LOG_ERR("EHP", "OOM: first page of block");
+      outOfMemory_ = true;
+      return;
+    }
     currentPageNextY = 0;
   }
 
   if (currentPageNextY + lineHeight > viewportHeight) {
     completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex);
     completedPageCount++;
-    currentPage.reset(new Page());
+    currentPage.reset(new (std::nothrow) Page());
+    if (!currentPage) {
+      LOG_ERR("EHP", "OOM: page after line break");
+      outOfMemory_ = true;
+      return;
+    }
     currentPageNextY = 0;
   }
 
@@ -1510,7 +1540,15 @@ void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
 
   // Apply horizontal left inset (margin + padding) as x position offset
   const int16_t xOffset = line->getBlockStyle().leftInset();
-  currentPage->elements.push_back(std::make_shared<PageLine>(line, xOffset, currentPageNextY));
+  // Not make_shared: with -fno-exceptions a failed allocation aborts the device instead of
+  // reporting, and this runs once per rendered line -- the densest allocation in layout.
+  auto pageLine = std::shared_ptr<PageLine>(new (std::nothrow) PageLine(line, xOffset, currentPageNextY));
+  if (!pageLine) {
+    LOG_ERR("EHP", "OOM: PageLine");
+    outOfMemory_ = true;
+    return;
+  }
+  currentPage->elements.push_back(std::move(pageLine));
   currentPageNextY += lineHeight;
 }
 
@@ -1521,7 +1559,12 @@ void ChapterHtmlSlimParser::makePages() {
   }
 
   if (!currentPage) {
-    currentPage.reset(new Page());
+    currentPage.reset(new (std::nothrow) Page());
+    if (!currentPage) {
+      LOG_ERR("EHP", "OOM: page for block layout");
+      outOfMemory_ = true;
+      return;
+    }
     currentPageNextY = 0;
   }
 

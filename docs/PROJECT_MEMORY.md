@@ -129,8 +129,64 @@ Clone both repositories as siblings (`pocket-daily-firmware` next to
 4. Open items: X4 hardware sign-off, the private hotspot path is a fallback
    (weak-signal sensitive), and `platformio.local.ini` is machine-local.
 
+## Reader freeze and abort on a rebuilt partial section — 2026-09-08
+
+Symptom on an X3 running `1.4.1-dev-main-551001f5`: a multi-chapter novel
+stopped responding to forward page turns at `~63/125`, and a long-press Confirm
+then rebooted the device. The retained crash report showed `Reset reason: panic`
+/ `abort() was called`, with the last log lines laying out pages 58-63 followed
+by a 4,005 ms tiled grayscale render.
+
+Cause, in the v130 incremental-build path:
+
+- `Section::startBuild` pins `pageCount` to a loaded partial's watermark until
+  the rebuild lays out *more* pages than the partial covers. The reader's
+  background pump in `EpubReaderActivity::loop()` only ticked while
+  `pageCount < currentPage + BUILD_WINDOW_AHEAD`, which is false during that
+  catch-up phase, so the rebuild never advanced in the background. Reaching the
+  watermark then forced `render()` to re-lay the whole 63-page prefix
+  synchronously while holding the RenderLock — seconds of no response to the
+  page-turn button.
+- That re-parse keeps expat, the CSS parser, the page LUT, and the live
+  `ParsedText`/`Page` alive across the reading path's own peak (tiled grayscale
+  render + font prewarm). Layout allocated pages and lines with bare `new` /
+  `std::make_shared`, which with `-fno-exceptions` calls `abort()` instead of
+  returning null. That is the reboot.
+- The default `longPressMenuFunction` is `LP_MENU_BILINGUAL_TOGGLE`, so an
+  ordinary long press ran `cycleBilingualMode()`. It dropped the section
+  whenever the *committed* cache was not tagged mode-agnostic — which a partial
+  never was — forcing yet another full re-parse of a monolingual chapter at the
+  worst moment.
+
+Fixes (verified: `pio run -e default`, strict `pio check`, 131/131 host tests):
+
+- `Section::isCatchingUp()` / `mayHaveMorePages()`. The background pump keeps
+  ticking through the catch-up phase, so the rebuild passes the watermark before
+  the reader arrives. `mayHaveMorePages()` reads the partial's watermark trailer
+  so a forward turn at a suspended build's last page still moves to the next
+  spine instead of stalling.
+- Heap floor `BUILD_MIN_FREE_BLOCK` (12 KB largest free block): the reader
+  suspends the build — persisting it as a partial and freeing the parser —
+  before a render can hit an exhausted heap. Guarded on `pageCount > 0` so a
+  suspend never drops the section below the page being read.
+- Every page/line/block allocation in `ChapterHtmlSlimParser` is now
+  `new (std::nothrow)` with a null check that sets `outOfMemory_`.
+  `parseStep()`/`finishParse()` turn that into a hard parse error and
+  `Section::finalizeBuild()` abandons rather than committing a cache that
+  silently drops text.
+- A parse that has not met a bilingual marker is tagged `BILINGUAL_MODE_ANY`
+  even when suspended as a partial, and `cycleBilingualMode()` consults the live
+  parse via `currentlyModeAgnostic()`. Pages before the first marker are
+  layout-identical in every mode and the rebuild re-derives them, so this is
+  safe without a `SECTION_FILE_VERSION` bump: the binary layout is unchanged and
+  both firmware directions read the field correctly.
+
+Not yet verified on hardware: the reader was not reflashed with this build, so
+the freeze and the abort are fixed in code review and host tests only.
+
 ## Maintenance
 
 Record only durable decisions, verified baselines, protocol contracts, and
 release evidence. Date mutable facts, name their source of truth, and replace
 stale notes rather than accumulating contradictions.
+

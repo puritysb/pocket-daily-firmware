@@ -111,6 +111,10 @@ class ChapterHtmlSlimParser {
   XML_Parser xmlParser_ = nullptr;
   HalFile parseFile_;
   uint32_t parseStartTime_ = 0;
+  // Set when a page/line/block allocation returned null. The expat callbacks cannot
+  // propagate a failure, so they record it here and parseStep()/finishParse() turn it into
+  // a hard parse error. Dropping the line instead would silently lose text from the book.
+  bool outOfMemory_ = false;
 
   void updateEffectiveInlineStyle();
   void startNewTextBlock(const BlockStyle& blockStyle);
@@ -175,6 +179,9 @@ class ChapterHtmlSlimParser {
   ParseStatus parseStep();
   bool finishParse();  // flush the trailing page and tear down; returns true
   void abortParse();   // tear down without flushing (error / abandon)
+  // True when layout ran out of heap. The caller must treat the section as failed rather
+  // than commit a cache that is missing content.
+  bool hitOutOfMemory() const { return outOfMemory_; }
   void addLineToPage(std::shared_ptr<TextBlock> line);
   const std::vector<std::pair<std::string, uint16_t>>& getAnchors() const { return anchorData; }
 

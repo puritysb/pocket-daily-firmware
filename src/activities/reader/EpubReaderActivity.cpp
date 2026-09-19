@@ -245,8 +245,13 @@ void EpubReaderActivity::loop() {
   // reopen comes from suspendBuild() persisting the laid-out pages as a partial on exit.
   // Skip while the render mutex is busy so we never delay a pending render; re-check
   // isBuilding() under the lock since render() may have just finished it.
+  // A rebuild over a loaded partial re-parses from the top while pageCount stays pinned at the
+  // partial's watermark, so the window test alone would not start it until the reader was
+  // within BUILD_WINDOW_AHEAD of the watermark and would then have to lay out the whole prefix
+  // synchronously on the next turn (several seconds of no response on a 60-page prefix). Keep
+  // ticking until the rebuild has passed the watermark, then fall back to the window.
   if (section && section->isBuilding() && !RenderLock::peek() &&
-      static_cast<int>(section->pageCount) < section->currentPage + BUILD_WINDOW_AHEAD) {
+      (section->isCatchingUp() || static_cast<int>(section->pageCount) < section->currentPage + BUILD_WINDOW_AHEAD)) {
     RenderLock lock;
     // Re-check under the lock: render() (which also holds the RenderLock) may have finalized the
     // build between the outer isBuilding() check and acquiring the lock here, in which case
@@ -256,12 +261,21 @@ void EpubReaderActivity::loop() {
     if (section->isBuilding()) {
       if (!section->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK)) {
         LOG_ERR("ERS", "Background section build failed");
+        // Keep the reader where it is: render() reloads at nextPageNumber, which still holds
+        // the page the section was opened on, not the page being read.
+        nextPageNumber = section->currentPage;
         section.reset();
         requestUpdate();
       } else if (section->isBuildComplete() && applyDeferredReposition()) {
         // The chapter re-paginated since the saved progress (settings changed): we now know the
         // real page count, so re-render at the remapped page. No-op for an unchanged resume.
         requestUpdate();
+      } else if (section->isBuilding() && section->pageCount > 0 && ESP.getMaxAllocHeap() < BUILD_MIN_FREE_BLOCK) {
+        // Heap floor: persist what is built and free the parser before a render can abort.
+        // Guarded on pageCount > 0 so a suspend can never drop the section below the page
+        // being read (suspendBuild keeps the larger of this build and any loaded partial).
+        LOG_INF("ERS", "Suspending section build: largest free block %u B", (unsigned)ESP.getMaxAllocHeap());
+        section->suspendBuild();
       }
     }
   }
@@ -839,11 +853,13 @@ void EpubReaderActivity::cycleBilingualMode() {
   bilingualMessageTime = millis();
   {
     RenderLock lock(*this);
-    if (section && section->bilingualModeAgnostic) {
-      // Chapter has no bilingual markers: its layout is identical in every mode and the
-      // section cache stores BILINGUAL_MODE_ANY, so keep the section (and the reading
-      // position) and only show the mode popup. Marker-bearing chapters elsewhere in the
-      // book still rebuild lazily on navigation via the header mode check.
+    if (section && section->currentlyModeAgnostic()) {
+      // No bilingual marker in this chapter so far (finalized cache tagged
+      // BILINGUAL_MODE_ANY, or an in-progress parse that has not met one): its layout is
+      // identical in every mode, so keep the section (and the reading position) and only
+      // show the mode popup. Dropping it here forced a full re-parse of a monolingual chapter
+      // on every accidental long press, with the parser state then held across the next
+      // render. Marker-bearing chapters still rebuild lazily via the header mode check.
     } else {
       // Drop the current section so the next render re-parses with the new mode; the
       // header mode check invalidates the on-disk cache. Preserve the reading position
@@ -867,7 +883,11 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     // beyond the current watermark and render()'s ensure-built pump will lay them out. Only when
     // the section is fully built AND we're on its last page do we move to the next spine -- using
     // the live pageCount alone would mistake the build watermark for the end of a giant spine.
-    if (section->currentPage < section->pageCount - 1 || section->isBuilding()) {
+    // A partial whose build was suspended (heap floor) also has pages beyond pageCount:
+    // render()'s partial-extension loop restarts the build to reach them. Its watermark
+    // trailer says whether unparsed bytes remain, so a suspended build at the true end of a
+    // chapter still advances to the next spine instead of stalling on the last page.
+    if (section->currentPage < section->pageCount - 1 || section->mayHaveMorePages()) {
       section->currentPage++;
     } else {
       // We don't want to delete the section mid-render, so grab the semaphore

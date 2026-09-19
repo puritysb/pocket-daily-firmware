@@ -450,6 +450,13 @@ bool Section::buildSomeMore(const int maxPages) {
   }
 }
 
+bool Section::currentlyModeAgnostic() const {
+  if (build_ && build_->parser) {
+    return !build_->parser->sawBilingualMarkers();
+  }
+  return bilingualModeAgnostic;
+}
+
 bool Section::hasHtmlCache() const {
   const std::string htmlPath = epub->getCachePath() + "/html/" + std::to_string(spineIndex) + ".html";
   return Storage.exists(htmlPath.c_str());
@@ -571,9 +578,13 @@ bool Section::commitBuildFile(const uint8_t version, const uint32_t bytesConsume
     serialization::writePod(file, totalBytes);
   }
 
-  // A partial can stop before a later bilingual marker, so only a completed parse may
-  // declare the section mode-agnostic. Partial caches retain the requested mode.
-  bilingualModeAgnostic = !asPartial && !build_->parser->sawBilingualMarkers();
+  // Pages laid out before the first bilingual marker are identical in every view mode, so a
+  // parse that has not met a marker yet -- finalized or suspended as a partial -- is
+  // mode-agnostic. A partial tagged this way stays valid across a mode toggle: the rebuild
+  // over it re-parses from the top in the new mode and reproduces the same marker-free
+  // prefix, then continues in the requested mode. Once a marker has been seen the cache
+  // retains the mode it was built in.
+  bilingualModeAgnostic = !build_->parser->sawBilingualMarkers();
   const uint8_t effectiveBilingualMode = bilingualModeAgnostic ? BILINGUAL_MODE_ANY : build_->bilingualViewMode;
 
   // Patch the effective bilingual mode, built page count, and section offsets.
@@ -606,7 +617,13 @@ bool Section::commitBuildFile(const uint8_t version, const uint32_t bytesConsume
 
 bool Section::finalizeBuild() {
   // Flush the trailing page (emits the last page via the completePageFn into the LUT).
-  build_->parser->finishParse();
+  // A false return means layout ran out of heap, so the page set is incomplete: abandon
+  // rather than commit a cache that silently drops the text it could not lay out.
+  if (!build_->parser->finishParse()) {
+    LOG_ERR("SCT", "Layout failed while finalizing; abandoning build");
+    abandonBuild();
+    return false;
+  }
 
   if (!build_->reusedHtml) {
     // Parse succeeded: promote the freshly unzipped HTML to the persistent cache so future

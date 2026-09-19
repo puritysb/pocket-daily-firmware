@@ -89,6 +89,14 @@ class EpubReaderActivity final : public Activity {
   // in one sitting -- instant reopen comes from Section::suspendBuild() persisting the pages
   // already laid out as a partial file on exit/sleep.
   static constexpr int BUILD_WINDOW_AHEAD = 5;
+  // An in-progress build keeps its expat parser, CSS parser, and page table alive across
+  // renders; that state used to be freed before any page was drawn. When the largest free
+  // block drops below this after a background tick, the build is suspended (persisted as a
+  // partial, parser freed) so the next grayscale render or progress save cannot hit a bare
+  // `new` on an exhausted heap, which aborts the device (X3 crash report 2026-09-06: abort()
+  // right after a 4 s tiled render that followed a full-chapter re-parse). Forward turns past
+  // the watermark restart the build from the partial.
+  static constexpr size_t BUILD_MIN_FREE_BLOCK = 12 * 1024;
   // Show the indexing popup when an initial build must lay out more than this many pages up front
   // (a deep resume/jump into a not-yet-built section), so it isn't a silent wait. Kept independent
   // of the small look-ahead window so ordinary landings stay popup-free.
