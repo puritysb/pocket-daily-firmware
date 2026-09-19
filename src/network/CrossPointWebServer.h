@@ -12,6 +12,7 @@
 #include <string>
 
 #include "pocket_daily/direct_session.h"
+#include "pocket_daily/live_studio/LiveStudioEvents.h"
 
 enum class CrossPointWebServerProfile : uint8_t {
   FULL,
@@ -169,6 +170,21 @@ class CrossPointWebServer {
   void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
   static void wsEventCallback(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
   void abortWsUpload(const char* tag);
+
+  // Live Studio v1 (`docs/live-studio-v1.md`): the WebSocket doubles as an
+  // event push channel on STA when heap allows. `liveStudioPush` records
+  // that the listener can serve events; the subscription, change signature,
+  // and send pacing are per-connection state kept out of the wire module.
+  bool liveStudioPush = false;
+  bool liveStudioSubscribed = false;
+  bool liveStudioClientAttached = false;
+  uint32_t liveStudioLastSendMs = 0;
+  uint32_t liveStudioLastCheckMs = 0;
+  uint32_t liveStudioLastSignatureMs = 0;
+  char liveStudioSignature[128] = {};
+  String buildStatusJson() const;
+  void sendLiveStudioLine(const char* line);
+  void pushLiveStudioStatusIfChanged();
 
   // File scanning
   void scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const;

@@ -50,6 +50,7 @@ add_subdirectory(agentdeck_glance)
 add_subdirectory(pocket_daily_identity)
 add_subdirectory(pocket_daily_learning_pack)
 add_subdirectory(pocket_daily_upload_stream)
+add_subdirectory(live_studio)
 add_subdirectory(games)
 
 add_subdirectory(opds_parser)

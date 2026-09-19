@@ -215,6 +215,27 @@ verified baseline.
   `libpdui_host.a` with provenance — an approved exception to the
   no-binaries-cross boundary rule for this one artifact.
 
+## LS-1 live-studio event push — 2026-09-19
+
+- `src/pocket_daily/live_studio/LiveStudioEvents.{h,cpp}` implements the
+  pure event protocol (hello/status/prefs/bye encoders, subscribe/unsubscribe/
+  ping parser with interval clamping, `shouldCaptureFrame` policy) and is
+  host-tested in `test/live_studio/`.
+- `CrossPointWebServer` starts the WebSocket on STA when free heap ≥ 40 KB
+  (`liveStudioPush`), sends `hello` on connect, pushes the full status JSON
+  on stable-field change (15 s keepalive, 500 ms spacing), broadcasts
+  `prefs` after a preferences POST, and `bye` on stop. Legacy binary/START
+  upload frames are now FULL-profile only. `/api/status` advertises
+  `liveStudio {mode, wsPort, frameStream:false, uiPacks:false}`.
+- Verified: default build, strict cppcheck, 147/147 host tests. Physical X3
+  push behavior (subscribe + status push while reading) is pending hardware
+  sign-off; the app-side consumer landed as M1 in `pocket-daily`.
+- Toolchain note: the registry `tool-cppcheck` package for darwin_arm64
+  ships an Intel-only binary (`Bad CPU type`). The native 2.11 build now
+  persists at ignored `build/native-cppcheck` and
+  `pio check -c build/native-check.ini` points there — temp-dir overrides
+  get wiped between sessions.
+
 ## Multi-agent collaboration — 2026-09-19
 
 - OpenCode, Claude Code, and Codex all work in this repository and in the

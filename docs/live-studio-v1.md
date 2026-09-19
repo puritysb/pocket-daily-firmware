@@ -37,7 +37,10 @@ definition-driven.
 Reader → app:
 
 - `hello` — `{proto:"live-studio/1", deviceID, version, caps}` on connect.
-- `status` — delta of `/api/status` fields; sent on change, min 500 ms apart.
+- `status` — the full `/api/status` body, embedded verbatim under `status`.
+  Sent when a stable field changes (identity, mode, capabilities; uptime,
+  rssi, and freeHeap do not trigger a send) with a minimum 500 ms spacing,
+  plus a 15 s keepalive that refreshes the live values.
 - `frame` — `{seq, bytes, sha256}` notification only. The image body is
   fetched over HTTP (below), reusing the proven chunked transport instead of
   WS binary framing.

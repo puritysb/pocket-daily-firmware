@@ -325,11 +325,13 @@ void CrossPointWebServer::begin() {
     LOG_ERR("WEB", "Could not allocate Pocket upload stream listener");
   }
 
-  if (profile == CrossPointWebServerProfile::FULL) {
-    // The generic browser/File Transfer surface keeps its legacy WebSocket.
-    // Pocket's private AP uses verified HTTP commits and skips this second
-    // listener, preserving contiguous heap on X3.
-    LOG_DBG("WEB", "Starting WebSocket server on port %d...", wsPort);
+  // The generic browser/File Transfer surface keeps its legacy WebSocket
+  // upload surface. On STA the same listener additionally serves Live Studio
+  // v1 event push when heap allows (`docs/live-studio-v1.md`); the private
+  // AP stays poll-only to preserve contiguous heap on X3.
+  liveStudioPush = !apMode && ESP.getFreeHeap() >= PocketDaily::LiveStudio::kMinListenerFreeHeap;
+  if (profile == CrossPointWebServerProfile::FULL || liveStudioPush) {
+    LOG_DBG("WEB", "Starting WebSocket server on port %d (liveStudioPush=%d)...", wsPort, liveStudioPush);
     wsServer = makeUniqueNoThrow<WebSocketsServer>(wsPort);
     if (wsServer) {
       wsInstance = const_cast<CrossPointWebServer*>(this);
@@ -337,6 +339,7 @@ void CrossPointWebServer::begin() {
       wsServer->onEvent(wsEventCallback);
       LOG_DBG("WEB", "WebSocket server started");
     } else {
+      liveStudioPush = false;
       LOG_ERR("WEB", "Could not allocate WebSocket server; HTTP File Transfer remains available");
     }
   }
@@ -353,7 +356,9 @@ void CrossPointWebServer::begin() {
   // Show the correct IP based on network mode
   const String ipAddr = apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString();
   LOG_DBG("WEB", "Access at http://%s/", ipAddr.c_str());
-  if (profile == CrossPointWebServerProfile::FULL) LOG_DBG("WEB", "WebSocket at ws://%s:%d/", ipAddr.c_str(), wsPort);
+  if (profile == CrossPointWebServerProfile::FULL || liveStudioPush) {
+    LOG_DBG("WEB", "WebSocket at ws://%s:%d/ (liveStudioPush=%d)", ipAddr.c_str(), wsPort, liveStudioPush);
+  }
   LOG_DBG("WEB", "[MEM] Free heap after server.begin(): %d bytes", ESP.getFreeHeap());
 }
 
@@ -399,9 +404,18 @@ void CrossPointWebServer::stop() {
   // Stop WebSocket server
   if (wsServer) {
     LOG_DBG("WEB", "Stopping WebSocket server...");
+    if (liveStudioPush) {
+      // Best-effort notice so a studio client distinguishes an intentional
+      // stop (mode change, shutdown) from a dropped link.
+      char bye[32];
+      if (PocketDaily::LiveStudio::encodeBye(bye, sizeof(bye))) wsServer->broadcastTXT(bye);
+    }
     wsServer->close();
     wsServer.reset();
     wsInstance = nullptr;
+    liveStudioPush = false;
+    liveStudioClientAttached = false;
+    liveStudioSubscribed = false;
     LOG_DBG("WEB", "WebSocket server stopped");
   }
 
@@ -455,6 +469,9 @@ void CrossPointWebServer::handleClient() {
   // Handle WebSocket events
   if (wsServer) {
     wsServer->loop();
+    if (liveStudioPush && liveStudioSubscribed) {
+      pushLiveStudioStatusIfChanged();
+    }
   }
 
   // Respond to discovery broadcasts
@@ -925,7 +942,9 @@ void CrossPointWebServer::handleNotFound() const {
   server->send(404, "text/plain", message);
 }
 
-void CrossPointWebServer::handleStatus() const {
+void CrossPointWebServer::handleStatus() const { server->send(200, "application/json", buildStatusJson()); }
+
+String CrossPointWebServer::buildStatusJson() const {
   // Get correct IP based on AP vs STA mode
   const String ipAddr = apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString();
 
@@ -953,16 +972,17 @@ void CrossPointWebServer::handleStatus() const {
   }
   const bool affordable = diagnosticsAffordable();
   doc["diagnosticsAffordable"] = affordable;
+  bool screenPreviewAvailable = false;
+  int screenPreviewBytes = 0;
   if (profile == CrossPointWebServerProfile::POCKET_SYNC && affordable &&
       Storage.exists(PocketDaily::SCREEN_PREVIEW_PATH)) {
     HalFile preview = Storage.open(PocketDaily::SCREEN_PREVIEW_PATH);
-    doc["screenPreviewAvailable"] = static_cast<bool>(preview) && !preview.isDirectory();
-    doc["screenPreviewBytes"] = preview ? preview.size() : 0;
+    screenPreviewAvailable = static_cast<bool>(preview) && !preview.isDirectory();
+    screenPreviewBytes = preview ? preview.size() : 0;
     if (preview) preview.close();
-  } else {
-    doc["screenPreviewAvailable"] = false;
-    doc["screenPreviewBytes"] = 0;
   }
+  doc["screenPreviewAvailable"] = screenPreviewAvailable;
+  doc["screenPreviewBytes"] = screenPreviewBytes;
   if (affordable && Storage.exists("/crash_report.txt")) {
     HalFile report = Storage.open("/crash_report.txt");
     doc["crashReportAvailable"] = static_cast<bool>(report);
@@ -972,10 +992,58 @@ void CrossPointWebServer::handleStatus() const {
     doc["crashReportAvailable"] = false;
     doc["crashReportBytes"] = 0;
   }
+  // Live Studio v1 capability advertisement. Absent on older firmware; the
+  // companion treats a missing object as a legacy poll-only reader.
+  {
+    JsonObject live = doc["liveStudio"].to<JsonObject>();
+    live["mode"] = liveStudioPush ? "push" : "poll";
+    if (liveStudioPush) live["wsPort"] = wsPort;
+    live["frameStream"] = false;  // LS-2: throttled screen-live capture
+    live["uiPacks"] = false;      // LS-3: .uipack apply
+    live["activePack"] = nullptr;
+    live["activePackVersion"] = nullptr;
+  }
 
   String json;
   serializeJson(doc, json);
-  server->send(200, "application/json", json);
+  return json;
+}
+
+void CrossPointWebServer::sendLiveStudioLine(const char* line) {
+  if (!wsServer || !liveStudioPush) return;
+  wsServer->broadcastTXT(line);
+}
+
+void CrossPointWebServer::pushLiveStudioStatusIfChanged() {
+  if (!liveStudioClientAttached) return;
+  const uint32_t now = millis();
+  if (static_cast<uint32_t>(now - liveStudioLastCheckMs) < 1000) return;
+  liveStudioLastCheckMs = now;
+
+  // Fast-moving fields (uptime, rssi, freeHeap) do not trigger a send; the
+  // signature covers the stable identity/capability fields the studio reacts
+  // to. A periodic keepalive re-pushes the full status including live values.
+  // Preview/session-end fields never vary in push mode (STA), so they stay
+  // out of the signature.
+  char signature[128];
+  char deviceId[9];
+  snprintf(deviceId, sizeof(deviceId), "%08lX", static_cast<unsigned long>(ESP.getEfuseMac() & 0xFFFFFFFFUL));
+  snprintf(signature, sizeof(signature), "%s|%s|%s|%s|%d", CROSSPOINT_VERSION, apMode ? "AP" : "STA",
+           gpio.deviceIsX3() ? "X3" : "X4", deviceId, pocketUploadServer ? 1 : 0);
+  const bool changed = strcmp(signature, liveStudioSignature) != 0;
+  const bool keepalive =
+      static_cast<uint32_t>(now - liveStudioLastSignatureMs) >= PocketDaily::LiveStudio::kKeepaliveIntervalMs;
+  const bool spaced =
+      static_cast<uint32_t>(now - liveStudioLastSendMs) >= PocketDaily::LiveStudio::kMinStatusIntervalMs;
+  if ((!changed && !keepalive) || !spaced) return;
+
+  const String json = buildStatusJson();
+  char event[1024];
+  if (!PocketDaily::LiveStudio::encodeStatusEvent(event, sizeof(event), json.c_str())) return;
+  sendLiveStudioLine(event);
+  strlcpy(liveStudioSignature, signature, sizeof(liveStudioSignature));
+  liveStudioLastSendMs = now;
+  liveStudioLastSignatureMs = now;
 }
 
 void CrossPointWebServer::handleCrashReport() const {
@@ -2221,6 +2289,12 @@ void CrossPointWebServer::handlePostPocketPreferences() {
   }
   server->sendHeader("Connection", "close");
   server->send(200, "application/json", "{\"saved\":true}");
+  // Tell a subscribed live-studio client that preferences changed so it can
+  // refetch without waiting for its next poll.
+  if (liveStudioPush && liveStudioSubscribed) {
+    char prefs[48];
+    if (PocketDaily::LiveStudio::encodePrefsChanged(prefs, sizeof(prefs))) sendLiveStudioLine(prefs);
+  }
 }
 
 // ---- OPDS Server API ----
@@ -2490,6 +2564,8 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
   switch (type) {
     case WStype_DISCONNECTED:
       LOG_DBG("WS", "Client %u disconnected", num);
+      liveStudioClientAttached = false;
+      liveStudioSubscribed = false;
       // Only clean up if this is the client that owns the active upload.
       // A new client may have already started a fresh upload before this
       // DISCONNECTED event fires (race condition on quick cancel + retry).
@@ -2500,10 +2576,53 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
 
     case WStype_CONNECTED: {
       LOG_DBG("WS", "Client %u connected", num);
+      if (liveStudioPush) {
+        liveStudioClientAttached = true;
+        char deviceId[9];
+        snprintf(deviceId, sizeof(deviceId), "%08lX", static_cast<unsigned long>(ESP.getEfuseMac() & 0xFFFFFFFFUL));
+        char hello[192];
+        if (PocketDaily::LiveStudio::encodeHello(hello, sizeof(hello), deviceId, CROSSPOINT_VERSION)) {
+          wsServer->sendTXT(num, hello);
+        }
+      }
       break;
     }
 
     case WStype_TEXT: {
+      // Live Studio v1 control messages are JSON objects; the legacy upload
+      // grammar is line-based and never starts with '{'. JSON wins on every
+      // profile so a browser client cannot trigger upload state off-profile.
+      if (length > 0 && payload[0] == '{') {
+        PocketDaily::LiveStudio::Subscription subscription;
+        switch (PocketDaily::LiveStudio::parseClientMessage(reinterpret_cast<const char*>(payload), length,
+                                                            &subscription)) {
+          case PocketDaily::LiveStudio::ClientMessage::Subscribe:
+            liveStudioSubscribed = true;
+            liveStudioClientAttached = true;
+            // Snapshot immediately: the studio should not wait for a change
+            // to learn the current state.
+            liveStudioLastCheckMs = 0;
+            liveStudioLastSignatureMs = 0;
+            liveStudioSignature[0] = '\0';
+            LOG_DBG("WS", "Live studio subscribed (frames=%d minIntervalMs=%lu)", subscription.frames,
+                    static_cast<unsigned long>(subscription.minIntervalMs));
+            pushLiveStudioStatusIfChanged();
+            break;
+          case PocketDaily::LiveStudio::ClientMessage::Unsubscribe:
+            liveStudioSubscribed = false;
+            break;
+          case PocketDaily::LiveStudio::ClientMessage::Ping: {
+            char pong[32];
+            if (PocketDaily::LiveStudio::encodePong(pong, sizeof(pong))) wsServer->sendTXT(num, pong);
+            break;
+          }
+          case PocketDaily::LiveStudio::ClientMessage::None:
+            break;
+        }
+        break;
+      }
+      if (profile != CrossPointWebServerProfile::FULL) break;
+
       // Parse control messages
       String msg = String((char*)payload);
       LOG_DBG("WS", "Text from client %u: %s", num, msg.c_str());
@@ -2595,6 +2714,8 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
     }
 
     case WStype_BIN: {
+      // The binary upload path belongs to the legacy browser surface only.
+      if (profile != CrossPointWebServerProfile::FULL) break;
       if (!wsUploadInProgress || !wsUploadFile || num != wsUploadClientNum) {
         wsServer->sendTXT(num, "ERROR:No upload in progress");
         return;
