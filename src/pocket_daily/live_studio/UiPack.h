@@ -6,7 +6,7 @@
 // .uipack v1 container (docs/live-studio-v1.md). Pure parsing/validation with
 // no Arduino types so the host suite exercises it. Layout (little-endian):
 //
-// Header (100 bytes):
+// Header (120 bytes):
 //   magic[4] "PDUI", version u8 = 1, reserved u8 x3,
 //   name char[32] (NUL-padded), packVersion char[16], minFirmware char[16],
 //   themeOverrides u16, strings u16, assets u16, reserved u16,
@@ -20,7 +20,7 @@
 //     crc32 u32, bytes
 namespace PocketDaily::LiveStudio {
 
-inline constexpr uint8_t UIPACK_HEADER_SIZE = 100;
+inline constexpr uint8_t UIPACK_HEADER_SIZE = 120;
 inline constexpr size_t UIPACK_MAX_THEME_OVERRIDES = 96;
 inline constexpr size_t UIPACK_MAX_STRINGS = 32;
 inline constexpr size_t UIPACK_MAX_ASSETS = 2;

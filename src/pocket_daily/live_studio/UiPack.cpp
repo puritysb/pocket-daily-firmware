@@ -41,11 +41,11 @@ UiPackResult validatePack(const uint8_t* data, size_t size, UiPackInfo* info, Th
   if (memcmp(data, "PDUI", 4) != 0) return UiPackResult::BadMagic;
   if (data[4] != 1) return UiPackResult::BadVersion;
 
-  const uint16_t themeCount = readU16(data + 64);
-  const uint16_t stringCount = readU16(data + 66);
-  const uint16_t assetCount = readU16(data + 68);
-  const uint32_t payloadLen = readU32(data + 72);
-  const uint32_t crc = readU32(data + 76);
+  const uint16_t themeCount = readU16(data + 72);
+  const uint16_t stringCount = readU16(data + 74);
+  const uint16_t assetCount = readU16(data + 76);
+  const uint32_t payloadLen = readU32(data + 80);
+  const uint32_t crc = readU32(data + 84);
   (void)data;  // sha at offset 80 checked by the device loader
 
   if (themeCount > UIPACK_MAX_THEME_OVERRIDES || stringCount > UIPACK_MAX_STRINGS || assetCount > UIPACK_MAX_ASSETS) {

@@ -44,14 +44,14 @@ StoreResult loadPackFromSd(const char* name, UiPackInfo* info, ThemeOverride* ov
   file.close();
 
   // SHA-256 when the header carries one (nonzero).
-  const uint8_t* sha = buffer + 80;
+  const uint8_t* sha = buffer + 88;
   bool shaPresent = false;
   for (size_t i = 0; i < 32 && !shaPresent; i++) {
     if (sha[i] != 0) shaPresent = true;
   }
   if (shaPresent) {
     uint8_t digest[32];
-    const uint32_t payloadLen = buffer[72] | (buffer[73] << 8) | (buffer[74] << 16) | (buffer[75] << 24);
+    const uint32_t payloadLen = buffer[80] | (buffer[81] << 8) | (buffer[82] << 16) | (buffer[83] << 24);
     if (payloadLen + UIPACK_HEADER_SIZE != size ||
         mbedtls_sha256(buffer + UIPACK_HEADER_SIZE, payloadLen, digest, 0) != 0 || memcmp(digest, sha, 32) != 0) {
       free(buffer);

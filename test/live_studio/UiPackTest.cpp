@@ -29,18 +29,18 @@ std::vector<uint8_t> buildPack(const std::vector<ThemeOverride>& overrides, uint
   memcpy(pack.data() + 8, "studio", 6);
   memcpy(pack.data() + 40, "1.0", 3);
   const uint16_t count = countOverride == 0xFFFF ? static_cast<uint16_t>(overrides.size()) : countOverride;
-  pack[64] = count & 0xFF;
-  pack[65] = count >> 8;
+  pack[72] = count & 0xFF;
+  pack[73] = count >> 8;
   const uint32_t payloadLen = static_cast<uint32_t>(payload.size());
-  pack[72] = payloadLen & 0xFF;
-  pack[73] = (payloadLen >> 8) & 0xFF;
-  pack[74] = (payloadLen >> 16) & 0xFF;
-  pack[75] = (payloadLen >> 24) & 0xFF;
+  pack[80] = payloadLen & 0xFF;
+  pack[81] = (payloadLen >> 8) & 0xFF;
+  pack[82] = (payloadLen >> 16) & 0xFF;
+  pack[83] = (payloadLen >> 24) & 0xFF;
   const uint32_t crc = crcOverride ? crcOverride : uiPackCrc32(payload.data(), payload.size());
-  pack[76] = crc & 0xFF;
-  pack[77] = (crc >> 8) & 0xFF;
-  pack[78] = (crc >> 16) & 0xFF;
-  pack[79] = (crc >> 24) & 0xFF;
+  pack[84] = crc & 0xFF;
+  pack[85] = (crc >> 8) & 0xFF;
+  pack[86] = (crc >> 16) & 0xFF;
+  pack[87] = (crc >> 24) & 0xFF;
   memcpy(pack.data() + UIPACK_HEADER_SIZE, payload.data(), payload.size());
   return pack;
 }

@@ -46,16 +46,16 @@ def build(description: dict) -> bytes:
     crc = ~crc & 0xFFFFFFFF
     sha = hashlib.sha256(bytes(payload)).digest()
 
-    header = bytearray(100)
+    header = bytearray(120)
     header[0:4] = b"PDUI"
     header[4] = 1
     header[8:8 + len(name)] = name
     header[40:40 + len(version)] = version
     header[56:56 + len(min_fw)] = min_fw
-    struct.pack_into("<H", header, 64, len(theme))
-    struct.pack_into("<I", header, 72, len(payload))
-    struct.pack_into("<I", header, 76, crc)
-    header[80:112] = sha
+    struct.pack_into("<H", header, 72, len(theme))
+    struct.pack_into("<I", header, 80, len(payload))
+    struct.pack_into("<I", header, 84, crc)
+    header[88:120] = sha
     return bytes(header) + bytes(payload)
 
 
