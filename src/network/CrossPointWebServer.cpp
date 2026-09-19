@@ -1087,10 +1087,15 @@ void CrossPointWebServer::pushLiveStudioStatusIfChanged() {
 // LS-2 live frame fetch: same chunked octet-stream contract as the one-shot
 // screen preview, but reading the latest captured frame. Single slot — the
 // companion associates the fetched bytes with the newest `frame` event.
+// The fetch gate sits below the diagnostics floor on purpose: a 4 KiB shared
+// -buffer read plus one bounded send is far lighter than the crash report,
+// and an X3 in STA File Transfer idles within a few hundred bytes of the
+// 10 KiB diagnostics floor, which starved multi-chunk fetches in testing.
+constexpr uint32_t LIVE_FETCH_MIN_FREE_HEAP = 6U * 1024U;
 void CrossPointWebServer::handlePocketScreenLive() const {
   HalSystem::setCrashBreadcrumb("nearby:screen-live");
-  if (!diagnosticsAffordable()) {
-    server->send(503, "text/plain", "Reader memory is too low for diagnostics right now");
+  if (ESP.getFreeHeap() < LIVE_FETCH_MIN_FREE_HEAP) {
+    server->send(503, "text/plain", "Reader memory is too low for the live frame right now");
     return;
   }
   HalFile frame = Storage.open(PocketDaily::LiveFrameCapture::LIVE_FRAME_PATH);
