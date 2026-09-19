@@ -215,6 +215,32 @@ verified baseline.
   `libpdui_host.a` with provenance — an approved exception to the
   no-binaries-cross boundary rule for this one artifact.
 
+## LS-2 live frames — 2026-09-19 hardware session
+
+- Protocol path PROVEN on X3 over STA: `dev/render` trigger → render task
+  capture (BMP 53,918 B = 792x528 1-bit) → `frame {seq,bytes}` event →
+  chunked `screen-live` fetch returns valid BMP. hello/subscribe/status
+  push flows all pass. Multi-chunk fetch gate lowered to 6 KiB
+  (`LIVE_FETCH_MIN_FREE_HEAP`, commit `a5178a01`) after the 10 KiB
+  diagnostics floor starved fetches at ~10.5 KiB idle heap.
+- OPEN DEFECT (reproduced twice): a remote render+capture cycle wedges the
+  activity loop for ~50 s or longer — render triggers time out, status
+  pushes stop, the frame event arrives ~56 s late, fetches stall partial
+  (8-12 KiB), and the reader stays unreachable afterwards until power-cycled.
+  Suspects: SD write from the render task contending with the display/SPI
+  path, a blocked `sendTXT` to a half-dead WS peer inside `handleClient`, or
+  transient heap exhaustion. Needs a USB-serial session with breadcrumbs;
+  do NOT trust "capture works" for studio use until this is fixed.
+- Dev loop additions shipped and exercised: `POST /api/pocket/v1/dev/flash`
+  (validate + flash + boot marker), `POST /api/pocket/v1/dev/render`, and
+  the File Transfer boot return (commit `1d5b6940`/`469d8d4e`). The flash
+  loop was used end-to-end twice; it needs exactly one Confirm after reboot.
+- Also open: no WS wake-lock (the reader can sleep mid-session), and the
+  deployed dev build's version string lags its commit (`-w<worktree>` from
+  pre-commit builds) — build after committing for exact install checks.
+- The File Transfer status screen only repaints on Wi-Fi-bar changes;
+  arrow keys do nothing there. Use `dev/render` to force a render.
+
 ## LS-1 hardware sign-off — 2026-09-19
 
 - X3 (`5B09AF70`) installed `1.4.1-dev-main-df75f78d` and joined STA File
