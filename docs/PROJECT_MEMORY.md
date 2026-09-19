@@ -215,6 +215,32 @@ verified baseline.
   `libpdui_host.a` with provenance — an approved exception to the
   no-binaries-cross boundary rule for this one artifact.
 
+## LS-2 stall root cause fixed — 2026-09-19
+
+- The ~50 s loop stall was links2004 `broadcastTXT` blocking on a WS peer
+  that died without a close handshake, fed repeatedly by the 15 s status
+  keepalive: the single activity loop crawled at ~one pass per TCP
+  retransmit cycle (diagnosed via the dev trace ring - one heartbeat per
+  ~30 s dump) until power cycle. Fix (`c385fc8b`): track the single
+  subscribed client, `clientIsConnected` guard before every send with
+  subscription teardown on a miss, `sendTXT` instead of broadcast, and no
+  periodic keepalive (change-driven pushes only; the app polls live values).
+  Verified on X3: frames flow, and after an abrupt client kill (no close
+  frame) status/render stayed responsive at 0-0.8 s for 18 s+.
+- Dev tooling that cracked it, all `ENABLE_DEV_REMOTE_FLASH`-only:
+  `DevTrace` 48-entry RAM ring + `/api/pocket/v1/dev/live-debug` dump. The
+  dump currently prints only the newest entry (chunked-sendContent quirk) -
+  still enough to spot heartbeat gaps; fix if it is needed again.
+- REMAINS OPEN, new failure mode seen after the fix: the reader went fully
+  offline (no ping) right after a partial screen-live fetch (first 4 KiB
+  chunk OK, then nothing). `WIFI_ABANDON_MS` is 5 min, so a blip should not
+  abandon. Cause unknown: sustained Wi-Fi degradation, a panic reboot, or
+  power. Next time it happens, READ THE READER SCREEN first - network
+  selection menu = Wi-Fi abandon path, Pocket Daily shell = reboot, dark =
+  power. Multi-chunk BMP fetch is still unverified end-to-end (single chunk
+  + header validated). Today's link was flaky all day (rssi -41..-76,
+  broken-pipe storms during pushes).
+
 ## LS-2 live frames — 2026-09-19 hardware session
 
 - Protocol path PROVEN on X3 over STA: `dev/render` trigger → render task
