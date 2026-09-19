@@ -483,7 +483,7 @@ void CrossPointWebServer::handleClient() {
       if (PocketDaily::LiveFrameCapture::consumeReady()) {
         char event[96];
         if (PocketDaily::LiveStudio::encodeFrameEvent(event, sizeof(event), PocketDaily::LiveFrameCapture::seq(),
-                                                       PocketDaily::LiveFrameCapture::bytes())) {
+                                                      PocketDaily::LiveFrameCapture::bytes())) {
           sendLiveStudioLine(event);
         }
       }

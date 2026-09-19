@@ -45,9 +45,8 @@ bool encodeStatusEvent(char* out, size_t cap, const char* statusJson) {
 
 bool encodeFrameEvent(char* out, size_t cap, uint32_t seq, uint32_t bytes) {
   if (!out || cap == 0) return false;
-  const int written = std::snprintf(
-      out, cap, "{\"frame\":{\"seq\":%lu,\"bytes\":%lu}}", static_cast<unsigned long>(seq),
-      static_cast<unsigned long>(bytes));
+  const int written = std::snprintf(out, cap, "{\"frame\":{\"seq\":%lu,\"bytes\":%lu}}",
+                                    static_cast<unsigned long>(seq), static_cast<unsigned long>(bytes));
   return written > 0 && static_cast<size_t>(written) < cap;
 }
 
