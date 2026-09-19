@@ -17,6 +17,7 @@
 #include "home/RecentBooksActivity.h"
 #include "network/CrossPointWebServerActivity.h"
 #include "pocket_daily/PocketDailyActivity.h"
+#include "pocket_daily/live_studio/LiveFrameCapture.h"
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
@@ -46,6 +47,11 @@ void ActivityManager::renderTaskLoop() {
     if (currentActivity) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
       currentActivity->render(std::move(lock));
+      // Live Studio LS-2: publish the just-rendered 1-bit frame while a
+      // companion is subscribed. Cheap no-op otherwise; the capture policy
+      // bounds heap use and cadence (docs/live-studio-v1.md).
+      PocketDaily::LiveFrameCapture::maybeCapture(renderer.getFrameBuffer(), renderer.getDisplayWidth(),
+                                                  renderer.getDisplayHeight());
       const UBaseType_t stackHeadroom = uxTaskGetStackHighWaterMark(nullptr);
       if (stackHeadroom < 1024)
         LOG_ERR("ACT", "Render stack headroom low: %uB", (unsigned)stackHeadroom);

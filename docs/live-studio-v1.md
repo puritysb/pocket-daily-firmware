@@ -45,9 +45,11 @@ Reader → app:
   Sent when a stable field changes (identity, mode, capabilities; uptime,
   rssi, and freeHeap do not trigger a send) with a minimum 500 ms spacing,
   plus a 15 s keepalive that refreshes the live values.
-- `frame` — `{seq, bytes, sha256}` notification only. The image body is
+- `frame` — `{seq, bytes}` notification only. The image body is
   fetched over HTTP (below), reusing the proven chunked transport instead of
-  WS binary framing.
+  WS binary framing. A per-frame content hash was deliberately left out of
+  v1: integrity is transport-level (TCP checksums) plus the app-side BMP
+  validation, and hashing would re-read the frame from SD on every capture.
 - `prefs` — `{changed:true}` after a preferences write from any client.
 - `bye` — before an intentional server stop (e.g. mode change).
 
@@ -62,13 +64,18 @@ existing upload-stream protocol tests.
 
 ## Live frame capture and fetch
 
-- New endpoint `GET /api/pocket/v1/screen-live?seq=<n>&offset=<o>` — chunked
-  octet-stream paging identical to `screen-preview` (BMP, starts `0x42 0x4D`).
-- Capture: after `displayBuffer()` completes, if a subscription is active,
-  serialize the current 1-bit framebuffer under `RenderLock` into the
-  transient BMP slot. A pure `LiveFramePolicy` (host-tested) gates capture:
-  at least 10 KB free heap, at least 250 ms since the last capture, and a
-  single-slot queue where a newer frame replaces an unfetched older one.
+- New endpoint `GET /api/pocket/v1/screen-live?offset=<o>` — chunked
+  octet-stream paging identical to `screen-preview` (BMP, starts `0x42 0x4D`),
+  reading the latest captured frame (single slot; latest wins). Registered on
+  the STA profiles alongside the WS listener.
+- Capture: after each completed render pass on the render task
+  (`ActivityManager::renderTaskLoop`), if a frames subscription is active,
+  the current 1-bit framebuffer is written row-by-row to
+  `/.crosspoint/live-frame.bmp` (no framebuffer-sized allocation). The pure
+  policy (`shouldCaptureFrameAt`: at least 10 KB free heap, subscription
+  spacing clamped to >= 250 ms, wrap-safe math) is host-tested. A single-slot
+  flag hands the notification to the web server's activity loop, which sends
+  the `frame` event (worst-case notification latency is the 1 s server tick).
 - The existing one-shot `screen-preview` contract is unchanged.
 
 ## UI pack format v1 (`.uipack`)

@@ -260,6 +260,12 @@ void CrossPointWebServer::begin() {
       handlePostPocketPreferences();
     });
   } else {
+    // Live Studio LS-2: chunked fetch of the latest captured frame, served
+    // wherever the WS push listener can run (STA profiles).
+    server->on("/api/pocket/v1/screen-live", HTTP_GET, [this] {
+      noteClientActivity();
+      handlePocketScreenLive();
+    });
     server->on("/settings", HTTP_GET, [this] { handleSettingsPage(); });
     server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
     server->on("/api/settings", HTTP_POST, [this] { handlePostSettings(); });
@@ -416,6 +422,7 @@ void CrossPointWebServer::stop() {
     liveStudioPush = false;
     liveStudioClientAttached = false;
     liveStudioSubscribed = false;
+    PocketDaily::LiveFrameCapture::clear();
     LOG_DBG("WEB", "WebSocket server stopped");
   }
 
@@ -471,6 +478,15 @@ void CrossPointWebServer::handleClient() {
     wsServer->loop();
     if (liveStudioPush && liveStudioSubscribed) {
       pushLiveStudioStatusIfChanged();
+      // A frame landed since the last tick: notify, and the companion fetches
+      // it over the chunked HTTP path.
+      if (PocketDaily::LiveFrameCapture::consumeReady()) {
+        char event[96];
+        if (PocketDaily::LiveStudio::encodeFrameEvent(event, sizeof(event), PocketDaily::LiveFrameCapture::seq(),
+                                                       PocketDaily::LiveFrameCapture::bytes())) {
+          sendLiveStudioLine(event);
+        }
+      }
     }
   }
 
@@ -998,8 +1014,8 @@ String CrossPointWebServer::buildStatusJson() const {
     JsonObject live = doc["liveStudio"].to<JsonObject>();
     live["mode"] = liveStudioPush ? "push" : "poll";
     if (liveStudioPush) live["wsPort"] = wsPort;
-    live["frameStream"] = false;  // LS-2: throttled screen-live capture
-    live["uiPacks"] = false;      // LS-3: .uipack apply
+    live["frameStream"] = liveStudioPush;  // LS-2: live capture while subscribed
+    live["uiPacks"] = false;               // LS-3: .uipack apply
     live["activePack"] = nullptr;
     live["activePackVersion"] = nullptr;
   }
@@ -1047,6 +1063,60 @@ void CrossPointWebServer::pushLiveStudioStatusIfChanged() {
   strlcpy(liveStudioSignature, signature, sizeof(liveStudioSignature));
   liveStudioLastSendMs = now;
   liveStudioLastSignatureMs = now;
+}
+
+// LS-2 live frame fetch: same chunked octet-stream contract as the one-shot
+// screen preview, but reading the latest captured frame. Single slot — the
+// companion associates the fetched bytes with the newest `frame` event.
+void CrossPointWebServer::handlePocketScreenLive() const {
+  HalSystem::setCrashBreadcrumb("nearby:screen-live");
+  if (!diagnosticsAffordable()) {
+    server->send(503, "text/plain", "Reader memory is too low for diagnostics right now");
+    return;
+  }
+  HalFile frame = Storage.open(PocketDaily::LiveFrameCapture::LIVE_FRAME_PATH);
+  if (!frame || frame.isDirectory()) {
+    if (frame) frame.close();
+    server->send(404, "text/plain", "No live frame captured yet");
+    return;
+  }
+  if (!server->hasArg("offset")) {
+    frame.close();
+    server->send(400, "text/plain", "Missing live frame offset");
+    return;
+  }
+  const String offsetText = server->arg("offset");
+  bool offsetValid = !offsetText.isEmpty();
+  for (size_t i = 0; offsetValid && i < offsetText.length(); i++) {
+    if (offsetText[i] < '0' || offsetText[i] > '9') offsetValid = false;
+  }
+  if (!offsetValid) {
+    frame.close();
+    server->send(400, "text/plain", "Invalid live frame offset");
+    return;
+  }
+  const size_t frameSize = frame.size();
+  const size_t offset = static_cast<size_t>(offsetText.toInt());
+  if (offset >= frameSize || !frame.seek(offset)) {
+    frame.close();
+    server->send(416, "text/plain", "Live frame offset out of range");
+    return;
+  }
+  uint8_t* body = firmware_flash::sharedStagingBuffer();
+  const size_t requested = std::min(frameSize - offset, SCREEN_PREVIEW_CHUNK_BYTES);
+  const int count = frame.read(body, requested);
+  frame.close();
+  if (count <= 0) {
+    server->send(500, "text/plain", "Could not read live frame chunk");
+    return;
+  }
+  server->client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
+  feedLoopWDT();
+  server->setContentLength(static_cast<size_t>(count));
+  server->sendHeader("Cache-Control", "no-store");
+  server->send(200, "application/octet-stream", "");
+  server->sendContent(reinterpret_cast<const char*>(body), static_cast<size_t>(count));
+  feedLoopWDT();
 }
 
 void CrossPointWebServer::handleCrashReport() const {
@@ -2569,6 +2639,7 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
       LOG_DBG("WS", "Client %u disconnected", num);
       liveStudioClientAttached = false;
       liveStudioSubscribed = false;
+      PocketDaily::LiveFrameCapture::clear();
       // Only clean up if this is the client that owns the active upload.
       // A new client may have already started a fresh upload before this
       // DISCONNECTED event fires (race condition on quick cancel + retry).
@@ -2602,6 +2673,10 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
           case PocketDaily::LiveStudio::ClientMessage::Subscribe:
             liveStudioSubscribed = true;
             liveStudioClientAttached = true;
+            // Frame capture runs only where the push listener runs (STA);
+            // elsewhere the subscription is a status-only subscription.
+            PocketDaily::LiveFrameCapture::setRequested(liveStudioPush && subscription.frames,
+                                                        subscription.minIntervalMs);
             // Snapshot immediately: the studio should not wait for a change
             // to learn the current state.
             liveStudioLastCheckMs = 0;
@@ -2613,6 +2688,7 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
             break;
           case PocketDaily::LiveStudio::ClientMessage::Unsubscribe:
             liveStudioSubscribed = false;
+            PocketDaily::LiveFrameCapture::clear();
             break;
           case PocketDaily::LiveStudio::ClientMessage::Ping: {
             char pong[32];

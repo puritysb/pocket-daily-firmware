@@ -12,6 +12,7 @@
 #include <string>
 
 #include "pocket_daily/direct_session.h"
+#include "pocket_daily/live_studio/LiveFrameCapture.h"
 #include "pocket_daily/live_studio/LiveStudioEvents.h"
 
 enum class CrossPointWebServerProfile : uint8_t {
@@ -185,6 +186,7 @@ class CrossPointWebServer {
   String buildStatusJson() const;
   void sendLiveStudioLine(const char* line);
   void pushLiveStudioStatusIfChanged();
+  void handlePocketScreenLive() const;
 
   // File scanning
   void scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const;

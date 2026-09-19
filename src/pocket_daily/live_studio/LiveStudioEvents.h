@@ -48,6 +48,10 @@ bool encodeBye(char* out, size_t cap);
 bool encodePrefsChanged(char* out, size_t cap);
 // `statusJson` (the exact /api/status body) is embedded verbatim.
 bool encodeStatusEvent(char* out, size_t cap, const char* statusJson);
+// LS-2 frame notification. Integrity is transport-level (TCP checksums) plus
+// the app-side BMP validation; a per-frame content hash was deliberately
+// left out of v1 to avoid re-reading the frame from SD just to hash it.
+bool encodeFrameEvent(char* out, size_t cap, uint32_t seq, uint32_t bytes);
 
 // Deterministic scanner for the app -> reader messages. Unknown or malformed
 // input decodes to ClientMessage::None; `out` (optional) receives the
@@ -57,5 +61,9 @@ ClientMessage parseClientMessage(const char* payload, size_t length, Subscriptio
 // Pure capture gate for the LS-2 frame stream: heap floor plus minimum
 // spacing since the previous capture, using wrap-safe millisecond math.
 bool shouldCaptureFrame(uint32_t freeHeap, uint32_t nowMs, uint32_t lastCaptureMs);
+
+// Same gate with a caller-supplied spacing (the subscription interval),
+// clamped up to kMinCaptureIntervalMs.
+bool shouldCaptureFrameAt(uint32_t freeHeap, uint32_t nowMs, uint32_t lastCaptureMs, uint32_t intervalMs);
 
 }  // namespace PocketDaily::LiveStudio

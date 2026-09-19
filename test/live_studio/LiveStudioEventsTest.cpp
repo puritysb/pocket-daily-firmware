@@ -83,15 +83,25 @@ TEST(LiveStudioEvents, ParsesUnsubscribePingAndRejectsGarbage) {
   EXPECT_EQ(ClientMessage::None, PocketDaily::LiveStudio::parseClientMessage("\x01\x02", 2, nullptr));
 }
 
+TEST(LiveStudioEvents, FrameEventCarriesSequenceAndSize) {
+  char out[96];
+  ASSERT_TRUE(PocketDaily::LiveStudio::encodeFrameEvent(out, sizeof(out), 7, 52128));
+  EXPECT_STREQ(out, "{\"frame\":{\"seq\":7,\"bytes\":52128}}");
+  char tiny[16];
+  EXPECT_FALSE(PocketDaily::LiveStudio::encodeFrameEvent(tiny, sizeof(tiny), 123456, 52128));
+}
+
 TEST(LiveStudioEvents, FrameCapturePolicy) {
   const uint32_t floor = PocketDaily::LiveStudio::kMinCaptureFreeHeap;
   EXPECT_FALSE(PocketDaily::LiveStudio::shouldCaptureFrame(floor - 1, 1000, 0));
   EXPECT_TRUE(PocketDaily::LiveStudio::shouldCaptureFrame(floor, 1000, 0));
   EXPECT_FALSE(PocketDaily::LiveStudio::shouldCaptureFrame(floor, 1000 + 249, 1000));
   EXPECT_TRUE(PocketDaily::LiveStudio::shouldCaptureFrame(floor, 1000 + 250, 1000));
-  // Spacing since the previous capture uses wrap-safe math: 0xFFFFFFF0 is
-  // -16 ms, so 100 - (-16) = 116 is below the floor; 0xFFFFFF00 is -256 ms,
-  // so 400 - (-256) = 656 crosses it.
+  // Subscription spacing is honored but never drops below the floor.
+  EXPECT_TRUE(PocketDaily::LiveStudio::shouldCaptureFrameAt(floor, 2000, 1000, 1000));
+  EXPECT_FALSE(PocketDaily::LiveStudio::shouldCaptureFrameAt(floor, 1999, 1000, 1000));
+  EXPECT_FALSE(PocketDaily::LiveStudio::shouldCaptureFrameAt(floor, 1000 + 100, 1000, 50));
+  // Wrap-safe math: 0xFFFFFF00 is -256 ms, so 400 - (-256) = 656 crosses.
   EXPECT_FALSE(PocketDaily::LiveStudio::shouldCaptureFrame(floor, 100, 0xFFFFFFF0u));
   EXPECT_TRUE(PocketDaily::LiveStudio::shouldCaptureFrame(floor, 400, 0xFFFFFF00u));
 }

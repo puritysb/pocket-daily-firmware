@@ -43,6 +43,14 @@ bool encodeStatusEvent(char* out, size_t cap, const char* statusJson) {
   return true;
 }
 
+bool encodeFrameEvent(char* out, size_t cap, uint32_t seq, uint32_t bytes) {
+  if (!out || cap == 0) return false;
+  const int written = std::snprintf(
+      out, cap, "{\"frame\":{\"seq\":%lu,\"bytes\":%lu}}", static_cast<unsigned long>(seq),
+      static_cast<unsigned long>(bytes));
+  return written > 0 && static_cast<size_t>(written) < cap;
+}
+
 namespace {
 
 // Bounded search for `"key"` inside [begin, end). Returns nullptr when absent.
@@ -106,8 +114,13 @@ ClientMessage parseClientMessage(const char* payload, size_t length, Subscriptio
 }
 
 bool shouldCaptureFrame(uint32_t freeHeap, uint32_t nowMs, uint32_t lastCaptureMs) {
+  return shouldCaptureFrameAt(freeHeap, nowMs, lastCaptureMs, kMinCaptureIntervalMs);
+}
+
+bool shouldCaptureFrameAt(uint32_t freeHeap, uint32_t nowMs, uint32_t lastCaptureMs, uint32_t intervalMs) {
   if (freeHeap < kMinCaptureFreeHeap) return false;
-  return static_cast<uint32_t>(nowMs - lastCaptureMs) >= kMinCaptureIntervalMs;
+  if (intervalMs < kMinCaptureIntervalMs) intervalMs = kMinCaptureIntervalMs;
+  return static_cast<uint32_t>(nowMs - lastCaptureMs) >= intervalMs;
 }
 
 }  // namespace PocketDaily::LiveStudio
