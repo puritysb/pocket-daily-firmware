@@ -122,12 +122,17 @@ bool readState(char* name, size_t nameCap, char* versionCap, size_t versionCap2)
 
 void clearState() { writeState("", ""); }
 
+ThemeOverride* sharedOverrideBuffer() {
+  static ThemeOverride overrides[UIPACK_MAX_THEME_OVERRIDES];
+  return overrides;
+}
+
 bool applyStartupPack() {
   char name[33];
   char version[17];
   if (!readState(name, sizeof(name), version, sizeof(version)) || name[0] == '\0') return false;
   UiPackInfo info;
-  static ThemeOverride overrides[UIPACK_MAX_THEME_OVERRIDES];
+  ThemeOverride* overrides = sharedOverrideBuffer();
   UiPackResult validateError = UiPackResult::Ok;
   if (loadPackFromSd(name, &info, overrides, UIPACK_MAX_THEME_OVERRIDES, &validateError) != StoreResult::Ok) {
     LOG_ERR("PCK", "Startup pack '%s' failed to load; reverting to theme metrics", name);

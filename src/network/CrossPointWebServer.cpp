@@ -1252,7 +1252,7 @@ void CrossPointWebServer::handleUiPackApply() {
     return;
   }
   PocketDaily::LiveStudio::UiPackInfo info;
-  static PocketDaily::LiveStudio::ThemeOverride overrides[PocketDaily::LiveStudio::UIPACK_MAX_THEME_OVERRIDES];
+  PocketDaily::LiveStudio::ThemeOverride* overrides = PocketDaily::LiveStudio::sharedOverrideBuffer();
   PocketDaily::LiveStudio::UiPackResult validateError = PocketDaily::LiveStudio::UiPackResult::Ok;
   const auto result = PocketDaily::LiveStudio::loadPackFromSd(
       name, &info, overrides, PocketDaily::LiveStudio::UIPACK_MAX_THEME_OVERRIDES, &validateError);

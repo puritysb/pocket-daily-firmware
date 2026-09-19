@@ -27,11 +27,12 @@ inline constexpr uint32_t kKeepaliveIntervalMs = 15000;
 // LS-1 so the policy is fixed before the capture path exists.
 inline constexpr uint32_t kMinCaptureIntervalMs = 250;
 inline constexpr uint32_t kMinCaptureFreeHeap = 10 * 1024;
-// The WS listener gate. Measured on an X3 in the File Transfer STA profile:
-// ~15 KB free after the HTTP server and the port-82 upload stream start, so
-// a 40 KB gate would never open. 12 KB leaves headroom above the diagnostics
-// floor while refusing to start deep into fragmentation.
-inline constexpr uint32_t kMinListenerFreeHeap = 12 * 1024;
+// The WS listener gate. The LS-3-era File Transfer baseline sits near 10 KB
+// free at boot; running the listener AND a sustained transfer at that level
+// wedged the radio in testing (cold boot recovered it). 14 KB keeps the
+// listener off on tight builds - the companion falls back to polling - and
+// preserves push on builds with healthy headroom.
+inline constexpr uint32_t kMinListenerFreeHeap = 14 * 1024;
 
 struct Subscription {
   bool frames = false;  // LS-2: accepted, not yet served
