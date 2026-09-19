@@ -70,6 +70,13 @@ existing upload-stream protocol tests.
   octet-stream paging identical to `screen-preview` (BMP, starts `0x42 0x4D`),
   reading the latest captured frame (single slot; latest wins). Registered on
   the STA profiles alongside the WS listener.
+- **Client discipline (required):** fetch all chunks of one frame over a
+  single persistent HTTP connection, pace fetches to the subscription
+  cadence, and never poll in a tight loop. Rapid one-connection-per-chunk
+  fetching plus status hammering exhausted the X3 until its radio went
+  zombie — `WL_CONNECTED` while deaf — recovering only after the user
+  re-entered the network mode. The companion app uses URLSession connection
+  reuse; test scripts must do the same.
 - Capture: after each completed render pass on the render task
   (`ActivityManager::renderTaskLoop`), if a frames subscription is active,
   the current 1-bit framebuffer is written row-by-row to

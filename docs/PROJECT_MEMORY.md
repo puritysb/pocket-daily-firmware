@@ -215,6 +215,24 @@ verified baseline.
   `libpdui_host.a` with provenance — an approved exception to the
   no-binaries-cross boundary rule for this one artifact.
 
+## LS-2 wrap-up — 2026-09-19 (end of session)
+
+- FULLY VERIFIED end-to-end: complete multi-chunk `screen-live` fetch of the
+  53,918 B BMP (528x792) on a healthy link; crash report unchanged through
+  all incidents (4,245 B - no panics anywhere today).
+- The "offline with QR on screen" incidents are a Wi-Fi zombie, not a code
+  freeze: power stayed on, keys worked, user re-entered the mode and it
+  recovered. `WiFi.setSleep(false)` was already active, so modem sleep is
+  not the cause. Trigger pattern: heavy short-lived HTTP connections
+  (chunk-per-connection test scripts + status hammering) on a link that
+  swung -41..-76 dBm all day. `WL_CONNECTED` stays true while deaf; only a
+  Wi-Fi re-init (mode re-entry) recovers it.
+- Client discipline recorded in the contract doc: persistent connection per
+  frame's chunks, paced fetches, no tight polling. The M2 app must use
+  URLSession connection reuse from day one; re-verify with disciplined
+  traffic before considering firmware-side lwIP tuning (PCB/MBOX) or an
+  active-probe reconnect in the activity's health check.
+
 ## LS-2 stall root cause fixed — 2026-09-19
 
 - The ~50 s loop stall was links2004 `broadcastTXT` blocking on a WS peer
