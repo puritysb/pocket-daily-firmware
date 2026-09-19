@@ -1015,6 +1015,9 @@ void CrossPointWebServer::sendLiveStudioLine(const char* line) {
 }
 
 void CrossPointWebServer::pushLiveStudioStatusIfChanged() {
+  // Never allocate for the push channel while the port-82 upload stream or a
+  // legacy WS upload is mid-transfer: that heap belongs to the transfer.
+  if (pocketUploadPhase != PocketUploadPhase::IDLE || wsUploadInProgress) return;
   if (!liveStudioClientAttached) return;
   const uint32_t now = millis();
   if (static_cast<uint32_t>(now - liveStudioLastCheckMs) < 1000) return;

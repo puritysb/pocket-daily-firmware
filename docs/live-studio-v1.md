@@ -24,8 +24,12 @@ definition-driven.
 ## Transport
 
 - **STA (File Transfer / Join a Network):** the existing `WebSocketsServer`
-  (`src/network/CrossPointWebServer.cpp:332`) is enabled for a live-studio
-  listener when `freeHeap >= 40 KB` at start. The port is advertised
+  (`src/network/CrossPointWebServer.cpp`) is enabled for a live-studio
+  listener when `freeHeap >= 12 KB` at start. The gate is measured, not
+  theoretical: an X3 in the File Transfer STA profile holds ~15 KB free after
+  the HTTP server and port-82 upload stream start, so the original 40 KB
+  draft gate never opened. While any upload is in progress the status push
+  is suspended — that heap belongs to the transfer. The port is advertised
   dynamically; the app never hardcodes it.
 - **Private AP (POCKET_SYNC):** no WS listener. The app polls `/api/status`
   at 2 s while the studio is active and treats preview/live frames as
