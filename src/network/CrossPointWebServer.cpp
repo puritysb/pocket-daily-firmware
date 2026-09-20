@@ -61,13 +61,6 @@ constexpr unsigned long UPLOAD_SOCKET_TIMEOUT_MS = 30 * 1000;
 // bounding the socket below the 5 s task-WDT window guarantees the send
 // returns (completed or aborted) before the watchdog could fire.
 constexpr unsigned long DIAGNOSTIC_SEND_TIMEOUT_MS = 3000;
-// Measured X3 private AP: ~6-7 KB free heap. Serving a 53 KB screen preview
-// there tripped the task watchdog inside lwIP (crash breadcrumb
-// nearby:screen-preview). Below this free-heap floor the reader reports the
-// diagnostics as unavailable and answers 503 so the companion never queues
-// dozens of requests at a starved reader; transfers remain available.
-constexpr uint32_t DIAGNOSTIC_MIN_FREE_HEAP = 10U * 1024U;
-bool diagnosticsAffordable() { return ESP.getFreeHeap() >= DIAGNOSTIC_MIN_FREE_HEAP; }
 
 // Static pointer for WebSocket callback (WebSocketsServer requires C-style callback)
 CrossPointWebServer* wsInstance = nullptr;
@@ -636,71 +629,23 @@ void CrossPointWebServer::handleNotFound() const {
   server->send(404, "text/plain", message);
 }
 
-void CrossPointWebServer::handleStatus() const { server->send(200, "application/json", buildStatusJson()); }
+// Pocket seam (SEAM.md): marshal host state into the value snapshot the
+// pocket status module builds /api/status from.
+PocketDaily::Web::StatusInputs CrossPointWebServer::statusInputs() const {
+  PocketDaily::Web::StatusInputs in;
+  in.apMode = apMode;
+  in.profile = profile;
+  in.stream = &pocketStream;
+  in.live.push = liveStudioPush;
+  in.live.suspended = liveListenerSuspended;
+  in.live.wsPort = wsPort;
+  strlcpy(in.live.activePackName, activePackName, sizeof(in.live.activePackName));
+  strlcpy(in.live.activePackVersion, activePackVersion, sizeof(in.live.activePackVersion));
+  return in;
+}
 
-String CrossPointWebServer::buildStatusJson() const {
-  // Get correct IP based on AP vs STA mode
-  const String ipAddr = apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString();
-
-  JsonDocument doc;
-  char deviceId[9];
-  snprintf(deviceId, sizeof(deviceId), "%08lX", static_cast<unsigned long>(ESP.getEfuseMac() & 0xFFFFFFFFUL));
-  doc["deviceID"] = deviceId;
-  doc["sessionEnd"] = profile == CrossPointWebServerProfile::POCKET_SYNC && apMode;
-  doc["version"] = CROSSPOINT_VERSION;
-  doc["ip"] = ipAddr;
-  doc["mode"] = apMode ? "AP" : "STA";
-  doc["rssi"] = apMode ? 0 : WiFi.RSSI();
-  doc["freeHeap"] = ESP.getFreeHeap();
-  doc["uptime"] = millis() / 1000;
-  doc["device"] = gpio.deviceIsX3() ? "X3" : "X4";
-  // Diagnoses a silent reboot during private-AP startup: the last runtime
-  // checkpoint from the boot that just ended, readable over the LAN even when
-  // no crash report was written (clean returnToLaunchOrigin).
-  doc["lastBootBreadcrumb"] = HalSystem::getPreviousBootBreadcrumb();
-  doc["lastResetReason"] = HalSystem::getResetReasonName();
-  if (pocketStream.listening()) {
-    doc["uploadStreamPort"] = pocketStream.port();
-    // The stream keeps an interrupted staging file and accepts `Resume: 1`.
-    doc["uploadStreamResume"] = true;
-  }
-  const bool affordable = diagnosticsAffordable();
-  doc["diagnosticsAffordable"] = affordable;
-  bool screenPreviewAvailable = false;
-  int screenPreviewBytes = 0;
-  if (profile == CrossPointWebServerProfile::POCKET_SYNC && affordable &&
-      Storage.exists(PocketDaily::SCREEN_PREVIEW_PATH)) {
-    HalFile preview = Storage.open(PocketDaily::SCREEN_PREVIEW_PATH);
-    screenPreviewAvailable = static_cast<bool>(preview) && !preview.isDirectory();
-    screenPreviewBytes = preview ? preview.size() : 0;
-    if (preview) preview.close();
-  }
-  doc["screenPreviewAvailable"] = screenPreviewAvailable;
-  doc["screenPreviewBytes"] = screenPreviewBytes;
-  if (affordable && Storage.exists("/crash_report.txt")) {
-    HalFile report = Storage.open("/crash_report.txt");
-    doc["crashReportAvailable"] = static_cast<bool>(report);
-    doc["crashReportBytes"] = report ? report.size() : 0;
-    if (report) report.close();
-  } else {
-    doc["crashReportAvailable"] = false;
-    doc["crashReportBytes"] = 0;
-  }
-  // Live Studio v1 capability advertisement. Absent on older firmware; the
-  // companion treats a missing object as a legacy poll-only reader.
-  {
-    JsonObject live = doc["liveStudio"].to<JsonObject>();
-    live["mode"] = (liveStudioPush && !liveListenerSuspended) ? "push" : "poll";
-    if (liveStudioPush && !liveListenerSuspended) live["wsPort"] = wsPort;
-    live["frameStream"] = liveStudioPush && !liveListenerSuspended;
-    live["uiPacks"] = true;  // LS-3: .uipack apply
-    live["activePack"] = activePackName[0] ? activePackName : nullptr;
-    live["activePackVersion"] = activePackVersion[0] ? activePackVersion : nullptr;
-  }
-
-  String json;
-  serializeJson(doc, json);
-  return json;
+void CrossPointWebServer::handleStatus() const {
+  server->send(200, "application/json", PocketDaily::Web::buildStatusJson(statusInputs()));
 }
 
 void CrossPointWebServer::startLiveListener() {
@@ -794,7 +739,7 @@ void CrossPointWebServer::pushLiveStudioStatusIfChanged() {
       static_cast<uint32_t>(now - liveStudioLastSendMs) >= PocketDaily::LiveStudio::kMinStatusIntervalMs;
   if (!changed || !spaced) return;
 
-  const String json = buildStatusJson();
+  const String json = PocketDaily::Web::buildStatusJson(statusInputs());
   char event[1024];
   if (!PocketDaily::LiveStudio::encodeStatusEvent(event, sizeof(event), json.c_str())) return;
   sendLiveStudioLine(event);
@@ -984,7 +929,7 @@ void CrossPointWebServer::handleDevRemoteFlash() {
 
 void CrossPointWebServer::handleCrashReport() const {
   HalSystem::setCrashBreadcrumb("nearby:crash-chunk");
-  if (!diagnosticsAffordable()) {
+  if (!PocketDaily::Web::diagnosticsAffordable()) {
     server->send(503, "text/plain", "Reader memory is too low for diagnostics right now");
     return;
   }
@@ -1046,7 +991,7 @@ void CrossPointWebServer::handleCrashReport() const {
 
 void CrossPointWebServer::handlePocketScreenPreview() const {
   HalSystem::setCrashBreadcrumb("nearby:screen-preview");
-  if (!diagnosticsAffordable()) {
+  if (!PocketDaily::Web::diagnosticsAffordable()) {
     server->send(503, "text/plain", "Reader memory is too low for diagnostics right now");
     return;
   }

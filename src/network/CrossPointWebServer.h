@@ -146,7 +146,9 @@ class CrossPointWebServer {
   void endTransferFocus();
   bool liveListenerSuspended = false;
 
-  String buildStatusJson() const;
+  // Pocket seam (SEAM.md): marshal host state into the value snapshot the
+  // pocket status module builds /api/status from.
+  PocketDaily::Web::StatusInputs statusInputs() const;
   void sendLiveStudioLine(const char* line);
   void pushLiveStudioStatusIfChanged();
   void handlePocketScreenLive() const;
