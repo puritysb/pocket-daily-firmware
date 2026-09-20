@@ -13,14 +13,11 @@
 #include <string>
 
 #include "pocket_daily/direct_session.h"
-#include "pocket_daily/live_studio/LiveFrameCapture.h"
-#include "pocket_daily/live_studio/LiveStudioEvents.h"
+#include "pocket_daily/web/PocketWebServices.h"
 
-enum class CrossPointWebServerProfile : uint8_t {
-  FULL,
-  FILE_TRANSFER,
-  POCKET_SYNC,
-};
+// Pocket-owned profile enum (route/listener/watchdog gating lives with the
+// pocket web modules); alias keeps every existing call site unchanged.
+using CrossPointWebServerProfile = PocketDaily::Web::Profile;
 
 // Structure to hold file information
 struct FileInfo {

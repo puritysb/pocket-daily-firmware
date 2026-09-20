@@ -29,6 +29,8 @@
 #include "html/js/jszip_minJs.generated.h"
 #include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/live_studio/DevTrace.h"
+#include "pocket_daily/live_studio/LiveFrameCapture.h"
+#include "pocket_daily/live_studio/LiveStudioEvents.h"
 #include "pocket_daily/live_studio/HeapMap.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/live_studio/StackReport.h"
