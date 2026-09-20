@@ -1,6 +1,6 @@
 #include "HeapMap.h"
 
-#ifdef ENABLE_DEV_REMOTE_FLASH
+#if POCKET_HEAP_MAP_ENABLED
 
 #include <Arduino.h>
 #include <esp_heap_caps.h>

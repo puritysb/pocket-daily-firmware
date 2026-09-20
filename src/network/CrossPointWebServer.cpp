@@ -321,6 +321,22 @@ void CrossPointWebServer::begin() {
   }
 
   server->onNotFound([this] { handleNotFound(); });
+#if POCKET_HEAP_MAP_ENABLED
+  // HN-2 evidence build: runtime heap map (caps totals + per-task stack
+  // high-water) over HTTP. The buffer is per-request heap - zero static
+  // cost, so the audit build keeps the release footprint.
+  server->on("/api/pocket/v1/dev/heap-map", HTTP_GET, [this] {
+    noteClientActivity();
+    char* map = static_cast<char*>(malloc(4096));
+    if (!map) {
+      server->send(503, "text/plain", "no memory for the heap map");
+      return;
+    }
+    const size_t n = PocketDaily::HeapMap::render(map, 4096);
+    server->send(200, "text/plain; charset=utf-8", n ? String(map) : "heap map unavailable");
+    free(map);
+  });
+#endif
 #ifdef ENABLE_DEV_REMOTE_FLASH
   // Developer builds only: flash the staged /update.bin over the LAN so
   // iteration does not walk the on-device Settings menus. Absent from
@@ -336,14 +352,7 @@ void CrossPointWebServer::begin() {
     requestRepaint();
     server->send(204, "text/plain", "");
   });
-  // Developer builds only: HN-2 evidence - runtime heap map (caps totals +
-  // per-task stack high-water) over HTTP.
-  server->on("/api/pocket/v1/dev/heap-map", HTTP_GET, [this] {
-    noteClientActivity();
-    static char map[4096];
-    const size_t n = PocketDaily::HeapMap::render(map, sizeof(map));
-    server->send(200, "text/plain; charset=utf-8", n ? String(map) : "heap map unavailable");
-  });
+
   // Developer builds only: network stability post-mortem log
   // (docs/network-stability-analysis.md). Readable after the radio died.
   server->on("/api/pocket/v1/dev/net-health", HTTP_GET, [this] {
