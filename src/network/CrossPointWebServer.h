@@ -193,6 +193,16 @@ class CrossPointWebServer {
   mutable std::atomic<bool> repaintRequested{false};
   char activePackName[33] = {};
   char activePackVersion[17] = {};
+  // Transfer focus: uploads own the DMA pool (the heap map showed it
+  // bottoming 3.5 KB from empty at an 8.7 KB settle); the WS listener's
+  // buffers are torn down for the duration and rebuilt afterwards.
+  void startLiveListener();
+  void suspendLiveListener();
+  void resumeLiveListener();
+  void beginTransferFocus();
+  void endTransferFocus();
+  bool liveListenerSuspended = false;
+
   String buildStatusJson() const;
   void sendLiveStudioLine(const char* line);
   void pushLiveStudioStatusIfChanged();

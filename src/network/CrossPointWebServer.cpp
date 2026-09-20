@@ -411,19 +411,7 @@ void CrossPointWebServer::begin() {
   // v1 event push when heap allows (`docs/live-studio-v1.md`); the private
   // AP stays poll-only to preserve contiguous heap on X3.
   liveStudioPush = !apMode && ESP.getFreeHeap() >= PocketDaily::LiveStudio::kMinListenerFreeHeap;
-  if (profile == CrossPointWebServerProfile::FULL || liveStudioPush) {
-    LOG_DBG("WEB", "Starting WebSocket server on port %d (liveStudioPush=%d)...", wsPort, liveStudioPush);
-    wsServer = makeUniqueNoThrow<WebSocketsServer>(wsPort);
-    if (wsServer) {
-      wsInstance = const_cast<CrossPointWebServer*>(this);
-      wsServer->begin();
-      wsServer->onEvent(wsEventCallback);
-      LOG_DBG("WEB", "WebSocket server started");
-    } else {
-      liveStudioPush = false;
-      LOG_ERR("WEB", "Could not allocate WebSocket server; HTTP File Transfer remains available");
-    }
-  }
+  if (profile == CrossPointWebServerProfile::FULL || liveStudioPush) startLiveListener();
 
   if (profile == CrossPointWebServerProfile::FULL) {
     udpActive = udp.begin(LOCAL_UDP_PORT);
@@ -671,6 +659,7 @@ void CrossPointWebServer::failPocketUploadStream(const char* message, const bool
 }
 
 void CrossPointWebServer::suspendPocketUploadStream(const char* message) {
+  endTransferFocus();
   // Transport failure while payload was flowing. Flush what already arrived,
   // keep the hidden staging file on the card and remember the verified prefix
   // so a reconnecting companion sends only the remainder. RAM cost is one path
@@ -778,6 +767,9 @@ bool CrossPointWebServer::reopenPocketStagingFile(const String& path, const size
   return ok;
 }
 
+void CrossPointWebServer::beginTransferFocus() { suspendLiveListener(); }
+void CrossPointWebServer::endTransferFocus() { resumeLiveListener(); }
+
 bool CrossPointWebServer::beginPocketUploadFromHeader() {
   PocketDaily::UploadStream::Request request;
   if (!PocketDaily::UploadStream::parseHeader(pocketUploadHeader, pocketUploadHeaderLength, request)) return false;
@@ -830,6 +822,7 @@ bool CrossPointWebServer::beginPocketUploadFromHeader() {
     const size_t length = PocketDaily::UploadStream::formatResumeReply(reply, sizeof(reply), pocketUploadReceived);
     if (length == 0 || pocketUploadClient.write(reinterpret_cast<const uint8_t*>(reply), length) != length) {
       suspendPocketUploadStream("Upload disconnected");
+      beginTransferFocus();
       return true;
     }
   }
@@ -839,6 +832,7 @@ bool CrossPointWebServer::beginPocketUploadFromHeader() {
           (unsigned)pocketUploadReceived, (unsigned)request.size,
           (unsigned)(pocketStreamBatch ? POCKET_STREAM_BATCH_BYTES : POCKET_STREAM_READ_BYTES));
   if (pocketUploadReceived >= pocketUploadExpected) finishPocketUploadStream();
+  beginTransferFocus();
   return true;
 }
 
@@ -874,6 +868,7 @@ bool CrossPointWebServer::appendPocketStreamPayload(const uint8_t* data, size_t 
 }
 
 void CrossPointWebServer::finishPocketUploadStream() {
+  endTransferFocus();
   if (pocketUploadFile) {
     suspendLoopWatchdog("nearby:upload-close");
     pocketUploadFile.close();
@@ -1098,10 +1093,10 @@ String CrossPointWebServer::buildStatusJson() const {
   // companion treats a missing object as a legacy poll-only reader.
   {
     JsonObject live = doc["liveStudio"].to<JsonObject>();
-    live["mode"] = liveStudioPush ? "push" : "poll";
-    if (liveStudioPush) live["wsPort"] = wsPort;
-    live["frameStream"] = liveStudioPush;  // LS-2: live capture while subscribed
-    live["uiPacks"] = true;                // LS-3: .uipack apply
+    live["mode"] = (liveStudioPush && !liveListenerSuspended) ? "push" : "poll";
+    if (liveStudioPush && !liveListenerSuspended) live["wsPort"] = wsPort;
+    live["frameStream"] = liveStudioPush && !liveListenerSuspended;
+    live["uiPacks"] = true;  // LS-3: .uipack apply
     live["activePack"] = activePackName[0] ? activePackName : nullptr;
     live["activePackVersion"] = activePackVersion[0] ? activePackVersion : nullptr;
   }
@@ -1109,6 +1104,49 @@ String CrossPointWebServer::buildStatusJson() const {
   String json;
   serializeJson(doc, json);
   return json;
+}
+
+void CrossPointWebServer::startLiveListener() {
+  if (wsServer) return;
+  LOG_DBG("WEB", "Starting WebSocket server on port %d (liveStudioPush=%d)...", wsPort, liveStudioPush);
+  wsServer = makeUniqueNoThrow<WebSocketsServer>(wsPort);
+  if (wsServer) {
+    wsInstance = const_cast<CrossPointWebServer*>(this);
+    wsServer->begin();
+    wsServer->onEvent(wsEventCallback);
+    LOG_DBG("WEB", "WebSocket server started");
+  } else {
+    if (profile == CrossPointWebServerProfile::FULL) {
+      LOG_ERR("WEB", "Could not allocate WebSocket server; HTTP File Transfer remains available");
+    } else {
+      liveStudioPush = false;
+      LOG_INF("WEB", "Live listener stays off (allocation failed)");
+    }
+  }
+}
+
+void CrossPointWebServer::suspendLiveListener() {
+  if (liveListenerSuspended || !wsServer) return;
+  liveListenerSuspended = true;
+  liveStudioSubscribed = false;
+  liveStudioClientAttached = false;
+  liveStudioClientNum = 255;
+  PocketDaily::LiveFrameCapture::clear();
+  LOG_INF("WEB", "Live listener suspended for transfer focus");
+  if (wsInstance) wsInstance = nullptr;
+  wsServer->close();
+  wsServer.reset();
+}
+
+void CrossPointWebServer::resumeLiveListener() {
+  if (!liveListenerSuspended) return;
+  liveListenerSuspended = false;
+  if (!liveStudioPush || ESP.getFreeHeap() < PocketDaily::LiveStudio::kMinListenerFreeHeap) {
+    LOG_INF("WEB", "Live listener not resumed (push off or heap %u)", (unsigned)ESP.getFreeHeap());
+    return;
+  }
+  LOG_INF("WEB", "Live listener resuming after transfer");
+  startLiveListener();
 }
 
 void CrossPointWebServer::sendLiveStudioLine(const char* line) {

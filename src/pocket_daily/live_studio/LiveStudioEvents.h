@@ -27,11 +27,12 @@ inline constexpr uint32_t kKeepaliveIntervalMs = 15000;
 // LS-1 so the policy is fixed before the capture path exists.
 inline constexpr uint32_t kMinCaptureIntervalMs = 250;
 inline constexpr uint32_t kMinCaptureFreeHeap = 10 * 1024;
-// The WS listener gate. Proven window: a morning build at 13.6 KB free ran
-// the listener plus repeated 6 MB transfers for hours; the 10 KB LS-3
-// baseline died at transfer start. 12 KB splits exactly between them -
-// push stays on where it was proven stable and stays off below.
-inline constexpr uint32_t kMinListenerFreeHeap = 12 * 1024;
+// The WS listener gate, checked AFTER the server settles: the heap map
+// (2026-09-20) showed the DMA pool bottoming 3.5 KB from empty during
+// transfers at an 8.7 KB settle, and the morning's stable build settled
+// ~13.6 KB. The listener's ~3 KB must not ride on builds that settle this
+// tight - below 16 KB at start, the reader stays poll-only.
+inline constexpr uint32_t kMinListenerFreeHeap = 16 * 1024;
 
 struct Subscription {
   bool frames = false;  // LS-2: accepted, not yet served
