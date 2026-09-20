@@ -11,6 +11,15 @@ available while CrossPoint Reader is in File Transfer or Calibre Wireless mode.
 Examples use `crosspoint.local`. If mDNS does not resolve on your network, use
 the IP address shown on the device screen.
 
+This document covers the inherited CrossPoint Reader surface. The Pocket Daily
+companion routes (`/api/pocket/v1/*`, the port-82 upload stream, and the Live
+Studio WebSocket push) are owned by `src/pocket_daily/web/` — see
+[SEAM.md](SEAM.md) for the ownership boundary,
+[nearby-sync-v1.md](nearby-sync-v1.md) for the private-AP sync protocol, and
+[live-studio-v1.md](live-studio-v1.md) for the live frame/UI-pack endpoints.
+Which routes exist in a given mode is gated by the profile selected in
+`pocket_daily/web/PrivateApPolicy.h`.
+
 ## HTTP Pages
 
 | Method | Path | Purpose |
