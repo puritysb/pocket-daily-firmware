@@ -29,6 +29,7 @@
 #include "html/js/jszip_minJs.generated.h"
 #include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/live_studio/DevTrace.h"
+#include "pocket_daily/live_studio/HeapMap.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/live_studio/UiPackStore.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
@@ -334,6 +335,14 @@ void CrossPointWebServer::begin() {
     DEV_TRACE(PocketDaily::DevTrace::RENDER_REQ);
     requestRepaint();
     server->send(204, "text/plain", "");
+  });
+  // Developer builds only: HN-2 evidence - runtime heap map (caps totals +
+  // per-task stack high-water) over HTTP.
+  server->on("/api/pocket/v1/dev/heap-map", HTTP_GET, [this] {
+    noteClientActivity();
+    static char map[4096];
+    const size_t n = PocketDaily::HeapMap::render(map, sizeof(map));
+    server->send(200, "text/plain; charset=utf-8", n ? String(map) : "heap map unavailable");
   });
   // Developer builds only: network stability post-mortem log
   // (docs/network-stability-analysis.md). Readable after the radio died.
