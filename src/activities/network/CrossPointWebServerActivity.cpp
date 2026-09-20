@@ -9,7 +9,6 @@
 #include <I18n.h>
 #include <Memory.h>
 #include <WiFi.h>
-#include <esp_system.h>
 #include <esp_task_wdt.h>
 
 #include <cstddef>
@@ -27,51 +26,14 @@
 #include "util/QrUtils.h"
 
 namespace {
-// Private-AP startup leaves a power-loss-durable trail on the SD card. The X3
-// hangs hard during web-server startup at its tightest heap (no crash report,
-// RTC breadcrumb lost on the power cycle needed to recover), so each step is
-// flushed to this file and read back over File Transfer afterwards. Diagnostic
-// only; cheap one-time writes on the Sync path.
-constexpr const char* AP_BOOT_LOG_PATH = "/nearby_ap_log.txt";
-void apBootLog(const char* step, const bool reset = false) {
-  if (reset && Storage.exists(AP_BOOT_LOG_PATH)) Storage.remove(AP_BOOT_LOG_PATH);
-  HalFile f = Storage.open(AP_BOOT_LOG_PATH, O_WRONLY | O_CREAT | O_APPEND);
-  if (!f) return;
-  char line[96];
-  const int n = snprintf(line, sizeof(line), "%lu %s heap=%u largest=%u\n", (unsigned long)millis(), step,
-                         (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
-  if (n > 0) f.write(reinterpret_cast<const uint8_t*>(line), (size_t)n);
-  f.close();  // flush each step so a hard hang still leaves the trail
-}
 // AP Mode configuration
 constexpr const char* AP_SSID = "CrossPoint-Reader";
 constexpr const char* AP_PASSWORD = nullptr;  // Open network for ease of use
 constexpr const char* AP_HOSTNAME = "crosspoint";
 constexpr uint8_t AP_CHANNEL = 1;
 constexpr uint8_t AP_MAX_CONNECTIONS = 4;
-constexpr uint8_t PRIVATE_AP_MAX_CONNECTIONS = 1;
 constexpr uint16_t PRIVATE_AP_LEASE_SECONDS = 300;
 constexpr unsigned long BLE_HANDOFF_DELAY_MS = 900;
-// NimBLE-Arduino needs a sizeable contiguous working set while it creates the
-// controller, host task, GATT database and advertising buffers.  The X3 has no
-// PSRAM, so refuse the transition before framework allocations can abort when
-// a reader cache has left the internal heap fragmented.
-constexpr uint32_t NEARBY_START_MIN_FREE = 64U * 1024U;
-constexpr uint32_t NEARBY_START_MIN_BLOCK = 32U * 1024U;
-// The preflight is measured before NimBLE allocates its controller, host task
-// and GATT database.  Guard the resulting steady state separately so a future
-// library/configuration change fails back to Pocket Daily instead of reaching
-// pairing with too little headroom and resetting the reader.
-constexpr uint32_t NEARBY_READY_MIN_FREE = 20U * 1024U;
-constexpr uint32_t NEARBY_READY_MIN_BLOCK = 8U * 1024U;
-// Measured X3 STA/AP operation leaves roughly 22-27 KB free after the Wi-Fi
-// driver starts. The Pocket profile omits WebDAV, WebSocket, discovery and
-// captive-portal services; the full profile retains them and gets the larger
-// guard. Upload buffers are allocated lazily after either gate.
-constexpr uint32_t POCKET_WEB_START_MIN_FREE = 18U * 1024U;
-constexpr uint32_t POCKET_WEB_START_MIN_BLOCK = 8U * 1024U;
-constexpr uint32_t FULL_WEB_START_MIN_FREE = 20U * 1024U;
-constexpr uint32_t FULL_WEB_START_MIN_BLOCK = 10U * 1024U;
 constexpr int QR_CODE_WIDTH = 198;
 constexpr int QR_CODE_HEIGHT = 198;
 
@@ -337,7 +299,7 @@ void CrossPointWebServerActivity::startNearbySync() {
   // after it has been unloaded.
   if (privateApMode) {
     HalSystem::setCrashBreadcrumb("nearby:web-preflight");
-    apBootLog("web-preflight");
+    PocketDaily::Web::apBootLog("web-preflight");
   }
   const uint32_t heapBeforeFontRelease = ESP.getFreeHeap();
   {
@@ -349,7 +311,7 @@ void CrossPointWebServerActivity::startNearbySync() {
   LOG_INF("NEARBY", "preflight heap=%lu->%lu largest=%lu", static_cast<unsigned long>(heapBeforeFontRelease),
           static_cast<unsigned long>(heapAfterFontRelease), static_cast<unsigned long>(largestBlock));
 
-  if (heapAfterFontRelease < NEARBY_START_MIN_FREE || largestBlock < NEARBY_START_MIN_BLOCK) {
+  if (!PocketDaily::Web::nearbyStartAllowed(heapAfterFontRelease, largestBlock)) {
     LOG_ERR("NEARBY", "start refused: heap free=%lu largest=%lu", static_cast<unsigned long>(heapAfterFontRelease),
             static_cast<unsigned long>(largestBlock));
     returnToLaunchOrigin();
@@ -389,7 +351,7 @@ void CrossPointWebServerActivity::handleNearbyStartup() {
     const uint32_t largestBlock = ESP.getMaxAllocHeap();
     LOG_INF("NEARBY", "ready heap=%lu largest=%lu", static_cast<unsigned long>(freeHeap),
             static_cast<unsigned long>(largestBlock));
-    if (freeHeap < NEARBY_READY_MIN_FREE || largestBlock < NEARBY_READY_MIN_BLOCK) {
+    if (!PocketDaily::Web::nearbyReadyAllowed(freeHeap, largestBlock)) {
       LOG_ERR("NEARBY", "ready refused: heap free=%lu largest=%lu", static_cast<unsigned long>(freeHeap),
               static_cast<unsigned long>(largestBlock));
       HalSystem::setCrashBreadcrumb("nearby:ready-low-memory");
@@ -439,11 +401,8 @@ void CrossPointWebServerActivity::handleNearbySync() {
       nearbySync.notifyOk(command.requestId);
       break;
     case Pocket::NearbySync::CommandType::START_AP: {
-      const uint32_t secretA = esp_random();
-      const uint32_t secretB = esp_random();
-      snprintf(privateApSsid, sizeof(privateApSsid), "Pocket-%.4s", nearbySync.deviceId() + 4);
-      snprintf(privateApPassword, sizeof(privateApPassword), "%08lX%04lX", static_cast<unsigned long>(secretA),
-               static_cast<unsigned long>(secretB & 0xFFFFU));
+      PocketDaily::Web::generatePrivateApCredentials(nearbySync.deviceId(), privateApSsid, sizeof(privateApSsid),
+                                                     privateApPassword, sizeof(privateApPassword));
 
       if (!nearbySync.notifyHotspot(command.requestId, privateApSsid, privateApPassword, "192.168.4.1", 80, 0,
                                     PRIVATE_AP_LEASE_SECONDS)) {
@@ -463,7 +422,7 @@ void CrossPointWebServerActivity::handleNearbySync() {
 void CrossPointWebServerActivity::startAccessPoint() {
   if (privateApMode) {
     HalSystem::setCrashBreadcrumb("nearby:ap-begin");
-    apBootLog("ap-begin", true);
+    PocketDaily::Web::apBootLog("ap-begin", true);
   }
   LOG_DBG("WEBACT", "Starting Access Point mode...");
   LOG_DBG("WEBACT", "Free heap before AP start: %d bytes", ESP.getFreeHeap());
@@ -476,7 +435,8 @@ void CrossPointWebServerActivity::startAccessPoint() {
   bool apStarted;
   const char* ssid = privateApMode ? privateApSsid : AP_SSID;
   const char* password = privateApMode ? privateApPassword : AP_PASSWORD;
-  const uint8_t maxConnections = privateApMode ? PRIVATE_AP_MAX_CONNECTIONS : AP_MAX_CONNECTIONS;
+  const uint8_t maxConnections =
+      privateApMode ? PocketDaily::Web::kPrivateApMaxConnections : AP_MAX_CONNECTIONS;
   if (password && strlen(password) >= 8) {
     apStarted = WiFi.softAP(ssid, password, AP_CHANNEL, false, maxConnections);
   } else {
@@ -501,7 +461,7 @@ void CrossPointWebServerActivity::startAccessPoint() {
   if (privateApMode) {
     privateApLastActivityAt = millis();
     HalSystem::setCrashBreadcrumb("nearby:ap-up");
-    apBootLog("ap-up");
+    PocketDaily::Web::apBootLog("ap-up");
   }
 
   LOG_DBG("WEBACT", "Access Point started!");
@@ -551,20 +511,16 @@ void CrossPointWebServerActivity::startWebServer() {
   }
   LOG_DBG("WEBACT", "Released resident SD font: heap %u -> %u (largest %u)", (unsigned)heapBeforeFontRelease,
           (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
-  if (privateApMode) apBootLog("web-fontfreed");
+  if (privateApMode) PocketDaily::Web::apBootLog("web-fontfreed");
 
-  const auto profile = privateApMode ? CrossPointWebServerProfile::POCKET_SYNC
-                                     : (gpio.deviceIsX3() ? CrossPointWebServerProfile::FILE_TRANSFER
-                                                          : CrossPointWebServerProfile::FULL);
+  const auto profile = PocketDaily::Web::selectProfile(privateApMode, gpio.deviceIsX3());
   const bool lightweightProfile = profile != CrossPointWebServerProfile::FULL;
-  const uint32_t minFree = lightweightProfile ? POCKET_WEB_START_MIN_FREE : FULL_WEB_START_MIN_FREE;
-  const uint32_t minBlock = lightweightProfile ? POCKET_WEB_START_MIN_BLOCK : FULL_WEB_START_MIN_BLOCK;
-  if (ESP.getFreeHeap() < minFree || ESP.getMaxAllocHeap() < minBlock) {
+  if (!PocketDaily::Web::webStartAllowed(lightweightProfile, ESP.getFreeHeap(), ESP.getMaxAllocHeap())) {
     LOG_ERR("WEBACT", "Web server start refused: heap free=%u largest=%u", (unsigned)ESP.getFreeHeap(),
             (unsigned)ESP.getMaxAllocHeap());
     if (privateApMode) {
       HalSystem::setCrashBreadcrumb("nearby:web-refused-heap");
-      apBootLog("web-refused-heap");
+      PocketDaily::Web::apBootLog("web-refused-heap");
     }
     returnToLaunchOrigin();
     return;
@@ -573,7 +529,7 @@ void CrossPointWebServerActivity::startWebServer() {
   // Create the web server instance
   if (privateApMode) {
     HalSystem::setCrashBreadcrumb("nearby:web-alloc");
-    apBootLog("web-alloc");
+    PocketDaily::Web::apBootLog("web-alloc");
   }
   webServer = makeUniqueNoThrow<CrossPointWebServer>(profile);
   if (!webServer) {
@@ -583,7 +539,7 @@ void CrossPointWebServerActivity::startWebServer() {
   }
   if (privateApMode) {
     HalSystem::setCrashBreadcrumb("nearby:web-begin");
-    apBootLog("web-begin");
+    PocketDaily::Web::apBootLog("web-begin");
   }
   webServer->begin();
 
@@ -591,28 +547,12 @@ void CrossPointWebServerActivity::startWebServer() {
     state = WebServerActivityState::SERVER_RUNNING;
     LOG_DBG("WEBACT", "Web server started successfully");
     if (privateApMode) {
-      // The Arduino loop task is not watched by default. Nearby Sync runs at
-      // the X3's tightest heap point and previously could retain a dead
-      // Hotspot Mode frame forever if a network handler stopped returning.
-      // Enrol it only for this bounded session; long transfer handlers already
-      // reset the task watchdog while making progress.
       HalSystem::setCrashBreadcrumb("nearby:server-running");
-      apBootLog("server-running");
-      enableLoopWDT();
-      // WebServer bounds each chunk send to HTTP_MAX_SEND_WAIT (5 s) waiting
-      // for the client ACK. On a weak link the exact-screen preview's 4 KiB
-      // sends approach that, and with the loop task watchdog also at 5 s the
-      // two race and reset the reader mid-preview (observed breadcrumb
-      // nearby:screen-preview). Widen the watchdog for this bounded private-AP
-      // session so a legitimate slow send cannot trip it, while a true hang is
-      // still caught. Only the loop task is subscribed here (idle task is not
-      // watched), and Nearby Sync always exits through a chip restart, which
-      // restores the sdkconfig 5 s default.
-      const esp_task_wdt_config_t apWdt = {.timeout_ms = 12000, .idle_core_mask = 0, .trigger_panic = true};
-      if (esp_task_wdt_reconfigure(&apWdt) != ESP_OK) {
+      PocketDaily::Web::apBootLog("server-running");
+      if (!PocketDaily::Web::armPrivateApWatchdog()) {
         LOG_ERR("WEBACT", "Could not widen task watchdog for private AP session");
       }
-      apBootLog("wdt-armed");
+      PocketDaily::Web::apBootLog("wdt-armed");
     }
     lastWifiBars = isApMode ? 0 : barsForRssi(WiFi.RSSI(), 0);
 
@@ -627,23 +567,6 @@ void CrossPointWebServerActivity::startWebServer() {
   }
 }
 
-// Two-way RF proof: a TCP handshake with the gateway on either of two
-// near-universally-open ports (DNS, router admin). A single boolean connect
-// cannot distinguish RST from timeout, so both ports are tried; a router
-// with neither open is treated as alive to avoid false escalations.
-bool CrossPointWebServerActivity::probeGateway() {
-  const IPAddress gateway = WiFi.gatewayIP();
-  if (gateway == IPAddress(0, 0, 0, 0)) return true;
-  for (uint16_t port : {static_cast<uint16_t>(53), static_cast<uint16_t>(80)}) {
-    WiFiClient probe;
-    probe.setTimeout((PocketDaily::RadioHealth::PROBE_TIMEOUT_MS + 999) / 1000);
-    if (probe.connect(gateway, port)) {
-      probe.stop();
-      return true;
-    }
-  }
-  return false;
-}
 
 void CrossPointWebServerActivity::loop() {
   if (state == WebServerActivityState::NEARBY_STARTING) {
@@ -698,52 +621,25 @@ void CrossPointWebServerActivity::loop() {
         lastWifiCheck = millis();
         PocketDaily::NetHealth::tick();
         const wl_status_t wifiStatus = WiFi.status();
-        // Driver auto-reconnect handles retries; abandon (via onGoHome) only
-        // after WIFI_ABANDON_MS, otherwise the activity freezes on a blip.
         bool repaint = false;
-        if (wifiStatus != WL_CONNECTED) {
-          if (consecutiveDisconnects == 0) {
-            firstDisconnectAt = millis();
-            repaint = true;
-          }
-          consecutiveDisconnects++;
-          PocketDaily::NetHealth::note("loop_no_wifi", consecutiveDisconnects);
-          LOG_DBG("WEBACT", "WiFi not connected (status=%d, consecutive=%d, total=%lu ms)", wifiStatus,
-                  consecutiveDisconnects, millis() - firstDisconnectAt);
-          if (millis() - firstDisconnectAt > WIFI_ABANDON_MS) {
-            LOG_DBG("WEBACT", "WiFi unavailable for >%lu s; returning to network selection", WIFI_ABANDON_MS / 1000UL);
+        // The probe ladder only runs once the server is up and stable:
+        // during connection setup the activity owns the Wi-Fi state machine
+        // and any interference bounces the user back to the home screen
+        // (observed 2026-09-20).
+        const bool serverStable = state == WebServerActivityState::SERVER_RUNNING && webServer && webServer->isRunning();
+        switch (staWatch.onCheck(wifiStatus, millis(), serverStable, repaint)) {
+          case PocketDaily::Web::StaAction::Abandon:
             state = WebServerActivityState::SHUTTING_DOWN;
             returnToLaunchOrigin();
             return;
-          }
-        } else {
-          if (consecutiveDisconnects > 0) {
-            LOG_DBG("WEBACT", "WiFi recovered after %d failed checks (%lu ms)", consecutiveDisconnects,
-                    millis() - firstDisconnectAt);
-            repaint = true;
-          }
-          consecutiveDisconnects = 0;
-          firstDisconnectAt = 0;
-          // HN-1: WL_CONNECTED lies in the zombie state - probe the gateway
-          // for two-way RF and escalate recovery while deaf. Only once the
-          // server is up and stable: during connection setup the activity
-          // owns the Wi-Fi state machine and any interference bounces the
-          // user back to the home screen (observed 2026-09-20).
-          const bool serverStable =
-              state == WebServerActivityState::SERVER_RUNNING && webServer && webServer->isRunning();
-          if (serverStable && millis() - lastRadioProbeMs >= PocketDaily::RadioHealth::PROBE_PERIOD_MS) {
-            lastRadioProbeMs = millis();
-            const bool reachable = probeGateway();
-            if (!reachable) PocketDaily::NetHealth::note("probe_dead", 0);
-            switch (radioHealth.onProbe(reachable)) {
-              case PocketDaily::RadioHealth::Level::DriverReconnect:
-                PocketDaily::NetHealth::note("rh_reconnect", 0);
-                WiFi.reconnect();
-                break;
-              case PocketDaily::RadioHealth::Level::None:
-                break;
-            }
-          }
+          case PocketDaily::Web::StaAction::Reconnect:
+            WiFi.reconnect();
+            break;
+          case PocketDaily::Web::StaAction::Repaint:
+          case PocketDaily::Web::StaAction::None:
+            break;
+        }
+        if (wifiStatus == WL_CONNECTED) {
           const int rssi = WiFi.RSSI();
           if (rssi < -75) {
             LOG_DBG("WEBACT", "Warning: Weak WiFi signal: %d dBm", rssi);
@@ -970,7 +866,7 @@ void CrossPointWebServerActivity::renderWifiIndicator(int subHeaderTop) const {
   const int iconLeft = iconRight - iconWidth;
   const int iconBottom = subHeaderTop + metrics.tabBarHeight - metrics.verticalSpacing;
 
-  const bool wifiUp = (WiFi.status() == WL_CONNECTED) && (consecutiveDisconnects == 0);
+  const bool wifiUp = (WiFi.status() == WL_CONNECTED) && staWatch.cleanAssociation();
   if (wifiUp) {
     for (int i = 0; i < BAR_COUNT; i++) {
       const int barHeight = (i + 1) * ICON_HEIGHT / BAR_COUNT;

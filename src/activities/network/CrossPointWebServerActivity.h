@@ -11,8 +11,9 @@
 #include "NetworkModeSelectionActivity.h"
 #include "activities/Activity.h"
 #include "network/CrossPointWebServer.h"
-#include "network/RadioHealthPolicy.h"
 #include "pocket_daily/nearby_sync/NearbySyncService.h"
+#include "pocket_daily/web/PrivateApPolicy.h"
+#include "pocket_daily/web/StaRadioWatch.h"
 
 // Web server activity states
 enum class WebServerActivityState {
@@ -70,16 +71,10 @@ class CrossPointWebServerActivity final : public Activity {
   // Performance monitoring
   unsigned long lastHandleClientTime = 0;
 
-  // HN-1 radio self-healing (docs/network-stability-analysis.md): probe the
-  // gateway while "connected"; WL_CONNECTED lies in the zombie state.
-  PocketDaily::RadioHealth::Policy radioHealth;
-  unsigned long lastRadioProbeMs = 0;
-  bool probeGateway();
-
-  // Sustained WiFi-loss tracking; abandon only after WIFI_ABANDON_MS.
-  int consecutiveDisconnects = 0;
-  unsigned long firstDisconnectAt = 0;
-  static constexpr unsigned long WIFI_ABANDON_MS = 5UL * 60UL * 1000UL;
+  // HN-1 radio self-healing ladder (docs/network-stability-analysis.md):
+  // sustained-loss abandon plus the two-way gateway probe that catches the
+  // zombie `WL_CONNECTED` state. The activity applies the returned action.
+  PocketDaily::Web::StaRadioWatch staWatch;
 
   // Cached signal-strength bracket (0..4) for the WiFi indicator.
   int lastWifiBars = 0;

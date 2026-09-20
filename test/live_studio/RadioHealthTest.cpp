@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "network/RadioHealthPolicy.h"
+#include "pocket_daily/web/RadioHealthPolicy.h"
 
 namespace {
 
