@@ -424,13 +424,9 @@ void handleUiPackList(WebServer& server, const RouteDeps& d) {
   server.sendContent("[");
   char line[160];
   bool first = true;
-  d.host.scanUiPacks(d.host.self, [&](const char* rawName, bool isDirectory, size_t size) {
-    const size_t rawLen = strlen(rawName);
-    if (isDirectory || rawLen < 7 || strcmp(rawName + rawLen - 7, ".uipack") != 0) return;
-    // Strip the extension for the pack name the apply endpoint expects.
-    const std::string name(rawName, rawLen - 7);
-    const bool active = name == d.liveStudio->activePackName();
-    const int n = snprintf(line, sizeof(line), R"({"name":"%.32s","size":%u,"active":%s})", name.c_str(),
+  PocketDaily::LiveStudio::listPacks([&](const char* name, size_t size) {
+    const bool active = strcmp(name, d.liveStudio->activePackName()) == 0;
+    const int n = snprintf(line, sizeof(line), R"({"name":"%.32s","size":%u,"active":%s})", name,
                            static_cast<unsigned>(size), active ? "true" : "false");
     if (n <= 0 || static_cast<size_t>(n) >= sizeof(line)) return;
     if (!first) server.sendContent(",");

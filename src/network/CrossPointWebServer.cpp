@@ -26,7 +26,6 @@
 #include "html/js/jszip_minJs.generated.h"
 #include "pocket_daily/direct_session.h"
 #include "pocket_daily/live_studio/DevTrace.h"
-#include "pocket_daily/live_studio/UiPackStore.h"
 #include "pocket_daily/upload_stream_protocol.h"
 #include "util/BookCacheUtils.h"
 
@@ -463,12 +462,6 @@ void CrossPointWebServer::wirePocketRoutes() {
   pocketRoutes.host.requestRepaint = [](void* self) { static_cast<CrossPointWebServer*>(self)->requestRepaint(); };
   pocketRoutes.host.normalizeWebPath = [](void*, const String& path) { return normalizeWebPath(path); };
   pocketRoutes.host.isProtectedItemName = [](void*, const String& name) { return isProtectedItemName(name); };
-  pocketRoutes.host.scanUiPacks = [](void* self, const std::function<void(const char*, bool, size_t)>& fn) {
-    static_cast<const CrossPointWebServer*>(self)->scanFiles(PocketDaily::LiveStudio::UIPACK_DIR,
-                                                             [&fn](const FileInfo& info) {
-                                                               fn(info.name.c_str(), info.isDirectory, info.size);
-                                                             });
-  };
 }
 
 CrossPointWebServer::WsUploadStatus CrossPointWebServer::getWsUploadStatus() const {

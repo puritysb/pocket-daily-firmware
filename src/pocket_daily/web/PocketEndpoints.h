@@ -4,7 +4,6 @@
 #include <WebServer.h>
 
 #include <cstddef>
-#include <functional>
 
 #include "pocket_daily/web/LiveStudioService.h"
 #include "pocket_daily/web/Profile.h"
@@ -23,10 +22,6 @@ struct RouteHost {
   void (*requestRepaint)(void* self) = nullptr;    // pack apply + dev render
   String (*normalizeWebPath)(void* self, const String& path) = nullptr;
   bool (*isProtectedItemName)(void* self, const String& name) = nullptr;
-  // Directory scan of the .uipack store, adapted from the host's FileInfo
-  // scan so this module stays independent of the inherited header.
-  void (*scanUiPacks)(void* self,
-                      const std::function<void(const char* name, bool isDirectory, size_t size)>& fn) = nullptr;
 };
 
 struct RouteDeps {

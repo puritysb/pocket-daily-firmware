@@ -3,12 +3,14 @@
 #include <Arduino.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <esp_task_wdt.h>
 #include <mbedtls/sha256.h>
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
+#include "CrossPointSettings.h"
 #include "components/UITheme.h"
 
 namespace PocketDaily::LiveStudio {
@@ -71,6 +73,43 @@ StoreResult loadPackFromSd(const char* name, UiPackInfo* info, ThemeOverride* ov
     return StoreResult::ValidateFailed;
   }
   return StoreResult::Ok;
+}
+
+bool listPacks(const std::function<void(const char* name, size_t size)>& fn) {
+  HalFile root = Storage.open(UIPACK_DIR);
+  if (!root) {
+    LOG_DBG("WEB", "Failed to open directory: %s", UIPACK_DIR);
+    return false;
+  }
+  if (!root.isDirectory()) {
+    LOG_DBG("WEB", "Not a directory: %s", UIPACK_DIR);
+    root.close();
+    return false;
+  }
+  char name[500];
+  HalFile file = root.openNextFile();
+  while (file) {
+    file.getName(name, sizeof(name));
+    const bool isDirectory = file.isDirectory();
+    const size_t size = isDirectory ? 0 : file.size();
+    const bool hidden = name[0] == '.' && !SETTINGS.showHiddenFiles;
+    file.close();
+    if (!hidden && !isDirectory) {
+      const size_t rawLen = strlen(name);
+      // A file literally named ".uipack" stays hidden (dot rule) unless the
+      // user opted into hidden files; then it lists as an empty pack name,
+      // exactly as the previous host-scan path did.
+      if (rawLen >= 7 && strcmp(name + rawLen - 7, ".uipack") == 0) {
+        name[rawLen - 7] = '\0';  // strip the extension for the caller
+        fn(name, size);
+      }
+    }
+    yield();               // Yield to allow WiFi and other tasks to process during long scans
+    esp_task_wdt_reset();  // Reset watchdog to prevent timeout on large directories
+    file = root.openNextFile();
+  }
+  root.close();
+  return true;
 }
 
 bool writeState(const char* name, const char* version) {

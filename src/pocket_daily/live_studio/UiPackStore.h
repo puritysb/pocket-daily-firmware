@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 
 #include "UiPack.h"
 
@@ -29,6 +30,13 @@ enum class StoreResult : uint8_t {
 // validates, and copies theme overrides out.
 StoreResult loadPackFromSd(const char* name, UiPackInfo* info, ThemeOverride* overrides, size_t cap,
                            UiPackResult* validateError);
+
+// Streams `(name, size)` for every stored pack, extension stripped, in
+// directory order. Dot-prefixed entries follow the showHiddenFiles setting,
+// as the web file browser does. Streaming callback: no intermediate
+// allocation. False when the pack directory cannot be opened (nothing is
+// reported; callers answer as for an empty store).
+bool listPacks(const std::function<void(const char* name, size_t size)>& fn);
 
 // State file (`name=...\nversion=...`). Empty name means "no pack active".
 bool writeState(const char* name, const char* version);
