@@ -197,6 +197,48 @@ stale notes rather than accumulating contradictions. A memory entry must be
 committed together with the change it describes; uncommitted work is not a
 verified baseline.
 
+## Device session: old-build verification + 6 MB grind cut short — 2026-09-21
+
+Supersedes the "no hardware verification yet" line in the sprint entry for the
+items below; all results are from the X3 (5B09AF70) at 192.168.68.68, File
+Transfer STA, on the **lean heapmap build** ("1.6.6-audit", pre-refactor —
+dev/render 404 proves no ENABLE_DEV_REMOTE_FLASH, so no dev/flash endpoint).
+
+- **Verified on device (old build):** /api/status bytes captured (518 B,
+  pre-refactor baseline — copy in `~/pocket-verify-20260921/` on this host);
+  port-82 upload **twice** with resume banking across radio-death windows
+  (3-attempt run: window dies, ladder recovers, RESUME continues — the
+  banking design works exactly as intended); `/api/pocket/v1/commit` atomic
+  publish 200 with size+crc echo; /mkdir 200; **M3 pack demo complete** —
+  hand-built .uipack (3 overrides) uploaded, committed, applied
+  (`{"applied":true,...,"overrides":3}`), `activePack` reflected in
+  /api/status, reverted (`{"applied":false}`). LS-2 capture confirmed by
+  screen-live answering 200 (frame exists) — the 4 KB body send was blocked
+  by the radio, not the code.
+- **HN-2 settle evidence (File Transfer):** free 8,232 B, largest contiguous
+  **3,316 B**, 32-bit-pool minEver 1,184 B. Stack-report on the lean build
+  rendered only 2 tasks (caller 8,404; Tmr Svc 3,836) and took 4.1 s.
+  Live evidence for the mode-lifecycle note: `liveStudio.mode:"poll"` — the
+  WS listener's 40 KB gate can never open at the 8 KB settle heap.
+- **Radio pattern reconfirmed:** back-to-back requests kill the window;
+  blind fast retries prolong the dead phase. The probe-gated sniper client
+  (`put82big.py`) is the right shape. 6 MB push banked 157,292 B in ~9 min
+  of grinding (10-130 KB per window) — projected hours; cut short by choice,
+  not by loss (bank never regressed).
+- **Delivery-path discovery:** Settings hosts the SD firmware picker
+  (`SdFirmwareUpdateActivity`, .bin browser, validates at confirmation with
+  the reader's own Confirm) — a Wi-Fi-delivered /update.bin needs no UP+POWER
+  and no card removal. /update.bin has no other consumer on the lean build.
+- **Ready for next session:** post-refactor `heapmap` build staged at
+  `~/Desktop/update.bin` (6,072,720 B, same "1.6.6-audit" version string for
+  a faithful byte-compare; sha256 66c1612a…). Test pack remains on-device at
+  `/pocket-daily/ui-packs/host-verify.uipack` for the new `listPacks()`.
+  Next-session checklist: flash (SD bridge or finish the 6 MB push on the new
+  build), byte-compare with `compare_status.py`, route 404 matrix, listPacks
+  shows host-verify, apply/revert, port-82 + commit on the refactored path,
+  WS probe (only if boot-time heap opens the listener), then the overnight
+  6 MB stress on the *refactored* stream and the OTA self-update test.
+
 ## Layer re-separation sprint complete — 2026-09-20
 
 - The seam sprint (S1–S9, commits 227d45e7…e0bbd721) is done: the Pocket web
