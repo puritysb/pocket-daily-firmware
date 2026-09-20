@@ -197,6 +197,37 @@ stale notes rather than accumulating contradictions. A memory entry must be
 committed together with the change it describes; uncommitted work is not a
 verified baseline.
 
+## Layer re-separation sprint complete — 2026-09-20
+
+- The seam sprint (S1–S9, commits 227d45e7…e0bbd721) is done: the Pocket web
+  stack now lives under `src/pocket_daily/web/` + `src/pocket_daily/boot/`
+  (`Profile`, `UploadStreamServer`, `PocketStatus`, `LiveStudioService`,
+  `PocketEndpoints`, `Host` bundles, `PrivateApPolicy`, `StaRadioWatch`,
+  `RadioHealthPolicy`, `ProductBoot`), and inherited files keep only hooks.
+  Residual Pocket footprint: `CrossPointWebServer.cpp` ~150 lines (from
+  +1,696), header ~40, `main.cpp` ~30, the Activity ~180 (NearbySync drive
+  stays by design).
+- `docs/SEAM.md` is now the source of truth for the boundary: hook inventory,
+  E1–E5 exceptions, the carried-patch register (EpubReaderActivity,
+  HttpDownloader, lib/Epub — upstream-PR candidates; never send the product
+  stack upstream), include rules, the five mirror obligations (status base
+  fields, silent-reboot magic 0xC1EAB007, reboot-target numbering,
+  hidden-file rule, StaRadioWatch ladder), and the merge routine. Any new
+  Pocket touchpoint in an inherited file must be registered there in the same
+  change.
+- Verified host-side only: both pio envs (`default`, `gh_release`) build, 157
+  host tests pass, strict cppcheck clean. S8 (`UiPackStore::listPacks`) is an
+  isolated commit because its allocation profile changed (no per-entry String
+  churn). **No hardware verification yet** — the device-session bundle is
+  still pending: /api/status byte-compare pre/post refactor, per-profile route
+  404 matrix, port-82 upload+commit AND chunked /upload+commit, WS
+  subscribe/hello/status/frame + pack-apply repaint + transfer focus,
+  private-AP stream with watchdog, then the older pending items (6 MB stress,
+  M3 pack demo, OTA self-update). Sniper pattern; do not claim device
+  behavior from host results.
+- Next: mode-lifecycle resource separation design notes this session;
+  implementation next session with HN-2 heap-map evidence.
+
 ## Live studio direction — 2026-09-19
 
 - Agreed direction with the companion app: a live studio over the reader —
