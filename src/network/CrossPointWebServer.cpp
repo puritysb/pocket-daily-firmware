@@ -31,6 +31,7 @@
 #include "pocket_daily/live_studio/DevTrace.h"
 #include "pocket_daily/live_studio/HeapMap.h"
 #include "pocket_daily/live_studio/NetHealth.h"
+#include "pocket_daily/live_studio/StackReport.h"
 #include "pocket_daily/live_studio/UiPackStore.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include "pocket_daily/product_identity.h"
@@ -322,6 +323,14 @@ void CrossPointWebServer::begin() {
 
   server->onNotFound([this] { handleNotFound(); });
 #if POCKET_HEAP_MAP_ENABLED
+  // HN-2 evidence part 2: per-task stack high-water marks. Safe API per task
+  // (no scheduler suspension, unlike uxTaskGetSystemState which hung).
+  server->on("/api/pocket/v1/dev/stack-report", HTTP_GET, [this] {
+    noteClientActivity();
+    char report[640];
+    const size_t n = PocketDaily::StackReport::render(report, sizeof(report));
+    server->send(200, "text/plain; charset=utf-8", n ? String(report) : "unavailable");
+  });
   // HN-2 evidence: caps-only, fixed small response. The fuller map hung the
   // request on the loaded X3 (uxTaskGetSystemState suspends every task; the
   // chunked variant never answered). Three numbers per capability survive
