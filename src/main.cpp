@@ -34,20 +34,9 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
-#include "pocket_daily/PocketScreenPreview.h"
-#include "pocket_daily/live_studio/NetHealth.h"
-#include "pocket_daily/live_studio/UiPackStore.h"
-#ifdef ENABLE_DEV_REMOTE_FLASH
-#include "pocket_daily/product_identity.h"
-#endif
+#include "pocket_daily/boot/ProductBoot.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
-
-// PlatformIO turns the compact Pocket Daily Japanese font into linker data.
-// Keep this subset in firmware so a clean SD card can render the offline deck
-// before the device has ever reached AgentDeck or File Transfer.
-extern const uint8_t pocketJpFontStart[] asm("_binary_assets_fonts_PocketJP_PocketSansJP_12_cpfont_start");
-extern const uint8_t pocketJpFontEnd[] asm("_binary_assets_fonts_PocketJP_PocketSansJP_12_cpfont_end");
 
 // 16 KB loop task stack (Arduino default: 8 KB). The agent dashboard runs its
 // whole synchronous world on this task — WS pump + JSON dispatch, the feed
@@ -173,8 +162,6 @@ void bumpTimedSleepPaintSerial() { timedSleepPaintCount = timedSleepPaintSerial(
 constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
-constexpr uint32_t SILENT_REBOOT_TARGET_POCKET_DAILY = 2;
-constexpr uint32_t SILENT_REBOOT_TARGET_POCKET_NEARBY_SYNC = 3;
 
 // How the device is coming back to life, resolved once at boot. Both resume
 // flows suppress the splash and leave the panel holding its pre-boot frame; a
@@ -212,34 +199,6 @@ void silentRestartToReader() {
   silentRebootTarget = SILENT_REBOOT_TARGET_READER;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
   LOG_DBG("MAIN", "Silent restart (target=reader)");
-  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-  delay(50);
-  ESP.restart();
-}
-
-void silentRestartToPocketDaily() {
-  if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
-  if (Storage.exists(PocketDaily::SCREEN_PREVIEW_PATH)) Storage.remove(PocketDaily::SCREEN_PREVIEW_PATH);
-  silentRebootTarget = SILENT_REBOOT_TARGET_POCKET_DAILY;
-  silentRebootMagic = SILENT_REBOOT_MAGIC;
-  LOG_DBG("MAIN", "Silent restart (target=Pocket Daily)");
-  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-  delay(50);
-  ESP.restart();
-}
-
-void silentRestartToPocketNearbySync() {
-  if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
-  // Preserve the exact Pocket Daily surface before the loading popup replaces
-  // it. Writing the BMP row-by-row costs no framebuffer-sized allocation and
-  // gives the Apple companion a pixel-identical preview after the clean reboot.
-  const bool previewSaved =
-      ScreenshotUtil::saveFramebufferAsBmp(PocketDaily::SCREEN_PREVIEW_PATH, renderer.getFrameBuffer(),
-                                           renderer.getDisplayWidth(), renderer.getDisplayHeight());
-  LOG_DBG("MAIN", "Pocket screen preview %s", previewSaved ? "saved" : "unavailable");
-  silentRebootTarget = SILENT_REBOOT_TARGET_POCKET_NEARBY_SYNC;
-  silentRebootMagic = SILENT_REBOOT_MAGIC;
-  LOG_DBG("MAIN", "Silent restart (target=Pocket Nearby Sync)");
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
   delay(50);
   ESP.restart();
@@ -317,71 +276,6 @@ static bool loadSleepFrameBuffer() {
   }
   Storage.remove(SLEEP_FRAME_FILE);
   return true;
-}
-
-static void installPocketJapaneseFont() {
-  static constexpr char kHiddenRoot[] = "/.fonts";
-  static constexpr char kVisibleRoot[] = "/fonts";
-  static constexpr char kFamily[] = "PocketSansJP";
-  static constexpr char kFilename[] = "PocketSansJP_12.cpfont";
-  static constexpr char kRevision[] = "3\n";
-
-  const char* root = Storage.exists("/fonts/PocketSansJP") ? kVisibleRoot : kHiddenRoot;
-  char familyDir[64];
-  char finalPath[96];
-  char tempPath[96];
-  char revisionPath[96];
-  snprintf(familyDir, sizeof(familyDir), "%s/%s", root, kFamily);
-  snprintf(finalPath, sizeof(finalPath), "%s/%s", familyDir, kFilename);
-  snprintf(tempPath, sizeof(tempPath), "%s/%s.tmp", familyDir, kFilename);
-  snprintf(revisionPath, sizeof(revisionPath), "%s/.pocket-revision", familyDir);
-
-  // OTA replaces this embedded, content-derived subset whenever its revision
-  // changes. Merely checking for file existence left the original 16-word font
-  // installed forever even after the learning deck grew to 612 records.
-  if (Storage.exists(finalPath)) {
-    char installedRevision[sizeof(kRevision)] = {};
-    HalFile revisionFile;
-    if (Storage.openFileForRead("FONT", revisionPath, revisionFile) &&
-        revisionFile.read(installedRevision, sizeof(kRevision) - 1) == sizeof(kRevision) - 1 &&
-        memcmp(installedRevision, kRevision, sizeof(kRevision) - 1) == 0) {
-      return;
-    }
-  }
-
-  if (!Storage.exists(root) && !Storage.mkdir(root)) return;
-  if (!Storage.exists(familyDir) && !Storage.mkdir(familyDir)) return;
-
-  HalFile file;
-  if (!Storage.openFileForWrite("FONT", tempPath, file)) return;
-  // Linker-provided symbols are separate declarations even though they bound
-  // one embedded blob. Integer addresses express that contract without the
-  // undefined cross-object pointer subtraction cppcheck correctly rejects.
-  const size_t total = reinterpret_cast<uintptr_t>(pocketJpFontEnd) - reinterpret_cast<uintptr_t>(pocketJpFontStart);
-  size_t written = 0;
-  while (written < total) {
-    const size_t chunk = (total - written) > 4096 ? 4096 : (total - written);
-    const size_t n = file.write(pocketJpFontStart + written, chunk);
-    if (n != chunk) break;
-    written += n;
-  }
-  file.close();
-  if (written != total) {
-    Storage.remove(tempPath);
-    LOG_ERR("FONT", "Pocket JP install incomplete: %u/%u", (unsigned)written, (unsigned)total);
-    return;
-  }
-  Storage.remove(finalPath);
-  if (!Storage.rename(tempPath, finalPath)) {
-    Storage.remove(tempPath);
-    return;
-  }
-
-  HalFile revisionFile;
-  if (Storage.openFileForWrite("FONT", revisionPath, revisionFile)) {
-    revisionFile.write(kRevision, sizeof(kRevision) - 1);
-  }
-  LOG_INF("FONT", "Installed Pocket Japanese subset (%u bytes)", (unsigned)total);
 }
 
 // Enter deep sleep mode
@@ -522,7 +416,7 @@ void setup() {
   // Bound the target range too — RTC_NOINIT memory is uninitialized on cold boot.
   const bool isSilentReboot = (silentRebootMagic == SILENT_REBOOT_MAGIC);
   const uint32_t snapshotTarget =
-      (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_POCKET_NEARBY_SYNC) ? silentRebootTarget : 0;
+      (isSilentReboot && silentRebootTarget <= PocketDaily::Boot::kRebootTargetMax) ? silentRebootTarget : 0;
   silentRebootMagic = 0;
   silentRebootTarget = 0;
 
@@ -545,11 +439,14 @@ void setup() {
     return;
   }
 
-  installPocketJapaneseFont();
+  // Pocket boot seam (SEAM.md): wire the product boot hooks, then run them in
+  // the same order the inline code used to run.
+  PocketDaily::Boot::begin(renderer, deepSleepInProgress);
+  PocketDaily::Boot::installJapaneseFont();
 
   HalSystem::checkPanic();
 
-  PocketDaily::NetHealth::begin();
+  PocketDaily::Boot::beginNetHealth();
   SETTINGS.loadFromFile();
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
@@ -557,9 +454,7 @@ void setup() {
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
   UITheme::getInstance().reload();
-  // Live Studio LS-3: layer the persisted UI pack over the selected theme
-  // before any surface renders.
-  PocketDaily::LiveStudio::applyStartupPack();
+  PocketDaily::Boot::applyStartupUiPack();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
   // Prewarm the static settings metadata before the web server/File Transfer
@@ -664,26 +559,16 @@ void setup() {
     // Panic, watchdog and power-fault resets all leave an SD report. Surface it
     // immediately instead of silently resuming into the failing interaction.
     activityManager.goToCrashReport();
-  } else if (
-#ifdef ENABLE_DEV_REMOTE_FLASH
-      Storage.exists(PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER)
-#else
-      false
-#endif
-  ) {
-#ifdef ENABLE_DEV_REMOTE_FLASH
+  } else if (PocketDaily::Boot::consumeDevBootReturn()) {
     // Dev loop only: a remote-triggered flash asked to land back in the
     // File Transfer menu, where one Confirm rejoins the saved network.
-    LOG_INF("MAIN", "Dev boot: returning to File Transfer");
-    Storage.remove(PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER);
     activityManager.goToFileTransfer();
-#endif
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
              !APP_STATE.openEpubPath.empty()) {
     activityManager.goToReader(APP_STATE.openEpubPath);
-  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_POCKET_DAILY) {
+  } else if (resume == BootResume::Silent && snapshotTarget == PocketDaily::Boot::kRebootTargetPocketDaily) {
     activityManager.goToPocketDaily();
-  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_POCKET_NEARBY_SYNC) {
+  } else if (resume == BootResume::Silent && snapshotTarget == PocketDaily::Boot::kRebootTargetPocketNearbySync) {
     activityManager.goToPocketNearbySync();
   } else if (resume == BootResume::Silent) {
     // target == home (or reader with no open book): land on home — don't fall
