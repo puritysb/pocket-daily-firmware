@@ -327,14 +327,23 @@ void CrossPointWebServer::begin() {
   // cost, so the audit build keeps the release footprint.
   server->on("/api/pocket/v1/dev/heap-map", HTTP_GET, [this] {
     noteClientActivity();
-    char* map = static_cast<char*>(malloc(4096));
-    if (!map) {
-      server->send(503, "text/plain", "no memory for the heap map");
-      return;
+    // Zero-heap streaming: caps first, then task batches, all through one
+    // small stack buffer (the X3 audit settled at 6.4 KB free, fragmented
+    // below a 4 KiB contiguous block).
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "text/plain; charset=utf-8", "");
+    char chunk[512];
+    size_t n = PocketDaily::HeapMap::renderCaps(chunk, sizeof(chunk));
+    if (n) server->sendContent(chunk, n);
+    static constexpr size_t kMaxTasks = 20;
+    TaskStatus_t tasks[kMaxTasks];
+    const size_t count = PocketDaily::HeapMap::queryTasks(reinterpret_cast<uintptr_t*>(tasks), kMaxTasks);
+    for (size_t from = 0; from < count; from += 6) {
+      n = PocketDaily::HeapMap::renderTaskBatch(reinterpret_cast<const uintptr_t*>(tasks), count, from, 6, chunk,
+                                                sizeof(chunk));
+      if (n) server->sendContent(chunk, n);
     }
-    const size_t n = PocketDaily::HeapMap::render(map, 4096);
-    server->send(200, "text/plain; charset=utf-8", n ? String(map) : "heap map unavailable");
-    free(map);
+    server->sendContent("");
   });
 #endif
 #ifdef ENABLE_DEV_REMOTE_FLASH

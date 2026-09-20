@@ -4,55 +4,51 @@
 
 #include <Arduino.h>
 #include <esp_heap_caps.h>
-#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
 #include <cstdio>
-#include <cstring>
 
 namespace PocketDaily::HeapMap {
 
-namespace {
-int line(char*& p, size_t& left, const char* fmt, ...) {
-  va_list args;
-  va_start(args, fmt);
-  const int n = vsnprintf(p, left, fmt, args);
-  va_end(args);
-  if (n <= 0 || static_cast<size_t>(n) >= left) return 0;
-  p += n;
-  left -= static_cast<size_t>(n);
-  return n;
-}
-}  // namespace
-
-size_t render(char* out, size_t cap) {
-  char* p = out;
-  size_t left = cap;
-
-  line(p, left, "# heap capabilities\n");
-  const uint32_t capsList[] = {MALLOC_CAP_8BIT, MALLOC_CAP_32BIT, MALLOC_CAP_INTERNAL, MALLOC_CAP_DMA};
+size_t renderCaps(char* out, size_t cap) {
+  size_t used = 0;
+  const uint32_t capsList[] = {MALLOC_CAP_8BIT, MALLOC_CAP_INTERNAL, MALLOC_CAP_DMA};
+  used += static_cast<size_t>(snprintf(out + used, cap - used, "# caps total/free/largest/minEver\n"));
   for (uint32_t caps : capsList) {
     multi_heap_info_t info;
     heap_caps_get_info(&info, caps);
-    line(p, left, "caps=%08x total=%lu free=%lu largest=%lu minFree=%lu\n", static_cast<unsigned long>(caps),
-         static_cast<unsigned long>(info.total_free_bytes + info.total_allocated_bytes),
-         static_cast<unsigned long>(info.total_free_bytes), static_cast<unsigned long>(info.largest_free_block),
-         static_cast<unsigned long>(info.minimum_free_bytes));
+    used += static_cast<size_t>(
+        snprintf(out + used, cap - used, "caps=%08lx %lu %lu %lu %lu\n", static_cast<unsigned long>(caps),
+                 static_cast<unsigned long>(info.total_free_bytes + info.total_allocated_bytes),
+                 static_cast<unsigned long>(info.total_free_bytes), static_cast<unsigned long>(info.largest_free_block),
+                 static_cast<unsigned long>(info.minimum_free_bytes)));
   }
+  return used < cap ? used : cap - 1;
+}
 
-  line(p, left, "# tasks (stack high-water = never-used bytes)\n");
-  const size_t maxTasks = 24;
-  TaskStatus_t tasks[maxTasks];
-  UBaseType_t count = uxTaskGetSystemState(tasks, maxTasks, nullptr);
-  for (UBaseType_t i = 0; i < count; i++) {
-    line(p, left, "task=%-16s stackFree=%lu prio=%lu core=%lu\n", tasks[i].pcTaskName,
-         static_cast<unsigned long>(tasks[i].usStackHighWaterMark * sizeof(StackType_t)),
-         static_cast<unsigned long>(tasks[i].uxCurrentPriority), static_cast<unsigned long>(tasks[i].xCoreID));
+size_t queryTasks(uintptr_t* tasks, size_t maxTasks) {
+  // The caller's storage must hold TaskStatus_t; uintptr_t keeps the header
+  // free of FreeRTOS includes.
+  static_assert(sizeof(uintptr_t) > 0, "storage unit");
+  TaskStatus_t* status = reinterpret_cast<TaskStatus_t*>(tasks);
+  return uxTaskGetSystemState(status, maxTasks, nullptr);
+}
+
+size_t renderTaskBatch(const uintptr_t* tasks, size_t count, size_t from, size_t batch, char* out, size_t cap) {
+  const TaskStatus_t* status = reinterpret_cast<const TaskStatus_t*>(tasks);
+  size_t used = 0;
+  if (from == 0) {
+    used += static_cast<size_t>(snprintf(out + used, cap - used, "# tasks stackFree/prio\n"));
   }
-
-  line(p, left, "# uptime=%lu ms\n", static_cast<unsigned long>(esp_timer_get_time() / 1000));
-  return cap - left;
+  for (size_t i = from; i < count && i < from + batch; i++) {
+    used +=
+        static_cast<size_t>(snprintf(out + used, cap - used, "%-16s %lu %lu\n", status[i].pcTaskName,
+                                     static_cast<unsigned long>(status[i].usStackHighWaterMark * sizeof(StackType_t)),
+                                     static_cast<unsigned long>(status[i].uxCurrentPriority)));
+    if (used >= cap - 64) break;
+  }
+  return used < cap ? used : cap - 1;
 }
 
 }  // namespace PocketDaily::HeapMap
@@ -60,7 +56,9 @@ size_t render(char* out, size_t cap) {
 #else
 
 namespace PocketDaily::HeapMap {
-size_t render(char*, size_t) { return 0; }
+size_t renderCaps(char*, size_t) { return 0; }
+size_t queryTasks(uintptr_t*, size_t) { return 0; }
+size_t renderTaskBatch(const uintptr_t*, size_t, size_t, size_t, char*, size_t) { return 0; }
 }  // namespace PocketDaily::HeapMap
 
 #endif
