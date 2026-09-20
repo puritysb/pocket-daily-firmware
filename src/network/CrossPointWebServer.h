@@ -10,7 +10,6 @@
 #include <memory>
 #include <string>
 
-#include "pocket_daily/direct_session.h"
 #include "pocket_daily/web/PocketWebServices.h"
 
 // Pocket-owned profile enum (route/listener/watchdog gating lives with the
@@ -84,9 +83,7 @@ class CrossPointWebServer {
   void requestRepaint();
   bool consumeRepaintRequest();
 
-  bool shouldEndSession() const {
-    return PocketDaily::DirectSession::shouldEnd(sessionEndRequested, sessionEndRequestedAt, millis());
-  }
+  bool shouldEndSession() const;
 
   WsUploadStatus getWsUploadStatus() const;
 

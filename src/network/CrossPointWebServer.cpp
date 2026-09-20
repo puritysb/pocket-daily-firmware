@@ -24,6 +24,7 @@
 #include "html/HomePageHtml.generated.h"
 #include "html/SettingsPageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
+#include "pocket_daily/direct_session.h"
 #include "pocket_daily/live_studio/DevTrace.h"
 #include "pocket_daily/live_studio/UiPackStore.h"
 #include "pocket_daily/upload_stream_protocol.h"
@@ -395,6 +396,10 @@ void CrossPointWebServer::handleClient() {
 }
 
 void CrossPointWebServer::noteClientActivity() const { clientActivityAt = millis(); }
+
+bool CrossPointWebServer::shouldEndSession() const {
+  return PocketDaily::DirectSession::shouldEnd(sessionEndRequested, sessionEndRequestedAt, millis());
+}
 
 void CrossPointWebServer::beginTransferFocus() { liveStudio.beginTransferFocus(); }
 void CrossPointWebServer::endTransferFocus() { liveStudio.endTransferFocus(); }
