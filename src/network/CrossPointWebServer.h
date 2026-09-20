@@ -1,8 +1,6 @@
 #pragma once
 
 #include <HalStorage.h>
-#include <NetworkClient.h>
-#include <NetworkServer.h>
 #include <NetworkUdp.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
@@ -105,70 +103,18 @@ class CrossPointWebServer {
   CrossPointWebServerProfile profile;
   uint16_t port = 80;
   uint16_t wsPort = 81;  // WebSocket port
-  static constexpr uint16_t pocketUploadPort = 82;
   NetworkUDP udp;
   bool udpActive = false;
 
-  // Pocket's upload data plane uses one long-lived TCP connection. Arduino's
-  // WebServer closes every HTTP request, which leaves hundreds of lwIP sockets
-  // in TIME_WAIT for a multi-megabyte firmware upload on the no-PSRAM X3. This
-  // listener is deliberately tiny and is serviced incrementally from the
-  // activity loop so physical buttons remain responsive during SD writes.
-  enum class PocketUploadPhase : uint8_t { IDLE, HEADER, DATA, REPLIED };
-  std::unique_ptr<NetworkServer> pocketUploadServer = nullptr;
-  NetworkClient pocketUploadClient;
-  PocketUploadPhase pocketUploadPhase = PocketUploadPhase::IDLE;
-  HalFile pocketUploadFile;
-  char pocketUploadHeader[320] = {};
-  size_t pocketUploadHeaderLength = 0;
-  String pocketUploadFullPath;
-  size_t pocketUploadExpected = 0;
-  size_t pocketUploadReceived = 0;  // bytes flushed to SD and covered by pocketUploadCrc32
-  uint32_t pocketUploadCrc32 = 0xFFFFFFFFU;
-  unsigned long pocketUploadLastActivity = 0;
+  // Pocket web services (SEAM.md): the upload-stream data plane and the host
+  // reach-in bundle it is wired with. These members and their one-line hooks
+  // below are the only Pocket footprint this inherited file keeps.
+  PocketDaily::Web::UploadStreamServer pocketStream;
+  PocketDaily::Web::Host pocketHost;
   mutable unsigned long clientActivityAt = 0;
 
-  // Socket bytes are batched into sector-aligned SD writes. During a
-  // transfer this points at the flasher's idle 4 KiB static staging buffer
-  // (firmware_flash::sharedStagingBuffer): the X3 private AP keeps ~6 KB of
-  // heap, so a transient allocation would fail exactly where it matters. The
-  // small static read buffer remains the fallback so a transfer is never
-  // refused for lack of the optimization.
-  uint8_t* pocketStreamBatch = nullptr;
-  size_t pocketStreamBatchFill = 0;
-
-  // A transport failure (disconnect, idle timeout) keeps the hidden staging
-  // file and this verified prefix so the companion can reconnect and send
-  // only the remainder. Protocol and SD failures discard it.
-  struct PocketResumeState {
-    String path;
-    size_t expected = 0;
-    size_t received = 0;
-    uint32_t crc32 = 0xFFFFFFFFU;
-    bool valid() const { return received > 0 && !path.isEmpty(); }
-    void clear() {
-      path = "";
-      expected = 0;
-      received = 0;
-      crc32 = 0xFFFFFFFFU;
-    }
-  } pocketResume;
-
   void noteClientActivity() const;
-  void handlePocketUploadStream();
-  bool beginPocketUploadFromHeader();
-  bool createPocketStagingFile(const String& path, size_t expected);
-  bool reopenPocketStagingFile(const String& path, size_t received);
-  void removeStaleStagingFiles(const String& directory, const String& keepName) const;
-  bool appendPocketStreamPayload(const uint8_t* data, size_t count);
-  bool flushPocketStreamBatch();
-  void finishPocketUploadStream();
-  void failPocketUploadStream(const char* message, bool removePartial = true);
-  void suspendPocketUploadStream(const char* message);
-  void resetPocketUploadStream(bool removePartial);
-  void discardPocketResume();
-  void suspendLoopWatchdog(const char* breadcrumb) const;
-  void resumeLoopWatchdog() const;
+  void wirePocketHost();
 
   // WebSocket upload state
   void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);

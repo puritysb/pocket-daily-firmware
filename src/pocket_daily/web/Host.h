@@ -13,10 +13,10 @@ namespace PocketDaily::Web {
 // host object (or null for pure free-function thunks).
 struct Host {
   void* self = nullptr;
-  void (*noteClientActivity)(void* self) = nullptr;      // idle-lease heartbeat
-  bool (*httpUploadBusy)(void* self) = nullptr;          // legacy /upload holds staging
-  void (*releaseHttpUploadBuffer)(void* self) = nullptr; // stream-begin heap hygiene
-  void (*beginTransferFocus)(void* self) = nullptr;      // uploads own the DMA pool
+  void (*noteClientActivity)(void* self) = nullptr;       // idle-lease heartbeat
+  bool (*httpUploadBusy)(void* self) = nullptr;           // legacy /upload holds staging
+  void (*releaseHttpUploadBuffer)(void* self) = nullptr;  // stream-begin heap hygiene
+  void (*beginTransferFocus)(void* self) = nullptr;       // uploads own the DMA pool
   void (*endTransferFocus)(void* self) = nullptr;
   void (*requestRepaint)(void* self) = nullptr;
   String (*normalizeWebPath)(void* self, const String& path) = nullptr;
