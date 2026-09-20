@@ -32,3 +32,18 @@ target_link_libraries(UiPackTest PRIVATE
 )
 
 gtest_discover_tests(UiPackTest)
+
+add_executable(RadioHealthTest
+  RadioHealthTest.cpp
+)
+
+target_include_directories(RadioHealthTest PRIVATE
+  ${REPO_ROOT}/src
+)
+
+target_link_libraries(RadioHealthTest PRIVATE
+  crosspoint_test_common
+  GTest::gtest_main
+)
+
+gtest_discover_tests(RadioHealthTest)

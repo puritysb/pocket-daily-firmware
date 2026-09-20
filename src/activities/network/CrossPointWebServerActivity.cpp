@@ -11,6 +11,7 @@
 #include <WiFi.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
+#include <esp_wifi.h>
 
 #include <cstddef>
 
@@ -18,6 +19,7 @@
 #include "NetworkModeSelectionActivity.h"
 #include "SdCardFontSystem.h"
 #include "SilentRestart.h"
+#include "WifiCredentialStore.h"
 #include "WifiSelectionActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
 #include "components/UITheme.h"
@@ -626,6 +628,34 @@ void CrossPointWebServerActivity::startWebServer() {
   }
 }
 
+// Two-way RF proof: a TCP handshake with the gateway on either of two
+// near-universally-open ports (DNS, router admin). A single boolean connect
+// cannot distinguish RST from timeout, so both ports are tried; a router
+// with neither open is treated as alive to avoid false escalations.
+bool CrossPointWebServerActivity::probeGateway() {
+  const IPAddress gateway = WiFi.gatewayIP();
+  if (gateway == IPAddress(0, 0, 0, 0)) return true;
+  for (uint16_t port : {static_cast<uint16_t>(53), static_cast<uint16_t>(80)}) {
+    WiFiClient probe;
+    probe.setTimeout((PocketDaily::RadioHealth::PROBE_TIMEOUT_MS + 999) / 1000);
+    if (probe.connect(gateway, port)) {
+      probe.stop();
+      return true;
+    }
+  }
+  return false;
+}
+
+void CrossPointWebServerActivity::reassociateWithSaved() {
+  const auto* cred = WIFI_STORE.findCredential(connectedSSID);
+  WiFi.disconnect(false, true);
+  if (cred && !cred->password.empty()) {
+    WiFi.begin(connectedSSID.c_str(), cred->password.c_str());
+  } else {
+    WiFi.begin(connectedSSID.c_str());
+  }
+}
+
 void CrossPointWebServerActivity::loop() {
   if (state == WebServerActivityState::NEARBY_STARTING) {
     handleNearbyStartup();
@@ -705,6 +735,30 @@ void CrossPointWebServerActivity::loop() {
           }
           consecutiveDisconnects = 0;
           firstDisconnectAt = 0;
+          // HN-1: WL_CONNECTED lies in the zombie state - probe the gateway
+          // for two-way RF and escalate recovery while deaf.
+          if (millis() - lastRadioProbeMs >= PocketDaily::RadioHealth::PROBE_PERIOD_MS) {
+            lastRadioProbeMs = millis();
+            const bool reachable = probeGateway();
+            if (!reachable) PocketDaily::NetHealth::note("probe_dead", 0);
+            switch (radioHealth.onProbe(reachable)) {
+              case PocketDaily::RadioHealth::Level::DriverReconnect:
+                PocketDaily::NetHealth::note("rh_reconnect", 0);
+                WiFi.reconnect();
+                break;
+              case PocketDaily::RadioHealth::Level::FullReassociate:
+                PocketDaily::NetHealth::note("rh_reassoc", 0);
+                reassociateWithSaved();
+                break;
+              case PocketDaily::RadioHealth::Level::RadioRestart:
+                PocketDaily::NetHealth::note("rh_restart", 0);
+                esp_wifi_stop();
+                esp_wifi_start();
+                break;
+              case PocketDaily::RadioHealth::Level::None:
+                break;
+            }
+          }
           const int rssi = WiFi.RSSI();
           if (rssi < -75) {
             LOG_DBG("WEBACT", "Warning: Weak WiFi signal: %d dBm", rssi);
