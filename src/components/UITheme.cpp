@@ -55,8 +55,17 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
 void UITheme::applyPackMetrics(const PocketDaily::LiveStudio::ThemeOverride* overrides, size_t count) {
   if (count > PocketDaily::LiveStudio::UIPACK_MAX_THEME_OVERRIDES)
     count = PocketDaily::LiveStudio::UIPACK_MAX_THEME_OVERRIDES;
-  packOverrideCount = count;
-  for (size_t i = 0; i < count; i++) packOverrides[i] = overrides[i];
+  delete[] packOverrides;
+  packOverrides = nullptr;
+  packOverrideCount = 0;
+  if (count > 0) {
+    // std::nothrow: an allocation failure keeps the theme's own metrics
+    // instead of aborting the device (-fno-exceptions).
+    packOverrides = new (std::nothrow) PocketDaily::LiveStudio::ThemeOverride[count];
+    if (packOverrides == nullptr) return;
+    for (size_t i = 0; i < count; i++) packOverrides[i] = overrides[i];
+    packOverrideCount = count;
+  }
   reapplyPackAfterThemeChange();
 }
 

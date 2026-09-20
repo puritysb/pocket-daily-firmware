@@ -677,6 +677,7 @@ void CrossPointWebServerActivity::loop() {
       static unsigned long lastWifiCheck = 0;
       if (millis() - lastWifiCheck > 2000) {  // Check every 2 seconds
         lastWifiCheck = millis();
+        PocketDaily::NetHealth::tick();
         const wl_status_t wifiStatus = WiFi.status();
         // Driver auto-reconnect handles retries; abandon (via onGoHome) only
         // after WIFI_ABANDON_MS, otherwise the activity freezes on a blip.

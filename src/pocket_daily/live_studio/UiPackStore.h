@@ -35,9 +35,10 @@ bool writeState(const char* name, const char* version);
 bool readState(char* name, size_t nameCap, char* versionCap, size_t versionCap2);
 void clearState();
 
-// Shared override scratch (one buffer, not per-call statics - the X3's
-// File Transfer heap cannot afford three copies).
-ThemeOverride* sharedOverrideBuffer();
+// Override scratch, heap-allocated for the duration of a load and freed by
+// releaseOverrideBuffer() - the idle baseline carries no pack buffers.
+ThemeOverride* acquireOverrideBuffer();
+void releaseOverrideBuffer(ThemeOverride* buffer);
 
 // Boot path: read state, load the pack, layer it over the current theme.
 bool applyStartupPack();

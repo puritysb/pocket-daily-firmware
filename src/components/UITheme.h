@@ -41,8 +41,10 @@ class UITheme {
 
   const ThemeMetrics* currentMetrics;
   std::unique_ptr<BaseTheme> currentTheme;
+  // Pack state lives on the heap only while a pack is active - the File
+  // Transfer baseline must stay at its no-pack level (radio buffer budget).
   ThemeMetrics packedMetrics{};
-  PocketDaily::LiveStudio::ThemeOverride packOverrides[PocketDaily::LiveStudio::UIPACK_MAX_THEME_OVERRIDES]{};
+  PocketDaily::LiveStudio::ThemeOverride* packOverrides = nullptr;
   size_t packOverrideCount = 0;
 };
 

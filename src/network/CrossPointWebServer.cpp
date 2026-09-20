@@ -1261,11 +1261,16 @@ void CrossPointWebServer::handleUiPackApply() {
     return;
   }
   PocketDaily::LiveStudio::UiPackInfo info;
-  PocketDaily::LiveStudio::ThemeOverride* overrides = PocketDaily::LiveStudio::sharedOverrideBuffer();
+  PocketDaily::LiveStudio::ThemeOverride* overrides = PocketDaily::LiveStudio::acquireOverrideBuffer();
+  if (!overrides) {
+    server->send(503, "text/plain", "Not enough memory to load the pack");
+    return;
+  }
   PocketDaily::LiveStudio::UiPackResult validateError = PocketDaily::LiveStudio::UiPackResult::Ok;
   const auto result = PocketDaily::LiveStudio::loadPackFromSd(
       name, &info, overrides, PocketDaily::LiveStudio::UIPACK_MAX_THEME_OVERRIDES, &validateError);
   if (result != PocketDaily::LiveStudio::StoreResult::Ok) {
+    PocketDaily::LiveStudio::releaseOverrideBuffer(overrides);
     const int code = result == PocketDaily::LiveStudio::StoreResult::OpenFail ? 404 : 422;
     char body[128];
     snprintf(body, sizeof(body), "{\"applied\":false,\"error\":\"%s\"}",
@@ -1274,6 +1279,7 @@ void CrossPointWebServer::handleUiPackApply() {
     return;
   }
   UITheme::getInstance().applyPackMetrics(overrides, info.themeOverrideCount);
+  PocketDaily::LiveStudio::releaseOverrideBuffer(overrides);
   PocketDaily::LiveStudio::writeState(info.name, info.packVersion);
   strlcpy(activePackName, info.name, sizeof(activePackName));
   strlcpy(activePackVersion, info.packVersion, sizeof(activePackVersion));

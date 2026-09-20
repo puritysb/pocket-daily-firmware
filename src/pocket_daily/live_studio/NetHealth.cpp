@@ -59,7 +59,7 @@ namespace {
 constexpr char LOG_PATH[] = "/.crosspoint/net-health.log";
 constexpr char LOG_OLD[] = "/.crosspoint/net-health.old";
 constexpr uint32_t ROTATE_BYTES = 64 * 1024;
-constexpr uint32_t HEARTBEAT_PERIOD_MS = 60 * 1000;
+constexpr uint32_t HEARTBEAT_PERIOD_S = 60;
 
 // Bounded append; drops the line entirely on failure (never block callers -
 // the paths being instrumented are the ones that die). Same pattern as the
@@ -85,15 +85,6 @@ void logEvent(const char* tag, int detail) {
   char line[96];
   formatEvent(line, sizeof(line), millis() / 1000, tag, detail);
   appendLine(line);
-}
-
-void heartbeatTask(void*) {
-  while (true) {
-    vTaskDelay(pdMS_TO_TICKS(HEARTBEAT_PERIOD_MS));
-    char line[96];
-    formatHeartbeat(line, sizeof(line), millis() / 1000, ESP.getFreeHeap(), ESP.getMaxAllocHeap(), WiFi.RSSI());
-    appendLine(line);
-  }
 }
 
 void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
@@ -124,8 +115,6 @@ void begin() {
   gStarted = true;
   WiFi.onEvent(onWiFiEvent);
   logEvent("boot", 0);
-  // Small stack: the task only formats one line and appends.
-  xTaskCreate(heartbeatTask, "net-health", 3072, nullptr, 1, nullptr);
 }
 
 void note(const char* tag, int detail) { logEvent(tag, detail); }
