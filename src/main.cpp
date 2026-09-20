@@ -671,11 +671,13 @@ void setup() {
       false
 #endif
   ) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
     // Dev loop only: a remote-triggered flash asked to land back in the
     // File Transfer menu, where one Confirm rejoins the saved network.
     LOG_INF("MAIN", "Dev boot: returning to File Transfer");
     Storage.remove(PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER);
     activityManager.goToFileTransfer();
+#endif
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
              !APP_STATE.openEpubPath.empty()) {
     activityManager.goToReader(APP_STATE.openEpubPath);

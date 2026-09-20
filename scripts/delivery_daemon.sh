@@ -3,16 +3,34 @@
 # firmware whenever the radio is reachable (flickers count). Accumulates the
 # verified prefix on the reader's SD staging file across recoveries.
 set -u
-IP="${1:-192.168.68.55}"
 FW="$(cd "$(dirname "$0")/.." && pwd)/firmware/update.bin"
 LOG=/var/folders/qv/1jczm91d1sn45vtk0c46fxrw0000gn/T/opencode/delivery-daemon.log
 exec >>"$LOG" 2>&1
-echo "=== daemon start $(date) target=$IP ==="
+echo "=== daemon start $(date) (auto-discovery) ==="
+
+# Find any live reader on the subnet (leases move); ~1 s per sweep.
+discover() {
+  python3 - <<'PY'
+import concurrent.futures, urllib.request
+def p(ip):
+    try:
+        urllib.request.urlopen(f"http://{ip}/api/status", timeout=0.8).read(64)
+        return ip
+    except Exception:
+        return None
+with concurrent.futures.ThreadPoolExecutor(64) as ex:
+    for res in ex.map(p, [f"192.168.68.{i}" for i in range(1, 255)]):
+        if res:
+            print(res)
+            break
+PY
+}
 
 STAGE=""
 while true; do
-  if ! curl -s --max-time 3 -o /dev/null http://$IP/api/status; then
-    sleep 5
+  IP=$(discover)
+  if [ -z "$IP" ]; then
+    sleep 4
     continue
   fi
   if [ -z "$STAGE" ]; then
