@@ -114,11 +114,13 @@ class CrossPointWebServer {
   PocketDaily::Web::Host pocketHost;
   PocketDaily::Web::LiveStudioService liveStudio;
   PocketDaily::Web::LiveHost liveStudioHost;
+  PocketDaily::Web::RouteDeps pocketRoutes;
   mutable unsigned long clientActivityAt = 0;
 
   void noteClientActivity() const;
   void wirePocketHost();
   void wireLiveStudioHost();
+  void wirePocketRoutes();
 
   // WebSocket upload state
   void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
@@ -136,14 +138,6 @@ class CrossPointWebServer {
   // Pocket seam (SEAM.md): marshal host state into the value snapshot the
   // pocket status module builds /api/status from.
   PocketDaily::Web::StatusInputs statusInputs() const;
-  void handlePocketScreenLive() const;
-#ifdef ENABLE_DEV_REMOTE_FLASH
-  // Developer builds only (`env:default`): network-reachable flash of the
-  // staged /update.bin. Never compiled into release builds.
-  void handleDevRemoteFlash();
-#endif
-  void handleUiPackList() const;
-  void handleUiPackApply();
 
   // File scanning
   void scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const;
@@ -155,14 +149,11 @@ class CrossPointWebServer {
   void handleJszip() const;
   void handleNotFound() const;
   void handleStatus() const;
-  void handleCrashReport() const;
-  void handlePocketScreenPreview() const;
   void handleFileList() const;
   void handleFileListData() const;
   void handleDownload() const;
   void handleUpload(UploadState& state) const;
   void handleUploadPost(UploadState& state) const;
-  void handleCommitUpload();
   void handleCreateFolder() const;
   void handleRename() const;
   void handleMove() const;
@@ -172,8 +163,6 @@ class CrossPointWebServer {
   void handleSettingsPage() const;
   void handleGetSettings() const;
   void handlePostSettings();
-  void handleGetPocketPreferences() const;
-  void handlePostPocketPreferences();
 
   // Font management handlers
   void handleFontsPage() const;
