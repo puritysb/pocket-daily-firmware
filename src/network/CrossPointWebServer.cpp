@@ -1292,10 +1292,9 @@ void CrossPointWebServer::handleUiPackApply() {
 // restart.
 void CrossPointWebServer::handleDevRemoteFlash() {
   HalSystem::setCrashBreadcrumb("dev:remote-flash");
-  if (apMode) {
-    server->send(403, "text/plain", "Dev flash runs on the STA profile only");
-    return;
-  }
+  // Allowed on the reader's own hotspot too: when the STA path is the thing
+  // being repaired, the dedicated AP link is the delivery route (and it has
+  // no router in the path). Still a dev-build-only endpoint.
   if (!Storage.exists("/update.bin")) {
     server->send(404, "text/plain", "No /update.bin staged on the reader");
     return;
