@@ -215,6 +215,32 @@ verified baseline.
   `libpdui_host.a` with provenance — an approved exception to the
   no-binaries-cross boundary rule for this one artifact.
 
+## v1.6.6 recovery install + post-install reality — 2026-09-20
+
+- v1.6.6 (a2d11e10, platform 55.03.311, diet phase 1, HN-1, 12 KiB listener
+  gate) was released via the tag workflow and installed with the one-time
+  SD recovery bridge (UP+POWER), which the user approved after every
+  wireless delivery path on the old build was measured dead.
+- Post-install on X3: boots clean, advertises LIVE (push/frames/uiPacks),
+  File Transfer heap baseline ~8.1 KiB (diet did NOT reach the morning's
+  13 KiB; the 3.3.11 core is larger). The old build's OTA "Update Failed"
+  was NOT the cert bundle (Sectigo E46 root present in both old and new
+  builds) - likely TLS handshake heap; v1.6.6's own OTA is untested until
+  the next release.
+- RADIO: materially better but not fixed. 6 MB pushes still break (~131 KiB
+  first window), BUT the radio now returns windows ON ITS OWN (13+ windows
+  in 15 min with no user re-entry - HN-1 ladder + platform effect), and
+  resume-banking works across windows (328 KiB banked before the daemon
+  restart). Long dead phases remain where the ladder (up to
+  esp_wifi_stop/start) exhausts without recovery - the ladder needs a
+  final escalation (e.g. guided reboot into File Transfer) or the heap
+  must rise enough that death stops happening.
+- OPEN (HN-2 phase 2 - the remaining root cause): File Transfer consumes
+  ~370 of 380 KiB. Next: dev-build heap breakdown endpoint
+  (heap_caps per-task info), then the real diet; upstream fragmentation
+  fixes (#3521, #3518) are port candidates. The stress-transfer completion
+  and the M3 pack demo (needs one radio window) remain to be exercised.
+
 ## Evening radio degradation curve — 2026-09-19
 
 - Same firmware build that moved 6 MB repeatedly in the morning degraded
