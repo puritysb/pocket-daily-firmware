@@ -119,6 +119,16 @@ void begin() {
 
 void note(const char* tag, int detail) { logEvent(tag, detail); }
 
+void tick() {
+  static uint32_t lastBeat = 0;
+  const uint32_t now = millis() / 1000;
+  if (now - lastBeat < HEARTBEAT_PERIOD_S) return;
+  lastBeat = now;
+  char line[96];
+  formatHeartbeat(line, sizeof(line), now, ESP.getFreeHeap(), ESP.getMaxAllocHeap(), WiFi.RSSI());
+  appendLine(line);
+}
+
 size_t readTail(HalFile file, char* out, size_t cap) {
   const size_t size = file.size();
   const size_t start = size > cap - 1 ? size - (cap - 1) : 0;
