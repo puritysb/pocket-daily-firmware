@@ -106,51 +106,36 @@ class CrossPointWebServer {
   NetworkUDP udp;
   bool udpActive = false;
 
-  // Pocket web services (SEAM.md): the upload-stream data plane and the host
-  // reach-in bundle it is wired with. These members and their one-line hooks
-  // below are the only Pocket footprint this inherited file keeps.
+  // Pocket web services (SEAM.md): the upload-stream data plane, the Live
+  // Studio push listener, and the host reach-in bundles they are wired with.
+  // These members and their one-line hooks below are the only Pocket
+  // footprint this inherited file keeps.
   PocketDaily::Web::UploadStreamServer pocketStream;
   PocketDaily::Web::Host pocketHost;
+  PocketDaily::Web::LiveStudioService liveStudio;
+  PocketDaily::Web::LiveHost liveStudioHost;
   mutable unsigned long clientActivityAt = 0;
 
   void noteClientActivity() const;
   void wirePocketHost();
+  void wireLiveStudioHost();
 
   // WebSocket upload state
   void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
   static void wsEventCallback(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
   void abortWsUpload(const char* tag);
 
-  // Live Studio v1 (`docs/live-studio-v1.md`): the WebSocket doubles as an
-  // event push channel on STA when heap allows. `liveStudioPush` records
-  // that the listener can serve events; the subscription, change signature,
-  // and send pacing are per-connection state kept out of the wire module.
-  bool liveStudioPush = false;
-  bool liveStudioSubscribed = false;
-  bool liveStudioClientAttached = false;
-  uint8_t liveStudioClientNum = 255;
-  uint32_t liveStudioLastSendMs = 0;
-  uint32_t liveStudioLastCheckMs = 0;
-  uint32_t liveStudioLastSignatureMs = 0;
-  char liveStudioSignature[128] = {};
+  // One repaint request flag shared by the UI-pack apply path and the dev
+  // render trigger; the hosting activity consumes it each loop pass.
   mutable std::atomic<bool> repaintRequested{false};
-  char activePackName[33] = {};
-  char activePackVersion[17] = {};
-  // Transfer focus: uploads own the DMA pool (the heap map showed it
-  // bottoming 3.5 KB from empty at an 8.7 KB settle); the WS listener's
-  // buffers are torn down for the duration and rebuilt afterwards.
-  void startLiveListener();
-  void suspendLiveListener();
-  void resumeLiveListener();
+  // Transfer focus routes the upload stream's Host hooks into the Live
+  // Studio service (uploads own the DMA pool; see LiveStudioService.h).
   void beginTransferFocus();
   void endTransferFocus();
-  bool liveListenerSuspended = false;
 
   // Pocket seam (SEAM.md): marshal host state into the value snapshot the
   // pocket status module builds /api/status from.
   PocketDaily::Web::StatusInputs statusInputs() const;
-  void sendLiveStudioLine(const char* line);
-  void pushLiveStudioStatusIfChanged();
   void handlePocketScreenLive() const;
 #ifdef ENABLE_DEV_REMOTE_FLASH
   // Developer builds only (`env:default`): network-reachable flash of the
