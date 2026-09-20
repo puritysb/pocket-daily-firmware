@@ -75,7 +75,6 @@ class CrossPointWebServerActivity final : public Activity {
   PocketDaily::RadioHealth::Policy radioHealth;
   unsigned long lastRadioProbeMs = 0;
   bool probeGateway();
-  void reassociateWithSaved();
 
   // Sustained WiFi-loss tracking; abandon only after WIFI_ABANDON_MS.
   int consecutiveDisconnects = 0;

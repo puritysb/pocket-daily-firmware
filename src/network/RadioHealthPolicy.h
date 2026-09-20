@@ -21,9 +21,11 @@ inline constexpr uint8_t STRIKES_PER_LEVEL = 3;
 
 enum class Level : uint8_t {
   None = 0,
-  DriverReconnect = 1,
-  FullReassociate = 2,
-  RadioRestart = 3,
+  DriverReconnect = 1,  // WiFi.reconnect() - safe under the Arduino layer
+  // Intentionally no deeper level: disconnect+begin fights the activity's
+  // own Wi-Fi state machine (bounces File Transfer to the home screen) and
+  // esp_wifi_stop/start crashes the Arduino stack (observed 2026-09-20).
+  // Deeper recovery belongs to a guided reboot, not the radio ladder.
 };
 
 class Policy {
@@ -54,18 +56,7 @@ class Policy {
 
  private:
   Level escalate() {
-    switch (level_) {
-      case Level::None:
-        level_ = Level::DriverReconnect;
-        break;
-      case Level::DriverReconnect:
-        level_ = Level::FullReassociate;
-        break;
-      case Level::FullReassociate:
-      case Level::RadioRestart:
-        level_ = Level::RadioRestart;
-        break;
-    }
+    if (level_ == Level::None) level_ = Level::DriverReconnect;
     return level_;
   }
 

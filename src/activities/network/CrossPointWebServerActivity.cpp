@@ -11,7 +11,6 @@
 #include <WiFi.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
-#include <esp_wifi.h>
 
 #include <cstddef>
 
@@ -646,16 +645,6 @@ bool CrossPointWebServerActivity::probeGateway() {
   return false;
 }
 
-void CrossPointWebServerActivity::reassociateWithSaved() {
-  const auto* cred = WIFI_STORE.findCredential(connectedSSID);
-  WiFi.disconnect(false, true);
-  if (cred && !cred->password.empty()) {
-    WiFi.begin(connectedSSID.c_str(), cred->password.c_str());
-  } else {
-    WiFi.begin(connectedSSID.c_str());
-  }
-}
-
 void CrossPointWebServerActivity::loop() {
   if (state == WebServerActivityState::NEARBY_STARTING) {
     handleNearbyStartup();
@@ -736,8 +725,13 @@ void CrossPointWebServerActivity::loop() {
           consecutiveDisconnects = 0;
           firstDisconnectAt = 0;
           // HN-1: WL_CONNECTED lies in the zombie state - probe the gateway
-          // for two-way RF and escalate recovery while deaf.
-          if (millis() - lastRadioProbeMs >= PocketDaily::RadioHealth::PROBE_PERIOD_MS) {
+          // for two-way RF and escalate recovery while deaf. Only once the
+          // server is up and stable: during connection setup the activity
+          // owns the Wi-Fi state machine and any interference bounces the
+          // user back to the home screen (observed 2026-09-20).
+          const bool serverStable =
+              state == WebServerActivityState::SERVER_RUNNING && webServer && webServer->isRunning();
+          if (serverStable && millis() - lastRadioProbeMs >= PocketDaily::RadioHealth::PROBE_PERIOD_MS) {
             lastRadioProbeMs = millis();
             const bool reachable = probeGateway();
             if (!reachable) PocketDaily::NetHealth::note("probe_dead", 0);
@@ -745,15 +739,6 @@ void CrossPointWebServerActivity::loop() {
               case PocketDaily::RadioHealth::Level::DriverReconnect:
                 PocketDaily::NetHealth::note("rh_reconnect", 0);
                 WiFi.reconnect();
-                break;
-              case PocketDaily::RadioHealth::Level::FullReassociate:
-                PocketDaily::NetHealth::note("rh_reassoc", 0);
-                reassociateWithSaved();
-                break;
-              case PocketDaily::RadioHealth::Level::RadioRestart:
-                PocketDaily::NetHealth::note("rh_restart", 0);
-                esp_wifi_stop();
-                esp_wifi_start();
                 break;
               case PocketDaily::RadioHealth::Level::None:
                 break;

@@ -15,27 +15,19 @@ TEST(RadioHealthPolicy, HealthyProbesNeverEscalate) {
   EXPECT_EQ(policy.currentLevel(), Level::None);
 }
 
-TEST(RadioHealthPolicy, EscalatesAfterThreeDeafStrikesAndResetsOnSuccess) {
+TEST(RadioHealthPolicy, EscalatesToReconnectOnlyAndResetsOnSuccess) {
   Policy policy;
   EXPECT_EQ(policy.onProbe(false), Level::None);
   EXPECT_EQ(policy.onProbe(false), Level::None);
   EXPECT_EQ(policy.onProbe(false), Level::DriverReconnect);
-  EXPECT_EQ(policy.currentLevel(), Level::DriverReconnect);
-  // Strikes reset per escalation; three more dead probes go one level up.
+  // The ladder deliberately stops here: deeper actions fight the activity's
+  // Wi-Fi state machine or crash the Arduino stack (observed 2026-09-20).
   EXPECT_EQ(policy.onProbe(false), Level::None);
   EXPECT_EQ(policy.onProbe(false), Level::None);
-  EXPECT_EQ(policy.onProbe(false), Level::FullReassociate);
-  // Radio restart is the ceiling and repeats.
-  EXPECT_EQ(policy.onProbe(false), Level::None);
-  EXPECT_EQ(policy.onProbe(false), Level::None);
-  EXPECT_EQ(policy.onProbe(false), Level::RadioRestart);
-  EXPECT_EQ(policy.onProbe(false), Level::None);
-  EXPECT_EQ(policy.onProbe(false), Level::None);
-  EXPECT_EQ(policy.onProbe(false), Level::RadioRestart);
+  EXPECT_EQ(policy.onProbe(false), Level::DriverReconnect);
   // Any successful probe fully heals.
   EXPECT_EQ(policy.onProbe(true), Level::None);
   EXPECT_EQ(policy.currentLevel(), Level::None);
-  EXPECT_EQ(policy.onProbe(false), Level::None);  // starts from strike one again
 }
 
 TEST(RadioHealthPolicy, ResetReturnsToCleanState) {
