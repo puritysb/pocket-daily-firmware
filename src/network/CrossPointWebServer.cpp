@@ -322,28 +322,15 @@ void CrossPointWebServer::begin() {
 
   server->onNotFound([this] { handleNotFound(); });
 #if POCKET_HEAP_MAP_ENABLED
-  // HN-2 evidence build: runtime heap map (caps totals + per-task stack
-  // high-water) over HTTP. The buffer is per-request heap - zero static
-  // cost, so the audit build keeps the release footprint.
+  // HN-2 evidence: caps-only, fixed small response. The fuller map hung the
+  // request on the loaded X3 (uxTaskGetSystemState suspends every task; the
+  // chunked variant never answered). Three numbers per capability survive
+  // any fragmentation.
   server->on("/api/pocket/v1/dev/heap-map", HTTP_GET, [this] {
     noteClientActivity();
-    // Zero-heap streaming: caps first, then task batches, all through one
-    // small stack buffer (the X3 audit settled at 6.4 KB free, fragmented
-    // below a 4 KiB contiguous block).
-    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
-    server->send(200, "text/plain; charset=utf-8", "");
-    char chunk[512];
-    size_t n = PocketDaily::HeapMap::renderCaps(chunk, sizeof(chunk));
-    if (n) server->sendContent(chunk, n);
-    static constexpr size_t kMaxTasks = 20;
-    TaskStatus_t tasks[kMaxTasks];
-    const size_t count = PocketDaily::HeapMap::queryTasks(reinterpret_cast<uintptr_t*>(tasks), kMaxTasks);
-    for (size_t from = 0; from < count; from += 6) {
-      n = PocketDaily::HeapMap::renderTaskBatch(reinterpret_cast<const uintptr_t*>(tasks), count, from, 6, chunk,
-                                                sizeof(chunk));
-      if (n) server->sendContent(chunk, n);
-    }
-    server->sendContent("");
+    char map[256];
+    const size_t n = PocketDaily::HeapMap::renderCaps(map, sizeof(map));
+    server->send(200, "text/plain; charset=utf-8", n ? String(map) : "unavailable");
   });
 #endif
 #ifdef ENABLE_DEV_REMOTE_FLASH
