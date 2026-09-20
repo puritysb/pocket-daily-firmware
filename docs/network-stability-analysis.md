@@ -104,6 +104,38 @@ Decision gate after E1-E4:
 The reason codes on disconnect are the single most valuable datum: beacon
 timeout vs AP-driven vs local failures point at different layers.
 
+## Heap map verdict — 2026-09-20
+
+The lean audit build finally measured it (caps-only endpoint; the
+uxTaskGetSystemState variant hung the request on the loaded X3):
+
+```
+heap total 153,492 B | free 8,772 | largest block 3,316 | minEver 5,628
+DMA pool (WiFi/lwIP): free 6,664 | minEver 3,520
+```
+
+- Statics are only 135 KiB (framebuffer 52 KiB inside); the dynamic load
+  at rest is ~145 KiB of the 153 KiB heap. The DMA pool bottoms 3.5 KiB
+  from empty during transfers - zero is the deaf-radio moment. The
+  morning-stable build simply had ~5 KiB more headroom.
+- Discovered machinery that already exists: SD-font release + web-server
+  start gates (18 KiB free / 8 KiB block) in CrossPointWebServerActivity -
+  the "bounce to home screen" seen with dev builds was this gate refusing
+  to start, not a crash. Dev builds cannot run File Transfer on the X3
+  (~5 KiB instrumentation statics).
+- Landed (transfer focus, `027b2d83`): listener gate 16 KiB + full WS
+  teardown during uploads. Effect on device: listener off at settle, radio
+  now SURVIVES transfer breaks (reader alive after broken pipe - first
+  time), largest block 3.3 -> 6.9 KiB. Remaining: a deterministic upload
+  break at exactly 128 KiB (131,072 B, chunk 8 of 16 KiB) with the reader
+  alive - a protocol-path bug distinct from radio death, still unsolved;
+  and the radio still dies on its own at idle on a ~7-9 KiB settle.
+- Structural conclusion: the software load overshoots the 380 KiB device
+  by 10-20 KiB. Firmware delivery now works via daemon grinding (windows
+  + resume + reader-alive). UX-scale transfers need either the deep diet
+  (per-component evidence still missing - use vTaskGetStackHighWaterMark
+  per known task, not uxTaskGetSystemState) or HN-3 task separation.
+
 ## Core options (if analysis says go deeper)
 
 - Option 0 - Targeted hardening (HN-1..HN-4 as already planned).
