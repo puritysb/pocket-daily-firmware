@@ -225,8 +225,10 @@ verified baseline.
   private-AP stream with watchdog, then the older pending items (6 MB stress,
   M3 pack demo, OTA self-update). Sniper pattern; do not claim device
   behavior from host results.
-- Next: mode-lifecycle resource separation design notes this session;
-  implementation next session with HN-2 heap-map evidence.
+- Next: `docs/mode-lifecycle-resources.md` (same session) holds the
+  mode-lifecycle design — reboot-as-boundary model, resource inventory, and
+  the evidence-gated increment list. Implementation next session with HN-2
+  heap-map evidence.
 
 ## Live studio direction — 2026-09-19
 
