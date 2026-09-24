@@ -30,6 +30,7 @@
 #include "pocket_daily/live_studio/UiPackStore.h"
 #include "pocket_daily/web/ExactRouteDispatch.h"
 #include "pocket_daily/web/PocketStatus.h"
+#include "pocket_daily/web/TcpCensus.h"
 #include "util/BookCacheUtils.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include "pocket_daily/product_identity.h"
@@ -903,6 +904,20 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
       server->sendContent(chunk, count);
     }
     server->sendContent("");
+  });
+  // Developer evidence: TCP PCB states and Sync TIME_WAIT releases. Heap is
+  // sampled first so this response's own buffers are not counted.
+  routes.on("/api/pocket/v1/dev/tcp", HTTP_GET, [server = &server, deps = &d] {
+    note(*deps);
+    const auto heap = ESP.getFreeHeap();
+    const auto block = ESP.getMaxAllocHeap();
+    char census[160];
+    if (!renderTcpCensus(census, sizeof(census))) census[0] = '\0';
+    const auto purged = deps->timeWaitPurged ? deps->timeWaitPurged(deps->host.self) : 0u;
+    char line[240];
+    snprintf(line, sizeof(line), "heap=%u block=%u timeWaitPurged=%u %s\n", static_cast<unsigned>(heap),
+             static_cast<unsigned>(block), static_cast<unsigned>(purged), census);
+    server->send(200, "text/plain", line);
   });
   routes.on("/api/pocket/v1/dev/flash", HTTP_POST, [server = &server, deps = &d] {
     note(*deps);

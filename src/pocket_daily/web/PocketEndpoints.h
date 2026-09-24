@@ -32,6 +32,8 @@ struct RouteDeps {
   LiveStudioService* liveStudio = nullptr;  // pack apply, prefs notify, active flag
   RouteHost host{};
   Content::PresentationHost presentation{};
+  // Developer evidence only (dev/tcp): Sync TIME_WAIT PCBs released so far.
+  uint32_t (*timeWaitPurged)(void* self) = nullptr;
 };
 
 // Registers every Pocket-owned route on the host's WebServer: private-AP

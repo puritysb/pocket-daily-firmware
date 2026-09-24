@@ -120,6 +120,7 @@ class CrossPointWebServer {
   PocketDaily::Web::LiveStudioService liveStudio;
   PocketDaily::Web::LiveHost liveStudioHost;
   PocketDaily::Web::RouteDeps pocketRoutes;
+  PocketDaily::Web::ServerTimeWaitPurge pocketTimeWait;
   mutable unsigned long clientActivityAt = 0;
 
   void noteClientActivity() const;

@@ -72,6 +72,22 @@ class SyncRoutesTest(unittest.TestCase):
                         activity.index("contentPresentation.service("))
         self.assertIn("contentPresentation.preparationPending() && webServer->presentationTransportIdle()", activity)
 
+    def test_sync_releases_own_time_wait_before_presentation_admission(self):
+        root = Path(__file__).resolve().parents[1]
+        host = (root / "src/network/CrossPointWebServer.cpp").read_text()
+        loop = host[host.index("void CrossPointWebServer::handleClient() {"):]
+        purge = loop.index("pocketTimeWait.service(millis(), port, pocketStream.port(), admission);")
+        # Sync only, and ahead of the presentation-busy early return so the
+        # activity's admission sample (right after handleClient) follows a purge.
+        self.assertLess(loop.index("if (PocketDaily::Web::isSyncProfile(profile)) {"), purge)
+        self.assertLess(purge, loop.index("if (pocketRoutes.presentation.busy && pocketRoutes.presentation.busy("))
+        walker = (root / "src/pocket_daily/web/ServerTimeWait.cpp").read_text()
+        self.assertIn("LOCK_TCPIP_CORE();", walker)
+        self.assertIn("purgeTimeWaitList(tcp_tw_pcbs, httpPort, streamPort", walker)
+        self.assertNotIn("tcp_active_pcbs", walker)  # never touches live or closing connections
+        census = (root / "src/pocket_daily/web/TcpCensus.cpp").read_text()
+        self.assertTrue(census.startswith('#include "TcpCensus.h"\n\n#ifdef ENABLE_DEV_REMOTE_FLASH'))
+
     def test_theme_routes_are_unconditional_in_production_registration(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()

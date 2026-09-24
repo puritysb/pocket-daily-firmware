@@ -62,7 +62,7 @@ named by function, not line number — line numbers drift.
 - `using CrossPointWebServerProfile = PocketDaily::Web::Profile;` — keeps
   every existing call site compiling unchanged.
 - Service members: `pocketStream`, `pocketHost`, `liveStudio`,
-  `liveStudioHost`, `pocketRoutes`, `clientActivityAt`.
+  `liveStudioHost`, `pocketRoutes`, `pocketTimeWait`, `clientActivityAt`.
 - One-line decls: `wirePocketHost()` / `wireLiveStudioHost()` /
   `wirePocketRoutes()`, `shouldEndSession()`, `statusInputs()`,
   `repaintRequested`, `beginTransferFocus()` / `endTransferFocus()`.
@@ -83,7 +83,9 @@ Call-site hooks (each ≤10 lines):
   existing Pocket Sync launch mode; that mode also skips mDNS on X4.
 - `stop()`: `pocketStream.stop()` (first — listener teardown precedes bye
   broadcast and `wsServer->close()`; keep the order).
-- `handleClient()`: dev-trace heartbeat (`#ifdef`), stream-first service;
+- `handleClient()`: Sync-only `pocketTimeWait.service(...)` before the
+  presentation-busy return (forced while admission is pending; see
+  `sync-route-memory.md`); dev-trace heartbeat (`#ifdef`), stream-first service;
   skip HTTP while `pocketStream.receiving()` (HEADER/DATA), allow commit in
   REPLIED, and tick Live Studio even without a WS slot to finish its cooldown.
 - `shouldEndSession()`: 1-line delegation to `PocketDaily::DirectSession`.
@@ -92,7 +94,7 @@ Call-site hooks (each ≤10 lines):
 Thunk blocks (E3): `wirePocketHost()` (8 thunks), `wireLiveStudioHost()`
 (5 thunks, includes the file-static `wsInstance` trampoline — the inherited
 WS-upload grammar's event routing stays in this file), `wirePocketRoutes()`
-(7 thunks).
+(8 thunks, including the dev-only `timeWaitPurged` evidence counter).
 
 ### Wi-Fi initialization boundary (experimental build only)
 

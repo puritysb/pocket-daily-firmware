@@ -5,6 +5,29 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-24 repeated Apply memory fixed on X3 dedicated Sync. Cause: stock
+  WebServer actively closes every response, and lwIP kept each PCB in
+  TIME_WAIT for120s (~256B, cap16). Eight status reads fell19,016->17,468B
+  on wbcb431b1; heartbeat plus an Apply burst explains14,184/13,140B failures.
+  Sync now purges only this server's TIME_WAIT PCBs (ports80/82) every100ms
+  and on every pass while admission is pending (ServerTimeWait.*); lwIP
+  tcp_abandon frees TIME_WAIT without a segment (verified in the ELF). Floors
+  stay16KiB/4KiB; File Transfer unchanged. A client-closes-first variant was
+  measured and removed: macOS drops the reader FIN after curl/URLSession
+  close, leaving LAST_ACK PCBs ~60s. Installed w0482f45b (identical src to
+  this change) via one transfer + dev flash each; same eight reads held
+  19,136-19,176B, census timeWait0/lastAck0. Actual Mac app edits in one
+  session: gen4 rendered at17,524B/8,180B, then second Apply gen5 rendered at
+  20,428B/13,300B. These are driver receipts; per-card optical confirmation
+  was not separately reported. X4, private AP, long idle and
+  more repetitions remain unverified. Dev-only GET dev/tcp reports heap,
+  purge count and PCB states. Evidence build/apply-memory/; design in
+  docs/sync-route-memory.md. 364 host tests, default/gh_release builds and
+  strict cppcheck pass.
+- This host's Homebrew Python/Swift are blocked by macOS Local Network
+  privacy while Apple curl/nc work; installs used a loopback relay to nc
+  with pocket_put.py unchanged. Not a firmware or protocol issue.
+
 - 2026-09-24 physical cleanup installation: wbcb431b1 installed in one
   uninterrupted wireless transfer (6,102,096B, reader CRC95643196); exact
   version verified after one developer flash. Origin marker correctly

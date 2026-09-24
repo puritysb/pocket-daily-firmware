@@ -369,6 +369,14 @@ void CrossPointWebServer::handleClient() {
     lastDebugPrint = millis();
   }
 
+  // Pocket seam (SEAM.md): Sync drops this server's own TIME_WAIT PCBs, on
+  // every pass while a presentation awaits admission (sync-route-memory.md).
+  if (PocketDaily::Web::isSyncProfile(profile)) {
+    const bool admission =
+        pocketRoutes.presentation.busy && pocketRoutes.presentation.busy(pocketRoutes.presentation.self);
+    pocketTimeWait.service(millis(), port, pocketStream.port(), admission);
+  }
+
   // The existing render task owns the transient font budget until display
   // completion. Do not overlap another request/upload allocation with it.
   // Pending preparation is serviced by the activity after this call returns.
@@ -478,6 +486,9 @@ void CrossPointWebServer::wirePocketRoutes() {
   pocketRoutes.stream = &pocketStream;
   pocketRoutes.liveStudio = &liveStudio;
   pocketRoutes.host.self = this;
+  pocketRoutes.timeWaitPurged = [](void* self) {
+    return static_cast<CrossPointWebServer*>(self)->pocketTimeWait.purged();
+  };
   pocketRoutes.host.noteClientActivity = [](void* self) {
     static_cast<CrossPointWebServer*>(self)->noteClientActivity();
   };
