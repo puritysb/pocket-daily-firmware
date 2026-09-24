@@ -1,11 +1,12 @@
 #pragma once
 
+#include <SdCardFont.h>
+
 #include <cstdint>
 #include <string>
 #include <vector>
 
 class GfxRenderer;
-class SdCardFont;
 struct SdCardFontFamilyInfo;
 
 class SdCardFontManager {
@@ -20,7 +21,10 @@ class SdCardFontManager {
   // .cpfont file is loaded; other sizes remain on disk. This keeps resident
   // interval + kern/ligature tables to one size's worth of memory.
   // Returns true on success.
-  bool loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t fontSizeEnum);
+  bool loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t fontSizeEnum,
+                  SdCardFont::LoadMode mode = SdCardFont::LoadMode::Cached, void (*progress)() = nullptr);
+  SdCardFont::LoadMode loadMode() const { return loadedMode_; }
+  bool boundedReadFailed() const { return loaded_.empty() || loaded_.front().font->boundedReadFailed(); }
 
   // Unload everything, unregister from renderer.
   void unloadAll(GfxRenderer& renderer);
@@ -46,5 +50,6 @@ class SdCardFontManager {
 
   std::string loadedFamilyName_;
   uint8_t loadedPointSize_ = 0;
+  SdCardFont::LoadMode loadedMode_ = SdCardFont::LoadMode::Cached;
   std::vector<LoadedFont> loaded_;
 };

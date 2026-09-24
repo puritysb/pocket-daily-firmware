@@ -3,8 +3,11 @@
 #include <HalStorage.h>
 #include <WebServer.h>
 
+#include "pocket_daily/web/TransferAdmission.h"
+
 class WebDAVHandler : public RequestHandler {
  public:
+  WebDAVHandler(void* host, bool (*busy)(void*)) : host_(host), busy_(busy) {}
   // RequestHandler interface
   bool canHandle(WebServer& server, HTTPMethod method, const String& uri) override;
   bool canRaw(WebServer& server, const String& uri) override;
@@ -12,6 +15,9 @@ class WebDAVHandler : public RequestHandler {
   bool handle(WebServer& server, HTTPMethod method, const String& uri) override;
 
  private:
+  void* host_ = nullptr;
+  bool (*busy_)(void*) = nullptr;
+  PocketDaily::Web::UploadAdmission admission_;
   // PUT streaming state (raw() is called in chunks)
   HalFile _putFile;
   String _putPath;

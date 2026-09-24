@@ -83,7 +83,9 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {
     }
     const auto* selected = family->findClosestReaderSize(sizeEnum);
     const uint8_t wantedPt = selected ? selected->pointSize : 0;
-    if (!registryWasDirty && wantedPt == manager_.currentPointSize()) return;
+    if (!registryWasDirty && wantedPt == manager_.currentPointSize() &&
+        manager_.loadMode() == SdCardFont::LoadMode::Cached)
+      return;
     LOG_DBG("SDFS", "Reloading %s: size %u -> %u (enum %u)%s", wantedFamily, manager_.currentPointSize(), wantedPt,
             sizeEnum, registryWasDirty ? " [registry dirty]" : "");
   }
@@ -115,7 +117,8 @@ void SdCardFontSystem::releaseLoaded(GfxRenderer& renderer) {
   }
 }
 
-int SdCardFontSystem::ensureUiFamilyLoaded(GfxRenderer& renderer, const char* familyName) {
+int SdCardFontSystem::ensureUiFamilyLoaded(GfxRenderer& renderer, const char* familyName, SdCardFont::LoadMode mode,
+                                           void (*progress)()) {
   if (!familyName || !familyName[0]) return 0;
 
   refreshIfDirty();
@@ -126,7 +129,8 @@ int SdCardFontSystem::ensureUiFamilyLoaded(GfxRenderer& renderer, const char* fa
 
   const auto* selected = family->findClosestReaderSize(uiFontSizeEnum);
   const uint8_t wantedPt = selected ? selected->pointSize : 0;
-  if (manager_.currentFamilyName() == familyName && manager_.currentPointSize() == wantedPt) {
+  if (manager_.currentFamilyName() == familyName && manager_.currentPointSize() == wantedPt &&
+      manager_.loadMode() == mode && (mode != SdCardFont::LoadMode::BoundedUI || !manager_.boundedReadFailed())) {
     return manager_.getFontId(familyName);
   }
 
@@ -134,7 +138,7 @@ int SdCardFontSystem::ensureUiFamilyLoaded(GfxRenderer& renderer, const char* fa
     manager_.unloadAll(renderer);
   }
 
-  if (!manager_.loadFamily(*family, renderer, uiFontSizeEnum)) {
+  if (!manager_.loadFamily(*family, renderer, uiFontSizeEnum, mode, progress)) {
     LOG_ERR("SDFS", "Failed to load UI SD font family: %s", familyName);
     return 0;
   }
@@ -154,7 +158,8 @@ int SdCardFontSystem::ensureAutomaticReaderFontLoaded(GfxRenderer& renderer) {
   const uint8_t sizeEnum = fontSizeEnumFromSettings();
   const auto* selected = family->findClosestReaderSize(sizeEnum);
   const uint8_t wantedPt = selected ? selected->pointSize : 0;
-  if (manager_.currentFamilyName() == automaticFamily && manager_.currentPointSize() == wantedPt) {
+  if (manager_.currentFamilyName() == automaticFamily && manager_.currentPointSize() == wantedPt &&
+      manager_.loadMode() == SdCardFont::LoadMode::Cached) {
     return manager_.getFontId(automaticFamily);
   }
 

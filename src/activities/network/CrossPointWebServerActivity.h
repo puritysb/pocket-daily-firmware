@@ -11,6 +11,7 @@
 #include "NetworkModeSelectionActivity.h"
 #include "activities/Activity.h"
 #include "network/CrossPointWebServer.h"
+#include "pocket_daily/ContentSessionInput.h"
 #include "pocket_daily/nearby_sync/NearbySyncService.h"
 #include "pocket_daily/web/PrivateApPolicy.h"
 #include "pocket_daily/web/StaRadioWatch.h"
@@ -42,6 +43,7 @@ enum class WebServerLaunchMode { FILE_TRANSFER, POCKET_NEARBY_SYNC };
  */
 class CrossPointWebServerActivity final : public Activity {
   WebServerLaunchMode launchMode;
+  bool autoJoinSavedNetwork;
   WebServerActivityState state = WebServerActivityState::MODE_SELECTION;
 
   // Network mode
@@ -63,6 +65,9 @@ class CrossPointWebServerActivity final : public Activity {
 
   // Web server - owned by this activity
   std::unique_ptr<CrossPointWebServer> webServer;
+  PocketDaily::Content::ContentPresentation contentPresentation;
+  PocketDaily::Content::ContentSessionInput contentInput;
+  bool completedDisplayFrame = false;  // accessed only under RenderLock
 
   // Server status
   std::string connectedIP;
@@ -95,14 +100,19 @@ class CrossPointWebServerActivity final : public Activity {
 
  public:
   explicit CrossPointWebServerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                       WebServerLaunchMode launchMode = WebServerLaunchMode::FILE_TRANSFER)
+                                       WebServerLaunchMode launchMode = WebServerLaunchMode::FILE_TRANSFER,
+                                       bool autoJoinSavedNetwork = false)
       : Activity(launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC ? "PocketNearbySync" : "CrossPointWebServer",
                  renderer, mappedInput),
-        launchMode(launchMode) {}
+        launchMode(launchMode),
+        autoJoinSavedNetwork(autoJoinSavedNetwork) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool canCaptureFrame() const override {
+    return completedDisplayFrame && (!contentPresentation.visible() || contentPresentation.canCaptureFrame());
+  }
   bool skipLoopDelay() override { return webServer && webServer->isRunning(); }
   bool preventAutoSleep() override {
     return state == WebServerActivityState::NEARBY_STARTING || state == WebServerActivityState::NEARBY_HANDOFF ||

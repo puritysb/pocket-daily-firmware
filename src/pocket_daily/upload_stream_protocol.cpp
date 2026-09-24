@@ -73,6 +73,7 @@ bool parseHeader(const char* header, const size_t length, Request& out) {
   bool sawPath = false;
   bool sawSize = false;
   bool sawResume = false;
+  bool sawWindow = false;
 
   size_t lineStart = 0;
   for (size_t i = 0; i < length; ++i) {
@@ -108,13 +109,18 @@ bool parseHeader(const char* header, const size_t length, Request& out) {
       if (sawResume || !lineEquals(value, valueLength, "1")) return false;
       request.resume = true;
       sawResume = true;
+    } else if (keyMatches(line, lineLength, "Window", value, valueLength)) {
+      uint32_t window = 0;
+      if (sawWindow || !parseUint32(value, valueLength, window) || window != FLOW_WINDOW_BYTES) return false;
+      sawWindow = true;
+      request.flowControl = true;
     } else if (memchr(line, ':', lineLength) == nullptr) {
       return false;  // Not a "Key: value" record.
     }
     // Unknown keys are ignored so a future companion can add fields.
   }
 
-  if (!sawMagic || !sawPath || !sawSize || !isStagingPath(request.path)) return false;
+  if (!sawMagic || !sawPath || !sawSize || !isStagingPath(request.path) || (sawWindow && !sawResume)) return false;
   out = request;
   return true;
 }
@@ -137,6 +143,11 @@ size_t formatOkReply(char* out, const size_t outSize, const uint32_t received, c
 
 size_t formatResumeReply(char* out, const size_t outSize, const uint32_t received) {
   const int written = snprintf(out, outSize, "RESUME %lu\n", static_cast<unsigned long>(received));
+  return written > 0 && static_cast<size_t>(written) < outSize ? static_cast<size_t>(written) : 0;
+}
+
+size_t formatAckReply(char* out, const size_t outSize, const uint32_t received) {
+  const int written = snprintf(out, outSize, "ACK %lu\n", static_cast<unsigned long>(received));
   return written > 0 && static_cast<size_t>(written) < outSize ? static_cast<size_t>(written) : 0;
 }
 

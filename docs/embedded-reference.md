@@ -33,12 +33,14 @@ on an X3 with the per-stage ledger in `PocketDailyActivity::logHeapStage()`:
 | + UDP discovery socket | −2.0 KB | |
 | After one feed pull | ~22 KB | ~7 KB |
 
-**The Wi-Fi driver alone takes ~75 KB of the ~97 KB available**, and it is
-Arduino's precompiled `esp_wifi_init(WIFI_INIT_CONFIG_DEFAULT)` — the buffer
-counts are baked into the framework's `sdkconfig` and cannot be tuned from
-this project. So the only lever is what we stack on top: raise the radio late,
-start discovery services only when discovery is actually needed, and keep any
-allocation held across a network operation small.
+**The Wi-Fi driver alone takes ~75 KB of the ~97 KB available** in that
+measurement. The installed Arduino core constructs a `wifi_init_config_t`
+before calling `esp_wifi_init`; its default overrides RX/TX counts at runtime
+(4 static RX, 32 dynamic RX/TX). These counts are not immutable merely because
+SDK libraries are precompiled. The opt-in `sta_recovery` build wraps this
+boundary with a bounded buffer policy; validate radio behavior before
+promoting it. Raising the radio late, deferring optional services and keeping
+allocations small remain necessary.
 
 Two traps this has produced, both of which end in `abort()`:
 * Arduino's Wi-Fi event task allocates an `arduino_event_t` per driver event.

@@ -27,6 +27,7 @@ struct StatusInputs {
   bool apMode = false;
   Profile profile = Profile::FULL;
   const UploadStreamServer* stream = nullptr;  // null: listener not begun
+  bool contentPresentation = false;
   LiveInputs live;
 };
 

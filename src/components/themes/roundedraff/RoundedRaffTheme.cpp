@@ -13,6 +13,7 @@
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
 #include "fontIds.h"
+#include "pocket_daily/live_studio/MetricGeometry.h"
 #include "util/UiCjkFont.h"
 
 namespace {
@@ -31,8 +32,8 @@ void drawScrollBar(const GfxRenderer& renderer, Rect rect, int itemCount, int pa
     return;
   }
 
-  const int barW = RoundedRaffMetrics::values.scrollBarWidth;
-  const int barX = rect.x + rect.width - RoundedRaffMetrics::values.scrollBarRightOffset - barW;
+  const int barW = UITheme::getInstance().getMetrics().scrollBarWidth;
+  const int barX = rect.x + rect.width - UITheme::getInstance().getMetrics().scrollBarRightOffset - barW;
   const int barY = rect.y;
   const int barH = rect.height;
 
@@ -54,13 +55,13 @@ void RoundedRaffTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const 
   if (title == nullptr) {
     return;
   }
-  const int sidePadding = RoundedRaffMetrics::values.contentSidePadding;
+  const int sidePadding = UITheme::getInstance().getMetrics().contentSidePadding;
   const int titleX = rect.x + sidePadding;
   const int titleY = rect.y + 14;
 
   const bool showBatteryPercentage =
       SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
-  const int batteryIconX = rect.x + rect.width - sidePadding - RoundedRaffMetrics::values.batteryWidth;
+  const int batteryIconX = rect.x + rect.width - sidePadding - UITheme::getInstance().getMetrics().batteryWidth;
 
   // Reserve space for the widest possible percentage text to avoid title/battery overlap
   int batteryGroupLeftX = batteryIconX;
@@ -69,8 +70,9 @@ void RoundedRaffTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const 
     const int maxTextWidth = renderer.getTextWidth(SMALL_FONT_ID, "100%");
     batteryGroupLeftX -= maxTextWidth + batteryPercentSpacing;
 
-    const int clearW = maxTextWidth + batteryPercentSpacing + RoundedRaffMetrics::values.batteryWidth;
-    const int clearH = std::max(renderer.getTextHeight(SMALL_FONT_ID), RoundedRaffMetrics::values.batteryHeight + 8);
+    const int clearW = maxTextWidth + batteryPercentSpacing + UITheme::getInstance().getMetrics().batteryWidth;
+    const int clearH =
+        std::max(renderer.getTextHeight(SMALL_FONT_ID), UITheme::getInstance().getMetrics().batteryHeight + 8);
     renderer.fillRect(batteryIconX - maxTextWidth - batteryPercentSpacing, rect.y + 14, clearW, clearH, false);
   }
 
@@ -85,8 +87,8 @@ void RoundedRaffTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const 
                       true);
   }
   drawBatteryRight(renderer,
-                   Rect{batteryIconX, rect.y + 14, RoundedRaffMetrics::values.batteryWidth,
-                        RoundedRaffMetrics::values.batteryHeight},
+                   Rect{batteryIconX, rect.y + 14, UITheme::getInstance().getMetrics().batteryWidth,
+                        UITheme::getInstance().getMetrics().batteryHeight},
                    showBatteryPercentage);
 }
 
@@ -123,15 +125,15 @@ void RoundedRaffTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const 
 void RoundedRaffTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                                            const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
                                            bool& bufferRestored, std::function<bool()> storeCoverBuffer) const {
-  const int tileWidth = rect.width - 2 * RoundedRaffMetrics::values.contentSidePadding;
+  const int tileWidth = rect.width - 2 * UITheme::getInstance().getMetrics().contentSidePadding;
   const int tileHeight = rect.height;
   const int tileY = rect.y;
   const bool hasContinueReading = !recentBooks.empty();
   if (coverWidth == 0) {
-    coverWidth = RoundedRaffMetrics::values.homeCoverHeight * 0.6;
+    coverWidth = UITheme::getInstance().getMetrics().homeCoverHeight * 0.6;
   }
-  const int imgY = tileY + (tileHeight - RoundedRaffMetrics::values.homeCoverHeight) / 2;
-  const int tileX = RoundedRaffMetrics::values.contentSidePadding;
+  const int imgY = tileY + (tileHeight - UITheme::getInstance().getMetrics().homeCoverHeight) / 2;
+  const int tileX = UITheme::getInstance().getMetrics().contentSidePadding;
 
   // Draw book card regardless, fill with message based on `hasContinueReading`
   // Draw cover image as background if available (inside the box)
@@ -145,7 +147,7 @@ void RoundedRaffTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
         hasCover = false;
       } else {
         const std::string coverBmpPath =
-            UITheme::getCoverThumbPath(coverPath, RoundedRaffMetrics::values.homeCoverHeight);
+            UITheme::getCoverThumbPath(coverPath, UITheme::getInstance().getMetrics().homeCoverHeight);
 
         // First time: load cover from SD and render
         HalFile file;
@@ -154,9 +156,9 @@ void RoundedRaffTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
           if (bitmap.parseHeaders() == BmpReaderError::Ok) {
             coverWidth = bitmap.getWidth();
             renderer.drawBitmap(bitmap, tileX + (tileWidth - coverWidth) / 2, imgY, coverWidth,
-                                RoundedRaffMetrics::values.homeCoverHeight);
+                                UITheme::getInstance().getMetrics().homeCoverHeight);
             renderer.maskRoundedRectOutsideCorners(tileX + (tileWidth - coverWidth) / 2, imgY, coverWidth,
-                                                   RoundedRaffMetrics::values.homeCoverHeight, kCoverRadius,
+                                                   UITheme::getInstance().getMetrics().homeCoverHeight, kCoverRadius,
                                                    Color::LightGray);
           } else {
             hasCover = false;
@@ -167,15 +169,16 @@ void RoundedRaffTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
 
       // Draw either way
       renderer.drawRoundedRect(tileX + (tileWidth - coverWidth) / 2, imgY, coverWidth,
-                               RoundedRaffMetrics::values.homeCoverHeight, 1, kCoverRadius, true);
+                               UITheme::getInstance().getMetrics().homeCoverHeight, 1, kCoverRadius, true);
 
       if (!hasCover) {
         // Render empty cover
-        renderer.fillRect(tileX + (tileWidth - coverWidth) / 2, imgY + (RoundedRaffMetrics::values.homeCoverHeight / 3),
-                          coverWidth, 2 * RoundedRaffMetrics::values.homeCoverHeight / 3, true);
+        renderer.fillRect(tileX + (tileWidth - coverWidth) / 2,
+                          imgY + (UITheme::getInstance().getMetrics().homeCoverHeight / 3), coverWidth,
+                          2 * UITheme::getInstance().getMetrics().homeCoverHeight / 3, true);
         renderer.drawIcon(CoverIcon, tileX + (tileWidth - coverWidth) / 2 + 24, imgY + 24, 32, 32);
         renderer.maskRoundedRectOutsideCorners(tileX + (tileWidth - coverWidth) / 2, imgY, coverWidth,
-                                               RoundedRaffMetrics::values.homeCoverHeight, kCoverRadius,
+                                               UITheme::getInstance().getMetrics().homeCoverHeight, kCoverRadius,
                                                Color::LightGray);
       }
 
@@ -185,13 +188,13 @@ void RoundedRaffTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
 
     renderer.fillRoundedRect(tileX, tileY, tileWidth, imgY - tileY, kRowRadius, true, true, false, false,
                              Color::LightGray);
-    renderer.fillRectDither(tileX, imgY, (tileWidth - coverWidth) / 2, RoundedRaffMetrics::values.homeCoverHeight,
-                            Color::LightGray);
+    renderer.fillRectDither(tileX, imgY, (tileWidth - coverWidth) / 2,
+                            UITheme::getInstance().getMetrics().homeCoverHeight, Color::LightGray);
     renderer.fillRectDither(tileX + (tileWidth + coverWidth) / 2, imgY, (tileWidth - coverWidth) / 2,
-                            RoundedRaffMetrics::values.homeCoverHeight, Color::LightGray);
-    renderer.fillRoundedRect(tileX, imgY + RoundedRaffMetrics::values.homeCoverHeight, tileWidth,
-                             tileHeight - (imgY - tileY + RoundedRaffMetrics::values.homeCoverHeight), kRowRadius,
-                             false, false, true, true, Color::LightGray);
+                            UITheme::getInstance().getMetrics().homeCoverHeight, Color::LightGray);
+    renderer.fillRoundedRect(tileX, imgY + UITheme::getInstance().getMetrics().homeCoverHeight, tileWidth,
+                             tileHeight - (imgY - tileY + UITheme::getInstance().getMetrics().homeCoverHeight),
+                             kRowRadius, false, false, true, true, Color::LightGray);
   } else {
     renderer.fillRoundedRect(tileX, tileY, tileWidth, tileHeight, kRowRadius, Color::LightGray);
     renderer.drawCenteredText(kTitleFontId, rect.y + rect.height / 2 - renderer.getLineHeight(kTitleFontId) / 2,
@@ -203,12 +206,12 @@ void RoundedRaffTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int butt
                                       const std::function<std::string(int index)>& buttonLabel,
                                       const std::function<UIIcon(int index)>& rowIcon) const {
   (void)rowIcon;
-  const int sidePadding = RoundedRaffMetrics::values.contentSidePadding;
+  const int sidePadding = UITheme::getInstance().getMetrics().contentSidePadding;
   const int rowX = rect.x + sidePadding;
   const int rowHeight = renderer.getLineHeight(kTitleFontId) + 20;  // 10px top + 10px bottom
   const int rowGap = kSelectableRowGap;
-  const int rowStep = rowHeight + rowGap;
-  const int pageItems = std::max(1, rect.height / rowStep);
+  const int rowStep = PocketDaily::LiveStudio::MetricGeometry::rowStep(rowHeight, rowGap);
+  const int pageItems = PocketDaily::LiveStudio::MetricGeometry::pageItems(rect.height, rowStep);
   const int safeSelectedIndex = std::max(0, selectedIndex);
   const int lastPageStart = std::max(0, buttonCount - pageItems);
   const int pageStartIndex = std::min((safeSelectedIndex / pageItems) * pageItems, lastPageStart);
@@ -331,12 +334,12 @@ void RoundedRaffTheme::drawList(const GfxRenderer& renderer, Rect rect, int item
   constexpr int subtitleInterLineGap = 4;
   const int subtitleRowHeight =
       subtitleTopPadding + titleLineHeight + subtitleInterLineGap + subtitleLineHeight + subtitleBottomPadding;
-  const int rowHeight = hasSubtitle ? subtitleRowHeight : RoundedRaffMetrics::values.listRowHeight;
-  const int rowStep = rowHeight + kSelectableRowGap;
-  const int pageItems = std::max(1, rect.height / rowStep);
+  const int rowHeight = hasSubtitle ? subtitleRowHeight : UITheme::getInstance().getMetrics().listRowHeight;
+  const int rowStep = PocketDaily::LiveStudio::MetricGeometry::rowStep(rowHeight, kSelectableRowGap);
+  const int pageItems = PocketDaily::LiveStudio::MetricGeometry::pageItems(rect.height, rowStep);
   const int pageStartIndex = std::max(0, selectedIndex / pageItems) * pageItems;
 
-  const int sidePadding = RoundedRaffMetrics::values.contentSidePadding;
+  const int sidePadding = UITheme::getInstance().getMetrics().contentSidePadding;
   const int rowX = rect.x + sidePadding;
   const int rowWidth = rect.width - sidePadding * 2;
 
@@ -417,7 +420,7 @@ void RoundedRaffTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, 
   const int sidePadding = 20;
   const int groupGap = 10;
   const int bottomMargin = 10;
-  const int hintHeight = RoundedRaffMetrics::values.buttonHintsHeight - 10;  // 30px total guide height
+  const int hintHeight = UITheme::getInstance().getMetrics().buttonHintsHeight - 10;  // 30px total guide height
   const int groupWidth = (pageWidth - sidePadding * 2 - groupGap) / 2;
   const int hintY = pageHeight - hintHeight - bottomMargin;
   const bool backDisabled = (btn1 == nullptr || btn1[0] == '\0');

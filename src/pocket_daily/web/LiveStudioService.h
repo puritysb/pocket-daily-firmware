@@ -7,6 +7,7 @@
 
 #include "pocket_daily/web/PocketStatus.h"
 #include "pocket_daily/web/Profile.h"
+#include "pocket_daily/web/TransferFocus.h"
 
 namespace PocketDaily::Web {
 
@@ -65,14 +66,14 @@ class LiveStudioService final {
   void endTransferFocus();
   // Pack apply/clear: persist + record the advertisement the status builder
   // and the ui-packs listing read back.
-  void onPackApplied(const char* name, const char* packVersion);
-  void onPackCleared();
+  bool onPackApplied(const char* name, const char* packVersion);
+  bool onPackCleared();
 
   // Status/listing inputs.
-  bool pushActive() const { return liveStudioPush; }
+  bool pushActive() const { return liveStudioPush && host_ && host_->wsSlot && *host_->wsSlot; }
   bool listenerSuspended() const { return liveListenerSuspended; }
-  const char* activePackName() const { return activePackName_; }
-  const char* activePackVersion() const { return activePackVersion_; }
+  const char* activePackName() const;
+  const char* activePackVersion() const;
 
  private:
   void startListener();
@@ -96,8 +97,7 @@ class LiveStudioService final {
   uint32_t liveStudioLastSignatureMs = 0;
   char liveStudioSignature[128] = {};
   bool liveListenerSuspended = false;
-  char activePackName_[33] = {};
-  char activePackVersion_[17] = {};
+  TransferFocus transferFocus_;
 };
 
 }  // namespace PocketDaily::Web

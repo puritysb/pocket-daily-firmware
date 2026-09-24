@@ -33,8 +33,17 @@ target_link_libraries(UiPackTest PRIVATE
 
 gtest_discover_tests(UiPackTest)
 
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(NAME ThemeMetricBindings
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/test_theme_metric_bindings.py
+)
+add_test(NAME SyncRouteBoundaries
+  COMMAND ${Python3_EXECUTABLE} ${REPO_ROOT}/scripts/test_sync_routes.py
+)
+
 add_executable(RadioHealthTest
   RadioHealthTest.cpp
+  TransferAdmissionTest.cpp
 )
 
 target_include_directories(RadioHealthTest PRIVATE

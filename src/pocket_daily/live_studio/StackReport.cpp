@@ -1,6 +1,6 @@
 #include "StackReport.h"
 
-#if defined(ENABLE_DEV_REMOTE_FLASH) || defined(ENABLE_HEAP_MAP)
+#if defined(ENABLE_DEV_NETWORK_DIAGNOSTICS) || defined(ENABLE_HEAP_MAP)
 
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>

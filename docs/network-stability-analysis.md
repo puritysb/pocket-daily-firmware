@@ -1,9 +1,24 @@
 # Reader network stability — root-cause analysis and core options
 
+2026-09-22 implementation correction (not yet installed): the gateway-probe
+reconnect ladder described in older entries below has been removed. It could
+force WiFi.reconnect while association was healthy, and its one-second blocking
+select competed with the server loop. `StaRadioWatch` now observes actual
+association only, preserving driver auto-reconnect and the five-minute loss
+grace. This removes an unjustified intervention, not a proven explanation of
+the current hardware failure. Installed `w998f2f9d` still has the old ladder;
+no new upload or network-mode change is part of this correction.
+
 STATUS: ACTIVE WORKSTREAM, opened 2026-09-19 evening after a full day of
 degrading radio behavior. This document is the evidence ledger, hypothesis
 register, experiment matrix, and the decision framework for how deep the
 fix goes (targeted hardening vs core reimplementation).
+
+2026-09-21 correction: see [CORE_CONNECTIVITY_REPAIR.md](CORE_CONNECTIVITY_REPAIR.md)
+for the installed SDK audit and implemented experiment. The earlier 128 KiB
+"protocol-path bug" verdict below was too strong: that number was a client
+socket-submission counter, not a verified receiver offset. Heap starvation
+remains a hypothesis, not proof that the DMA pool actually reached zero.
 
 ## Stack under analysis
 

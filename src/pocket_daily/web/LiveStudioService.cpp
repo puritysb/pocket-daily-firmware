@@ -22,21 +22,20 @@ void LiveStudioService::begin(const Config& config, LiveHost* host) {
 
   // The generic browser/File Transfer surface keeps its legacy WebSocket
   // upload surface. On STA the same listener additionally serves Live Studio
-  // v1 event push when heap allows (`docs/live-studio-v1.md`); the private
-  // AP stays poll-only to preserve contiguous heap on X3.
-  liveStudioPush = !apMode_ && ESP.getFreeHeap() >= PocketDaily::LiveStudio::kMinListenerFreeHeap;
+  // v1 event push when heap allows (`docs/live-studio-v1.md`). Both dedicated
+  // Sync profiles stay poll-only to reserve memory for verified transfers.
+  liveStudioPush =
+      allowsLivePush(profile_, apMode_) && ESP.getFreeHeap() >= PocketDaily::LiveStudio::kMinListenerFreeHeap;
   if (!host_ || !host_->wsSlot || !host_->wireListener) {
     LOG_ERR("WEB", "Live listener host not wired; push stays off");
     liveStudioPush = false;
     return;
   }
   if (profile_ == Profile::FULL || liveStudioPush) startListener();
-  // LS-3: surface the persisted pack selection in every status advertisement.
-  PocketDaily::LiveStudio::readState(activePackName_, sizeof(activePackName_), activePackVersion_,
-                                     sizeof(activePackVersion_));
 }
 
 void LiveStudioService::startListener() {
+  if (isSyncProfile(profile_)) return;
   if (*host_->wsSlot) return;
   LOG_DBG("WEB", "Starting WebSocket server on port %d (liveStudioPush=%d)...", wsPort_, liveStudioPush);
   *host_->wsSlot = makeUniqueNoThrow<WebSocketsServer>(wsPort_);
@@ -72,7 +71,7 @@ void LiveStudioService::onServerStopping() {
 }
 
 void LiveStudioService::suspendListener() {
-  if (liveListenerSuspended || !*host_->wsSlot) return;
+  if (!host_ || !host_->wsSlot || liveListenerSuspended || !*host_->wsSlot) return;
   liveListenerSuspended = true;
   liveStudioSubscribed = false;
   liveStudioClientAttached = false;
@@ -85,14 +84,14 @@ void LiveStudioService::suspendListener() {
 }
 
 void LiveStudioService::resumeListener() {
+  if (isSyncProfile(profile_)) return;
   if (!liveListenerSuspended) return;
-  liveListenerSuspended = false;
-  if (!liveStudioPush || ESP.getFreeHeap() < PocketDaily::LiveStudio::kMinListenerFreeHeap) {
-    LOG_INF("WEB", "Live listener not resumed (push off or heap %u)", (unsigned)ESP.getFreeHeap());
+  if (!transferFocus_.allowsListener(millis()) || ESP.getFreeHeap() < PocketDaily::LiveStudio::kMinListenerFreeHeap)
     return;
-  }
+  if (!liveStudioPush && profile_ != Profile::FULL) return;
   LOG_INF("WEB", "Live listener resuming after transfer");
   startListener();
+  liveListenerSuspended = !*host_->wsSlot;
 }
 
 void LiveStudioService::sendLine(const char* line) {
@@ -156,6 +155,7 @@ void LiveStudioService::pushStatusIfChanged() {
 }
 
 void LiveStudioService::tick() {
+  resumeListener();
   if (!liveStudioPush || !liveStudioSubscribed) return;
   pushStatusIfChanged();
   // A frame landed since the last tick: notify, and the companion fetches
@@ -238,20 +238,26 @@ void LiveStudioService::notifyPrefsChanged() {
   }
 }
 
-void LiveStudioService::beginTransferFocus() { suspendListener(); }
-
-void LiveStudioService::endTransferFocus() { resumeListener(); }
-
-void LiveStudioService::onPackApplied(const char* name, const char* packVersion) {
-  PocketDaily::LiveStudio::writeState(name, packVersion);
-  strlcpy(activePackName_, name, sizeof(activePackName_));
-  strlcpy(activePackVersion_, packVersion, sizeof(activePackVersion_));
+void LiveStudioService::beginTransferFocus() {
+  transferFocus_.begin();
+  suspendListener();
 }
 
-void LiveStudioService::onPackCleared() {
-  PocketDaily::LiveStudio::clearState();
-  activePackName_[0] = '\0';
-  activePackVersion_[0] = '\0';
+void LiveStudioService::endTransferFocus() { transferFocus_.end(millis()); }
+
+bool LiveStudioService::onPackApplied(const char* name, const char* packVersion) {
+  if (!PocketDaily::LiveStudio::writeState(name, packVersion)) return false;
+  PocketDaily::LiveStudio::noteActive(name, packVersion);
+  return true;
 }
+
+bool LiveStudioService::onPackCleared() {
+  if (!PocketDaily::LiveStudio::clearState()) return false;
+  PocketDaily::LiveStudio::noteActive("", "");
+  return true;
+}
+
+const char* LiveStudioService::activePackName() const { return PocketDaily::LiveStudio::activeName(); }
+const char* LiveStudioService::activePackVersion() const { return PocketDaily::LiveStudio::activeVersion(); }
 
 }  // namespace PocketDaily::Web

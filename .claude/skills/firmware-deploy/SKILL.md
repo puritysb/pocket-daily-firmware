@@ -69,11 +69,46 @@ doubles as a transport test. Card swapping is the fallback, not the default.
    ```bash
    python3 scripts/pocket_put.py firmware/update.bin --target update.bin --host <reader-ip>
    ```
-   `published /update.bin` is success. After an interruption, rerun with the
+   `published /update.bin` is staging success, not installation. The tool now
+   retries transport failures up to three times with the same staging path and
+   verified device ID; `--attempts 1` disables automatic recovery. After exhaustion, rerun with the
    printed `--resume --staging …` options (firmware with `uploadStreamResume`).
+   Legacy bootstrap pacing can use `--legacy-delay-ms 20 --legacy-chunk-bytes 512`.
+   This changes sender write granularity only; it is not SD acknowledgement and
+   does not override the negotiated 4 KiB window on newer firmware.
+   For the experimental low-heap STA image, `--flow-delay-ms 10` sends
+   512-byte fragments with pacing inside each negotiated 4 KiB window; the
+   next window still waits for the reader's SD ACK. Keep status/preview probes
+   out of the active payload phase. CLI pacing is opt-in, not a throughput claim.
 3. On the reader: Settings → System → Update firmware, then reboot.
 4. Verify: `/api/status` `version` must end with the `-w<fingerprint>` of the
-   image you pushed (`strings firmware/update.bin | grep 'Starting CrossPoint version'`).
+   image you pushed (`strings firmware/update.bin | rg 'CrossPoint version'`).
+
+### Explicit developer iteration (not production auto-flashing)
+
+When the user requests automated developer installation, an already-installed
+`ENABLE_DEV_REMOTE_FLASH` build supports:
+
+```sh
+python3 scripts/pocket_put.py firmware/update.bin --host <reader-ip> --target update.bin \
+  --resume --dev-flash
+```
+
+The default remains staging only. The new build version is read from the image's
+embedded identity strings (including low-log builds); an optional `--expected-version` adds a caller assertion.
+Production/unknown image versions are rejected before transfer. This option verifies upload and commit,
+requests the existing dev flash endpoint once, then checks the same device ID
+and exact new version for up to 120 seconds. A lost flash reply is not retried.
+The new developer build consumes a one-shot boot marker and rejoins saved Wi-Fi;
+missing credentials or association failure falls back to the reader's chooser.
+Both current and new firmware must be developer builds for this loop; release
+builds have no dev flash endpoint. This does not bootstrap an old release image,
+survive an IP-address change automatically, or prove hardware acceptance.
+
+Developer environments are now split: `default` keeps the update loop without
+heavy network diagnostics; `network_diagnostics` opts into diagnostic buffers;
+`sta_recovery` experiments with bounded Wi-Fi driver buffers. Do not treat the
+experimental image as a verified production radio fix.
 
 Do not use the Pocket Daily Sync hotspot for this on firmware older than
 2026-09-03: its private AP left ~6 KB of heap and the companion's diagnostic

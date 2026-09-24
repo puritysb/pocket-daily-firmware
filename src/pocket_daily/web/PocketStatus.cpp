@@ -30,6 +30,7 @@ String buildStatusJson(const StatusInputs& in) {
   snprintf(deviceId, sizeof(deviceId), "%08lX", static_cast<unsigned long>(ESP.getEfuseMac() & 0xFFFFFFFFUL));
   doc["deviceID"] = deviceId;
   doc["sessionEnd"] = in.profile == Profile::POCKET_SYNC && in.apMode;
+  doc["contentPresentation"] = in.contentPresentation;
   doc["version"] = CROSSPOINT_VERSION;
   doc["ip"] = ipAddr;
   doc["mode"] = in.apMode ? "AP" : "STA";
@@ -46,8 +47,12 @@ String buildStatusJson(const StatusInputs& in) {
     doc["uploadStreamPort"] = in.stream->port();
     // The stream keeps an interrupted staging file and accepts `Resume: 1`.
     doc["uploadStreamResume"] = true;
+    doc["uploadStreamWindow"] = PocketDaily::UploadStream::FLOW_WINDOW_BYTES;
   }
-  const bool affordable = diagnosticsAffordable();
+  // A sync heartbeat is not permission to start SD diagnostics or frame
+  // downloads. Explicit diagnostic endpoints remain available outside this
+  // automatic advertisement; content redraw uses its own verified receipt.
+  const bool affordable = !isSyncProfile(in.profile) && diagnosticsAffordable();
   doc["diagnosticsAffordable"] = affordable;
   bool screenPreviewAvailable = false;
   int screenPreviewBytes = 0;

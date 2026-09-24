@@ -5,6 +5,7 @@
 #include <EpdFontFamily.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
+#include <HalSystem.h>
 #include <I18n.h>
 #include <Memory.h>
 #include <WiFi.h>
@@ -47,6 +48,8 @@
 #include "components/icons/glyph_openclaw.h"
 #include "components/icons/glyph_opencode.h"
 #include "fontIds.h"
+#include "pocket_daily/CardSignature.h"
+#include "pocket_daily/ContentActiveStore.h"
 #include "pocket_daily/font_pack_sync.h"
 #include "pocket_daily/learning_pack.h"
 #include "pocket_daily/learning_pack_sync.h"
@@ -791,6 +794,7 @@ constexpr size_t kJapaneseDailyWordCount = sizeof(kJapaneseDailyWords) / sizeof(
 
 void PocketDailyActivity::onEnter() {
   Activity::onEnter();
+  appContent.load(nullptr, HalSystem::feedWatchdogIfRegistered);
 
   // Pocket is a hardware-shaped shell. Normalize it to the chassis portrait
   // coordinate system so edge and front-button affordances remain true even
@@ -897,7 +901,7 @@ void PocketDailyActivity::onEnter() {
   // Wi-Fi, discovery, or a daemon.
   requestUpdate();
 
-  // Local books, study packs, cards and games are the product. Keep every
+  // Local books, study packs and cards are the product. Keep every
   // normal Pocket entry radio-free unless the user explicitly enabled the
   // optional AgentDeck dashboard in Settings. This early return also migrates
   // existing devices safely: the new key is absent from their JSON and loads
@@ -1164,12 +1168,7 @@ uint32_t PocketDailyActivity::computeStateSignature() const {
   const auto& s = AgentDeck::g_state;
   h = fnvUpdate(h, &s.wsConnected, sizeof(s.wsConnected));
   h = fnvUpdate(h, &s.dataReceived, sizeof(s.dataReceived));
-  h = fnvUpdate(h, &s.pocketCount, sizeof(s.pocketCount));
-  for (uint8_t i = 0; i < s.pocketCount && i < PocketDaily::CARD_CAP; i++) {
-    h = fnvUpdate(h, s.pocketCards[i].cardId, strlen(s.pocketCards[i].cardId));
-    h = fnvUpdate(h, s.pocketCards[i].question, strlen(s.pocketCards[i].question));
-    h = fnvUpdate(h, &s.pocketCards[i].choiceCount, sizeof(s.pocketCards[i].choiceCount));
-  }
+  h = PocketDaily::cardsSignature(h, s.pocketCards, s.pocketCount);
   h = fnvUpdate(h, &s.glance, sizeof(s.glance));
   AgentDeck::unlockState();
   // Local view/cursor state so navigation repaints.
@@ -2222,6 +2221,7 @@ void PocketDailyActivity::beginTimedSleep(uint32_t seconds) {
 
 void PocketDailyActivity::onExit() {
   Activity::onExit();
+  appContent.reset();
 
   PocketDaily::LearningPackSync::cancel();
   PocketDaily::FontPackSync::cancel();
@@ -2313,6 +2313,14 @@ bool PocketDailyActivity::findAwaiting(const char* selected, AwaitingItem& out) 
 
 bool PocketDailyActivity::findPocketCard(const char* cardId, PocketDaily::Card& out) const {
   if (!cardId || !cardId[0]) return false;
+  if (const auto* appCards = appContent.cards()) {
+    for (uint8_t i = 0; i < appCards->count; ++i) {
+      if (strcmp(appCards->cards[i].card.cardId, cardId) == 0) {
+        out = appCards->cards[i].card;
+        return true;
+      }
+    }
+  }
   bool found = false;
   AgentDeck::lockState();
   if (localStudyCard.cardId[0] && strcmp(localStudyCard.cardId, cardId) == 0) {
@@ -2431,7 +2439,11 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
   AgentDeck::lockState();
   const PocketDaily::Card local = localStudyCard;
   AgentDeck::unlockState();
-  appendPocket(local);
+  if (const auto* appCards = appContent.cards(); appCards && appCards->count) {
+    for (uint8_t i = 0; i < appCards->count && n < cap; ++i) appendPocket(appCards->cards[i].card);
+  } else {
+    appendPocket(local);
+  }
 
   AgentDeck::lockState();
   const auto& s = AgentDeck::g_state;
@@ -2527,13 +2539,7 @@ void PocketDailyActivity::serviceDeckPersist() {
   {
     const auto& s = AgentDeck::g_state;
     dataReceived = s.dataReceived;
-    for (uint8_t i = 0; i < s.pocketCount; i++) {
-      const auto& card = s.pocketCards[i];
-      sig = fnvUpdate(sig, card.cardId, strlen(card.cardId));
-      sig = fnvUpdate(sig, card.question, strlen(card.question));
-      sig = fnvUpdate(sig, card.context, strlen(card.context));
-      sig = fnvUpdate(sig, &card.choiceCount, sizeof(card.choiceCount));
-    }
+    sig = PocketDaily::cardsSignature(sig, s.pocketCards, s.pocketCount);
     // The glance block (weather / quota / wrap-up) is part of the persisted
     // snapshot: a weather-only change must still refresh the cache. POD bytes,
     // clear()-normalized, so the raw-memory hash is stable.
@@ -2954,8 +2960,8 @@ void PocketDailyActivity::dismissPocketCard(const char* cardId) {
 
 bool PocketDailyActivity::deferPocketCard(const PocketDaily::Card& card) {
   if (millis() - lastDecisionMs < kDecisionCooldownMs || !card.cardId[0]) return false;
-  if (strcmp(card.module, "local") == 0) {
-    // Back/Later on the built-in lesson simply closes it. It is not a daemon
+  if (strcmp(card.module, "local") == 0 || strcmp(card.module, "app") == 0) {
+    // Back/Later on a local/app card simply closes it. It is not a daemon
     // decision and must not poison the offline outbox with an unknown module.
     lastDecisionMs = millis();
     cardSid[0] = '\0';
@@ -3042,7 +3048,9 @@ void PocketDailyActivity::preparePersonalSnapshot() {
     snprintf(renderSyncedHm, sizeof(renderSyncedHm), "%s", cachedDeck->serverHm);
   if (cachedDeck) renderSavedEpoch = cachedDeck->savedEpoch;
 
-  if (localStudyCard.cardId[0])
+  if (const auto* appCards = appContent.cards(); appCards && appCards->count)
+    renderPocketSnapshot = appCards->cards[0].card;
+  else if (localStudyCard.cardId[0])
     renderPocketSnapshot = localStudyCard;
   else if (AgentDeck::g_state.pocketCount > 0)
     renderPocketSnapshot = AgentDeck::g_state.pocketCards[0];
@@ -3777,6 +3785,30 @@ void PocketDailyActivity::renderDetail() {
   renderer.displayBuffer();
 }
 
+void PocketDailyActivity::drawAppCardImage(const char* cardId, int x, int y, int width, int height) const {
+  const auto* appCards = appContent.cards();
+  if (!appCards || !appContent.revision()[0] || width <= 0 || height <= 0) return;
+  for (uint8_t i = 0; i < appCards->count; ++i) {
+    const auto& card = appCards->cards[i];
+    if (!card.imagePath[0] || strcmp(card.card.cardId, cardId) != 0) continue;
+    char path[160];
+    snprintf(path, sizeof(path), "%s/%s/%s", PocketDaily::Content::CONTENT_ROOT, appContent.revision(), card.imagePath);
+    HalFile file = Storage.open(path, O_RDONLY);
+    if (!file) {
+      LOG_ERR("CONTENT", "Card image unavailable");
+      return;
+    }
+    const PocketDaily::Content::ManifestSource source{
+        &file, file.size(), [](void* context, size_t offset, uint8_t* bytes, size_t count) {
+          HalSystem::feedWatchdogIfRegistered();
+          auto& file = *static_cast<HalFile*>(context);
+          return file.seek(offset) && file.read(bytes, count) == static_cast<int>(count);
+        }};
+    GUI.drawContentImage(renderer, source, x, y, width, height);
+    return;
+  }
+}
+
 void PocketDailyActivity::renderPocketCard(const PocketDaily::Card& card) {
   const auto& m = UITheme::getInstance().getMetrics();
   const int w = renderer.getScreenWidth();
@@ -3810,6 +3842,13 @@ void PocketDailyActivity::renderPocketCard(const PocketDaily::Card& card) {
       renderer.drawText(contextFont, pad, y, line.c_str(), true);
       y += renderer.getLineHeight(contextFont) + 2;
     }
+  }
+
+  // Keep the image below text and above the fixed action/hint area. The
+  // theme clamps to the oriented framebuffer; no second framebuffer is used.
+  if (y >= 0 && y < optionsTop && optionsTop <= pageH && pad >= 0 && pad < w / 2) {
+    const int imageGap = std::clamp(m.verticalSpacing, 0, optionsTop - y);
+    drawAppCardImage(card.cardId, pad, y + imageGap, w - pad * 2, optionsTop - y - imageGap);
   }
 
   y = optionsTop;

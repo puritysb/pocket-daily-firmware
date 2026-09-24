@@ -105,6 +105,7 @@ int8_t EpdFont::getKerning(const uint32_t leftCp, const uint32_t rightCp) const 
     return 0;
   }
   if (!data->kernMatrix) {
+    if (data->kernLookup) return data->kernLookup(data->glyphMissCtx, leftCp, rightCp);
     return 0;
   }
   const uint8_t lc = lookupKernClass(data->kernLeftClasses, data->kernLeftEntryCount, leftCp);
@@ -115,6 +116,7 @@ int8_t EpdFont::getKerning(const uint32_t leftCp, const uint32_t rightCp) const 
 }
 
 uint32_t EpdFont::getLigature(const uint32_t leftCp, const uint32_t rightCp) const {
+  if (data->ligatureLookup) return data->ligatureLookup(data->glyphMissCtx, leftCp, rightCp);
   const auto* pairs = data->ligaturePairs;
   const auto count = data->ligaturePairCount;
   if (!pairs || count == 0 || leftCp > 0xFFFF || rightCp > 0xFFFF) {
@@ -137,7 +139,7 @@ uint32_t EpdFont::getLigature(const uint32_t leftCp, const uint32_t rightCp) con
 }
 
 uint32_t EpdFont::applyLigatures(uint32_t cp, const char*& text) const {
-  if (!data->ligaturePairs || data->ligaturePairCount == 0) {
+  if ((!data->ligaturePairs || data->ligaturePairCount == 0) && !data->ligatureLookup) {
     return cp;
   }
   while (true) {

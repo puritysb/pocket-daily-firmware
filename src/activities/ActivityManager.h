@@ -16,16 +16,7 @@
 class Activity;    // forward declaration
 class RenderLock;  // forward declaration
 
-enum class HomeMenuItem {
-  NONE,
-  FILE_BROWSER,
-  RECENTS,
-  OPDS_BROWSER,
-  FILE_TRANSFER,
-  POCKET_DAILY,
-  GAMES,
-  SETTINGS_MENU
-};
+enum class HomeMenuItem { NONE, FILE_BROWSER, RECENTS, OPDS_BROWSER, FILE_TRANSFER, POCKET_DAILY, SETTINGS_MENU };
 
 /**
  * ActivityManager
@@ -89,10 +80,9 @@ class ActivityManager {
   void replaceActivity(std::unique_ptr<Activity>&& newActivity);
 
   // goTo... functions are convenient wrapper for replaceActivity()
-  void goToFileTransfer();
+  void goToFileTransfer(bool autoJoinSavedNetwork = false);
   void goToPocketDaily();
-  void goToPocketNearbySync();
-  void goToGames();
+  void goToPocketNearbySync(bool autoJoinSavedNetwork = false);
   void goToSettings();
   void goToFileBrowser(std::string path = {});
   void goToRecentBooks();
@@ -117,6 +107,8 @@ class ActivityManager {
   bool isReaderActivity() const;
   bool skipLoopDelay() const;
   ScreenshotInfo getScreenshotInfo() const;
+  // Caller must hold RenderLock so activity lifetime and framebuffer agree.
+  bool canCaptureFrame() const;
 
   // If immediate is true, the update will be triggered immediately.
   // Otherwise, it will be deferred until the end of the current loop iteration.

@@ -15,6 +15,9 @@ class HalStorage {
   HalStorage();
   bool begin();
   bool ready() const;
+  enum class FilesystemFormat { Unavailable, Fat, ExFat };
+  // Reads mounted SDK metadata under the storage lock; never scans the card.
+  FilesystemFormat filesystemFormat() const;
   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
   // Read the entire file at `path` into a String. Returns empty string on failure.
   String readFile(const char* path);
@@ -62,9 +65,12 @@ class HalFile : public Print {
   friend class HalStorage;
   class Impl;
   std::unique_ptr<Impl> impl;
+  static std::unique_ptr<Impl> allocateImpl();
   explicit HalFile(std::unique_ptr<Impl> impl);
 
  public:
+  // Empty/OOM handles are safe to close and inspect. Reads fail with -1,
+  // writes return zero, and seek/rename/preallocation return false.
   HalFile();
   ~HalFile();
   HalFile(HalFile&&);
@@ -97,6 +103,15 @@ class HalFile : public Print {
   void rewindDirectory();
   bool close();
   HalFile openNextFile();
+  enum class DirectoryRead { Record, End, Error };
+  // One raw 32-byte FAT/exFAT directory slot, including deleted/LFN slots.
+  // Does not decode names or prove directory semantic validity. Use a dedicated
+  // directory handle at a 32-byte boundary and stop on End/Error. Callers bound
+  // the total number of slots and yield between calls; never mix with openNextFile.
+  // End means a clean physical EOF or a zero entry marker, not a complete valid
+  // inventory. Partial records, sticky SDK errors and invalid handles are Error.
+  // record is cleared on End/Error. No additional handle/buffer allocation.
+  DirectoryRead readDirectoryRecord(uint8_t (&record)[32]);
   bool isOpen() const;
   operator bool() const;
 };

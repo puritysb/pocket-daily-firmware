@@ -55,9 +55,11 @@ struct Snapshot {
   Record records[AgentDeckCfg::SESSIONS_CAP];
 };
 
-// Write the snapshot to the SD card (tmp + rename so a power cut mid-write
-// leaves the previous deck intact). Returns false when the SD isn't ready or
-// the write fails; the caller just retries on the next deck change.
+// Write the non-current v7 slot, preserving the latest valid slot. Success
+// requires exact-length/CRC/generation readback. A false result can be ambiguous
+// if the completed write persisted but readback failed; load resolves it.
+// Serialized activity-loop access only. Not a guarantee against SD/FAT-wide
+// corruption or a controller that loses acknowledged writes on power failure.
 bool save(const Snapshot& snap);
 
 // Load the persisted deck. On any failure (missing file, format/version

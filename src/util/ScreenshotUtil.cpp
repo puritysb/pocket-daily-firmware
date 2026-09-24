@@ -68,6 +68,10 @@ void ScreenshotUtil::buildFilename(const ScreenshotInfo& info, char* buf, size_t
 }
 
 void ScreenshotUtil::takeScreenshot(GfxRenderer& renderer) {
+  if (!activityManager.canCaptureFrame()) {
+    LOG_ERR("SCR", "Current framebuffer has no completed display frame");
+    return;
+  }
   const uint8_t* fb = renderer.getFrameBuffer();
   if (!fb) {
     LOG_ERR("SCR", "Framebuffer not available");

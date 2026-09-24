@@ -20,6 +20,13 @@ constexpr const char* HOSTNAME = "crosspoint";
 void CalibreConnectActivity::onEnter() {
   Activity::onEnter();
 
+  // Calibre can be entered independently of File Transfer. Protect the
+  // Wi-Fi scan/association peak, not only the later web-server allocation.
+  {
+    RenderLock fontRenderLock(*this);
+    sdFontSystem.releaseLoaded(renderer);
+  }
+
   requestUpdate();
   state = CalibreConnectState::WIFI_SELECTION;
   connectedIP.clear();
@@ -79,8 +86,11 @@ void CalibreConnectActivity::startWebServer() {
   // buffers. Keep the reader font selection, but release its resident tables
   // and glyph caches while Calibre transfer is active; onExit restarts the
   // device and the selected family is loaded again at boot.
-  const uint32_t heapBeforeFontRelease = ESP.getFreeHeap();
-  sdFontSystem.releaseLoaded(renderer);
+  [[maybe_unused]] const uint32_t heapBeforeFontRelease = ESP.getFreeHeap();
+  {
+    RenderLock fontRenderLock(*this);
+    sdFontSystem.releaseLoaded(renderer);
+  }
   LOG_DBG("CAL", "Released resident SD font: heap %u -> %u (largest %u)", (unsigned)heapBeforeFontRelease,
           (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 

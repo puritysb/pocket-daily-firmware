@@ -3,7 +3,7 @@
 #include <cstdio>
 #include <cstring>
 
-#ifdef ENABLE_DEV_REMOTE_FLASH
+#ifdef ENABLE_DEV_NETWORK_DIAGNOSTICS
 #include <Arduino.h>
 #include <HalStorage.h>
 #include <WiFi.h>
@@ -52,7 +52,7 @@ int formatEvent(char* out, size_t cap, uint32_t uptimeS, const char* tag, int de
   return std::snprintf(out, cap, "E %lu %s %d", static_cast<unsigned long>(uptimeS), tag, detail);
 }
 
-#ifdef ENABLE_DEV_REMOTE_FLASH
+#ifdef ENABLE_DEV_NETWORK_DIAGNOSTICS
 
 namespace {
 
@@ -158,6 +158,6 @@ size_t tail(char* out, size_t cap) {
   return 0;
 }
 
-#endif  // ENABLE_DEV_REMOTE_FLASH
+#endif  // ENABLE_DEV_NETWORK_DIAGNOSTICS
 
 }  // namespace PocketDaily::NetHealth

@@ -5,6 +5,7 @@
 
 #include <cstddef>
 
+#include "pocket_daily/ContentPresentation.h"
 #include "pocket_daily/web/LiveStudioService.h"
 #include "pocket_daily/web/Profile.h"
 #include "pocket_daily/web/UploadStreamServer.h"
@@ -17,7 +18,7 @@ namespace PocketDaily::Web {
 struct RouteHost {
   void* self = nullptr;
   void (*noteClientActivity)(void* self) = nullptr;
-  bool (*httpUploadBusy)(void* self) = nullptr;    // session/end 409 gate
+  bool (*httpUploadBusy)(void* self) = nullptr;    // any live file writer; commit/session 409 gate
   void (*endDirectSession)(void* self) = nullptr;  // session/end accepted
   void (*requestRepaint)(void* self) = nullptr;    // pack apply + dev render
   String (*normalizeWebPath)(void* self, const String& path) = nullptr;
@@ -30,6 +31,7 @@ struct RouteDeps {
   UploadStreamServer* stream = nullptr;     // commit verification, session/end gate
   LiveStudioService* liveStudio = nullptr;  // pack apply, prefs notify, active flag
   RouteHost host{};
+  Content::PresentationHost presentation{};
 };
 
 // Registers every Pocket-owned route on the host's WebServer: private-AP
@@ -38,5 +40,8 @@ struct RouteDeps {
 // (compiled in only under their build flags). `deps` must outlive the
 // registered routes — the host stores it as a member.
 void registerPocketRoutes(WebServer& server, const RouteDeps& deps);
+// Dedicated Sync uses the same definitions through the existing not-found
+// callback, avoiding per-route handler/URI/closure allocations for its lifetime.
+bool dispatchPocketRoute(WebServer& server, const RouteDeps& deps);
 
 }  // namespace PocketDaily::Web

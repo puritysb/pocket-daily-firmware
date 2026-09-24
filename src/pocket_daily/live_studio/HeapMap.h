@@ -6,7 +6,7 @@
 // HN-2 evidence: a runtime heap map streamed over HTTP in small chunks
 // (the X3's File Transfer heap cannot afford a contiguous 4 KiB buffer, so
 // the whole map renders through caller-provided ~512 B buffers).
-#if defined(ENABLE_DEV_REMOTE_FLASH) || defined(ENABLE_HEAP_MAP)
+#if defined(ENABLE_DEV_NETWORK_DIAGNOSTICS) || defined(ENABLE_HEAP_MAP)
 #define POCKET_HEAP_MAP_ENABLED 1
 #else
 #define POCKET_HEAP_MAP_ENABLED 0

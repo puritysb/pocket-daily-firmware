@@ -9,6 +9,8 @@
 #include <algorithm>
 
 #include "network/FirmwareFlasher.h"
+#include "pocket_daily/ContentPathPolicy.h"
+#include "pocket_daily/web/SocketReceive.h"
 
 namespace {
 constexpr unsigned long POCKET_STREAM_IDLE_TIMEOUT_MS = 30 * 1000;
@@ -64,6 +66,28 @@ void UploadStreamServer::endTransferFocus() const {
   if (host_ && host_->endTransferFocus) host_->endTransferFocus(host_->self);
 }
 
+size_t UploadStreamServer::writeReply(const uint8_t* data, size_t size) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  const uint32_t start = micros();
+#endif
+  const auto written = client_.write(data, size);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (metrics_.outcome == TransferMetrics::Outcome::Active) metrics_.replyWrite.record(micros() - start);
+#endif
+  return written;
+}
+
+void UploadStreamServer::closeFile() {
+  if (!file_) return;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  const uint32_t start = micros();
+#endif
+  file_.close();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (metrics_.outcome == TransferMetrics::Outcome::Active) metrics_.sdClose.record(micros() - start);
+#endif
+}
+
 void UploadStreamServer::suspendLoopWatchdog(const char* breadcrumb) const {
   // X3 SD cluster allocation or a multi-sector flush can occasionally block a
   // valid storage call longer than the private Nearby Sync loop-watchdog
@@ -91,7 +115,11 @@ void UploadStreamServer::discardResume() {
 }
 
 void UploadStreamServer::reset(const bool removePartial) {
-  if (file_) file_.close();
+  const bool heldFocus = phase_ != Phase::IDLE;
+  closeFile();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  metrics_.end(millis(), TransferMetrics::Outcome::Stopped, received_);
+#endif
   if (removePartial && !fullPath_.isEmpty() && fullPath_ != resume_.path) {
     Storage.remove(fullPath_.c_str());
   }
@@ -107,6 +135,9 @@ void UploadStreamServer::reset(const bool removePartial) {
   lastActivity_ = 0;
   batch_ = nullptr;
   batchFill_ = 0;
+  // Release only after the socket, file and borrowed buffer are gone. Every
+  // terminal path (including malformed headers and SD errors) converges here.
+  if (heldFocus) endTransferFocus();
 }
 
 void UploadStreamServer::fail(const char* message, const bool removePartial) {
@@ -115,7 +146,7 @@ void UploadStreamServer::fail(const char* message, const bool removePartial) {
   batchFill_ = 0;
   if (file_) {
     suspendLoopWatchdog("nearby:upload-close");
-    file_.close();
+    closeFile();
     resumeLoopWatchdog();
   }
   if (removePartial && !fullPath_.isEmpty()) {
@@ -127,14 +158,16 @@ void UploadStreamServer::fail(const char* message, const bool removePartial) {
   char response[112];
   const size_t length = PocketDaily::UploadStream::formatErrorReply(response, sizeof(response), message);
   if (client_ && length > 0) {
-    client_.write(reinterpret_cast<const uint8_t*>(response), length);
+    writeReply(reinterpret_cast<const uint8_t*>(response), length);
   }
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  metrics_.end(millis(), TransferMetrics::Outcome::Rejected, received_);
+#endif
   phase_ = Phase::REPLIED;
   lastActivity_ = millis();
 }
 
 void UploadStreamServer::suspend(const char* message) {
-  endTransferFocus();
   // Transport failure while payload was flowing. Flush what already arrived,
   // keep the hidden staging file on the card and remember the verified prefix
   // so a reconnecting companion sends only the remainder. RAM cost is one path
@@ -144,7 +177,7 @@ void UploadStreamServer::suspend(const char* message) {
   batchFill_ = 0;
   if (file_) {
     suspendLoopWatchdog("nearby:upload-close");
-    file_.close();
+    closeFile();
     resumeLoopWatchdog();
   }
   if (flushed && received_ > 0 && received_ < expected_) {
@@ -164,8 +197,11 @@ void UploadStreamServer::suspend(const char* message) {
   char response[112];
   const size_t length = PocketDaily::UploadStream::formatErrorReply(response, sizeof(response), message);
   if (client_ && client_.connected() && length > 0) {
-    client_.write(reinterpret_cast<const uint8_t*>(response), length);
+    writeReply(reinterpret_cast<const uint8_t*>(response), length);
   }
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  metrics_.end(millis(), TransferMetrics::Outcome::Interrupted, received_);
+#endif
   phase_ = Phase::REPLIED;
   lastActivity_ = millis();
 }
@@ -248,12 +284,15 @@ bool UploadStreamServer::beginFromHeader() {
   const String requestedPath = request.path;
   const String normalized = host_->normalizeWebPath(host_->self, requestedPath);
   if (normalized != requestedPath) return false;
+  if (!Content::genericContentWriteAllowed({normalized.c_str(), normalized.length()})) return false;
+  if (!Content::contentWriteWithinBudget({normalized.c_str(), normalized.length()}, 0, request.size)) return false;
   const int slash = normalized.lastIndexOf('/');
   if (slash < 0) return false;
   const String name = normalized.substring(slash + 1);
   const String directory = slash == 0 ? "/" : normalized.substring(0, slash);
 
-  if (host_->httpUploadBusy && host_->httpUploadBusy(host_->self)) return false;  // A legacy HTTP upload owns the shared commit state.
+  if (host_->httpUploadBusy && host_->httpUploadBusy(host_->self))
+    return false;  // A legacy HTTP upload owns the shared commit state.
   if (host_->releaseHttpUploadBuffer) host_->releaseHttpUploadBuffer(host_->self);
   staged_.fileName = name;
   staged_.path = directory;
@@ -269,6 +308,7 @@ bool UploadStreamServer::beginFromHeader() {
   crc32_ = PocketDaily::UploadStream::CRC32_INITIAL;
   batchFill_ = 0;
   batch_ = firmware_flash::sharedStagingBuffer();
+  flowControl_ = request.flowControl;
 
   bool resumed = false;
   if (request.resume && resume_.valid() && resume_.path == normalized && resume_.expected == request.size) {
@@ -281,28 +321,34 @@ bool UploadStreamServer::beginFromHeader() {
   if (!resumed && !resume_.path.isEmpty()) discardResume();
   resume_.clear();
   if (!resumed) {
+    // A clean SD card need not have the app's learning/UI-pack directories.
+    // Only the already-normalized staging parent is created; publication still
+    // goes through the verified commit endpoint.
+    if (!Storage.exists(directory.c_str()) && !Storage.mkdir(directory.c_str())) return false;
     removeStaleStagingFiles(directory, name);
     if (!createStagingFile(normalized, request.size)) return false;
   }
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  metrics_.payload(millis(), expected_, received_);
+#endif
   if (request.resume) {
     // The companion waits for this line before sending any payload byte, so
     // the retained prefix is never overwritten with duplicate data.
     char reply[32];
     const size_t length = PocketDaily::UploadStream::formatResumeReply(reply, sizeof(reply), received_);
-    if (length == 0 || client_.write(reinterpret_cast<const uint8_t*>(reply), length) != length) {
+    if (length == 0 || writeReply(reinterpret_cast<const uint8_t*>(reply), length) != length) {
       suspend("Upload disconnected");
-      beginTransferFocus();
       return true;
     }
   }
 
+  acknowledged_ = received_;
   phase_ = Phase::DATA;
   LOG_INF("PUPLOAD", "%s %s (%u/%u bytes, batch=%u)", resumed ? "Resuming" : "Receiving", normalized.c_str(),
           (unsigned)received_, (unsigned)request.size,
           (unsigned)(batch_ ? POCKET_STREAM_BATCH_BYTES : POCKET_STREAM_READ_BYTES));
   if (received_ >= expected_) finish();
-  beginTransferFocus();
   return true;
 }
 
@@ -311,7 +357,14 @@ bool UploadStreamServer::flushBatch() {
   const uint8_t* batch = batch_ ? batch_ : pocketStreamReadBuffer;
   const size_t count = batchFill_;
   suspendLoopWatchdog("nearby:upload-write");
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  const uint32_t start = micros();
+#endif
   const size_t written = file_ ? file_.write(batch, count) : 0;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  metrics_.sdWrite.record(micros() - start);
+  metrics_.heap(ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+#endif
   resumeLoopWatchdog();
   if (written != count) return false;
   // Only flushed bytes count toward the verified prefix a resume may reuse.
@@ -338,10 +391,9 @@ bool UploadStreamServer::appendPayload(const uint8_t* data, size_t count) {
 }
 
 void UploadStreamServer::finish() {
-  endTransferFocus();
   if (file_) {
     suspendLoopWatchdog("nearby:upload-close");
-    file_.close();
+    closeFile();
     resumeLoopWatchdog();
   }
   batch_ = nullptr;
@@ -355,10 +407,17 @@ void UploadStreamServer::finish() {
   }
 
   const uint32_t finalizedCrc = PocketDaily::UploadStream::finalizeCrc32(crc32_);
+  // Preserve a completed prefix as well: the final OK can be lost in transit.
+  resume_.path = fullPath_;
+  resume_.expected = expected_;
+  resume_.received = received_;
+  resume_.crc32 = crc32_;
   char response[48];
-  const size_t length =
-      PocketDaily::UploadStream::formatOkReply(response, sizeof(response), received_, finalizedCrc);
-  if (length > 0) client_.write(reinterpret_cast<const uint8_t*>(response), length);
+  const size_t length = PocketDaily::UploadStream::formatOkReply(response, sizeof(response), received_, finalizedCrc);
+  if (length > 0) writeReply(reinterpret_cast<const uint8_t*>(response), length);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  metrics_.end(millis(), TransferMetrics::Outcome::Complete, received_);
+#endif
   phase_ = Phase::REPLIED;
   lastActivity_ = millis();
   LOG_INF("PUPLOAD", "Received %s (%u bytes, crc32=%08lX)", fullPath_.c_str(), (unsigned)received_,
@@ -367,13 +426,21 @@ void UploadStreamServer::finish() {
 
 void UploadStreamServer::service() {
   if (!server_) return;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  metrics_.service(millis());
+#endif
 
   if (phase_ == Phase::IDLE) {
     if (!server_->hasClient()) return;
     client_ = server_->accept();
     if (!client_) return;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    metrics_.start(millis(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+#endif
     client_.setNoDelay(true);
     phase_ = Phase::HEADER;
+    // Drop optional allocations before parsing, opening SD files or replying.
+    beginTransferFocus();
     headerLength_ = 0;
     lastActivity_ = millis();
     noteClientActivity();
@@ -399,7 +466,9 @@ void UploadStreamServer::service() {
 
   const int available = client_.available();
   if (available <= 0) {
-    if (!client_.connected()) {
+    uint8_t byte;
+    const auto result = receiveSocket(client_.fd(), &byte, 1, true);
+    if (result.state == ReceiveState::Closed || result.state == ReceiveState::Failed) {
       if (receivingPayload) {
         suspend("Upload disconnected");
       } else {
@@ -411,8 +480,13 @@ void UploadStreamServer::service() {
 
   if (phase_ == Phase::HEADER) {
     const size_t wanted = std::min(static_cast<size_t>(available), POCKET_STREAM_READ_BYTES);
-    const int count = client_.read(pocketStreamReadBuffer, wanted);
-    if (count <= 0) return;
+    const auto result = receiveSocket(client_.fd(), pocketStreamReadBuffer, wanted);
+    if (result.state == ReceiveState::Pending) return;
+    if (result.state != ReceiveState::Data) {
+      fail("Upload disconnected");
+      return;
+    }
+    const size_t count = result.count;
     lastActivity_ = millis();
     noteClientActivity();
 
@@ -439,6 +513,9 @@ void UploadStreamServer::service() {
       fail("Upload overflow");
       return;
     }
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    metrics_.receive(millis(), leftover);
+#endif
     if (!appendPayload(pocketStreamReadBuffer + offset, leftover)) {
       fail("SD write failed");
       return;
@@ -454,11 +531,19 @@ void UploadStreamServer::service() {
       return;
     }
     const size_t wanted = std::min({static_cast<size_t>(available), capacity - batchFill_, outstanding});
-    const int count = client_.read(batch + batchFill_, wanted);
-    if (count <= 0) return;
+    const auto result = receiveSocket(client_.fd(), batch + batchFill_, wanted);
+    if (result.state == ReceiveState::Pending) return;
+    if (result.state != ReceiveState::Data) {
+      suspend("Upload disconnected");
+      return;
+    }
+    const size_t count = result.count;
     lastActivity_ = millis();
     noteClientActivity();
     batchFill_ += static_cast<size_t>(count);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    metrics_.receive(millis(), count);
+#endif
     if (batchFill_ == capacity && !flushBatch()) {
       fail("SD write failed");
       return;
@@ -471,6 +556,18 @@ void UploadStreamServer::service() {
       return;
     }
     finish();
+  } else if (flowControl_ && received_ + batchFill_ - acknowledged_ >= PocketDaily::UploadStream::FLOW_WINDOW_BYTES) {
+    if (!flushBatch()) {
+      fail("SD write failed");
+      return;
+    }
+    char reply[32];
+    const size_t length = PocketDaily::UploadStream::formatAckReply(reply, sizeof(reply), received_);
+    if (length == 0 || writeReply(reinterpret_cast<const uint8_t*>(reply), length) != length) {
+      suspend("Upload disconnected");
+      return;
+    }
+    acknowledged_ = received_;
   }
 }
 

@@ -39,6 +39,7 @@ enum class UiPackResult : uint8_t {
   BadSha,
   UnknownField,
   BadRecord,
+  ReadFail,
 };
 
 struct ThemeOverride {
@@ -61,6 +62,17 @@ struct UiPackInfo {
 // is an error: the caller must size for every override).
 UiPackResult validatePack(const uint8_t* data, size_t size, UiPackInfo* info, ThemeOverride* overrides,
                           size_t overridesCap);
+
+struct UiPackSource {
+  void* context;
+  // Caller must keep the source unchanged throughout both validation passes.
+  // Exact, bounded read. The validator never requests more than 128 bytes.
+  bool (*readAt)(void* context, size_t offset, uint8_t* output, size_t bytes);
+  // Optional digest sink, called once for each payload byte during CRC validation.
+  bool (*digestPayload)(void* context, const uint8_t* data, size_t bytes) = nullptr;
+};
+UiPackResult validatePackSource(const UiPackSource& source, size_t size, UiPackInfo* info, ThemeOverride* overrides,
+                                size_t overridesCap, uint8_t* expectedSha256 = nullptr);
 
 const char* uiPackResultName(UiPackResult r);
 

@@ -14,7 +14,7 @@ namespace PocketDaily::Web {
 struct Host {
   void* self = nullptr;
   void (*noteClientActivity)(void* self) = nullptr;       // idle-lease heartbeat
-  bool (*httpUploadBusy)(void* self) = nullptr;           // legacy /upload holds staging
+  bool (*httpUploadBusy)(void* self) = nullptr;           // legacy HTTP or WS writer holds storage
   void (*releaseHttpUploadBuffer)(void* self) = nullptr;  // stream-begin heap hygiene
   void (*beginTransferFocus)(void* self) = nullptr;       // uploads own the DMA pool
   void (*endTransferFocus)(void* self) = nullptr;

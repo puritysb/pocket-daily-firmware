@@ -11,6 +11,7 @@
 #include <string>
 
 #include "pocket_daily/web/PocketWebServices.h"
+#include "pocket_daily/web/TransferAdmission.h"
 
 // Pocket-owned profile enum (route/listener/watchdog gating lives with the
 // pocket web modules); alias keeps every existing call site unchanged.
@@ -38,6 +39,7 @@ class CrossPointWebServer {
 
   // Used by POST upload handler
   struct UploadState {
+    PocketDaily::Web::UploadAdmission admission;
     HalFile file;
     String fileName;
     String path = "/";
@@ -47,6 +49,7 @@ class CrossPointWebServer {
     String error = "";
     bool chunked = false;
     size_t chunkStart = 0;
+    bool contentStaging = false;
 
     // Upload write buffer batches small writes into SD card operations.
     // The HTTP layer already delivers multipart uploads in roughly 1.4 KiB
@@ -77,6 +80,8 @@ class CrossPointWebServer {
   // AP activity uses this timestamp to expire idle sessions without cutting
   // off a transfer that is still making progress.
   unsigned long lastClientActivityAt() const { return clientActivityAt; }
+  bool receivingUpload() const { return pocketStream.receiving(); }
+  bool presentationTransportIdle() const { return !pocketStream.transferActive(); }
 
   // Live Studio LS-3: ask the hosting activity for one render pass after a
   // UI pack apply (and by the dev-only render trigger).
@@ -84,6 +89,8 @@ class CrossPointWebServer {
   bool consumeRepaintRequest();
 
   bool shouldEndSession() const;
+  void setContentPresentation(const PocketDaily::Content::PresentationHost& host) { pocketRoutes.presentation = host; }
+  bool contentPresentationAllowed() const { return !fileMutationBusy() && !pocketStream.transferActive(); }
 
   WsUploadStatus getWsUploadStatus() const;
 
@@ -91,6 +98,7 @@ class CrossPointWebServer {
   uint16_t getPort() const { return port; }
 
  private:
+  bool fileMutationBusy() const;
   std::unique_ptr<WebServer> server = nullptr;
   std::unique_ptr<WebSocketsServer> wsServer = nullptr;
   bool sessionEndRequested = false;

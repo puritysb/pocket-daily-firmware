@@ -551,6 +551,9 @@ void setup() {
       break;
   }
 
+  // Consume even on recovery/crash boots: those routes take precedence, but
+  // must not leave a stale automatic radio request for a later normal boot.
+  const auto devBootReturn = PocketDaily::Boot::consumeDevBootReturn();
   if (recoveryFirmwareMode) {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
     activityManager.replaceActivity(
@@ -559,10 +562,14 @@ void setup() {
     // Panic, watchdog and power-fault resets all leave an SD report. Surface it
     // immediately instead of silently resuming into the failing interaction.
     activityManager.goToCrashReport();
-  } else if (PocketDaily::Boot::consumeDevBootReturn()) {
-    // Dev loop only: a remote-triggered flash asked to land back in the
-    // File Transfer menu, where one Confirm rejoins the saved network.
-    activityManager.goToFileTransfer();
+  } else if (devBootReturn != PocketDaily::Boot::DevBootReturn::None) {
+    // Dev loop only: consume the one-shot marker before reconnecting. Missing
+    // credentials or association failure leaves the normal Wi-Fi chooser.
+    using PocketDaily::Boot::DevBootReturn;
+    if (devBootReturn == DevBootReturn::SyncSta || devBootReturn == DevBootReturn::SyncMenu)
+      activityManager.goToPocketNearbySync(devBootReturn == DevBootReturn::SyncSta);
+    else
+      activityManager.goToFileTransfer(devBootReturn == DevBootReturn::FileTransferSta);
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
              !APP_STATE.openEpubPath.empty()) {
     activityManager.goToReader(APP_STATE.openEpubPath);
@@ -726,7 +733,7 @@ void loop() {
 
   const unsigned long activityStartTime = millis();
   activityManager.loop();
-  const unsigned long activityDuration = millis() - activityStartTime;
+  [[maybe_unused]] const unsigned long activityDuration = millis() - activityStartTime;
 
   const unsigned long loopDuration = millis() - loopStartTime;
   if (loopDuration > maxLoopDuration) {

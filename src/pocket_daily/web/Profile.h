@@ -11,8 +11,28 @@ namespace PocketDaily::Web {
 // call sites compile unchanged.
 enum class Profile : uint8_t {
   FULL,           // Upstream's complete browser surface (X4, legacy use)
-  FILE_TRANSFER,  // Manual File Transfer: browser routes, no WS push
+  FILE_TRANSFER,  // Manual File Transfer: browser routes, no WebDAV/discovery
   POCKET_SYNC,    // Pocket's authenticated private AP: minimal route set only
+  COMPANION,      // Pocket Sync on shared Wi-Fi: app routes, no browser services
 };
+
+inline constexpr bool hasBrowserRoutes(Profile profile) {
+  return profile == Profile::FULL || profile == Profile::FILE_TRANSFER;
+}
+
+// Dedicated sessions reserve radio/socket memory for verified transfers and
+// content presentation. This policy applies on both boards and both bearers;
+// extra heap must not silently enable optional services halfway through sync.
+inline constexpr bool isSyncProfile(Profile profile) {
+  return profile == Profile::COMPANION || profile == Profile::POCKET_SYNC;
+}
+
+inline constexpr bool allowsLivePush(Profile profile, bool apMode) { return !isSyncProfile(profile) && !apMode; }
+
+inline constexpr Profile selectProfile(bool privateAp, bool deviceIsX3, bool companion = false) {
+  if (privateAp) return Profile::POCKET_SYNC;
+  if (companion) return Profile::COMPANION;
+  return deviceIsX3 ? Profile::FILE_TRANSFER : Profile::FULL;
+}
 
 }  // namespace PocketDaily::Web

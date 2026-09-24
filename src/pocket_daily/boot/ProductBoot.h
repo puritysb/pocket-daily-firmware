@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "DevBootReturn.h"
+
 class GfxRenderer;
 
 namespace PocketDaily::Boot {
@@ -28,9 +30,9 @@ void installJapaneseFont();
 void beginNetHealth();
 void applyStartupUiPack();
 
-// Dev builds only: consume the remote-flash boot marker. True means route to
-// the File Transfer menu where one Confirm rejoins the saved network.
-bool consumeDevBootReturn();
+// Dev builds only: read and remove the one-shot mode marker before any radio
+// attempt. Invalid/unremovable markers never trigger automatic connection.
+DevBootReturn consumeDevBootReturn();
 
 }  // namespace PocketDaily::Boot
 

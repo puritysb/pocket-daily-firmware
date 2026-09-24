@@ -6,7 +6,7 @@
 // Network stability instrumentation (docs/network-stability-analysis.md).
 // The radio can die in ways that take every diagnostic path with it, so the
 // record lives on the SD card and survives. Always on in dev builds
-// (ENABLE_DEV_REMOTE_FLASH); compiled out of release builds until the
+// (ENABLE_DEV_NETWORK_DIAGNOSTICS); compiled out of release builds until the
 // workstream closes.
 namespace PocketDaily::NetHealth {
 
@@ -18,7 +18,7 @@ int formatHeartbeat(char* out, size_t cap, uint32_t uptimeS, uint32_t freeHeap, 
 // One event line: "E <uptime_s> <tag> [detail]".
 int formatEvent(char* out, size_t cap, uint32_t uptimeS, const char* tag, int detail);
 
-#ifdef ENABLE_DEV_REMOTE_FLASH
+#ifdef ENABLE_DEV_NETWORK_DIAGNOSTICS
 // Device side. begin() installs the WiFi event hooks. tick() is called from
 // the activity loop's existing 2 s Wi-Fi check and logs the heartbeat line
 // every 60 s - no dedicated task, no extra stack. note() records one-off

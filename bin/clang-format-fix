@@ -47,6 +47,10 @@ git ls-files  --exclude-standard ${GIT_LS_FILES_FLAGS} \
     | grep -v -E '^lib/EpdFont/builtinFonts/' \
     | grep -v -E '^lib/Epub/Epub/hyphenation/generated/' \
     | grep -v -E '^lib/uzlib/' \
-    | xargs -r "${CLANG_FORMAT_BIN}" -style=file -i
+    | while IFS= read -r path; do
+        # Deleted tracked files are reported by --modified too.
+        if [[ -f "$path" ]]; then printf '%s\0' "$path"; fi
+      done \
+    | xargs -0 -r "${CLANG_FORMAT_BIN}" -style=file -i
 # Restore strict pipeline failure handling for the rest of the script.
 set -o pipefail

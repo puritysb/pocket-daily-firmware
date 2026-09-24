@@ -9,8 +9,13 @@
 #include "esp_private/esp_cpu_internal.h"
 #include "esp_private/esp_system_attr.h"
 #include "esp_private/panic_internal.h"
+#include "esp_task_wdt.h"
 
 #define MAX_PANIC_STACK_DEPTH 32
+
+void HalSystem::feedWatchdogIfRegistered() {
+  if (esp_task_wdt_status(nullptr) == ESP_OK) esp_task_wdt_reset();
+}
 
 RTC_NOINIT_ATTR char panicMessage[256];
 RTC_NOINIT_ATTR HalSystem::StackFrame panicStack[MAX_PANIC_STACK_DEPTH];

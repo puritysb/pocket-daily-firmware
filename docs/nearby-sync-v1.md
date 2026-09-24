@@ -21,6 +21,15 @@ the phone and reader to be on the same infrastructure Wi-Fi network.
 
 ## Transport selection
 
+2026-09-24 correction: the shared-network route selects COMPANION, not the
+browser File Transfer profile (superseding the older extension paragraph).
+COMPANION and private POCKET_SYNC now both stay poll-only, omit browser
+management services, and decline automatic diagnostic/frame downloads. Both
+retain verified stream/commit, preferences, content/theme and presentation
+endpoints. These are implemented paths, not X3/X4 hardware sign-off. The app
+now revokes a failed pre-lease BLE request without Wi-Fi changes; handed-off
+leases retain their manual recovery/end-session controls.
+
 The transport design has one reliable path and two optional shortcuts:
 
 1. BLE performs discovery, authenticated status, and requests a temporary
@@ -127,6 +136,11 @@ Nearby Sync uses a versioned, interruption-safe bulk API:
   opens that port once, sends `POCKET-PUT/1`, staging path, and byte length,
   then streams the file on the same connection. The reader returns the received
   length and CRC32 before the app is allowed to commit.
+  Updated peers additionally negotiate `uploadStreamWindow:4096`: after
+  `Resume: 1` / `Window: 4096` and `RESUME n`, each non-final 4 KiB block must
+  receive `ACK <absolute offset>` before the next block is sent. The final
+  block returns OK. This uses the existing SD staging buffer and is optional
+  for legacy peers; see `live-studio-v1.md` for ownership and recovery details.
 - `POST /api/pocket/v1/commit` supplies the staging path, final path, byte
   length, and CRC32. The reader checks all four against the completed upload,
   then publishes it. A disconnect cannot overwrite the previous final file.

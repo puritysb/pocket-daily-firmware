@@ -1,0 +1,10 @@
+add_subdirectory(${REPO_ROOT}/host ${CMAKE_CURRENT_BINARY_DIR}/host)
+add_executable(gfx_host_test GfxHostTest.cpp ContentImageHostTest.cpp HostStorageTest.cpp HostAbiTest.cpp)
+target_link_libraries(gfx_host_test PRIVATE pdui_host GTest::gtest_main)
+gtest_discover_tests(gfx_host_test)
+add_executable(gfx_font_fixture_check GfxFontFixtureCheck.cpp)
+target_link_libraries(gfx_font_fixture_check PRIVATE pdui_host)
+# Compile/link the public header as C, not just as C++ with extern declarations.
+add_executable(host_abi_c_check HostAbiCCheck.c)
+target_link_libraries(host_abi_c_check PRIVATE pdui_host)
+add_test(NAME HostAbi.CHeaderAndLink COMMAND host_abi_c_check)

@@ -11,6 +11,9 @@
 
 #include "pocket_daily/upload_stream_protocol.h"
 #include "pocket_daily/web/Host.h"
+#ifdef ENABLE_DEV_REMOTE_FLASH
+#include "pocket_daily/web/TransferMetrics.h"
+#endif
 
 namespace PocketDaily::Web {
 
@@ -56,8 +59,12 @@ class UploadStreamServer final {
   // A stream transfer occupies the listener (any phase past IDLE), including
   // the short REPLIED grace window after the final reply.
   bool transferActive() const { return phase_ != Phase::IDLE; }
+  bool receiving() const { return phase_ == Phase::HEADER || phase_ == Phase::DATA; }
   bool listening() const { return server_ != nullptr; }
   uint16_t port() const { return config_.port; }
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  const TransferMetrics& metrics() const { return metrics_; }
+#endif
 
   const StagedUpload& staged() const { return staged_; }
   // The inherited chunked HTTP /upload path publishes its result here at
@@ -111,6 +118,8 @@ class UploadStreamServer final {
   void noteClientActivity() const;
   void beginTransferFocus() const;
   void endTransferFocus() const;
+  size_t writeReply(const uint8_t* data, size_t size);
+  void closeFile();
 
   Config config_{};
   const Host* host_ = nullptr;
@@ -134,9 +143,14 @@ class UploadStreamServer final {
   // refused for lack of the optimization.
   uint8_t* batch_ = nullptr;
   size_t batchFill_ = 0;
+  bool flowControl_ = false;
+  size_t acknowledged_ = 0;
 
   ResumeState resume_;
   mutable StagedUpload staged_;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  TransferMetrics metrics_;
+#endif
 };
 
 }  // namespace PocketDaily::Web

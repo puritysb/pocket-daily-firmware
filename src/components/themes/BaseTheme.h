@@ -188,8 +188,19 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .textFieldLineEndOffset = 0};
 }
 
+namespace PocketDaily::Content {
+struct ManifestSource;
+struct ContentCard;
+}  // namespace PocketDaily::Content
+
 class BaseTheme {
  public:
+  // Uses one already-loaded bounded SD font; never invokes font discovery or
+  // switches back to the cached EPUB font path while a live session is open.
+  bool drawContentPage(GfxRenderer& renderer, const PocketDaily::Content::ContentCard* card, const char* revision,
+                       int fontId, const char* const labels[4]) const;
+  bool drawContentImage(const GfxRenderer& renderer, const PocketDaily::Content::ManifestSource& source, int x, int y,
+                        int width, int height) const;
   virtual ~BaseTheme() = default;
 
   // Component drawing methods

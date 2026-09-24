@@ -22,7 +22,7 @@
 #include "fontIds.h"
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 6;  // File Browser, Recents, File transfer, Pocket Daily, Games, Settings
+  int count = 5;  // File Browser, Recents, File transfer, Pocket Daily, Settings
   if (!recentBooks.empty()) {
     count += recentBooks.size();
   }
@@ -201,9 +201,6 @@ void HomeActivity::loop() {
         case HomeMenuItem::POCKET_DAILY:
           onPocketDailyOpen();
           break;
-        case HomeMenuItem::GAMES:
-          onGamesOpen();
-          break;
         case HomeMenuItem::SETTINGS_MENU:
           onSettingsOpen();
           break;
@@ -237,26 +234,29 @@ void HomeActivity::render(RenderLock&&) {
                           recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
                           std::bind(&HomeActivity::storeCoverBuffer, this));
 
-  // Build menu items dynamically
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES),     tr(STR_MENU_RECENT_BOOKS), tr(STR_FILE_TRANSFER),
-                                        tr(STR_POCKET_DAILY_APP), tr(STR_GAMES_TITLE),       tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, AgentMark, Bookmark, Settings};
-
-  if (hasOpdsServers) {
-    menuItems.insert(menuItems.begin() + 2, tr(STR_OPDS_BROWSER));
-    menuIcons.insert(menuIcons.begin() + 2, Library);
-  }
-
+  // Five base entries plus optional Continue Reading and OPDS. Pointer/icon
+  // arrays are bounded stack data, not vectors allocated on every paint.
+  const char* menuItems[7]{};
+  UIIcon menuIcons[7]{};
+  int menuCount = 0;
+  const auto append = [&](const char* title, UIIcon icon) {
+    menuItems[menuCount] = title;
+    menuIcons[menuCount++] = icon;
+  };
   if (metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
-    // Insert Continue Reading at the top if enabled in theme
-    menuItems.insert(menuItems.begin(), tr(STR_CONTINUE_READING));
-    menuIcons.insert(menuIcons.begin(), Book);
+    append(tr(STR_CONTINUE_READING), Book);
   }
+  append(tr(STR_BROWSE_FILES), Folder);
+  append(tr(STR_MENU_RECENT_BOOKS), Recent);
+  if (hasOpdsServers) append(tr(STR_OPDS_BROWSER), Library);
+  append(tr(STR_FILE_TRANSFER), Transfer);
+  append(tr(STR_POCKET_DAILY_APP), AgentMark);
+  append(tr(STR_SETTINGS_TITLE), Settings);
 
   const int menuTop = metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset;
   const int menuHeight = std::max(0, pageHeight - menuTop - metrics.buttonHintsHeight);
   GUI.drawButtonMenu(
-      renderer, Rect{0, menuTop, pageWidth, menuHeight}, static_cast<int>(menuItems.size()),
+      renderer, Rect{0, menuTop, pageWidth, menuHeight}, menuCount,
       metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - recentBooks.size(),
       [&menuItems](int index) { return std::string(menuItems[index]); },
       [&menuIcons](int index) { return menuIcons[index]; });
@@ -286,7 +286,5 @@ void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
 
 void HomeActivity::onPocketDailyOpen() { activityManager.goToPocketDaily(); }
-
-void HomeActivity::onGamesOpen() { activityManager.goToGames(); }
 
 void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }

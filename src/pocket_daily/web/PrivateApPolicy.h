@@ -27,8 +27,6 @@ bool nearbyReadyAllowed(uint32_t freeHeap, uint32_t largestBlock);
 // X3 File Transfer) profile has the smaller guard.
 bool webStartAllowed(bool lightweightProfile, uint32_t freeHeap, uint32_t largestBlock);
 
-Profile selectProfile(bool privateAp, bool deviceIsX3);
-
 // Enrol the Arduino loop task on the task watchdog and widen it for the
 // bounded private-AP session. Nearby Sync always exits through a chip
 // restart, which restores the sdkconfig 5 s default. False = reconfigure

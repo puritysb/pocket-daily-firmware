@@ -10,7 +10,6 @@
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
-#include "games/GamesActivity.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
@@ -53,8 +52,10 @@ void ActivityManager::renderTaskLoop() {
       // Live Studio LS-2: publish the just-rendered 1-bit frame while a
       // companion is subscribed. Cheap no-op otherwise; the capture policy
       // bounds heap use and cadence (docs/live-studio-v1.md).
-      PocketDaily::LiveFrameCapture::maybeCapture(renderer.getFrameBuffer(), renderer.getDisplayWidth(),
-                                                  renderer.getDisplayHeight());
+      if (currentActivity->canCaptureFrame()) {
+        PocketDaily::LiveFrameCapture::maybeCapture(renderer.getFrameBuffer(), renderer.getDisplayWidth(),
+                                                    renderer.getDisplayHeight());
+      }
       const UBaseType_t stackHeadroom = uxTaskGetStackHighWaterMark(nullptr);
       if (stackHeadroom < 1024)
         LOG_ERR("ACT", "Render stack headroom low: %uB", (unsigned)stackHeadroom);
@@ -186,8 +187,14 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
   }
 }
 
-void ActivityManager::goToFileTransfer() {
-  replaceActivity(std::make_unique<CrossPointWebServerActivity>(renderer, mappedInput));
+void ActivityManager::goToFileTransfer(const bool autoJoinSavedNetwork) {
+  auto transfer = makeUniqueNoThrow<CrossPointWebServerActivity>(
+      renderer, mappedInput, WebServerLaunchMode::FILE_TRANSFER, autoJoinSavedNetwork);
+  if (!transfer) {
+    LOG_ERR("ACT", "OOM: CrossPointWebServerActivity");
+    return;
+  }
+  replaceActivity(std::move(transfer));
 }
 
 void ActivityManager::goToPocketDaily() {
@@ -199,23 +206,14 @@ void ActivityManager::goToPocketDaily() {
   replaceActivity(std::move(pocketDaily));
 }
 
-void ActivityManager::goToPocketNearbySync() {
-  auto nearbySync =
-      makeUniqueNoThrow<CrossPointWebServerActivity>(renderer, mappedInput, WebServerLaunchMode::POCKET_NEARBY_SYNC);
+void ActivityManager::goToPocketNearbySync(const bool autoJoinSavedNetwork) {
+  auto nearbySync = makeUniqueNoThrow<CrossPointWebServerActivity>(
+      renderer, mappedInput, WebServerLaunchMode::POCKET_NEARBY_SYNC, autoJoinSavedNetwork);
   if (!nearbySync) {
     LOG_ERR("ACT", "OOM: Pocket Nearby Sync activity");
     return;
   }
   replaceActivity(std::move(nearbySync));
-}
-
-void ActivityManager::goToGames() {
-  auto games = makeUniqueNoThrow<GamesActivity>(renderer, mappedInput);
-  if (!games) {
-    LOG_ERR("ACT", "OOM: GamesActivity");
-    return;
-  }
-  replaceActivity(std::move(games));
 }
 
 void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
@@ -266,8 +264,6 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
     } else if (activityName == "PocketDaily" || activityName == "PocketNearbySync") {
       initialMenuItem = HomeMenuItem::POCKET_DAILY;
-    } else if (activityName == "Games") {
-      initialMenuItem = HomeMenuItem::GAMES;
     } else if (activityName == "Settings") {
       initialMenuItem = HomeMenuItem::SETTINGS_MENU;
     }
@@ -306,6 +302,8 @@ bool ActivityManager::isReaderActivity() const {
 }
 
 bool ActivityManager::skipLoopDelay() const { return currentActivity && currentActivity->skipLoopDelay(); }
+
+bool ActivityManager::canCaptureFrame() const { return currentActivity && currentActivity->canCaptureFrame(); }
 
 ScreenshotInfo ActivityManager::getScreenshotInfo() const {
   if (currentActivity) {

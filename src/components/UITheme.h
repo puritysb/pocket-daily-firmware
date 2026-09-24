@@ -27,8 +27,10 @@ class UITheme {
   void setTheme(CrossPointSettings::UI_THEME type);
   // Live Studio LS-3: apply a validated .uipack's theme overrides on top of
   // the current theme. An empty list reverts to the theme's own metrics.
-  void applyPackMetrics(const PocketDaily::LiveStudio::ThemeOverride* overrides, size_t count);
-  bool packActive() const { return packOverrideCount > 0; }
+  // Takes ownership of malloc-backed, already validated overrides; no allocation.
+  // Caller holds RenderLock when the render task is running.
+  void adoptPackMetrics(PocketDaily::LiveStudio::ThemeOverride* overrides, size_t count);
+  bool packActive() const { return packOverrides != nullptr; }
   static int getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,
                                      bool hasSubtitle, int extraReservedHeight = 0);
   static std::string getCoverThumbPath(std::string coverBmpPath, int coverHeight);
@@ -40,6 +42,7 @@ class UITheme {
   void reapplyPackAfterThemeChange();
 
   const ThemeMetrics* currentMetrics;
+  const ThemeMetrics* baseMetrics = nullptr;
   std::unique_ptr<BaseTheme> currentTheme;
   // Pack state lives on the heap only while a pack is active - the File
   // Transfer baseline must stay at its no-pack level (radio buffer budget).

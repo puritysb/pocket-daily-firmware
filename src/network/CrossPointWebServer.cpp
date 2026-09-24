@@ -24,6 +24,7 @@
 #include "html/HomePageHtml.generated.h"
 #include "html/SettingsPageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
+#include "pocket_daily/ContentPathPolicy.h"
 #include "pocket_daily/direct_session.h"
 #include "pocket_daily/live_studio/DevTrace.h"
 #include "pocket_daily/upload_stream_protocol.h"
@@ -158,12 +159,17 @@ void CrossPointWebServer::begin() {
 
   // Setup routes
   LOG_DBG("WEB", "Setting up routes...");
-  server->on("/", HTTP_GET, [this] {
-    noteClientActivity();
-    handleRoot();
-  });
-  // A phone heartbeat must not hold an otherwise idle direct session forever.
-  server->on("/api/status", HTTP_GET, [this] { handleStatus(); });
+  if (!PocketDaily::Web::isSyncProfile(profile)) {
+    server->on("/", HTTP_GET, [this] {
+      noteClientActivity();
+      if (PocketDaily::Web::hasBrowserRoutes(profile))
+        handleRoot();
+      else
+        handleStatus();
+    });
+    // A phone heartbeat must not hold an otherwise idle direct session forever.
+    server->on("/api/status", HTTP_GET, [this] { handleStatus(); });
+  }
 
   // Upload endpoint with special handling for multipart form data
   server->on(
@@ -181,7 +187,7 @@ void CrossPointWebServer::begin() {
   // app. The full browser/File Transfer surface remains available as a
   // separate profile without imposing WebDAV/WebSocket/discovery allocations
   // on the X3 private-AP path.
-  if (profile != CrossPointWebServerProfile::POCKET_SYNC) {
+  if (PocketDaily::Web::hasBrowserRoutes(profile)) {
     server->on("/settings", HTTP_GET, [this] { handleSettingsPage(); });
     server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
     server->on("/api/settings", HTTP_POST, [this] { handlePostSettings(); });
@@ -225,7 +231,8 @@ void CrossPointWebServer::begin() {
     // Collect WebDAV headers and register handler
     const char* davHeaders[] = {"Depth", "Destination", "Overwrite", "If", "Lock-Token", "Timeout"};
     server->collectHeaders(davHeaders, 6);
-    auto* webDav = new (std::nothrow) WebDAVHandler();
+    auto* webDav = new (std::nothrow)
+        WebDAVHandler(this, [](void* self) { return static_cast<CrossPointWebServer*>(self)->fileMutationBusy(); });
     if (webDav) {
       server->addHandler(webDav);  // Deleted by WebServer when the server is stopped.
       LOG_DBG("WEB", "WebDAV handler initialized");
@@ -264,8 +271,7 @@ void CrossPointWebServer::begin() {
   const String ipAddr = apMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString();
   LOG_DBG("WEB", "Access at http://%s/", ipAddr.c_str());
   if (profile == CrossPointWebServerProfile::FULL || liveStudio.pushActive()) {
-    LOG_DBG("WEB", "WebSocket at ws://%s:%d/ (liveStudioPush=%d)", ipAddr.c_str(), wsPort,
-            liveStudio.pushActive());
+    LOG_DBG("WEB", "WebSocket at ws://%s:%d/ (liveStudioPush=%d)", ipAddr.c_str(), wsPort, liveStudio.pushActive());
   }
   LOG_DBG("WEB", "[MEM] Free heap after server.begin(): %d bytes", ESP.getFreeHeap());
 }
@@ -276,7 +282,9 @@ void CrossPointWebServer::abortWsUpload(const char* tag) {
   String filePath = wsUploadPath;
   if (!filePath.endsWith("/")) filePath += "/";
   filePath += wsUploadFileName;
-  if (Storage.remove(filePath.c_str())) {
+  if (!PocketDaily::Content::genericContentWriteAllowed({filePath.c_str(), filePath.length()})) {
+    LOG_ERR(tag, "Refused incomplete-upload cleanup of protected or unsafe path");
+  } else if (Storage.remove(filePath.c_str())) {
     LOG_DBG(tag, "Deleted incomplete upload: %s", filePath.c_str());
   } else {
     LOG_DBG(tag, "Failed to delete incomplete upload: %s", filePath.c_str());
@@ -335,8 +343,8 @@ void CrossPointWebServer::stop() {
 
 void CrossPointWebServer::handleClient() {
   static unsigned long lastDebugPrint = 0;
+#ifdef ENABLE_DEV_NETWORK_DIAGNOSTICS
   static unsigned long lastTraceHeartbeat = 0;
-#ifdef ENABLE_DEV_REMOTE_FLASH
   // Dev trace heartbeat: a missing heartbeat in the dump is the stall window.
   if (millis() - lastTraceHeartbeat >= 1000) {
     lastTraceHeartbeat = millis();
@@ -361,15 +369,28 @@ void CrossPointWebServer::handleClient() {
     lastDebugPrint = millis();
   }
 
-  server->handleClient();
-
+  // The existing render task owns the transient font budget until display
+  // completion. Do not overlap another request/upload allocation with it.
+  // Pending preparation is serviced by the activity after this call returns.
+  if (pocketRoutes.presentation.busy && pocketRoutes.presentation.busy(pocketRoutes.presentation.self)) {
+    // A completed upload may still own its reply-grace socket. Drain only
+    // that existing lifecycle, never accept a new stream during preparation.
+    if (pocketStream.transferActive()) pocketStream.service();
+    return;
+  }
   pocketStream.service();
+  // WebServer may block waiting for an HTTP request body. Never let an
+  // optional request starve the upload socket (and its Wi-Fi RX buffers).
+  // The REPLIED phase still services HTTP so the client can commit promptly.
+  if (pocketStream.receiving()) return;
+  server->handleClient();
+  if (pocketRoutes.presentation.busy && pocketRoutes.presentation.busy(pocketRoutes.presentation.self)) return;
 
   // Handle WebSocket events
   if (wsServer) {
     wsServer->loop();
-    liveStudio.tick();
   }
+  liveStudio.tick();
 
   // Respond to discovery broadcasts
   if (udpActive) {
@@ -396,6 +417,12 @@ void CrossPointWebServer::handleClient() {
 
 void CrossPointWebServer::noteClientActivity() const { clientActivityAt = millis(); }
 
+bool CrossPointWebServer::fileMutationBusy() const {
+  if (pocketRoutes.presentation.busy && pocketRoutes.presentation.busy(pocketRoutes.presentation.self)) return true;
+  return PocketDaily::Web::TransferWriters{static_cast<bool>(upload.file), wsUploadInProgress, pocketStream.receiving()}
+      .any();
+}
+
 bool CrossPointWebServer::shouldEndSession() const {
   return PocketDaily::DirectSession::shouldEnd(sessionEndRequested, sessionEndRequestedAt, millis());
 }
@@ -409,7 +436,10 @@ void CrossPointWebServer::wirePocketHost() {
   pocketHost.self = this;
   pocketHost.noteClientActivity = [](void* self) { static_cast<CrossPointWebServer*>(self)->noteClientActivity(); };
   pocketHost.httpUploadBusy = [](void* self) {
-    return static_cast<bool>(static_cast<CrossPointWebServer*>(self)->upload.file);
+    auto* host = static_cast<CrossPointWebServer*>(self);
+    return static_cast<bool>(host->upload.file) || wsUploadInProgress ||
+           (host->pocketRoutes.presentation.busy &&
+            host->pocketRoutes.presentation.busy(host->pocketRoutes.presentation.self));
   };
   pocketHost.releaseHttpUploadBuffer = [](void* self) {
     static_cast<CrossPointWebServer*>(self)->upload.buffer.reset();
@@ -452,7 +482,7 @@ void CrossPointWebServer::wirePocketRoutes() {
     static_cast<CrossPointWebServer*>(self)->noteClientActivity();
   };
   pocketRoutes.host.httpUploadBusy = [](void* self) {
-    return static_cast<bool>(static_cast<CrossPointWebServer*>(self)->upload.file);
+    return static_cast<CrossPointWebServer*>(self)->fileMutationBusy();
   };
   pocketRoutes.host.endDirectSession = [](void* self) {
     auto* host = static_cast<CrossPointWebServer*>(self);
@@ -493,6 +523,15 @@ void CrossPointWebServer::handleJszip() const {
 }
 
 void CrossPointWebServer::handleNotFound() const {
+  if (PocketDaily::Web::isSyncProfile(profile) && server->method() == HTTP_GET) {
+    const String path = server->uri();
+    if (path == "/" || path == "/api/status") {
+      if (path == "/") noteClientActivity();
+      handleStatus();
+      return;
+    }
+  }
+  if (PocketDaily::Web::dispatchPocketRoute(*server, pocketRoutes)) return;
   String message = "404 Not Found\n\n";
   message += "URI: " + server->uri() + "\n";
   server->send(404, "text/plain", message);
@@ -505,6 +544,7 @@ PocketDaily::Web::StatusInputs CrossPointWebServer::statusInputs() const {
   in.apMode = apMode;
   in.profile = profile;
   in.stream = &pocketStream;
+  in.contentPresentation = pocketRoutes.presentation.prepare && pocketRoutes.presentation.state;
   in.live.push = liveStudio.pushActive();
   in.live.suspended = liveStudio.listenerSuspended();
   in.live.wsPort = wsPort;
@@ -757,6 +797,9 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
 
   const HTTPUpload& upload = server->upload();
 
+  if (upload.status == UPLOAD_FILE_START) state.admission.begin(fileMutationBusy());
+  if (state.admission.rejected()) return;
+
   if (upload.status == UPLOAD_FILE_START) {
     // Reset watchdog - this is the critical 1% crash point
     esp_task_wdt_reset();
@@ -827,6 +870,18 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     if (!filePath.endsWith("/")) filePath += "/";
     filePath += state.fileName;
 
+    state.contentStaging = PocketDaily::Content::isContentStagingPath({filePath.c_str(), filePath.length()});
+    if (!PocketDaily::Content::genericContentWriteAllowed({filePath.c_str(), filePath.length()}) ||
+        (state.contentStaging && !PocketDaily::Content::contentStagingRangeAllowed(requestedOffset, 0))) {
+      if (state.file) state.file.close();
+      state.buffer.reset();
+      state.bufferPos = 0;
+      state.error = "Protected or unsafe content path";
+      pocketStream.publishHttpStaged(state.fileName, state.path, state.size, state.crc32, false, state.error,
+                                     state.chunked, state.chunkStart);
+      return;
+    }
+
     esp_task_wdt_reset();
     if (chunked && requestedOffset > 0) {
       state.file = Storage.open(filePath.c_str(), O_RDWR);
@@ -860,6 +915,13 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     LOG_DBG("WEB", "[UPLOAD] File created successfully: %s", filePath.c_str());
   } else if (upload.status == UPLOAD_FILE_WRITE) {
     if (state.file && state.error.isEmpty()) {
+      if (state.contentStaging && !PocketDaily::Content::contentStagingRangeAllowed(state.size, upload.currentSize)) {
+        state.error = "Content staging file exceeds 256 KiB";
+        state.file.close();
+        state.buffer.reset();
+        state.bufferPos = 0;
+        return;
+      }
       state.crc32 = updateCrc32(state.crc32, upload.buf, upload.currentSize);
       const uint8_t* data = upload.buf;
       size_t remaining = upload.currentSize;
@@ -963,6 +1025,10 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
 }
 
 void CrossPointWebServer::handleUploadPost(UploadState& state) const {
+  if (state.admission.rejected()) {
+    server->send(409, "text/plain", "Another file transfer is active");
+    return;
+  }
   if (state.success) {
     server->send(200, "text/plain", "File uploaded successfully: " + state.fileName);
   } else {
@@ -972,6 +1038,10 @@ void CrossPointWebServer::handleUploadPost(UploadState& state) const {
 }
 
 void CrossPointWebServer::handleCreateFolder() const {
+  if (fileMutationBusy()) {
+    server->send(409, "text/plain", "Another file transfer is active");
+    return;
+  }
   // Get folder name from form data
   if (!server->hasArg("name")) {
     server->send(400, "text/plain", "Missing folder name");
@@ -1003,6 +1073,11 @@ void CrossPointWebServer::handleCreateFolder() const {
   if (!folderPath.endsWith("/")) folderPath += "/";
   folderPath += folderName;
 
+  if (!PocketDaily::Content::genericContentWriteAllowed({folderPath.c_str(), folderPath.length()})) {
+    server->send(403, "text/plain", "Protected or unsafe content path");
+    return;
+  }
+
   LOG_DBG("WEB", "Creating folder: %s", folderPath.c_str());
 
   // Check if already exists
@@ -1022,6 +1097,10 @@ void CrossPointWebServer::handleCreateFolder() const {
 }
 
 void CrossPointWebServer::handleRename() const {
+  if (fileMutationBusy()) {
+    server->send(409, "text/plain", "Another file transfer is active");
+    return;
+  }
   if (!server->hasArg("path") || !server->hasArg("name")) {
     server->send(400, "text/plain", "Missing path or new name");
     return;
@@ -1030,6 +1109,11 @@ void CrossPointWebServer::handleRename() const {
   String itemPath = normalizeWebPath(server->arg("path"));
   String newName = server->arg("name");
   newName.trim();
+
+  if (!PocketDaily::Content::genericContentWriteAllowed({itemPath.c_str(), itemPath.length()})) {
+    server->send(403, "text/plain", "Protected or unsafe content path");
+    return;
+  }
 
   if (itemPath.isEmpty() || itemPath == "/") {
     server->send(400, "text/plain", "Invalid path");
@@ -1084,6 +1168,17 @@ void CrossPointWebServer::handleRename() const {
   }
   newPath += newName;
 
+  if (!PocketDaily::Content::contentWriteWithinBudget({newPath.c_str(), newPath.length()}, 0, file.fileSize64())) {
+    server->send(413, "text/plain", "Content staging file exceeds 256 KiB");
+    return;
+  }
+
+  if (!PocketDaily::Content::genericContentWriteAllowed({newPath.c_str(), newPath.length()})) {
+    file.close();
+    server->send(403, "text/plain", "Protected or unsafe content path");
+    return;
+  }
+
   if (Storage.exists(newPath.c_str())) {
     file.close();
     server->send(409, "text/plain", "Target already exists");
@@ -1104,6 +1199,10 @@ void CrossPointWebServer::handleRename() const {
 }
 
 void CrossPointWebServer::handleMove() const {
+  if (fileMutationBusy()) {
+    server->send(409, "text/plain", "Another file transfer is active");
+    return;
+  }
   if (!server->hasArg("path") || !server->hasArg("dest")) {
     server->send(400, "text/plain", "Missing path or destination");
     return;
@@ -1111,6 +1210,11 @@ void CrossPointWebServer::handleMove() const {
 
   String itemPath = normalizeWebPath(server->arg("path"));
   String destPath = normalizeWebPath(server->arg("dest"));
+
+  if (!PocketDaily::Content::genericContentWriteAllowed({itemPath.c_str(), itemPath.length()})) {
+    server->send(403, "text/plain", "Protected or unsafe content path");
+    return;
+  }
 
   if (itemPath.isEmpty() || itemPath == "/") {
     server->send(400, "text/plain", "Invalid path");
@@ -1172,6 +1276,17 @@ void CrossPointWebServer::handleMove() const {
   }
   newPath += itemName;
 
+  if (!PocketDaily::Content::contentWriteWithinBudget({newPath.c_str(), newPath.length()}, 0, file.fileSize64())) {
+    server->send(413, "text/plain", "Content staging file exceeds 256 KiB");
+    return;
+  }
+
+  if (!PocketDaily::Content::genericContentWriteAllowed({newPath.c_str(), newPath.length()})) {
+    file.close();
+    server->send(403, "text/plain", "Protected or unsafe content path");
+    return;
+  }
+
   if (newPath == itemPath) {
     file.close();
     server->send(200, "text/plain", "Already in destination");
@@ -1197,6 +1312,10 @@ void CrossPointWebServer::handleMove() const {
 }
 
 void CrossPointWebServer::handleDelete() const {
+  if (fileMutationBusy()) {
+    server->send(409, "text/plain", "Another file transfer is active");
+    return;
+  }
   // To ensure backwards compatibility, plain `path` is mapped
   // to a single element JSON array.
   bool hasPathArg = server->hasArg("path");
@@ -1250,6 +1369,12 @@ void CrossPointWebServer::handleDelete() const {
     // Ensure path starts with /
     if (!itemPath.startsWith("/")) {
       itemPath = "/" + itemPath;
+    }
+
+    if (!PocketDaily::Content::genericContentWriteAllowed({itemPath.c_str(), itemPath.length()})) {
+      failedItems += itemPath + " (protected or unsafe content path); ";
+      allSuccess = false;
+      continue;
     }
 
     // Security check: prevent deletion of protected items
@@ -1806,7 +1931,7 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
       if (msg.startsWith("START:")) {
         // Reject any START while an upload is already active to prevent
         // leaking the open wsUploadFile handle (owning client re-START included)
-        if (wsUploadInProgress) {
+        if (fileMutationBusy()) {
           wsServer->sendTXT(num, "ERROR:Upload already in progress");
           break;
         }
@@ -1845,6 +1970,14 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
           String filePath = wsUploadPath;
           if (!filePath.endsWith("/")) filePath += "/";
           filePath += wsUploadFileName;
+
+          if (!PocketDaily::Content::genericContentWriteAllowed({filePath.c_str(), filePath.length()}) ||
+              !PocketDaily::Content::contentWriteWithinBudget({filePath.c_str(), filePath.length()}, 0, wsUploadSize)) {
+            wsServer->sendTXT(num, "ERROR:Protected or unsafe content path");
+            wsUploadInProgress = false;
+            wsUploadClientNum = 255;
+            return;
+          }
 
           LOG_DBG("WS", "Starting upload: %s (%d bytes) to %s", wsUploadFileName.c_str(), wsUploadSize,
                   filePath.c_str());

@@ -5,6 +5,7 @@
 #include <Logging.h>
 #include <esp_task_wdt.h>
 
+#include "pocket_daily/ContentPathPolicy.h"
 #include "util/BookCacheUtils.h"
 
 namespace {
@@ -46,9 +47,12 @@ bool WebDAVHandler::canRaw(WebServer& server, const String& uri) {
 
 void WebDAVHandler::raw(WebServer& server, const String& uri, HTTPRaw& raw) {
   (void)uri;
+  if (raw.status == RAW_START) admission_.begin(busy_ && busy_(host_));
+  if (admission_.rejected()) return;
   if (raw.status == RAW_START) {
     _putPath = getRequestPath(server);
-    if (isProtectedPath(_putPath)) {
+    if (isProtectedPath(_putPath) ||
+        !PocketDaily::Content::genericContentWriteAllowed({_putPath.c_str(), _putPath.length()})) {
       _putOk = false;
       return;
     }
@@ -84,6 +88,14 @@ void WebDAVHandler::raw(WebServer& server, const String& uri, HTTPRaw& raw) {
 
   } else if (raw.status == RAW_WRITE) {
     if (_putFile && _putOk) {
+      if (!PocketDaily::Content::contentWriteWithinBudget({_putPath.c_str(), _putPath.length()}, _putFile.fileSize64(),
+                                                          raw.currentSize)) {
+        _putOk = false;
+        _putFile.close();
+        const String tempPath = _putPath + ".davtmp";
+        Storage.remove(tempPath.c_str());
+        return;
+      }
       esp_task_wdt_reset();
       size_t written = _putFile.write(raw.buf, raw.currentSize);
       if (written != raw.currentSize) {
@@ -110,13 +122,38 @@ void WebDAVHandler::raw(WebServer& server, const String& uri, HTTPRaw& raw) {
   } else if (raw.status == RAW_ABORTED) {
     if (_putFile) _putFile.close();
     String tempPath = _putPath + ".davtmp";
-    Storage.remove(tempPath.c_str());
+    if (PocketDaily::Content::genericContentWriteAllowed({_putPath.c_str(), _putPath.length()}))
+      Storage.remove(tempPath.c_str());
     _putOk = false;
   }
 }
 
 bool WebDAVHandler::handle(WebServer& server, HTTPMethod method, const String& uri) {
   (void)uri;
+  if (method == HTTP_PUT || method == HTTP_DELETE || method == HTTP_MKCOL || method == HTTP_MOVE ||
+      method == HTTP_COPY) {
+    if ((method == HTTP_PUT && admission_.rejected()) || (busy_ && busy_(host_))) {
+      server.send(409, "text/plain", "Another file transfer is active");
+      return true;
+    }
+    const String source = getRequestPath(server);
+    const String target = (method == HTTP_MOVE || method == HTTP_COPY) ? getDestinationPath(server) : source;
+    if ((method != HTTP_COPY && !PocketDaily::Content::genericContentWriteAllowed({source.c_str(), source.length()})) ||
+        !PocketDaily::Content::genericContentWriteAllowed({target.c_str(), target.length()})) {
+      server.send(403, "text/plain", "Protected or unsafe content path");
+      return true;
+    }
+    if ((method == HTTP_MOVE || method == HTTP_COPY) &&
+        PocketDaily::Content::isContentStagingPath({target.c_str(), target.length()})) {
+      // Check before either handler can remove an existing destination. A
+      // directory move would bypass every per-file upload admission check.
+      HalFile file = Storage.open(source.c_str());
+      if (!file || file.isDirectory() || !PocketDaily::Content::contentStagingRangeAllowed(0, file.fileSize64())) {
+        server.send(413, "text/plain", "Content staging requires a file of at most 256 KiB");
+        return true;
+      }
+    }
+  }
   switch (method) {
     case HTTP_OPTIONS:
       handleOptions(server);

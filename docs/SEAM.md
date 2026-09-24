@@ -32,8 +32,8 @@ conflicts can only land at hook sites and carried patches.
 | `web/PocketEndpoints.{h,cpp}` | every `/api/pocket/v1/*` route (registration + handlers) |
 | `web/Host.h` / `RouteDeps` | plain-function-pointer host reach-in bundles |
 | `web/PrivateApPolicy.{h,cpp}` | private-AP credentials, heap start gates, profile select, watchdog, `apBootLog` |
-| `web/StaRadioWatch.{h,cpp}` | STA disconnect/zombie-probe ladder (`StaAction`) |
-| `web/RadioHealthPolicy.h` | probe-period/level policy (host-testable, header-only) |
+| `web/StaRadioWatch.{h,cpp}` | passive STA association tracking (`StaAction`) |
+| `web/RadioHealthPolicy.h` | association grace/repaint policy (host-testable, header-only) |
 | `boot/ProductBoot.{h,cpp}` | JP font install, silent restarts, NetHealth boot, startup pack, dev-boot return |
 | `live_studio/UiPackStore.{h,cpp}` | `.uipack` storage incl. `listPacks()` streaming scan |
 
@@ -42,6 +42,15 @@ Older Pocket modules (`nearby_sync/`, `upload_stream_protocol.*`,
 were already seam-shaped.
 
 ## Hook inventory
+
+### Bounded UI font access (carried rendering patch)
+
+`lib/EpdFont/SdCardFont.*` has an opt-in `BoundedUI` mode for a future live content
+view. `EpdFontData`/`EpdFont` add nullable disk-backed kerning/ligature callbacks;
+cached and built-in fonts keep their existing path. CPFONT v4 bytes are unchanged.
+The live content presenter selects this mode. See `docs/bounded-ui-fonts.md` for the memory
+bound, host/fixture verification and remaining integration. Preserve this mode
+when merging font-loader changes from upstream; do not enable it globally for EPUB.
 
 Line counts are the Pocket footprint inside each inherited file. Sites are
 named by function, not line number — line numbers drift.
@@ -69,9 +78,14 @@ Call-site hooks (each ≤10 lines):
 - `begin()`: profile route-gating `if` (E1); `wirePocketHost()` +
   `pocketStream.begin()`; `liveStudio.begin()`; `wirePocketRoutes()` +
   `PocketDaily::Web::registerPocketRoutes(*server, pocketRoutes)`.
+  `hasBrowserRoutes` preserves FULL/FILE_TRANSFER; COMPANION omits browser
+  route allocations and serves status at root. Profile selection uses the
+  existing Pocket Sync launch mode; that mode also skips mDNS on X4.
 - `stop()`: `pocketStream.stop()` (first — listener teardown precedes bye
   broadcast and `wsServer->close()`; keep the order).
-- `handleClient()`: dev-trace heartbeat (`#ifdef`), `pocketStream.service()`.
+- `handleClient()`: dev-trace heartbeat (`#ifdef`), stream-first service;
+  skip HTTP while `pocketStream.receiving()` (HEADER/DATA), allow commit in
+  REPLIED, and tick Live Studio even without a WS slot to finish its cooldown.
 - `shouldEndSession()`: 1-line delegation to `PocketDaily::DirectSession`.
 - `handleStatus()`: 1-line call to `PocketDaily::Web::buildStatusJson(statusInputs())`.
 
@@ -79,6 +93,19 @@ Thunk blocks (E3): `wirePocketHost()` (8 thunks), `wireLiveStudioHost()`
 (5 thunks, includes the file-static `wsInstance` trampoline — the inherited
 WS-upload grammar's event routing stays in this file), `wirePocketRoutes()`
 (7 thunks).
+
+### Wi-Fi initialization boundary (experimental build only)
+
+The normal upload data plane also uses `SocketReceive.h` for allocation-free,
+nonblocking descriptor reads into existing buffers. Its socket owner remains
+NetworkClient; no buffered NetworkClient reads may be mixed into that path.
+
+`src/pocket_daily/web/WifiInitBudget.cpp` supplies `__wrap_esp_wifi_init` only
+when `POCKET_BOUNDED_WIFI_BUFFERS` is enabled. `sta_recovery` adds the linker
+wrap flag; default and release retain the SDK path. The wrapper copies the
+complete SDK configuration and changes only RX/TX buffer limits and the RX
+block-ACK window, using no heap. Diagnostic buffers are separately gated by
+`ENABLE_DEV_NETWORK_DIAGNOSTICS`, not by remote-flash availability.
 
 ### `src/main.cpp` (~30 of 755 lines)
 
@@ -89,6 +116,9 @@ WS-upload grammar's event routing stays in this file), `wirePocketRoutes()`
 - Routing: `consumeDevBootReturn()` else-if; silent-reboot else-ifs keyed on
   `kRebootTargetPocketDaily` / `kRebootTargetPocketNearbySync`; the
   read-and-clear bound uses `kRebootTargetMax`.
+- Consumed developer-update return calls `goToFileTransfer(true)`; its one-shot
+  flag skips only network mode selection and reuses saved-network association
+  with the existing interactive failure path. Normal launches keep the chooser.
 
 ### `src/activities/network/CrossPointWebServerActivity.{h,cpp}` (~180 lines)
 
@@ -99,8 +129,9 @@ WS-upload grammar's event routing stays in this file), `wirePocketRoutes()`
   `nearbyReadyAllowed()`, `webStartAllowed()`, `selectProfile()`,
   `armPrivateApWatchdog()`, `generatePrivateApCredentials()`,
   `kPrivateApMaxConnections`, `apBootLog()` markers.
-- STA loop: `StaRadioWatch` ladder (`staWatch.onCheck(...)` switch) and
-  `staWatch.cleanAssociation()` in the Wi-Fi indicator.
+- STA loop: passive `StaRadioWatch` (`staWatch.onCheck(...)` switch) and
+  `staWatch.cleanAssociation()` in the Wi-Fi indicator. There are no gateway
+  probes or forced reconnect actions; the driver owns association recovery.
 - The NearbySync state-machine drive and render stay here by design (already
   exemplary in shape; extraction is not a merge problem).
 
@@ -155,8 +186,17 @@ follow-up, never send product stack upstream):
 
 Fork-resident product patches (no upstream intent):
 
+- `src/components/themes/{BaseTheme,lyra/*,roundedraff/*}.cpp` — runtime
+  metric reads go through `UITheme::getInstance().getMetrics()`, including
+  formerly constexpr button dimensions. Native constants remain in headers and
+  UITheme's theme selection. This prevents draw/layout paths from bypassing
+  active UI packs. Pagination uses Pocket's bounded `MetricGeometry` helpers;
+  tiny rectangles never produce a zero page-count divisor. Keep the source
+  boundary test `ThemeMetricBindings` when reconciling upstream theme changes.
 - `src/network/FirmwareFlasher.{h,cpp}` — shared staging buffer + image
-  validation used by Pocket transfer/diagnostics.
+  validation used by Pocket transfer/diagnostics. AgentDeck OTA decode and
+  pulled-image hashing also borrow it synchronously on the main loop, finishing
+  before validation/flash; they hold no pointer across events or activities.
 - `src/network/OtaUpdater.cpp`, `src/network/WebDAVHandler.cpp` — OTA channel,
   WebDAV guards.
 - `src/CrossPointSettings.h` — Pocket preference fields.
@@ -213,10 +253,10 @@ in the same commit:
 4. **Hidden-file rule.** `UiPackStore::listPacks()` mirrors `scanFiles`' dot
    rule (`SETTINGS.showHiddenFiles`); a change to one scan's rule should be
    reflected in the other.
-5. **StaRadioWatch ladder semantics.** Repaint is an out-param orthogonal to
-   the returned action (recovery-repaint and reconnect-escalation can
-   coincide); abandon skips repaint. This preserves the pre-extraction loop
-   behavior.
+5. **StaRadioWatch association semantics.** Repaint is always assigned, once
+   on observed loss/recovery. Only actual sustained disconnection (>5 minutes)
+   can abandon the activity. Application-port timeouts cannot request a radio
+   restart. Elapsed-time subtraction is uint32 wrap-safe across one wrap.
 
 ## Invariants
 

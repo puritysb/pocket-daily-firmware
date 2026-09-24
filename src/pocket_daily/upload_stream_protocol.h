@@ -16,6 +16,7 @@
 //   Path: /.pocket-<uuid>.part
 //   Size: <decimal byte count>
 //   Resume: 1                     (optional)
+//   Window: 4096                  (optional; requires Resume: 1 and advertised support)
 //
 // Unknown "Key: value" lines are ignored for forward compatibility. `Path`
 // must name a hidden staging file (`.pocket-*.part`) so a dropped link can
@@ -28,6 +29,10 @@
 //                                 prefix the reader still holds for this
 //                                 path/size pair (0 restarts from scratch).
 //   OK <received> <CRC32 hex>     after the final payload byte was flushed.
+//   ACK <received>                Window mode only: one SD-accepted 4096-byte
+//                                 block, relative to the RESUME offset. Wait
+//                                 for ACK before sending the next block; the
+//                                 final block returns OK instead of ACK.
 //   ERROR <message>               at any time; the socket closes afterwards.
 namespace PocketDaily::UploadStream {
 
@@ -35,11 +40,13 @@ constexpr const char* MAGIC = "POCKET-PUT/1";
 constexpr size_t MAX_HEADER_BYTES = 320;
 constexpr size_t MAX_PATH_BYTES = 256;
 constexpr uint32_t CRC32_INITIAL = 0xFFFFFFFFU;
+constexpr uint32_t FLOW_WINDOW_BYTES = 4096;
 
 struct Request {
   char path[MAX_PATH_BYTES] = {};
   uint32_t size = 0;
   bool resume = false;
+  bool flowControl = false;
 };
 
 enum class HeaderStatus : uint8_t { Complete, Incomplete, TooLarge };
@@ -65,6 +72,7 @@ inline uint32_t finalizeCrc32(const uint32_t crc) { return crc ^ 0xFFFFFFFFU; }
 // terminator) or 0 when `outSize` is too small.
 size_t formatOkReply(char* out, size_t outSize, uint32_t received, uint32_t finalizedCrc32);
 size_t formatResumeReply(char* out, size_t outSize, uint32_t received);
+size_t formatAckReply(char* out, size_t outSize, uint32_t received);
 size_t formatErrorReply(char* out, size_t outSize, const char* message);
 
 }  // namespace PocketDaily::UploadStream

@@ -22,6 +22,10 @@ class SdCardFont {
  public:
   static constexpr uint16_t MAX_PAGE_GLYPHS = 512;
   static constexpr uint8_t MAX_STYLES = 4;
+  enum class LoadMode : uint8_t { Cached, BoundedUI };
+  // BoundedUI is for small UI fonts, not general book typography. Interval
+  // tables stay on SD; the existing eight-slot glyph cache is byte-capped.
+  static constexpr uint16_t UI_GLYPH_BYTES = 256;
 
   SdCardFont() = default;
   ~SdCardFont();
@@ -35,7 +39,11 @@ class SdCardFont {
   // Load .cpfont file: reads header + intervals into RAM, records file layout offsets.
   // Supports v4 (multi-style) format.
   // Returns true on success.
-  bool load(const char* path);
+  bool load(const char* path, LoadMode mode = LoadMode::Cached, void (*progress)() = nullptr);
+  LoadMode loadMode() const { return loadMode_; }
+  // Sticky per load: a presenter must not certify a frame after a disk-backed
+  // shaping/read/allocation failure was replaced by fallback output.
+  bool boundedReadFailed() const { return boundedReadFailed_; }
 
   // Pre-read glyphs needed for the given UTF-8 text from SD card.
   // styleMask: bitmask of styles to prewarm (bit 0=regular, 1=bold, 2=italic, 3=bolditalic).
@@ -236,6 +244,13 @@ class SdCardFont {
   Stats stats_;
   uint32_t contentHash_ = 0;
   bool loaded_ = false;
+  LoadMode loadMode_ = LoadMode::Cached;
+  void (*progress_)() = nullptr;
+  uint32_t loadedFileSize_ = 0;
+  mutable bool boundedReadFailed_ = false;
+  int checkBoundedText(const char* text, uint8_t styleMask);
+  static int8_t lookupBoundedKerning(void* context, uint32_t left, uint32_t right);
+  static uint32_t lookupBoundedLigature(void* context, uint32_t left, uint32_t right);
 
   // Per-style helpers
   void freeStyleMiniData(PerStyle& s);

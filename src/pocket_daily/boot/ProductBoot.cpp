@@ -50,14 +50,22 @@ void applyStartupUiPack() {
   PocketDaily::LiveStudio::applyStartupPack();
 }
 
-bool consumeDevBootReturn() {
+DevBootReturn consumeDevBootReturn() {
 #ifdef ENABLE_DEV_REMOTE_FLASH
-  if (!Storage.exists(PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER)) return false;
-  LOG_INF("MAIN", "Dev boot: returning to File Transfer");
-  Storage.remove(PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER);
-  return true;
+  if (!Storage.exists(PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER)) return DevBootReturn::None;
+  DevBootReturn target = DevBootReturn::None;
+  {
+    HalFile marker = Storage.open(PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER);
+    char value = 0;
+    if (marker && marker.size() == 1 && marker.read(&value, 1) == 1) target = decodeDevBootMarker(&value, 1);
+  }
+  if (!Storage.remove(PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER)) {
+    LOG_ERR("MAIN", "Could not consume dev boot marker; skipping automatic return");
+    return DevBootReturn::None;
+  }
+  return target;
 #else
-  return false;
+  return DevBootReturn::None;
 #endif
 }
 
@@ -146,7 +154,7 @@ void silentRestartToPocketNearbySync() {
   // Preserve the exact Pocket Daily surface before the loading popup replaces
   // it. Writing the BMP row-by-row costs no framebuffer-sized allocation and
   // gives the Apple companion a pixel-identical preview after the clean reboot.
-  const bool previewSaved =
+  [[maybe_unused]] const bool previewSaved =
       ScreenshotUtil::saveFramebufferAsBmp(PocketDaily::SCREEN_PREVIEW_PATH, bootRenderer->getFrameBuffer(),
                                            bootRenderer->getDisplayWidth(), bootRenderer->getDisplayHeight());
   LOG_DBG("MAIN", "Pocket screen preview %s", previewSaved ? "saved" : "unavailable");

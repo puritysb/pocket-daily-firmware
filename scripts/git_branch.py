@@ -1,6 +1,6 @@
 """
 PlatformIO pre-build script: inject git branch and short SHA into
-CROSSPOINT_VERSION for the default (dev) environment.
+CROSSPOINT_VERSION for developer environments, including recovery/diagnostics.
 
 Results in a version string like:  1.1.0-dev-feat-kosync-xpath-05c6cf8
 Release environments are unaffected; they set CROSSPOINT_VERSION in the ini.
@@ -122,9 +122,9 @@ def get_base_version(project_dir):
 
 
 def inject_version(env):
-    # Only applies to the dev (default) environment; release envs set the
+    # Only applies to developer environments; release envs set the
     # version via build_flags in platformio.ini and are unaffected.
-    if env['PIOENV'] != 'default':
+    if env['PIOENV'] not in ('default', 'network_diagnostics', 'sta_recovery'):
         return
 
     project_dir = env['PROJECT_DIR']
@@ -132,6 +132,8 @@ def inject_version(env):
     branch = get_git_branch(project_dir)
     short_sha = get_git_short_sha(project_dir)
     version_string = f'{base_version}-dev-{branch}-{short_sha}'
+    if env['PIOENV'] != 'default':
+        version_string += '-' + env['PIOENV'].replace('_', '-')
     worktree = get_worktree_fingerprint(project_dir)
     if worktree:
         version_string += f'-w{worktree}'

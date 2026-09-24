@@ -54,11 +54,6 @@ bool webStartAllowed(const bool lightweightProfile, const uint32_t freeHeap, con
   return freeHeap >= minFree && largestBlock >= minBlock;
 }
 
-Profile selectProfile(const bool privateAp, const bool deviceIsX3) {
-  if (privateAp) return Profile::POCKET_SYNC;
-  return deviceIsX3 ? Profile::FILE_TRANSFER : Profile::FULL;
-}
-
 bool armPrivateApWatchdog() {
   // The Arduino loop task is not watched by default. Nearby Sync runs at
   // the X3's tightest heap point and previously could retain a dead

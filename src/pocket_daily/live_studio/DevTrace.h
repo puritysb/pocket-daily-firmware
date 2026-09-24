@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef ENABLE_DEV_REMOTE_FLASH
+#ifdef ENABLE_DEV_NETWORK_DIAGNOSTICS
 
 #include <Arduino.h>
 
@@ -51,4 +51,4 @@ inline void record(uint8_t tag, uint16_t aux = 0) {
 
 #define DEV_TRACE(tag, ...)
 
-#endif  // ENABLE_DEV_REMOTE_FLASH
+#endif  // ENABLE_DEV_NETWORK_DIAGNOSTICS

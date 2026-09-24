@@ -10,6 +10,8 @@ struct StackFrame {
 };
 
 void begin();
+// Feed only the current task if registered; no logging on non-WDT profiles.
+void feedWatchdogIfRegistered();
 
 // Dump panic info to SD card if necessary
 void checkPanic();

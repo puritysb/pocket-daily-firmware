@@ -4,8 +4,79 @@
 #include <string>
 
 #include "src/pocket_daily/upload_stream_protocol.h"
+#include "src/pocket_daily/web/TransferMetrics.h"
 
 using namespace PocketDaily::UploadStream;
+
+TEST(TransferMetrics, RetainsCompletedAttemptUntilNextConnection) {
+  PocketDaily::Web::TransferMetrics metrics;
+  using Outcome = PocketDaily::Web::TransferMetrics::Outcome;
+  metrics.start(100, 12000, 6000);
+  metrics.payload(110, 8192, 4096);
+  metrics.service(115);
+  metrics.receive(120, 4096);
+  metrics.sdWrite.record(1500);
+  metrics.heap(11000, 5000);
+  metrics.heap(13000, 7000);
+  metrics.end(130, Outcome::Complete, 8192);
+  metrics.service(9999);
+  metrics.end(9999, Outcome::Stopped, 0);
+  EXPECT_EQ(metrics.outcome, Outcome::Complete);
+  EXPECT_EQ(metrics.accepted, 8192u);
+  EXPECT_EQ(metrics.socketBytes, 4096u);
+  EXPECT_EQ(metrics.elapsedMs, 30u);
+  EXPECT_EQ(metrics.maxServiceGapMs, 15u);
+  EXPECT_EQ(metrics.maxReceiveGapMs, 10u);
+  EXPECT_EQ(metrics.minHeap, 11000u);
+  EXPECT_EQ(metrics.minBlock, 5000u);
+  metrics.start(10000, 14000, 8000);
+  EXPECT_EQ(metrics.attempt, 2u);
+  EXPECT_EQ(metrics.socketBytes, 0u);
+  EXPECT_EQ(metrics.sdWrite.calls, 0u);
+  EXPECT_EQ(metrics.outcome, Outcome::Active);
+}
+
+TEST(TransferMetrics, WraparoundAndSaturationAreExplicit) {
+  PocketDaily::Web::TransferMetrics metrics;
+  using Outcome = PocketDaily::Web::TransferMetrics::Outcome;
+  metrics.start(UINT32_MAX - 5, 100, 80);
+  metrics.payload(UINT32_MAX - 5, 1000, 0);
+  metrics.service(4);
+  metrics.receive(4, 512);
+  metrics.end(5, Outcome::Interrupted, 256);
+  EXPECT_EQ(metrics.elapsedMs, 11u);
+  EXPECT_EQ(metrics.maxServiceGapMs, 10u);
+  EXPECT_EQ(metrics.maxReceiveGapMs, 10u);
+  EXPECT_EQ(metrics.accepted, 256u);
+  metrics.sdWrite.record(UINT32_MAX - 1);
+  metrics.sdWrite.record(100);
+  EXPECT_EQ(metrics.sdWrite.totalUs, UINT32_MAX);
+  EXPECT_EQ(metrics.sdWrite.maxUs, UINT32_MAX - 1);
+  EXPECT_EQ(metrics.sdWrite.calls, 2u);
+}
+
+TEST(TransferMetrics, WorstCaseJsonFitsBoundedChunks) {
+  PocketDaily::Web::TransferMetrics metrics;
+  metrics.attempt = metrics.expected = metrics.resumed = metrics.socketBytes = metrics.accepted = UINT32_MAX;
+  metrics.elapsedMs = metrics.maxServiceGapMs = metrics.maxReceiveGapMs = metrics.minHeap = metrics.minBlock =
+      UINT32_MAX;
+  metrics.sdWrite = metrics.sdClose = metrics.replyWrite = {UINT32_MAX, UINT32_MAX, UINT32_MAX};
+  std::string json;
+  for (unsigned section = 0; section < 3; ++section) {
+    char chunk[224];
+    const auto count = metrics.format(chunk, sizeof(chunk), section);
+    ASSERT_GT(count, 0u);
+    EXPECT_EQ(count, strlen(chunk));
+    json.append(chunk, count);
+    char tiny[2];
+    EXPECT_EQ(metrics.format(tiny, sizeof(tiny), section), 0u);
+  }
+  EXPECT_EQ(json.front(), '{');
+  EXPECT_EQ(json.back(), '}');
+  EXPECT_NE(json.find("\"sdWriteUs\":[4294967295,4294967295,4294967295]"), std::string::npos);
+  char chunk[224];
+  EXPECT_EQ(metrics.format(chunk, sizeof(chunk), 3), 0u);
+}
 
 namespace {
 
@@ -27,6 +98,22 @@ TEST(UploadStreamProtocol, ParsesMinimalV1Header) {
   EXPECT_STREQ(request.path, "/.pocket-3f2a.part");
   EXPECT_EQ(request.size, 2621440U);
   EXPECT_FALSE(request.resume);
+  EXPECT_FALSE(request.flowControl);
+}
+
+TEST(UploadStreamProtocol, FlowControlRequiresNegotiatedWindowAndResumeHandshake) {
+  Request request;
+  const std::string base = "POCKET-PUT/1\nPath: /.pocket-a.part\nSize: 6000000\n";
+  ASSERT_TRUE(parse(base + "Resume: 1\nWindow: 4096\n\n", request));
+  EXPECT_TRUE(request.flowControl);
+  EXPECT_FALSE(parse(base + "Window: 4096\n\n", request));
+  EXPECT_FALSE(parse(base + "Resume: 1\nWindow: 0\n\n", request));
+  EXPECT_FALSE(parse(base + "Resume: 1\nWindow: 8192\n\n", request));
+  EXPECT_FALSE(parse(base + "Resume: 1\nWindow: 4096\nWindow: 4096\n\n", request));
+  char reply[32];
+  EXPECT_EQ(formatAckReply(reply, sizeof(reply), 131077), 11U);
+  EXPECT_STREQ(reply, "ACK 131077\n");
+  EXPECT_EQ(formatAckReply(reply, 4, 131077), 0U);
 }
 
 TEST(UploadStreamProtocol, ParsesResumeAndIgnoresUnknownKeys) {

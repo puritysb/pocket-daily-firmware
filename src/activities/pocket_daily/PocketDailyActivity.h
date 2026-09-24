@@ -20,6 +20,7 @@
 #include "agentdeck/deck_store.h"
 #include "agentdeck/endpoint_candidates.h"
 #include "agentdeck/ota_ws_receiver.h"
+#include "pocket_daily/ContentViewState.h"
 #include "pocket_daily/font_pack_sync.h"
 #include "pocket_daily/models.h"
 
@@ -85,10 +86,9 @@ class PocketDailyActivity final : public Activity {
     bool reading;
   };
 
-  // Local reading + an always-available study card + up to the remaining
-  // portable slots. The Pocket-reader feed currently authors at most two host
-  // cards, so four bounded rows cover its full live contract without growing
-  // both cross-task scratch arrays on the no-PSRAM X3.
+  // Local reading + three portable slots. Active app cards take priority over
+  // the built-in study row; provider cards fill remaining slots. Keep both
+  // cross-task scratch arrays bounded on the no-PSRAM X3.
   static constexpr int kOverviewCap = 1 + PocketDaily::CARD_CAP;
   // Scratch lives in the heap-allocated Activity object, not either task stack.
   // Each buffer is 4 bounded rows (~1.5 KB), allocated once with the activity
@@ -110,6 +110,10 @@ class PocketDailyActivity final : public Activity {
   // completely offline first boot and never writes a meaningless host outbox
   // decision. Guarded by the AgentDeck state mutex when copied across tasks.
   PocketDaily::Card localStudyCard{};
+  // Immutable after onEnter, read by loop/render; released after render stops.
+  // <=2400B only when app content is active, not a permanent radio allocation.
+  PocketDaily::Content::ContentViewState appContent;
+  void drawAppCardImage(const char* cardId, int x, int y, int width, int height) const;
   uint16_t localStudyOffset = 0;
   uint32_t localStudyPackVersion = 0;
   uint32_t localStudyPackRecordCount = 0;

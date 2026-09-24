@@ -28,7 +28,8 @@ int SdCardFontManager::computeFontId(uint32_t contentHash, const char* familyNam
   return id != 0 ? id : 1;  // 0 is reserved as "not found" sentinel
 }
 
-bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t fontSizeEnum) {
+bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t fontSizeEnum,
+                                   SdCardFont::LoadMode mode, void (*progress)()) {
   // Unload any previously loaded family first
   if (!loadedFamilyName_.empty()) {
     unloadAll(renderer);
@@ -49,7 +50,7 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
     return false;
   }
 
-  if (!font->load(selected->path.c_str())) {
+  if (!font->load(selected->path.c_str(), mode, progress)) {
     LOG_ERR("SDMGR", "Failed to load %s", selected->path.c_str());
     delete font;
     return false;
@@ -64,6 +65,7 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
     return false;
   }
   renderer.registerSdCardFont(fontId, font);
+  loaded_.reserve(1);  // the facade owns one physical font at a time
   loaded_.push_back({font, fontId, selected->pointSize});
 
   LOG_DBG("SDMGR", "Loaded %s size=%u id=%d styles=%u (sizeEnum=%u)", selected->path.c_str(), selected->pointSize,
@@ -74,6 +76,7 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
 
   loadedFamilyName_ = family.name;
   loadedPointSize_ = selected->pointSize;
+  loadedMode_ = mode;
   return true;
 }
 

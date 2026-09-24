@@ -1,9 +1,11 @@
 #include "ws_client.h"
 
 #include <Arduino.h>
+#include <Logging.h>
 #include <WebSocketsClient.h>
 #include <WiFi.h>
 
+#include "OutboundQueue.h"
 #include "agent/AgentLog.h"
 #include "agent_state.h"
 #include "agentdeck_config.h"
@@ -29,16 +31,23 @@ bool disconnectAfterLoop = false;
 // ── outbound queue (any task → loop task) ──
 // links2004/WebSockets is not thread-safe; M3 button handlers enqueue here and
 // the loop task drains via pumpOutbound().
-constexpr int OUTBOX_MAX = 6;
-constexpr int OUTBOX_LEN = 200;
-char outbox[OUTBOX_MAX][OUTBOX_LEN];
-int outboxHead = 0;
-int outboxCount = 0;
+OutboundQueue outbox;
 SemaphoreHandle_t outboxMutex = nullptr;
+
+void setOutboxSession(bool active) {
+  if (!outboxMutex) return;
+  xSemaphoreTake(outboxMutex, portMAX_DELAY);
+  if (active)
+    outbox.beginSession();
+  else
+    outbox.endSession();
+  xSemaphoreGive(outboxMutex);
+}
 
 void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     case WStype_DISCONNECTED:
+      setOutboxSession(false);
       AgentLog::line("WS", "disconnected");
       connected = false;
       connecting = false;
@@ -48,6 +57,7 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
       break;
 
     case WStype_CONNECTED:
+      setOutboxSession(true);
       AgentLog::line("WS", "connected to %s:%u", savedIp, (unsigned)savedPort);
       connected = true;
       connecting = false;
@@ -95,29 +105,19 @@ void wsInit() {
 void queueOutbound(const char* json) {
   if (!json || !json[0] || !outboxMutex) return;
   xSemaphoreTake(outboxMutex, portMAX_DELAY);
-  if (outboxCount < OUTBOX_MAX) {
-    int idx = (outboxHead + outboxCount) % OUTBOX_MAX;
-    strncpy(outbox[idx], json, OUTBOX_LEN - 1);
-    outbox[idx][OUTBOX_LEN - 1] = '\0';
-    outboxCount++;
-  }
+  const auto result = outbox.push(json);
   xSemaphoreGive(outboxMutex);
+  if (result == OutboundQueue::Result::NoMemory) LOG_ERR("WS", "Outbound queue allocation failed");
 }
 
 void pumpOutbound() {
   if (!outboxMutex) return;
   while (true) {
-    char line[OUTBOX_LEN];
+    char line[OutboundQueue::LINE_BYTES];
     xSemaphoreTake(outboxMutex, portMAX_DELAY);
-    if (outboxCount == 0) {
-      xSemaphoreGive(outboxMutex);
-      break;
-    }
-    strncpy(line, outbox[outboxHead], sizeof(line));
-    line[sizeof(line) - 1] = '\0';
-    outboxHead = (outboxHead + 1) % OUTBOX_MAX;
-    outboxCount--;
+    const bool available = outbox.pop(line, sizeof(line));
     xSemaphoreGive(outboxMutex);
+    if (!available) break;
     if (connected) ws.sendTXT(line);
     // Not connected → drop (no serial bridge on this dead-USB unit).
   }
@@ -125,6 +125,8 @@ void pumpOutbound() {
 
 void wsConnect(const char* ip, uint16_t port, const char* token, const char* board) {
   if (connected || connecting) return;
+  wsInit();
+  setOutboxSession(false);
   connecting = true;
 
   ws.disconnect();
@@ -157,6 +159,7 @@ void wsConnect(const char* ip, uint16_t port, const char* token, const char* boa
 }
 
 void wsDisconnect() {
+  setOutboxSession(false);
   ws.disconnect();
   connected = false;
   connecting = false;

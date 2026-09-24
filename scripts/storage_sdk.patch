@@ -1,0 +1,12 @@
+diff --git a/libs/hardware/SDCardManager/include/SDCardManager.h b/libs/hardware/SDCardManager/include/SDCardManager.h
+--- a/libs/hardware/SDCardManager/include/SDCardManager.h
++++ b/libs/hardware/SDCardManager/include/SDCardManager.h
+@@ -9,6 +9,8 @@ class SDCardManager {
+   SDCardManager();
+   bool begin();
+   bool ready() const;
++  // Pocket HAL-only query: 0 unavailable, 12/16/32 FAT, 64 exFAT. No scan.
++  uint8_t filesystemType() const { return initialized ? sd.fatType() : 0; }
+   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
+   // Read the entire file at `path` into a String. Returns empty string on failure.
+   String readFile(const char* path);

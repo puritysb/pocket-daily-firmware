@@ -62,7 +62,7 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
   const auto pageHeight = renderer.getScreenHeight();
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
-                 pocketSync ? tr(STR_NEARBY_SYNC) : tr(STR_FILE_TRANSFER));
+                 pocketSync ? tr(STR_POCKET_CONNECT_TITLE) : tr(STR_FILE_TRANSFER));
 
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
@@ -76,10 +76,13 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
   GUI.drawList(
       renderer, Rect{0, contentTop, pageWidth, contentHeight}, itemCount(), selectedIndex,
       [this](int index) {
-        return std::string(I18N.get(pocketSync && index == 1 ? StrId::STR_NEARBY_SYNC : menuItems[index]));
+        return std::string(
+            I18N.get(pocketSync ? (index == 0 ? StrId::STR_POCKET_WIFI : StrId::STR_POCKET_DIRECT) : menuItems[index]));
       },
       [this](int index) {
-        return std::string(I18N.get(pocketSync && index == 1 ? StrId::STR_NEARBY_OPEN_APP : menuDescs[index]));
+        return std::string(I18N.get(pocketSync
+                                        ? (index == 0 ? StrId::STR_POCKET_WIFI_DESC : StrId::STR_POCKET_DIRECT_DESC)
+                                        : menuDescs[index]));
       },
       [this](int index) { return menuIcons[pocketSync && index == 1 ? 2 : index]; });
 

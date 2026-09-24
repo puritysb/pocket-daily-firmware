@@ -93,6 +93,14 @@ void CrossPointWebServerActivity::onEnter() {
   lastHandleClientTime = 0;
   requestUpdate();
 
+  // Consume once before either profile's chooser. Failed saved association
+  // falls back to the existing Wi-Fi UI, never another reboot/auto-retry loop.
+  if (autoJoinSavedNetwork) {
+    autoJoinSavedNetwork = false;
+    onNetworkModeSelected(NetworkMode::JOIN_NETWORK);
+    return;
+  }
+
   if (launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC) {
     LOG_DBG("WEBACT", "Launching Pocket Nearby Sync directly...");
     // One transient menu replaces the normal File Transfer chooser; it is
@@ -141,6 +149,7 @@ void CrossPointWebServerActivity::returnToLaunchOrigin() {
 
 void CrossPointWebServerActivity::onExit() {
   Activity::onExit();
+  contentPresentation.hide(renderer);  // ActivityManager owns RenderLock here
 
   LOG_DBG("WEBACT", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
 
@@ -208,6 +217,15 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
   isApMode = (mode == NetworkMode::CREATE_HOTSPOT);
   privateApMode = false;
 
+  // Release rebuildable reader state BEFORE WiFi.mode/scan allocates the
+  // driver. Waiting until startWebServer protects HTTP, but not radio startup.
+  // The mode chooser has finished; transfer UI uses built-in fonts and the
+  // next reader activity reloads the saved family on demand.
+  {
+    RenderLock fontRenderLock(*this);
+    sdFontSystem.releaseLoaded(renderer);
+  }
+
   if (mode == NetworkMode::CONNECT_CALIBRE) {
     startActivityForResult(
         std::make_unique<CalibreConnectActivity>(renderer, mappedInput), [this](const ActivityResult& result) {
@@ -258,7 +276,7 @@ void CrossPointWebServerActivity::onWifiSelectionComplete(const bool connected) 
 
     // X3 exposes the IP and QR code directly. mDNS costs about 5.6 KB on this
     // no-PSRAM board and is not worth running beside browser file transfer.
-    if (!gpio.deviceIsX3()) restartMdns(AP_HOSTNAME, "WEBACT");
+    if (!gpio.deviceIsX3() && launchMode == WebServerLaunchMode::FILE_TRANSFER) restartMdns(AP_HOSTNAME, "WEBACT");
 
     // Start the web server
     startWebServer();
@@ -435,8 +453,7 @@ void CrossPointWebServerActivity::startAccessPoint() {
   bool apStarted;
   const char* ssid = privateApMode ? privateApSsid : AP_SSID;
   const char* password = privateApMode ? privateApPassword : AP_PASSWORD;
-  const uint8_t maxConnections =
-      privateApMode ? PocketDaily::Web::kPrivateApMaxConnections : AP_MAX_CONNECTIONS;
+  const uint8_t maxConnections = privateApMode ? PocketDaily::Web::kPrivateApMaxConnections : AP_MAX_CONNECTIONS;
   if (password && strlen(password) >= 8) {
     apStarted = WiFi.softAP(ssid, password, AP_CHANNEL, false, maxConnections);
   } else {
@@ -496,15 +513,10 @@ void CrossPointWebServerActivity::startWebServer() {
   state = WebServerActivityState::SERVER_STARTING;
   requestUpdateAndWait();
 
-  // X3/X4 have no PSRAM. A resident .cpfont keeps its interval tables,
-  // decompression pages and glyph caches in internal RAM; leaving it loaded
-  // while WebServer + WebSocketsServer allocate their TCP buffers reduced the
-  // X3 to an 8 KB free heap (and a ~2 KB largest block), causing otherwise
-  // valid uploads to lose their socket after roughly 128 KB. File Transfer
-  // does not render reader text, so release the resident family while keeping
-  // the saved selection. The next reader activity reloads it on demand (and
-  // leaving this activity already performs a clean restart after Wi-Fi use).
-  const uint32_t heapBeforeFontRelease = ESP.getFreeHeap();
+  // Defensive second release after the Wi-Fi chooser: no resident reader
+  // family should compete with server allocations. The primary release is
+  // before radio startup in onNetworkModeSelected; preserve saved selection.
+  [[maybe_unused]] const uint32_t heapBeforeFontRelease = ESP.getFreeHeap();
   {
     RenderLock fontRenderLock(*this);
     sdFontSystem.releaseLoaded(renderer);
@@ -513,7 +525,8 @@ void CrossPointWebServerActivity::startWebServer() {
           (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
   if (privateApMode) PocketDaily::Web::apBootLog("web-fontfreed");
 
-  const auto profile = PocketDaily::Web::selectProfile(privateApMode, gpio.deviceIsX3());
+  const auto profile = PocketDaily::Web::selectProfile(privateApMode, gpio.deviceIsX3(),
+                                                       launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC);
   const bool lightweightProfile = profile != CrossPointWebServerProfile::FULL;
   if (!PocketDaily::Web::webStartAllowed(lightweightProfile, ESP.getFreeHeap(), ESP.getMaxAllocHeap())) {
     LOG_ERR("WEBACT", "Web server start refused: heap free=%u largest=%u", (unsigned)ESP.getFreeHeap(),
@@ -541,6 +554,19 @@ void CrossPointWebServerActivity::startWebServer() {
     HalSystem::setCrashBreadcrumb("nearby:web-begin");
     PocketDaily::Web::apBootLog("web-begin");
   }
+  webServer->setContentPresentation(
+      {this,
+       [](void* self, const char* revision, uint32_t generation) {
+         auto& activity = *static_cast<CrossPointWebServerActivity*>(self);
+         RenderLock lock;
+         return activity.contentPresentation.enqueue(revision, generation);
+       },
+       [](void* self) {
+         // Metadata belongs to this same main-loop task; only phase is updated
+         // by rendering, through an atomic. Never block HTTP on a slow panel.
+         return static_cast<CrossPointWebServerActivity*>(self)->contentPresentation.receipt();
+       },
+       [](void* self) { return static_cast<CrossPointWebServerActivity*>(self)->contentPresentation.busy(); }});
   webServer->begin();
 
   if (webServer->isRunning()) {
@@ -567,7 +593,6 @@ void CrossPointWebServerActivity::startWebServer() {
   }
 }
 
-
 void CrossPointWebServerActivity::loop() {
   if (state == WebServerActivityState::NEARBY_STARTING) {
     handleNearbyStartup();
@@ -585,16 +610,38 @@ void CrossPointWebServerActivity::loop() {
 
   // Handle different states
   if (state == WebServerActivityState::SERVER_RUNNING) {
-    if (privateApMode && webServer && webServer->shouldEndSession()) {
-      returnToLaunchOrigin();
-      return;
+    // Consume each GPIO edge once. Waiting to dismiss a drawing view must not
+    // skip handleClient below or turn that same Back edge into session exit.
+    using ContentAction = PocketDaily::Content::ContentSessionInput::Action;
+    const auto contentAction = contentInput.update(contentPresentation.visible(), contentPresentation.busy(),
+                                                   webServer && webServer->contentPresentationAllowed(),
+                                                   mappedInput.wasPressed(MappedInputManager::Button::Back),
+                                                   mappedInput.wasPressed(MappedInputManager::Button::Right) ||
+                                                       mappedInput.wasPressed(MappedInputManager::Button::PageForward),
+                                                   mappedInput.wasPressed(MappedInputManager::Button::Left) ||
+                                                       mappedInput.wasPressed(MappedInputManager::Button::PageBack));
+    switch (contentAction) {
+      case ContentAction::None:
+        break;
+      case ContentAction::DismissView: {
+        RenderLock lock;
+        contentPresentation.hide(renderer);
+        requestUpdate();
+        break;
+      }
+      case ContentAction::Next:
+      case ContentAction::Previous: {
+        RenderLock lock;
+        if (contentPresentation.navigate(contentAction == ContentAction::Next, renderer)) requestUpdate();
+        break;
+      }
+      case ContentAction::ExitSession:
+        LOG_INF("WEBACT", "Exit requested while web server is running");
+        state = WebServerActivityState::SHUTTING_DOWN;
+        returnToLaunchOrigin();
+        return;
     }
-    // gpio.update() already ran once at the start of the global loop. Consume
-    // its edge before any synchronous network work. Calling mappedInput.update
-    // again in this activity clears pressedEvents and used to erase Back here.
-    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-      LOG_INF("WEBACT", "Exit requested while web server is running");
-      state = WebServerActivityState::SHUTTING_DOWN;
+    if (privateApMode && webServer && webServer->shouldEndSession()) {
       returnToLaunchOrigin();
       return;
     }
@@ -622,19 +669,13 @@ void CrossPointWebServerActivity::loop() {
         PocketDaily::NetHealth::tick();
         const wl_status_t wifiStatus = WiFi.status();
         bool repaint = false;
-        // The probe ladder only runs once the server is up and stable:
-        // during connection setup the activity owns the Wi-Fi state machine
-        // and any interference bounces the user back to the home screen
-        // (observed 2026-09-20).
-        const bool serverStable = state == WebServerActivityState::SERVER_RUNNING && webServer && webServer->isRunning();
-        switch (staWatch.onCheck(wifiStatus, millis(), serverStable, repaint)) {
+        // Match upstream ownership: driver auto-reconnect handles association
+        // loss; application-port timeouts never force a connected radio down.
+        switch (staWatch.onCheck(wifiStatus, millis(), repaint)) {
           case PocketDaily::Web::StaAction::Abandon:
             state = WebServerActivityState::SHUTTING_DOWN;
             returnToLaunchOrigin();
             return;
-          case PocketDaily::Web::StaAction::Reconnect:
-            WiFi.reconnect();
-            break;
           case PocketDaily::Web::StaAction::Repaint:
           case PocketDaily::Web::StaAction::None:
             break;
@@ -690,16 +731,26 @@ void CrossPointWebServerActivity::loop() {
         }
       }
       lastHandleClientTime = millis();
+      if (contentPresentation.preparationPending() && webServer->presentationTransportIdle()) {
+        RenderLock lock;
+        if (contentPresentation.service(renderer, ESP.getFreeHeap(), ESP.getMaxAllocHeap())) requestUpdate();
+      }
       if (privateApMode) HalSystem::setCrashBreadcrumb("nearby:server-idle");
     }
   }
 }
 
 void CrossPointWebServerActivity::render(RenderLock&&) {
+  completedDisplayFrame = false;
+  if (state == WebServerActivityState::SERVER_RUNNING && contentPresentation.render(renderer, mappedInput)) {
+    completedDisplayFrame = contentPresentation.canCaptureFrame();
+    return;
+  }
   if (state == WebServerActivityState::NEARBY_STARTING || state == WebServerActivityState::NEARBY_READY ||
       state == WebServerActivityState::NEARBY_HANDOFF) {
     renderNearbySync();
     renderer.displayBuffer();
+    completedDisplayFrame = true;
     return;
   }
 
@@ -713,7 +764,10 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
     const auto pageHeight = renderer.getScreenHeight();
 
     GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
-                   isApMode ? tr(STR_HOTSPOT_MODE) : tr(STR_FILE_TRANSFER), nullptr);
+                   launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC
+                       ? tr(STR_POCKET_CONNECT_TITLE)
+                       : (isApMode ? tr(STR_HOTSPOT_MODE) : tr(STR_FILE_TRANSFER)),
+                   nullptr);
 
     if (state == WebServerActivityState::SERVER_RUNNING) {
       GUI.drawSubHeader(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight},
@@ -722,11 +776,14 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
     } else {
       const auto height = renderer.getLineHeight(UI_10_FONT_ID);
       const auto top = (pageHeight - height) / 2;
-      renderer.drawCenteredText(
-          UI_10_FONT_ID, top,
-          state == WebServerActivityState::AP_STARTING ? tr(STR_STARTING_HOTSPOT) : tr(STR_STARTING_FILE_TRANSFER));
+      renderer.drawCenteredText(UI_10_FONT_ID, top,
+                                launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC
+                                    ? tr(STR_POCKET_CONNECT_STARTING)
+                                    : (state == WebServerActivityState::AP_STARTING ? tr(STR_STARTING_HOTSPOT)
+                                                                                    : tr(STR_STARTING_FILE_TRANSFER)));
     }
     renderer.displayBuffer();
+    completedDisplayFrame = true;
   }
 }
 
@@ -735,7 +792,10 @@ void CrossPointWebServerActivity::renderServerRunning() const {
   const auto pageWidth = renderer.getScreenWidth();
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
-                 isApMode ? tr(STR_HOTSPOT_MODE) : tr(STR_FILE_TRANSFER), nullptr);
+                 launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC
+                     ? tr(STR_POCKET_CONNECT_TITLE)
+                     : (isApMode ? tr(STR_HOTSPOT_MODE) : tr(STR_FILE_TRANSFER)),
+                 nullptr);
   GUI.drawSubHeader(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight},
                     connectedSSID.c_str());
 
@@ -745,7 +805,27 @@ void CrossPointWebServerActivity::renderServerRunning() const {
 
   int startY = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing * 2;
   int height10 = renderer.getLineHeight(UI_10_FONT_ID);
-  if (isApMode) {
+  if (launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC) {
+    // Pocket Sync serves the app, not the browser. In particular its root
+    // responds with status JSON, so a browser QR is not a useful next step.
+    // Keep this view allocation-free; no additional service or font cache.
+    const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true);
+    const int step = height10 + metrics.verticalSpacing * 2;
+    UITheme::drawCenteredText(renderer, safe, UI_10_FONT_ID, startY,
+                              privateApMode ? tr(STR_POCKET_DIRECT) : tr(STR_POCKET_WIFI), true, EpdFontFamily::BOLD);
+    startY += step;
+    UITheme::drawCenteredText(renderer, safe, UI_10_FONT_ID, startY, tr(STR_POCKET_CONNECT_APP));
+    startY += step;
+    UITheme::drawCenteredText(renderer, safe, UI_10_FONT_ID, startY,
+                              privateApMode ? tr(STR_POCKET_DIRECT_ACTION) : tr(STR_POCKET_WIFI_ACTION));
+    startY += step;
+    UITheme::drawCenteredText(renderer, safe, UI_10_FONT_ID, startY, tr(STR_POCKET_CONNECT_READY));
+    startY += step;
+    UITheme::drawCenteredText(renderer, safe, SMALL_FONT_ID, startY,
+                              privateApMode ? tr(STR_POCKET_DIRECT_INTERNET) : tr(STR_POCKET_CONNECT_KEEP_OPEN));
+    startY += step;
+    UITheme::drawCenteredText(renderer, safe, SMALL_FONT_ID, startY, connectedIP.c_str());
+  } else if (isApMode) {
     // AP mode display
     renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, startY, tr(STR_CONNECT_WIFI_HINT), true,
                       EpdFontFamily::BOLD);
@@ -822,7 +902,8 @@ void CrossPointWebServerActivity::renderNearbySync() const {
   const int pageWidth = renderer.getScreenWidth();
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
 
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_NEARBY_SYNC), nullptr);
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_POCKET_DIRECT),
+                 nullptr);
 
   int y = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing * 4;
   if (state == WebServerActivityState::NEARBY_STARTING) {
@@ -833,7 +914,7 @@ void CrossPointWebServerActivity::renderNearbySync() const {
   } else if (state == WebServerActivityState::NEARBY_HANDOFF) {
     renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_NEARBY_PREPARING), true, EpdFontFamily::BOLD);
   } else {
-    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_NEARBY_OPEN_APP), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_POCKET_DIRECT_ACTION), true, EpdFontFamily::BOLD);
     y += lineHeight + metrics.verticalSpacing * 3;
     renderer.drawCenteredText(UI_10_FONT_ID, y, nearbySync.advertisedName(), true);
     y += lineHeight + metrics.verticalSpacing * 4;

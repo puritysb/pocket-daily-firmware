@@ -59,8 +59,11 @@ Result flashFromSdPath(const char* sdPath, ProgressCb onProgress, void* ctx, boo
 Result validateImageFile(const char* sdPath, size_t partitionSize);
 
 // The flasher's 4 KiB static staging buffer, lent to the Pocket upload stream
-// and the diagnostic HTTP handlers. Those run inside the web-server activity,
-// which never validates or flashes an image, so the buffer is idle there. The
+// and the diagnostic HTTP handlers. Also borrowed for synchronous provider OTA
+// decode/hash calls on the main loop, completed before validation/flash starts.
+// The web-server upload path must finish before a developer flash request can
+// validate or install its image. Never use this scratch from a render/background
+// task or pump network callbacks while holding it. The
 // no-PSRAM X3 keeps only ~6 KB of heap on its private AP, which is why the
 // transfer path borrows static RAM instead of allocating a transient batch.
 // Never keep the pointer across an activity change.

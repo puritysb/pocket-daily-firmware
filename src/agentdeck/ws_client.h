@@ -37,7 +37,9 @@ bool wsConnecting();
 // Send JSON immediately (only when connected). Call from the loop/main task.
 void wsSend(const char* json);
 
-// Thread-safe enqueue from any task. Drained by pumpOutbound() on the loop task.
+// Thread-safe, current-connection-only enqueue from any task. Disconnected,
+// oversized or full-queue commands are dropped, never retained across reconnect.
+// Drained by pumpOutbound() on the loop task; this is not the durable SD outbox.
 void queueOutbound(const char* json);
 
 // Drain the outbox (WS when connected). Call every loop.

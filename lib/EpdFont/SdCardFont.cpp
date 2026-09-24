@@ -2,6 +2,7 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -402,6 +403,8 @@ void SdCardFont::applyGlyphMissCallback(uint8_t styleIdx) {
   auto& s = styles_[styleIdx];
   s.stubData.glyphMissHandler = &SdCardFont::onGlyphMiss;
   s.stubData.glyphMissCtx = &overflowCtx_[styleIdx];
+  s.stubData.kernLookup = loadMode_ == LoadMode::BoundedUI ? &SdCardFont::lookupBoundedKerning : nullptr;
+  s.stubData.ligatureLookup = loadMode_ == LoadMode::BoundedUI ? &SdCardFont::lookupBoundedLigature : nullptr;
 }
 
 // --- Compute per-style file offsets from a base data offset ---
@@ -419,8 +422,13 @@ void SdCardFont::computeStyleFileOffsets(PerStyle& s, uint32_t baseOffset) {
 
 // --- Load ---
 
-bool SdCardFont::load(const char* path) {
+bool SdCardFont::load(const char* path, LoadMode mode, void (*progress)()) {
   freeAll();
+  loadMode_ = mode;
+  progress_ = progress;
+  loadedFileSize_ = 0;
+  boundedReadFailed_ = false;
+  if (!path) return false;
   if (strlen(path) >= sizeof(filePath_)) {
     LOG_ERR("SDCF", "Path too long (%zu bytes, max %zu)", strlen(path), sizeof(filePath_) - 1);
     return false;
@@ -433,6 +441,8 @@ bool SdCardFont::load(const char* path) {
     LOG_ERR("SDCF", "Failed to open .cpfont: %s", path);
     return false;
   }
+  if (file.size() > UINT32_MAX) return false;
+  loadedFileSize_ = static_cast<uint32_t>(file.size());
 
   // Read and validate global header
   uint8_t headerBuf[HEADER_SIZE];
@@ -484,6 +494,11 @@ bool SdCardFont::load(const char* path) {
     }
 
     auto& s = styles_[styleId];
+    if (s.present) {
+      LOG_ERR("SDCF", "Duplicate style %u", styleId);
+      freeAll();
+      return false;
+    }
     s.present = true;
     s.header.intervalCount = readU32(tocBuf + 4);
     s.header.glyphCount = readU32(tocBuf + 8);
@@ -513,6 +528,19 @@ bool SdCardFont::load(const char* path) {
     }
 
     uint32_t dataOffset = readU32(tocBuf + 24);
+    // Counts are bounded above. Use wide arithmetic before the existing
+    // offset builder so a corrupt base cannot wrap into the file header.
+    const uint64_t metadataEnd =
+        static_cast<uint64_t>(dataOffset) + s.header.intervalCount * sizeof(EpdUnicodeInterval) +
+        s.header.glyphCount * sizeof(EpdGlyph) +
+        (s.header.kernLeftEntryCount + s.header.kernRightEntryCount) * sizeof(EpdKernClassEntry) +
+        static_cast<uint32_t>(s.header.kernLeftClassCount) * s.header.kernRightClassCount +
+        s.header.ligaturePairCount * sizeof(EpdLigaturePair);
+    if (dataOffset < HEADER_SIZE + styleCount * STYLE_TOC_ENTRY_SIZE || metadataEnd > loadedFileSize_) {
+      LOG_ERR("SDCF", "Font metadata outside file");
+      freeAll();
+      return false;
+    }
     computeStyleFileOffsets(s, dataOffset);
   }
 
@@ -541,12 +569,13 @@ bool SdCardFont::load(const char* path) {
     uint32_t prevLast = 0;
     EpdUnicodeInterval iv{};
     for (uint32_t j = 0; j < s.header.intervalCount; ++j) {
+      if (progress_) progress_();
       if (file.read(reinterpret_cast<uint8_t*>(&iv), sizeof(iv)) != sizeof(iv)) {
         LOG_ERR("SDCF", "Failed to read interval %u for style %u", j, i);
         freeAll();
         return false;
       }
-      if (iv.first > iv.last) {
+      if (iv.first > iv.last || iv.last > 0x10FFFF) {
         LOG_ERR("SDCF", "Style %u: invalid interval %u (first 0x%lX > last 0x%lX)", i, j,
                 static_cast<unsigned long>(iv.first), static_cast<unsigned long>(iv.last));
         file.close();
@@ -578,7 +607,10 @@ bool SdCardFont::load(const char* path) {
       return false;
     }
 
-    if (canUseBmp16) {
+    if (mode == LoadMode::BoundedUI) {
+      // Validated above; on-demand binary search reads one 12B interval.
+      // No resident table or extra permanent scratch buffer.
+    } else if (canUseBmp16) {
       s.bmpIntervals = new (std::nothrow) PerStyle::BmpInterval16[s.header.intervalCount];
       if (!s.bmpIntervals) {
         LOG_ERR("SDCF", "Failed to allocate compact intervals for style %u", i);
@@ -637,18 +669,38 @@ bool SdCardFont::load(const char* path) {
 // --- Codepoint lookup ---
 
 int32_t SdCardFont::findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) const {
+  HalFile file;
+  if (loadMode_ == LoadMode::BoundedUI && !Storage.openFileForRead("SDCF", filePath_, file)) {
+    boundedReadFailed_ = true;
+    return -1;
+  }
   int left = 0;
   int right = static_cast<int>(s.header.intervalCount) - 1;
   while (left <= right) {
     int mid = left + (right - left) / 2;
-    const uint32_t first = s.intervalsAreBmp16 ? s.bmpIntervals[mid].first : s.fullIntervals[mid].first;
-    const uint32_t last = s.intervalsAreBmp16 ? s.bmpIntervals[mid].last : s.fullIntervals[mid].last;
+    EpdUnicodeInterval interval{};
+    if (loadMode_ == LoadMode::BoundedUI) {
+      if (progress_) progress_();
+      const size_t position = s.intervalsFileOffset + static_cast<size_t>(mid) * sizeof(interval);
+      if (!file.seekSet(position) || file.read(&interval, sizeof(interval)) != sizeof(interval) ||
+          interval.first > interval.last || interval.last > 0x10FFFF || interval.offset >= s.header.glyphCount ||
+          interval.last - interval.first >= s.header.glyphCount - interval.offset) {
+        boundedReadFailed_ = true;
+        return -1;
+      }
+    } else if (s.intervalsAreBmp16) {
+      interval = {s.bmpIntervals[mid].first, s.bmpIntervals[mid].last, s.bmpIntervals[mid].offset};
+    } else {
+      interval = s.fullIntervals[mid];
+    }
+    const uint32_t first = interval.first;
+    const uint32_t last = interval.last;
     if (codepoint < first) {
       right = mid - 1;
     } else if (codepoint > last) {
       left = mid + 1;
     } else {
-      const uint32_t offset = s.intervalsAreBmp16 ? s.bmpIntervals[mid].offset : s.fullIntervals[mid].offset;
+      const uint32_t offset = interval.offset;
       return static_cast<int32_t>(offset + (codepoint - first));
     }
   }
@@ -659,6 +711,7 @@ int32_t SdCardFont::findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) 
 
 int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOnly) {
   if (!loaded_) return -1;
+  if (loadMode_ == LoadMode::BoundedUI) return checkBoundedText(utf8Text, styleMask);
   styleMask = resolveStyleMask(styleMask);
   if (styleMask == 0) return 0;
 
@@ -1229,10 +1282,21 @@ int SdCardFont::buildAdvanceTableRange(Iter begin, Iter end, bool includeSpace, 
 }
 
 int SdCardFont::buildAdvanceTable(const char* utf8Text, uint8_t styleMask) {
+  if (loadMode_ == LoadMode::BoundedUI) return checkBoundedText(utf8Text, styleMask);
   return buildAdvanceTableRange(&utf8Text, &utf8Text + 1, false, false, styleMask);
 }
 
 int SdCardFont::buildAdvanceTable(const std::vector<std::string>& words, bool includeHyphen, uint8_t styleMask) {
+  if (loadMode_ == LoadMode::BoundedUI) {
+    int missed = 0;
+    for (const auto& word : words) {
+      const int result = checkBoundedText(word.c_str(), styleMask);
+      if (result < 0 || result > INT_MAX - missed) return -1;
+      missed += result;
+    }
+    const int extra = checkBoundedText(includeHyphen ? " -" : " ", styleMask);
+    return extra < 0 || extra > INT_MAX - missed ? -1 : missed + extra;
+  }
   return buildAdvanceTableRange(words.begin(), words.end(), words.size() > 1, includeHyphen, styleMask);
 }
 
@@ -1286,6 +1350,110 @@ uint8_t SdCardFont::resolveStyleMask(uint8_t styleMask) const {
 
 // --- On-demand glyph loading (overflow buffer) ---
 
+namespace {
+uint8_t readKernClass(HalFile& file, uint32_t offset, uint16_t count, uint32_t cp, bool& failed) {
+  if (cp > UINT16_MAX) return 0;
+  uint16_t lo = 0, hi = count;
+  while (lo < hi) {
+    const uint16_t mid = lo + (hi - lo) / 2;
+    uint8_t entry[3];
+    if (!file.seekSet(offset + mid * sizeof(EpdKernClassEntry)) || file.read(entry, sizeof(entry)) != sizeof(entry)) {
+      failed = true;
+      return 0;
+    }
+    const uint16_t found = readU16(entry);
+    if (found == cp) return entry[2];
+    if (found < cp)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  return 0;
+}
+}  // namespace
+
+int8_t SdCardFont::lookupBoundedKerning(void* context, uint32_t left, uint32_t right) {
+  const auto& ctx = *static_cast<OverflowContext*>(context);
+  const auto& self = *ctx.self;
+  const auto& s = self.styles_[ctx.styleIdx];
+  if (!self.loaded_ || !s.header.kernLeftEntryCount || !s.header.kernRightEntryCount) return 0;
+  if (self.progress_) self.progress_();
+  HalFile file;
+  if (!Storage.openFileForRead("SDCF", self.filePath_, file)) {
+    self.boundedReadFailed_ = true;
+    return 0;
+  }
+  const uint8_t lc =
+      readKernClass(file, s.kernLeftFileOffset, s.header.kernLeftEntryCount, left, self.boundedReadFailed_);
+  const uint8_t rc =
+      readKernClass(file, s.kernRightFileOffset, s.header.kernRightEntryCount, right, self.boundedReadFailed_);
+  if (lc > s.header.kernLeftClassCount || rc > s.header.kernRightClassCount) self.boundedReadFailed_ = true;
+  if (!lc || !rc || self.boundedReadFailed_) return 0;
+  int8_t adjustment = 0;
+  const size_t position = s.kernMatrixFileOffset + (lc - 1) * s.header.kernRightClassCount + rc - 1;
+  if (!file.seekSet(position) || file.read(&adjustment, 1) != 1) {
+    self.boundedReadFailed_ = true;
+    return 0;
+  }
+  return adjustment;
+}
+
+uint32_t SdCardFont::lookupBoundedLigature(void* context, uint32_t left, uint32_t right) {
+  const auto& ctx = *static_cast<OverflowContext*>(context);
+  const auto& self = *ctx.self;
+  const auto& s = self.styles_[ctx.styleIdx];
+  if (!self.loaded_ || !s.header.ligaturePairCount || left > UINT16_MAX || right > UINT16_MAX) return 0;
+  if (self.progress_) self.progress_();
+  HalFile file;
+  if (!Storage.openFileForRead("SDCF", self.filePath_, file)) {
+    self.boundedReadFailed_ = true;
+    return 0;
+  }
+  uint16_t lo = 0, hi = s.header.ligaturePairCount;
+  const uint32_t key = (left << 16) | right;
+  while (lo < hi) {
+    const uint16_t mid = lo + (hi - lo) / 2;
+    uint8_t entry[8];
+    if (!file.seekSet(s.ligatureFileOffset + mid * sizeof(EpdLigaturePair)) ||
+        file.read(entry, sizeof(entry)) != sizeof(entry)) {
+      self.boundedReadFailed_ = true;
+      return 0;
+    }
+    const uint32_t pair = readU32(entry);
+    if (pair == key) {
+      const uint32_t cp = readU32(entry + 4);
+      if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+        self.boundedReadFailed_ = true;
+        return 0;
+      }
+      return cp;
+    }
+    if (pair < key)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  return 0;
+}
+
+int SdCardFont::checkBoundedText(const char* text, uint8_t styleMask) {
+  if (!loaded_ || !text) return -1;
+  styleMask = resolveStyleMask(styleMask);
+  int missed = 0;
+  const auto* p = reinterpret_cast<const unsigned char*>(text);
+  while (*p) {
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (cp == '\n' || cp == '\r' || cp == '\t') continue;
+    for (uint8_t style = 0; style < MAX_STYLES; ++style) {
+      if ((styleMask & (1U << style)) && !onGlyphMiss(&overflowCtx_[style], cp)) {
+        if (missed == INT_MAX) return -1;
+        ++missed;
+      }
+    }
+  }
+  return missed;
+}
+
 const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
   auto* oc = static_cast<OverflowContext*>(ctx);
   auto* self = oc->self;
@@ -1293,7 +1461,7 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
 
   if (!self->loaded_ || styleIdx >= MAX_STYLES || !self->styles_[styleIdx].present) return nullptr;
   const auto& s = self->styles_[styleIdx];
-  if (!s.fullIntervals && !s.bmpIntervals) return nullptr;
+  if (self->loadMode_ != LoadMode::BoundedUI && !s.fullIntervals && !s.bmpIntervals) return nullptr;
 
   // Check overflow cache first (matching both codepoint and style)
   for (uint32_t i = 0; i < self->overflowCount_; i++) {
@@ -1315,6 +1483,7 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
   // Read glyph metadata into temporary
   HalFile file;
   if (!Storage.openFileForRead("SDCF", self->filePath_, file)) {
+    if (self->loadMode_ == LoadMode::BoundedUI) self->boundedReadFailed_ = true;
     LOG_ERR("SDCF", "Overflow: failed to open .cpfont");
     return nullptr;
   }
@@ -1322,32 +1491,49 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
   EpdGlyph tempGlyph = {};
   uint32_t glyphFileOff = s.glyphsFileOffset + static_cast<uint32_t>(globalIdx) * sizeof(EpdGlyph);
   if (!file.seekSet(glyphFileOff)) {
+    if (self->loadMode_ == LoadMode::BoundedUI) self->boundedReadFailed_ = true;
     LOG_ERR("SDCF", "Overflow: failed to seek to glyph for U+%04X style %u", codepoint, styleIdx);
     file.close();
     return nullptr;
   }
   if (file.read(reinterpret_cast<uint8_t*>(&tempGlyph), sizeof(EpdGlyph)) != sizeof(EpdGlyph)) {
+    if (self->loadMode_ == LoadMode::BoundedUI) self->boundedReadFailed_ = true;
     LOG_ERR("SDCF", "Overflow: failed to read glyph metadata for U+%04X style %u", codepoint, styleIdx);
+    return nullptr;
+  }
+  if (self->loadMode_ == LoadMode::BoundedUI &&
+      (tempGlyph.width > 64 || tempGlyph.height > 64 || tempGlyph.dataLength > UI_GLYPH_BYTES ||
+       tempGlyph.dataLength !=
+           (static_cast<unsigned>(tempGlyph.width) * tempGlyph.height * (s.header.is2Bit ? 2 : 1) + 7) / 8 ||
+       static_cast<uint64_t>(s.bitmapFileOffset) + tempGlyph.dataOffset + tempGlyph.dataLength >
+           self->loadedFileSize_)) {
+    LOG_ERR("SDCF", "Glyph exceeds bounded UI budget or font file");
+    self->boundedReadFailed_ = true;
     return nullptr;
   }
 
   // Read bitmap data into temporary (if any)
+  std::unique_ptr<uint8_t[]> pendingBitmap;
   uint8_t* tempBitmap = nullptr;
   if (tempGlyph.dataLength > 0) {
-    tempBitmap = new (std::nothrow) uint8_t[tempGlyph.dataLength];
+    // Existing ring owns this allocation after successful read. BoundedUI
+    // retains <=8*256B, with one <=256B replacement transient; no page cache.
+    pendingBitmap = makeUniqueNoThrow<uint8_t[]>(tempGlyph.dataLength);
+    tempBitmap = pendingBitmap.get();
     if (!tempBitmap) {
+      if (self->loadMode_ == LoadMode::BoundedUI) self->boundedReadFailed_ = true;
       LOG_ERR("SDCF", "Overflow: failed to allocate %u bytes for U+%04X bitmap", tempGlyph.dataLength, codepoint);
       return nullptr;
     }
     if (!file.seekSet(s.bitmapFileOffset + tempGlyph.dataOffset)) {
+      if (self->loadMode_ == LoadMode::BoundedUI) self->boundedReadFailed_ = true;
       LOG_ERR("SDCF", "Overflow: failed to seek to bitmap for U+%04X", codepoint);
-      delete[] tempBitmap;
       file.close();
       return nullptr;
     }
     if (file.read(tempBitmap, tempGlyph.dataLength) != static_cast<int>(tempGlyph.dataLength)) {
+      if (self->loadMode_ == LoadMode::BoundedUI) self->boundedReadFailed_ = true;
       LOG_ERR("SDCF", "Overflow: failed to read bitmap for U+%04X", codepoint);
-      delete[] tempBitmap;
       return nullptr;
     }
   }
@@ -1360,7 +1546,7 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
   }
   self->overflowNext_ = (slot + 1) % OVERFLOW_CAPACITY;
   self->overflow_[slot].glyph = tempGlyph;
-  self->overflow_[slot].bitmap = tempBitmap;
+  self->overflow_[slot].bitmap = pendingBitmap.release();
   self->overflow_[slot].codepoint = codepoint;
   self->overflow_[slot].styleIdx = styleIdx;
 

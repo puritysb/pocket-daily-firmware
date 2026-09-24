@@ -31,6 +31,7 @@ constexpr const char* kCachePath = "/.crosspoint/agentdeck-ota.bin";
 // (sessions_list can be ~30 KB) are rejected by this gate before any JSON work.
 constexpr size_t kMaxOtaFrameBytes = 8192;
 constexpr size_t kMaxDecodedChunk = 4096;
+static_assert(kMaxDecodedChunk <= firmware_flash::STAGING_BUFFER_BYTES);
 
 struct RxState {
   bool active = false;
@@ -65,7 +66,6 @@ RxState rx;
 char expectedBoard[20] = {0};
 HalFile cacheFile;
 MD5Builder md5Builder;
-uint8_t decodeBuf[kMaxDecodedChunk];
 
 void sendAck(const char* otaId, const char* stage, uint32_t seq, uint32_t offset, uint32_t written) {
   char buf[192];
@@ -194,7 +194,11 @@ void handleChunk(JsonObjectConst obj) {
   }
 
   size_t decodedLen = 0;
-  const int rc = mbedtls_base64_decode(decodeBuf, sizeof(decodeBuf), &decodedLen,
+  // WS callbacks are pumped synchronously on the main loop. This operation
+  // finishes before validation/flash; File Transfer is a different activity.
+  // Borrow only for this call, never across events or an activity transition.
+  uint8_t* decodeBuf = firmware_flash::sharedStagingBuffer();
+  const int rc = mbedtls_base64_decode(decodeBuf, kMaxDecodedChunk, &decodedLen,
                                        reinterpret_cast<const unsigned char*>(data), strlen(data));
   if (rc != 0 || decodedLen == 0) {
     sendError(otaId, "chunk", "base64_decode_failed");
@@ -324,10 +328,12 @@ bool stagePulledImage(uint32_t expectedBytes, const char* md5hex) {
     return false;
   }
   // Whole-file MD5 (the feed advert's transfer checksum). Chunked read keeps
-  // the stack flat; decodeBuf is idle outside an active WS receive.
+  // the stack flat. This synchronous read ends before validateImageFile below
+  // reuses the same scratch; no network callbacks are pumped inside the loop.
+  uint8_t* decodeBuf = firmware_flash::sharedStagingBuffer();
   md5Builder.begin();
   for (uint32_t off = 0; off < expectedBytes;) {
-    const int got = f.read(decodeBuf, sizeof(decodeBuf));
+    const int got = f.read(decodeBuf, kMaxDecodedChunk);
     if (got <= 0) break;
     md5Builder.add(decodeBuf, (size_t)got);
     off += (uint32_t)got;

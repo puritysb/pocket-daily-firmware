@@ -101,8 +101,7 @@ assets. Bluetooth records, endpoint payloads, file layouts, and update rules
 are cross-repository contracts; verify both sides when any of them changes.
 
 `main` carries the Pocket Daily product stack — `src/pocket_daily/`,
-`src/activities/pocket_daily/`, the bundled games (`src/games/`,
-`src/activities/games/`), and the AgentDeck Companion provider
+`src/activities/pocket_daily/`, and the AgentDeck Companion provider
 `src/agentdeck/` — layered on upstream. AgentDeck is one optional sync
 provider, not the product. Being far ahead of `upstream/master` is expected.
 
@@ -125,6 +124,8 @@ provider, not the product. Being far ahead of `upstream/master` is expected.
   and dev-build serial logging both allocate, and failure ends in `abort()`.
 - Do not "fix" fragmentation with a permanent preallocated buffer; it lowers
   headroom for everything else without lowering the transient peak.
+- `sta_recovery` alone wraps `esp_wifi_init` to bound driver buffer counts; do
+  not promote it without hardware comparisons.
 
 ## Resource protocol
 
@@ -214,7 +215,9 @@ when an explicit executable override is required.
 
 Environments (`platformio.ini` is authoritative): `default` (development),
 `gh_release` (production), `gh_release_rc`, `slim` (no serial), and the
-`heapmap` audit build. Every successful build stages an ignored `firmware/update.bin`. Read
+opt-in `sta_recovery`, `network_diagnostics`
+(`ENABLE_DEV_NETWORK_DIAGNOSTICS`; heavy diagnostics are not in the default
+image), and `heapmap` audit builds. Every successful build stages an ignored `firmware/update.bin`. Read
 `firmware/LATEST_BUILD.txt` before identifying or installing the artifact.
 
 ## Host tests
@@ -257,11 +260,12 @@ the reader's File Transfer → Join a Network mode plus `scripts/pocket_put.py`
 over SD-card swapping; the user has asked that hardware tests go through that
 path. Serial monitoring: `python3 scripts/debugging_monitor.py`.
 
-Developer flash loop (`env:default` builds only, `ENABLE_DEV_REMOTE_FLASH`):
+Developer flash loop (`ENABLE_DEV_REMOTE_FLASH`; default and experimental
+sta_recovery builds, never gh_release):
 after `./scripts/pio.sh run` and a `scripts/pocket_put.py` push of
 `firmware/update.bin`, `curl -X POST http://<reader>/api/pocket/v1/dev/flash`
-validates and flashes the staged image and reboots the reader straight into
-the File Transfer menu; one Confirm rejoins the saved network. The endpoint
+validates and flashes the staged image and reboots the reader into a one-shot
+saved-network reconnect (failure falls back to the Wi-Fi chooser). The endpoint
 and its boot marker are compiled out of `gh_release` builds.
 
 ## Git and release hygiene

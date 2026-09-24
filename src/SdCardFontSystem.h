@@ -29,7 +29,12 @@ class SdCardFontSystem {
 
   /// Load a specific SD font family at the UI point size without changing the
   /// saved reader selection. Returns the loaded font ID, or 0 if unavailable.
-  int ensureUiFamilyLoaded(GfxRenderer& renderer, const char* familyName);
+  int ensureUiFamilyLoaded(GfxRenderer& renderer, const char* familyName,
+                           SdCardFont::LoadMode mode = SdCardFont::LoadMode::Cached, void (*progress)() = nullptr);
+  bool boundedUiFontReady(int fontId) const {
+    return fontId != 0 && fontId == currentLoadedFontId() && manager_.loadMode() == SdCardFont::LoadMode::BoundedUI &&
+           !manager_.boundedReadFailed();
+  }
 
   /// Load Pocket Daily's broad reading family without changing the saved
   /// reader selection. All supported book languages use the same flattened

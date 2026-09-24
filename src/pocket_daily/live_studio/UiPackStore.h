@@ -38,14 +38,21 @@ StoreResult loadPackFromSd(const char* name, UiPackInfo* info, ThemeOverride* ov
 // reported; callers answer as for an empty store).
 bool listPacks(const std::function<void(const char* name, size_t size)>& fn);
 
-// State file (`name=...\nversion=...`). Empty name means "no pack active".
+// Alternating CRC/generation slots; verified readback precedes activation.
+// Legacy text is read only until the first successful migration. Empty name reverts.
 bool writeState(const char* name, const char* version);
 bool readState(char* name, size_t nameCap, char* versionCap, size_t versionCap2);
-void clearState();
+bool clearState();
+// Actual runtime activation, not merely a persisted selection that might fail boot validation.
+const char* activeName();
+const char* activeVersion();
+void noteActive(const char* name, const char* version);
 
 // Override scratch, heap-allocated for the duration of a load and freed by
 // releaseOverrideBuffer() - the idle baseline carries no pack buffers.
 ThemeOverride* acquireOverrideBuffer();
+// Best-effort shrink before activation; failure retains the valid bounded buffer.
+ThemeOverride* compactOverrideBuffer(ThemeOverride* buffer, size_t count);
 void releaseOverrideBuffer(ThemeOverride* buffer);
 
 // Boot path: read state, load the pack, layer it over the current theme.

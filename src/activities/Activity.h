@@ -34,6 +34,10 @@ class Activity {
 
   virtual void render(RenderLock&&) {}
 
+  // Called only while holding RenderLock. A partial/failed render must not be
+  // exported as the panel's current frame. Native activities keep legacy behavior.
+  virtual bool canCaptureFrame() const { return true; }
+
   // If immediate is true, the update will be triggered immediately.
   // Otherwise, it will be deferred until the end of the current loop iteration.
   virtual void requestUpdate(bool immediate = false);
