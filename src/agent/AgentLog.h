@@ -38,7 +38,7 @@ inline void line(const char* tag, const char* fmt, ...) {
   // Append via HalStorage so this write shares storageMutex with every other SD
   // user. This runs on the loop task while the render task may be reading SD font
   // glyphs; raw SdMan/FsFile access here would drive SdFat from two tasks at once
-  // and can trip the xTaskPriorityDisinherit panic (SdFat #518, see CLAUDE.md).
+  // and can trip the xTaskPriorityDisinherit panic (SdFat #518, see AGENTS.md).
   HalFile f = Storage.open(kLogPath, O_WRITE | O_CREAT | O_APPEND);
   if (!f) return;
 

@@ -3667,7 +3667,7 @@ void PocketDailyActivity::renderDetail() {
   // Flat line list. lineOpt: -1 normal, -2 heading (bold), >=0 = option index.
   // Reserve the worst case up front (timeline entries × 3 wrap lines + decision
   // block) — this repaints on every state change, and unreserved push_back growth
-  // fragments DRAM (CLAUDE.md rule 7).
+  // fragments DRAM (AGENTS.md resource protocol).
   const size_t maxLines = static_cast<size_t>(tlCount) * 3 + 12 + static_cast<size_t>(optCount);
   std::vector<std::string> lines;
   std::vector<int> lineFonts;

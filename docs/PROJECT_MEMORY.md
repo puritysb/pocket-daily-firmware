@@ -471,10 +471,24 @@ dev/render 404 proves no ENABLE_DEV_REMOTE_FLASH, so no dev/flash endpoint).
 ## Multi-agent collaboration — 2026-09-19
 
 - OpenCode, Claude Code, and Codex all work in this repository and in the
-  sibling app repository. Each repository's `AGENTS.md` is the single
-  operational entry point for every agent, `CLAUDE.md` holds the shared
-  constraints, and this file is the shared cross-agent memory. No agent keeps
-  a private instruction file or separate memory.
+  sibling app repository. Each repository's `AGENTS.md` is the only project
+  instruction file for every agent and this file is the shared cross-agent
+  memory. No agent keeps a private instruction file or separate memory.
+- 2026-09-24: Claude Code 2.1.277+ reads `AGENTS.md` natively, but only when
+  no `CLAUDE.md`/`CLAUDE.local.md` exists in the working directory or above.
+  The `CLAUDE.md` → `.skills/SKILL.md` symlink was removed: always-needed
+  rules moved into `AGENTS.md`, mechanisms and examples into
+  `docs/embedded-reference.md`, and the scoped `lib/Epub/` and
+  `src/agentdeck/` guides were renamed to `AGENTS.md`. Skills stay under
+  `.claude/skills/` and are indexed from `AGENTS.md` for other agents. Do not
+  reintroduce a `CLAUDE.md`.
+- Upstream sync hazard: upstream #3058 (2026-08-15, after the 2026-06-29 merge
+  base) made its rulebook the real `AGENTS.md`, turned `CLAUDE.md` into a
+  symlink to it, and moved its skills from `.claude/skills/` to `.skills/`.
+  The next `sync-upstream.sh` merge will conflict on `AGENTS.md` and may
+  rename our skills by rename detection. Keep the fork's `AGENTS.md`, port
+  upstream rule changes into it or `docs/embedded-reference.md`, keep
+  `CLAUDE.md` deleted, and keep skills where Claude Code discovers them.
 - Cross-repository protocol work (Nearby Sync v1, upload stream, direct
   sessions) proceeds on both sides in one coordinated effort: verify the
   companion implementation whenever an endpoint, record, or file layout

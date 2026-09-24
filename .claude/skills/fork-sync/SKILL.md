@@ -50,7 +50,7 @@ The PR must contain **zero AgentDeck files**. That is only cheap if you plan for
 3. Touching a cache format? On the **upstream branch** bump the version to
    **upstream's current value + 1** (e.g. `SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
    On **product `main`** the same constant stays in the reserved 128–255 range — the two
-   branches deliberately number differently. See `lib/Epub/CLAUDE.md`.
+   branches deliberately number differently. See `lib/Epub/AGENTS.md`.
 4. `./scripts/pio.sh run`, push to `origin`, open a **draft** PR (public third-party repo — discuss with
    maintainers before marking ready):
    ```bash
@@ -90,7 +90,7 @@ interaction — only header/card/usage/activity/control geometry and status clas
 shared.
 
 The behavioural contract for that dashboard (which options become buttons) is a correctness
-invariant, not a sync step — it lives in `src/agentdeck/CLAUDE.md`.
+invariant, not a sync step — it lives in `src/agentdeck/AGENTS.md`.
 
 ## Self-review
 

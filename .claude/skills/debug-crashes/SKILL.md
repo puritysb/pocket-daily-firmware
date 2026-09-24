@@ -32,7 +32,7 @@ buffer to the heap. Locals over 256 bytes belong on the heap regardless.
 
 **4. Corrupt cache files** — symptoms are wrong layout or missing text rather than a panic.
 Delete `.crosspoint/` on the SD card to force a clean re-parse, and check the format versions
-(see `lib/Epub/CLAUDE.md` and `docs/file-formats.md`). A version that was changed without a
+(see `lib/Epub/AGENTS.md` and `docs/file-formats.md`). A version that was changed without a
 bump feeds stale caches to the reader silently.
 
 **5. Watchdog timeout** — a loop or task blocked >5s. Add `vTaskDelay(1)` in tight loops and

@@ -7,7 +7,7 @@ description: Changing content that a build script generates rather than hand-wri
 
 Three asset families in this repo are **generated from source at build time**. Editing the
 output is always wrong: the next `pio run` silently overwrites it, and the change is gone
-without an error. CLAUDE.md lists which files are generated; this is how to change each one.
+without an error. AGENTS.md lists which files are generated; this is how to change each one.
 
 The invariant: **find the source, edit that, regenerate, commit the source only.**
 

@@ -1,17 +1,9 @@
-# CrossPoint Reader Development Guide
+# Embedded Reference
 
-Project: Open-source e-reader firmware for Xteink X4 (ESP32-C3)
-Mission: Provide a lightweight, high-performance reading experience focused on EPUB rendering on constrained hardware.
-
-## AI Agent Identity and Cognitive Rules
-* Role: Senior Embedded Systems Engineer (ESP-IDF/Arduino-ESP32 specialized).
-* Primary Constraint: 380KB RAM is the hard ceiling. Stability is non-negotiable.
-* Evidence-Based Reasoning: Before proposing a change, you MUST cite the specific file path and line numbers that justify the modification.
-* Anti-Hallucination: Do not assume the existence of libraries or ESP-IDF functions. If you are unsure of an API's availability for the ESP32-C3 RISC-V target, check the open-x4-sdk or official docs first.
-* No Unfounded Claims: Do not claim performance gains or memory savings without explaining the technical mechanism (e.g., DRAM vs IRAM usage).
-* Resource Justification: You must justify any new heap allocation (new, malloc, std::vector) or explain why a stack/static alternative was rejected.
-* Verification: After suggesting a fix, instruct the user on how to verify it (e.g., monitoring heap via Serial or checking a specific cache file).
----
+Background for the rules in the root `AGENTS.md`: measurements, mechanisms,
+and code examples. `AGENTS.md` is authoritative and is always read; this file
+is read on demand. When the two disagree, fix this file. Do not add rules here
+that every task needs — those belong in `AGENTS.md`.
 
 ## Platform and Hardware Constraints
 
@@ -85,11 +77,8 @@ deck snapshot dropped worst-case free heap from 11,000 B to 1,104 B.
 ### Build Environment
 * **Standard**: C++20 (`-std=c++2a`). No Exceptions, No RTTI.
 * **Logging**: ALWAYS use `LOG_INF`, `LOG_DBG`, or `LOG_ERR` from `Logging.h`. Raw Serial output is deprecated.
-* **Environments** (in `platformio.ini`):
-  * `default`: Development (LOG_LEVEL=2, serial enabled)
-  * `gh_release`: Production (LOG_LEVEL=0)
-  * `gh_release_rc`: Release candidate (LOG_LEVEL=1)
-  * `slim`: Minimal build (no serial logging)
+* **Environments**: listed in `AGENTS.md`; `platformio.ini` is authoritative
+  for each environment's flags and log level.
 
 ### Critical Build Flags
 These flags in `platformio.ini` fundamentally affect firmware behavior:
@@ -435,201 +424,6 @@ cache, or a watchdog timeout. Diagnosis procedure and instrumentation for each:
 
 ---
 
-## Git Workflow and Repository Awareness
-
-### Repository Detection Protocol
-
-**CRITICAL**: verify repository context before any git operation — never assume. This clone
-may be a fork (`origin` = personal, `upstream` = parent), a direct clone, or carry extra
-collaborator remotes. Check `git remote -v` and `git branch --show-current` first. The main
-branch here is **`main`**. See the fork section below for what that means in
-practice.
-
-### Pocket Daily Fork: two sync axes
-
-**This repo is a personal fork.** `origin` = the firmware product repository
-(`puritysb/pocket-daily-firmware`), `upstream` = the parent project
-(`crosspoint-reader/crosspoint-reader`). Local `main`
-intentionally carries the **Pocket Daily** product stack — the offline-first Pocket shell
-(`src/pocket_daily/`, `src/activities/pocket_daily/`), the bundled games
-(`src/games/`, `src/activities/games/`), and the AgentDeck Companion provider
-(`src/agentdeck/`) — layered on top of upstream. AgentDeck is one optional sync
-provider for that product, not the product itself. **None of this stack goes
-upstream.** Our `main` being far ahead of `upstream/master` is expected, not drift.
-
-- **Pulling upstream**: `./scripts/sync-upstream.sh` — **merge, never rebase**.
-- **Contributing upstream**: the PR must contain **zero** product-stack files
-  (`src/agentdeck/`, `src/pocket_daily/`, `src/activities/pocket_daily/`, `src/games/`,
-  `src/activities/games/`), which means keeping product and reader changes in separate
-  commits from the start.
-- **Downstream**: `src/agentdeck/*` is a hand-port of AgentDeck's ESP32 wire contract, with no
-  codegen — drift is a discipline, not a build gate.
-
-Full procedure for all three: **`fork-sync` skill**. Behavioural contract for the
-Companion provider: `src/agentdeck/CLAUDE.md`.
-
-### Git Operation Rules
-
-1. **Never assume branch names**:
-   ```bash
-   # Bad: git push origin main
-   # Good: git push origin $(git branch --show-current)
-   ```
-
-2. **Never assume remote names or write permissions**:
-   - **Forked repos**: Push to `origin` (your fork), submit PR to `upstream`
-   - **Direct contributors**: May push feature branches to `upstream`
-   - **Always ask**: "Should I push to origin or create a PR?"
-
-3. **Check for upstream changes before starting work**:
-   ```bash
-   # Sync fork with upstream (if applicable)
-   git fetch upstream
-   git merge upstream/main  # or upstream/master
-   ```
-
-4. **Use explicit remote and branch names**:
-   ```bash
-   # Check remotes first
-   git remote -v
-
-   # Use explicit syntax
-   git push <remote> <branch>
-   ```
-
-### Branch Naming Convention
-
-**For feature/fix branches**:
-```text
-feature/<short-description>       # New features
-fix/<issue-number>-<description>  # Bug fixes
-refactor/<component-name>         # Code refactoring
-docs/<topic>                      # Documentation updates
-```
-
-**Examples**:
-- `feature/sd-download-progress`
-- `fix/123-orientation-crash`
-- `refactor/hal-storage`
-
-### Commit Message Format
-
-**Pattern**:
-```text
-<type>: <short summary (50 chars max)>
-
-<optional detailed description>
-
-```
-
-**Types**: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`
-
-**Example**:
-```text
-feat: add real-time SD download progress bar
-
-Implements progress tracking for book downloads using
-UITheme progress bar component with heap-safe updates.
-
-Tested in all 4 orientations with 5MB+ files.
-```
-
-### When to Commit
-
-**DO commit when**:
-- User explicitly requests: "commit these changes"
-- Feature is complete and tested on device
-- Bug fix is verified working
-- Refactoring preserves all functionality
-- All tests pass (`./scripts/pio.sh run` succeeds)
-
-**DO NOT commit when**:
-- Changes are untested on actual hardware
-- Build fails or has warnings
-- Experimenting or debugging in progress
-- User hasn't explicitly requested commit
-- Files excluded by `.gitignore` would be included — always run `git status` and cross-check against `.gitignore` before staging (e.g., `*.generated.h`, `.pio/`, `compile_commands.json`, `platformio.local.ini`)
-
-**Rule**: **If uncertain, ASK before committing.**
-
----
-
-## Generated Files and Build Artifacts
-
-### Files Generated by Build Scripts
-
-**NEVER manually edit these files** - they are regenerated automatically:
-
-1. **HTML Headers** (generated by `scripts/build_html.py`):
-   - `src/network/html/*.generated.h`
-   - **Source**: HTML templates in `data/html/` directory
-   - **Triggered**: During PlatformIO `pre:` build step
-   - **To modify**: Edit source HTML in `data/html/`, not generated headers
-
-2. **I18n Headers** (generated by `scripts/gen_i18n.py`):
-   - `lib/I18n/I18nKeys.h`, `lib/I18n/I18nStrings.h`, `lib/I18n/I18nStrings.cpp`
-   - **Source**: YAML translation files in `lib/I18n/translations/` (one per language)
-   - **To modify**: Edit source YAML files, then run `python scripts/gen_i18n.py lib/I18n/translations lib/I18n/`
-   - **Commit**: Source YAML files only. All three generated files (`I18nKeys.h`, `I18nStrings.h`, `I18nStrings.cpp`) are in `.gitignore` and regenerated at build time.
-
-3. **Build Artifacts** (in `.gitignore`):
-   - `.pio/` - PlatformIO build output
-   - `build/` - Compiled binaries
-   - `*.generated.h` - Any auto-generated headers
-   - `compile_commands.json` - LSP/IDE metadata
-
-### Modifying Generated Content
-
-Find the source, edit that, regenerate, commit the source only. Per-family procedure (i18n
-YAML, HTML pages, fonts): **`generated-content` skill**.
-
-```cpp
-#include <I18n.h>
-// All user-facing text goes through tr(); StrId enum lives in generated I18nKeys.h
-renderer.drawText(FONT_UI, x, y, tr(STR_LOADING), true);
-```
-
----
-
-## Local Development Configuration
-
-`platformio.local.ini` holds per-machine settings (serial ports, personal debug flags) and
-overrides `platformio.ini`.
-
-- **NEVER commit** `platformio.local.ini` — it is gitignored
-- **NEVER put** personal info (serial ports, credentials) in `platformio.ini`
-- Extend base flags with `${base.build_flags}`; assigning `build_flags` directly replaces them
-
----
-
-## Testing and Verification Workflow
-
-### Testing Checklist
-
-**AI agent scope** (what you CAN verify):
-1. ✅ **Build**: `./scripts/pio.sh run -t clean && ./scripts/pio.sh run` (0 errors/warnings)
-2. ✅ **Quality**: `./scripts/pio.sh check` + `find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i`
-3. ✅ **Format**: Commit messages (`feat:`/`fix:`), no `.gitignore`-excluded files staged (e.g., `*.generated.h`, `.pio/`, `platformio.local.ini`)
-4. ✅ **CI**: Fix GitHub Actions failures before review
-5. ✅ **Code review**: Ensure orientation-aware logic is correct in all 4 modes by inspecting switch/case coverage
-
-**Human tester scope** (flag these for the user):
-6. 🔲 **Device**: Test on hardware
-7. 🔲 **Orientations**: Verify all 4 modes (Portrait/Inverted/Landscape CW/CCW)
-8. 🔲 **Heap**: `ESP.getFreeHeap()` > 50KB, no leaks
-9. 🔲 **Cache**: If EPUB modified, delete `.crosspoint/` and verify re-parse
-
-### CI/CD Pipeline Awareness
-
-GitHub Actions run on every push to a PR (see `.github/workflows/`).
-
-**Rules**:
-- **Fix CI failures BEFORE** requesting review
-- Format check fails → run clang-format locally
-- Build check fails → fix compile errors
-
----
-
 ## Serial Monitoring and Live Debugging
 
 **Monitor**: `python3 scripts/debugging_monitor.py` (color-coded, recommended) or
@@ -660,8 +454,4 @@ incrementing). The upstream-contribution branch (`bilingual-toggle-upstream`) us
 `upstream + 1` instead.
 
 Cache layout, the full invalidation triggers, and how to clear by hand:
-**`lib/Epub/CLAUDE.md`**. Format documentation: `docs/file-formats.md`.
-
----
-
-Philosophy: We are building a dedicated e-reader, not a Swiss Army knife. If a feature adds RAM pressure without significantly improving the reading experience, it is Out of Scope.
+**`lib/Epub/AGENTS.md`**. Format documentation: `docs/file-formats.md`.

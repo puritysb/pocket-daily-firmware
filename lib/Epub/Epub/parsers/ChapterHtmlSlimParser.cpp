@@ -84,7 +84,7 @@ inline char asciiLower(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<cha
 // Case-insensitive comparison of the primary language subtag (the part before the first '-')
 // of two BCP 47 tags. Tags are case-insensitive per BCP 47, so "EN", "en", and "en-US" all
 // share the primary subtag "en". Operates on the raw C strings with no heap allocation, which
-// matters in the parse hot path (see String Policy in CLAUDE.md). Returns false if either
+// matters in the parse hot path (see the string rule in AGENTS.md). Returns false if either
 // primary subtag is empty.
 bool primarySubtagEqualsIgnoreCase(const char* a, const char* b) {
   if (!a || !b || !*a || !*b || *a == '-' || *b == '-') return false;
