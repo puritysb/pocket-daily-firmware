@@ -6,8 +6,8 @@
 #include <cstdio>
 #include <cstring>
 
-#include "agentdeck/glance_format.h"
 #include "fontIds.h"
+#include "pocket_daily/home/GlanceFormat.h"
 
 // Moved unchanged from PocketDailyActivity.cpp (P1-3, docs/pocket-profile-v1.md)
 // so the device and the host preview draw Home and the Daily Brief with the same
@@ -234,7 +234,7 @@ int drawWeatherPoster(const GfxRenderer& renderer, const PocketDaily::Weather& w
   // Today's rain window is the single most actionable fact on this panel, so it
   // gets the line directly under the number rather than a column of its own.
   char rain[40] = {0};
-  const bool hasRain = AgentDeck::GlanceFormat::formatRainLine(rain, sizeof(rain), weather) > 0;
+  const bool hasRain = GlanceFormat::formatRainLine(rain, sizeof(rain), weather) > 0;
   const int rainH = hasRain ? renderer.getLineHeight(SMALL_FONT_ID) + 4 : 0;
   const int heroH = maxHeight - rainH;
   // Runtime font metrics can make the rain line taller than cppcheck infers.
@@ -366,7 +366,7 @@ int drawForecastGrid(const GfxRenderer& renderer, const PocketDaily::Weather& we
     if (i > 0) renderer.drawLine(left, y + 2, left, y + height - 2);
 
     char weekday[4] = {0};
-    if (!AgentDeck::GlanceFormat::formatWeekday(weekday, sizeof(weekday), day.date))
+    if (!GlanceFormat::formatWeekday(weekday, sizeof(weekday), day.date))
       snprintf(weekday, sizeof(weekday), "D%d", i + 1);
     const int dw = renderer.getTextWidth(SMALL_FONT_ID, weekday, EpdFontFamily::BOLD);
     if (highlight) renderer.fillRect(cx - dw / 2 - 6, chipTop, dw + 12, chipH, true);

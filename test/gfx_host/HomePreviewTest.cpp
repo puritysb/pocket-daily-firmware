@@ -157,14 +157,23 @@ TEST_P(HomePreview, ItemOrderDecidesThePrimaryPanel) {
   EXPECT_EQ(pdui_render_home(context.get(), &readingFirst, PDUI_SAMPLE_ALL, 99), PDUI_OK);
 }
 
-TEST_P(HomePreview, MonitoringItemAppearsOnlyWithCarriedUsage) {
-  auto p = defaults();
-  p.home_items[0] = 4;
-  p.home_items[1] = 1;
-  p.home_count = 2;
-  const auto withUsage = home(p, PDUI_SAMPLE_ALL);
-  const auto withoutUsage = home(p, PDUI_SAMPLE_ALL & ~PDUI_SAMPLE_USAGE);
-  EXPECT_NE(withUsage, withoutUsage);
+TEST_P(HomePreview, RetiredProviderAndMonitorItemsAndSamplesDrawNothing) {
+  // provider (3) and monitor (4) were fed only by the retired AgentDeck
+  // daemon: a profile may still name them, and the retired sample bits stay
+  // accepted, but neither changes a single pixel.
+  auto readingOnly = defaults();
+  readingOnly.home_items[0] = 1;
+  readingOnly.home_count = 1;
+  auto withRetired = defaults();
+  withRetired.home_items[0] = 4;
+  withRetired.home_items[1] = 1;
+  withRetired.home_items[2] = 3;
+  withRetired.home_count = 3;
+  const auto expected = home(readingOnly, PDUI_SAMPLE_ALL);
+  EXPECT_EQ(home(withRetired, PDUI_SAMPLE_ALL), expected);
+  const uint32_t retired = PDUI_SAMPLE_PROVIDER | PDUI_SAMPLE_USAGE;
+  EXPECT_EQ(home(readingOnly, PDUI_SAMPLE_ALL & ~retired), expected);
+  EXPECT_EQ(brief(defaults(), PDUI_SAMPLE_ALL & ~retired), brief(defaults(), PDUI_SAMPLE_ALL));
 }
 
 TEST_P(HomePreview, BriefSectionOrderIsHonoured) {
@@ -206,32 +215,33 @@ TEST_P(HomePreview, InvalidProfilesAreRejectedAndLeaveNoFrame) {
 // X3 (528x792 portrait) and X4 (480x800 portrait) physical landscape panels.
 // The order and fallback rules shared by the device overview and the preview.
 TEST(HomeRowSources, FollowProfileOrderAndSkipItemsWithoutContent) {
+  using PocketDaily::DailyProfile::HomeItem;
   using PocketDaily::Home::RowSource;
-  auto profile = PocketDaily::DailyProfile::defaults();  // reading, study, provider
+  auto profile = PocketDaily::DailyProfile::defaults();  // reading, study
   PocketDaily::Home::RowAvailability all;
-  all.book = all.appCards = all.provider = all.monitor = true;
+  all.book = all.appCards = true;
   RowSource out[PocketDaily::DailyProfile::HOME_ITEM_CAP];
-  ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, all, out), 3);
+  ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, all, out), 2);
   EXPECT_EQ(out[0], RowSource::Reading);
   EXPECT_EQ(out[1], RowSource::AppCards);
-  EXPECT_EQ(out[2], RowSource::Provider);
 
-  profile.homeItems[0] = PocketDaily::DailyProfile::HomeItem::Monitor;
-  profile.homeItems[1] = PocketDaily::DailyProfile::HomeItem::Study;
-  profile.homeCount = 2;
+  // Retired daemon items still parse but never produce a page.
+  profile.homeItems[0] = HomeItem::Monitor;
+  profile.homeItems[1] = HomeItem::Study;
+  profile.homeItems[2] = HomeItem::Provider;
+  profile.homeCount = 3;
   PocketDaily::Home::RowAvailability none;
   // No cards: the daily word stands in while the profile keeps it...
   ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, none, out), 1);
   EXPECT_EQ(out[0], RowSource::DailyWord);
-  // ...and Study adds nothing when it does not; monitoring needs carried data.
+  // ...and Study adds nothing when it does not.
   profile.dailyWord = false;
   EXPECT_EQ(PocketDaily::Home::homeRowSources(profile, none, out), 0);
-  ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, all, out), 2);
-  EXPECT_EQ(out[0], RowSource::Monitor);
-  EXPECT_EQ(out[1], RowSource::AppCards);
+  ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, all, out), 1);
+  EXPECT_EQ(out[0], RowSource::AppCards);
   // A Word item of its own: Study shows only the app cards, never the word twice.
   profile.dailyWord = true;
-  profile.homeItems[0] = PocketDaily::DailyProfile::HomeItem::Word;
+  profile.homeItems[0] = HomeItem::Word;
   ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, none, out), 1);
   EXPECT_EQ(out[0], RowSource::DailyWord);
   ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, all, out), 2);

@@ -156,6 +156,9 @@ and `nm -S --size-sort -C`. These are link-time footprints, not measured peak
 heap or guaranteed reclaimable amounts. Flash-resident `0x3c...` symbols were
 excluded from DRAM accounting.
 
+> 2026-09-25: the `src/agentdeck/` rows below were removed with the AgentDeck daemon
+> path (static RAM fell from 129,944 B to 113,272 B in the default build).
+
 | Item | Current Pocket evidence | Interpretation |
 | --- | --- | --- |
 | ESP timer stack | SDK header: 8192 B; upstream tuned: 4096 B | 4096 B reservation difference; validate callback high-water marks before reducing |

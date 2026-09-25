@@ -246,15 +246,9 @@ class CrossPointSettings {
   // This fork is a Pocket reader product. The legacy setting remains readable
   // for file compatibility, but new installs start on the Pocket surface.
   uint8_t startupApp = STARTUP_AGENTDECK;
-  // AgentDeck is an optional companion surface, not a prerequisite for the
-  // Pocket reader. This is deliberately a new, default-off key: older Pocket
-  // settings commonly have agentPullSyncEnabled=1, and must not silently
-  // reactivate the legacy networking plane after this product split.
-  uint8_t agentDeckCompanionEnabled = 0;
-  // When the optional AgentDeck companion is enabled, permit timer-wake feed
-  // pulls and the associated battery cadence. Kept as a separate preference
-  // so a user can use the dashboard interactively without scheduled radio use.
-  uint8_t agentPullSyncEnabled = 0;
+  // The retired AgentDeck keys (agentDeckCompanionEnabled, agentPullSyncEnabled)
+  // are no longer read or written: settings.json is keyed, so an old file
+  // still loads and the next save simply omits them.
   // Show the current book's cached cover on Pocket Daily's retained frame.
   // Disable when the title/cover would expose private reading in a shared space.
   uint8_t pocketDailySleepCover = 1;

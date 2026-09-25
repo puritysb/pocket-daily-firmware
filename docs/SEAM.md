@@ -203,9 +203,8 @@ Fork-resident product patches (no upstream intent):
   tiny rectangles never produce a zero page-count divisor. Keep the source
   boundary test `ThemeMetricBindings` when reconciling upstream theme changes.
 - `src/network/FirmwareFlasher.{h,cpp}` — shared staging buffer + image
-  validation used by Pocket transfer/diagnostics. AgentDeck OTA decode and
-  pulled-image hashing also borrow it synchronously on the main loop, finishing
-  before validation/flash; they hold no pointer across events or activities.
+  validation used by Pocket transfer/diagnostics. (The AgentDeck OTA decode
+  and pulled-image hashing that also borrowed it were removed 2026-09-25.)
 - `src/network/OtaUpdater.cpp`, `src/network/WebDAVHandler.cpp` — OTA channel,
   WebDAV guards.
 - `src/CrossPointSettings.h` — Pocket preference fields.
@@ -214,7 +213,15 @@ Fork-resident product patches (no upstream intent):
   declaration set (Pocket implementations attach from `ProductBoot.cpp` via
   free-function definitions — see include rules).
 - `lib/hal/` (`HalSystem`, `HalPowerManager`, `HalGPIO`, `HalStorage`) —
-  product HAL features (breadcrumbs, sleep, button semantics).
+  product HAL features (breadcrumbs, sleep, button semantics). The AgentDeck
+  timed-wake cadence (`startTimedDeepSleep`, `WakeupReason::Timer`) and its
+  `main.cpp` half (`enterTimedDeepSleep`, the `timedSleep*` RTC words,
+  `PowerCycle.h`) were removed 2026-09-25; upstream's wake handling is back to
+  its own four reasons.
+- `src/CrossPointSettings.h` / `src/SettingsList.h` — the AgentDeck toggles
+  (`agentDeckCompanionEnabled`, `agentPullSyncEnabled`) were removed
+  2026-09-25. `settings.json` is keyed, so older files load unchanged and the
+  keys drop out on the next save.
 - `src/RecentBooksStore.*`, `src/SdCardFontSystem.*`, themes/icons,
   `platformio.ini`, CI workflows, `README.md`/`USER_GUIDE.md` — product
   identity, build, and release config.

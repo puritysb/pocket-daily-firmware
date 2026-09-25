@@ -24,7 +24,6 @@
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
-#include "PowerCycle.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "SettingsList.h"
@@ -136,28 +135,6 @@ unsigned long t2 = 0;
 // Definitions for SilentRestart.h. RTC_NOINIT survives ESP.restart() but not power loss.
 RTC_NOINIT_ATTR uint32_t silentRebootMagic;
 RTC_NOINIT_ATTR uint32_t silentRebootTarget;
-// Epoch estimate carried across an AgentDeck timed deep sleep (PowerCycle.h).
-// The timed-sleep path holds the battery latch, so the RTC domain — and these
-// words — survive the sleep; a power loss clears the magic with them.
-RTC_NOINIT_ATTR uint32_t timedSleepWakeEpoch;
-RTC_NOINIT_ATTR uint32_t timedSleepMagic;
-constexpr uint32_t TIMED_SLEEP_MAGIC = 0xADC0FFEE;
-// Sleep-glance paint counter (PowerCycle.h). Counts consecutive timed-sleep
-// frames so the renderer can insert a ghost-clearing FULL_REFRESH every Nth
-// paint; self-validating (RTC memory is garbage on cold boot).
-RTC_NOINIT_ATTR uint32_t timedSleepPaintCount;
-RTC_NOINIT_ATTR uint32_t timedSleepPaintMagic;
-constexpr uint32_t TIMED_PAINT_MAGIC = 0xADC0FFEF;
-
-uint32_t timedSleepPaintSerial() {
-  if (timedSleepPaintMagic != TIMED_PAINT_MAGIC) {
-    timedSleepPaintMagic = TIMED_PAINT_MAGIC;
-    timedSleepPaintCount = 0;
-  }
-  return timedSleepPaintCount;
-}
-
-void bumpTimedSleepPaintSerial() { timedSleepPaintCount = timedSleepPaintSerial() + 1; }
 constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
@@ -284,9 +261,9 @@ void enterDeepSleep(bool fromTimeout = false) {
 
   // An information surface keeps informing while it sleeps: give the current
   // activity the chance to own the retained frame instead of the sleep screen.
-  // The AgentDeck dashboard paints its glance here, so powering the device down
-  // leaves weather / quota / work summary on the panel for as long as it sits
-  // there. Runs BEFORE deepSleepInProgress so the render task is still normal.
+  // Pocket Daily paints its Daily Brief here, so powering the device down
+  // leaves reading, weather and today's schedule on the panel for as long as
+  // it sits there. Runs BEFORE deepSleepInProgress so the render task is still normal.
   const bool ownSleepFrame = activityManager.paintSleepFrame();
 
   const bool isQuickResumeSleep =
@@ -323,43 +300,6 @@ void enterDeepSleep(bool fromTimeout = false) {
   LOG_DBG("MAIN", "Entering deep sleep");
 
   powerManager.startDeepSleep(gpio);
-}
-
-// AgentDeck M6 pull-sync cadence (PowerCycle.h). Unlike enterDeepSleep():
-//  - the current activity is NOT replaced with SleepActivity — the e-ink keeps
-//    holding the Face ("a surface that always shows something"), and the same
-//    frame is saved for the quick-resume repaint at wake;
-//  - quick-resume is forced regardless of the user's sleep-screen setting;
-//  - the battery latch stays held so the sleep timer can fire on battery.
-void enterTimedDeepSleep(uint32_t seconds, uint32_t epochNowSec) {
-  HalPowerManager::Lock powerLock;
-  {
-    // No render may be in flight while we snapshot the framebuffer and put the
-    // panel to sleep. Callers requestUpdateAndWait() first; this is the belt.
-    RenderLock lock;
-    APP_STATE.lastSleepFromReader = false;
-    APP_STATE.showBootScreen = false;  // wake takes the quick-resume path
-    APP_STATE.saveToFile();
-    deepSleepInProgress = true;
-    saveSleepFrameBuffer();
-  }
-
-  if (epochNowSec) {
-    timedSleepWakeEpoch = epochNowSec + seconds;  // estimate of the wake instant
-    timedSleepMagic = TIMED_SLEEP_MAGIC;
-  } else {
-    timedSleepMagic = 0;
-  }
-
-  if (WiFi.getMode() != WIFI_MODE_NULL) {
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
-  }
-
-  halTiltSensor.deepSleep();
-  display.deepSleep();
-  LOG_DBG("MAIN", "Entering timed deep sleep (%us)", (unsigned)seconds);
-  powerManager.startTimedDeepSleep(gpio, seconds);
 }
 
 void setupDisplayAndFonts(bool seamless = false) {
@@ -474,17 +414,6 @@ void setup() {
       // If USB power caused a cold boot, go back to sleep
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");
       powerManager.startDeepSleep(gpio);
-      break;
-    case HalGPIO::WakeupReason::Timer:
-      // AgentDeck pull-sync wake (enterTimedDeepSleep). Seed the system clock
-      // from the carried wake-instant estimate so "as of" ages render honestly
-      // before any network sync; the next feed pull re-anchors it precisely.
-      if (timedSleepMagic == TIMED_SLEEP_MAGIC && timedSleepWakeEpoch > 1700000000u) {
-        const timeval tv = {(time_t)timedSleepWakeEpoch, 0};
-        settimeofday(&tv, nullptr);
-        LOG_DBG("MAIN", "Timer wake: clock seeded from RTC estimate");
-      }
-      timedSleepMagic = 0;
       break;
     case HalGPIO::WakeupReason::AfterFlash:
       // After flashing, just proceed to boot

@@ -160,20 +160,6 @@ Sample buildSample(uint32_t samples) {
     }
     s.glance.valid = true;
   }
-  if (samples & SampleUsage) {
-    auto& a = s.glance.usage[s.glance.usageCount++];
-    copy(a.provider, sizeof(a.provider), "claude");
-    copy(a.label, sizeof(a.label), "5h window");
-    a.primaryPercent = 42;
-    copy(a.primaryResetHm, sizeof(a.primaryResetHm), "16:00");
-    auto& b = s.glance.usage[s.glance.usageCount++];
-    copy(b.provider, sizeof(b.provider), "codex");
-    copy(b.label, sizeof(b.label), "weekly");
-    b.primaryPercent = 71;
-    b.secondaryPercent = -1;
-    copy(s.glance.wrapup[s.glance.wrapupCount++], PocketDaily::Glance::WRAPUP_BYTES, "Finished the sync fix.");
-    s.glance.valid = true;
-  }
   copy(s.word.cardId, sizeof(s.word.cardId), "local:word");
   copy(s.word.title, sizeof(s.word.title), "Daily word");
   copy(s.word.question, sizeof(s.word.question), "serendipity - finding something good without looking for it");
@@ -194,26 +180,22 @@ int buildRows(const PocketDaily::DailyProfile::Profile& profile, const Sample& s
   PocketDaily::Home::RowAvailability available;
   available.book = samples & SampleBook;
   available.appCards = !cards.empty() || (samples & SampleStudy);
-  available.provider = samples & SampleProvider;
-  available.monitor = samples & SampleUsage;
   RowSource sources[PocketDaily::DailyProfile::HOME_ITEM_CAP];
   const int count = PocketDaily::Home::homeRowSources(profile, available, sources);
   int n = 0;
   for (int k = 0; k < count && n < cap; ++k) {
     switch (sources[k]) {
       case RowSource::Reading:
-        rows[n++] = {true, false, false, false, false, false, "", "Continue Reading", "Pride and Prejudice"};
+        rows[n++] = {true, false, false, false, false, "", "Continue Reading", "Pride and Prejudice"};
         break;
       case RowSource::AppCards:
         if (cards.empty()) {
-          rows[n++] = {
-              false, true, false, true, false, false, sample.card.cardId, sample.card.title, sample.card.question};
+          rows[n++] = {false, true, true, false, false, sample.card.cardId, sample.card.title, sample.card.question};
           break;
         }
         for (size_t i = 0; i < cards.size() && n < cap; ++i)
           rows[n++] = {false,
                        true,
-                       false,
                        true,
                        false,
                        !cards[i].image.empty(),
@@ -222,14 +204,7 @@ int buildRows(const PocketDaily::DailyProfile::Profile& profile, const Sample& s
                        cards[i].summary.c_str()};
         break;
       case RowSource::DailyWord:
-        rows[n++] = {
-            false, true, false, false, true, false, sample.word.cardId, sample.word.title, sample.word.question};
-        break;
-      case RowSource::Provider:
-        rows[n++] = {false, true, false, false, false, false, "", "Pocket item", "A carried provider card"};
-        break;
-      case RowSource::Monitor:
-        rows[n++] = {false, false, true, false, false, false, "", "Monitoring", ""};
+        rows[n++] = {false, true, false, true, false, sample.word.cardId, sample.word.title, sample.word.question};
         break;
     }
   }

@@ -43,8 +43,7 @@ Profile defaults() {
   Profile p;
   p.homeItems[0] = HomeItem::Reading;
   p.homeItems[1] = HomeItem::Study;
-  p.homeItems[2] = HomeItem::Provider;
-  p.homeCount = 3;
+  p.homeCount = 2;
   p.sleepSections[0] = SleepSection::Reading;
   p.sleepSections[1] = SleepSection::Study;
   p.sleepSections[2] = SleepSection::Weather;

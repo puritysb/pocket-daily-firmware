@@ -10,6 +10,8 @@ namespace PocketDaily::DailyProfile {
 // Study is the companion's own cards ("My cards"); Word is the firmware's daily
 // word from the built-in list or an SD learning pack. Without Word in the
 // profile, Study falls back to the daily word when `dailyWord` is set (v1).
+// Provider and Monitor were fed only by the retired AgentDeck daemon: they
+// still parse, validate and encode, are not advertised, and are never shown.
 enum class HomeItem : uint8_t { Reading = 1, Study = 2, Provider = 3, Monitor = 4, Word = 5 };
 enum class WeatherPanel : uint8_t { Bottom = 0, Top = 1, Off = 2 };
 enum class SleepMode : uint8_t { Brief = 0, Reader = 1 };
@@ -36,8 +38,9 @@ struct Profile {
   bool sleeps(SleepSection section) const;
 };
 
-// Exactly the pre-profile behaviour: reading, study, provider; weather below;
-// next event on; Daily Brief with reading, study, weather, today.
+// Reading, study; weather below; next event on; Daily Brief with reading,
+// study, weather, today. (Before the daemon was retired the defaults also
+// listed provider, which now shows nothing.)
 Profile defaults();
 bool operator==(const Profile& a, const Profile& b);
 inline bool operator!=(const Profile& a, const Profile& b) { return !(a == b); }

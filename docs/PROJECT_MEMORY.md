@@ -5,6 +5,20 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-25 AgentDeck daemon removed; app-provided glance (docs/
+  pocket-glance-v1.md). Deleted src/agentdeck/**, the Pocket Daily daemon path
+  (Wi-Fi join, discovery, pairing, feed/outbox, pull + WS OTA, asset sync,
+  attention/decision UI, deck cache, timed-wake cadence in main.cpp and
+  HalPowerManager/HalGPIO), the two AgentDeck settings (keyed JSON: old files
+  load), provider glyphs and agentdeck-surface.json. New POST
+  /api/pocket/v1/glance (Sync profiles, content admission, strict ≤2048 B JSON,
+  404 B CRC record /.crosspoint/pocket-glance.bin saved temp→verify→swap with
+  .bak fallback); status `pocketGlance: 1`; an unset clock is set from
+  savedEpoch; utcOffsetMinutes drives the daily-word day and the local-day roll.
+  Profile provider/monitor still parse but are not advertised or shown;
+  defaults are reading, study. Static RAM 129,944 → 113,272 B (default), flash
+  6,111,695 → 5,980,237 B. 389 host tests. Not yet exercised on a reader.
+
 - 2026-09-25 My cards (docs/pocket-profile-v1.md): profile IDs `word` (Home
   item 5, the daily word as its own page; Study then shows only app cards) and
   `card` (sleep section 5, first app card with its image, shown even while a

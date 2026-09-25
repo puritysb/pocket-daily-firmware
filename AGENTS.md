@@ -31,8 +31,6 @@ improving reading is out of scope.
   its working directory, so **read the scoped file before editing that
   subtree**:
   - `lib/Epub/AGENTS.md` — cache formats, version bytes, invalidation.
-  - `src/agentdeck/AGENTS.md` — fork-only sync substrate, product boundary,
-    attention-steering invariant.
 - Task procedures live in `.claude/skills/<name>/SKILL.md`. Claude Code
   discovers them automatically; every other agent reads the matching file
   directly when the task fits:
@@ -46,7 +44,7 @@ improving reading is out of scope.
   | `refactor-for-review` | refactoring, cleaning up, or preparing a change for PR |
   | `debug-crashes` | chasing a panic, reboot, hang, or watchdog timeout |
   | `firmware-deploy` | getting a build onto the device |
-  | `fork-sync` | pulling upstream, opening an upstream PR, re-porting the AgentDeck contract |
+  | `fork-sync` | pulling upstream, opening an upstream PR |
   | `generated-content` | changing i18n YAML, HTML pages, or fonts |
 
 - `docs/PROJECT_MEMORY.md` is the shared cross-session, cross-agent memory.
@@ -100,10 +98,10 @@ and flashing. The app repository owns iOS/iPadOS/macOS code and App Store
 assets. Bluetooth records, endpoint payloads, file layouts, and update rules
 are cross-repository contracts; verify both sides when any of them changes.
 
-`main` carries the Pocket Daily product stack — `src/pocket_daily/`,
-`src/activities/pocket_daily/`, and the AgentDeck Companion provider
-`src/agentdeck/` — layered on upstream. AgentDeck is one optional sync
-provider, not the product. Being far ahead of `upstream/master` is expected.
+`main` carries the Pocket Daily product stack — `src/pocket_daily/` and
+`src/activities/pocket_daily/` — layered on upstream. The AgentDeck daemon
+provider (`src/agentdeck/`) was removed on 2026-09-25; the companion app is the
+only content source. Being far ahead of `upstream/master` is expected.
 
 - Pull upstream only with `./scripts/sync-upstream.sh`: merge, never rebase.
 - An upstream PR contains zero product-stack files, so keep product and reader

@@ -1,20 +1,17 @@
 ---
 name: fork-sync
-description: Keeping this fork in sync along both axes. Use when pulling upstream crosspoint-reader changes, resolving sync conflicts, contributing a general feature back upstream, opening an upstream PR, or re-porting the AgentDeck ESP32 wire contract into src/agentdeck. Covers merge-not-rebase, splitting AgentDeck code out of upstream PRs, cache-version numbering per branch, and the downstream protocol port.
+description: Keeping this fork in sync with upstream. Use when pulling upstream crosspoint-reader changes, resolving sync conflicts, contributing a general feature back upstream, or opening an upstream PR. Covers merge-not-rebase, splitting Pocket Daily product code out of upstream PRs, and cache-version numbering per branch.
 ---
 
 # Fork Sync
 
-This repo syncs in **two directions**, and confusing them is the main failure mode.
-
-- **Upstream axis** — `crosspoint-reader/crosspoint-reader` → here. Reader/EPUB/rendering
-  improvements flow in; general fixes flow back out as PRs.
-- **Downstream axis** — the **AgentDeck** repo's ESP32 wire contract → `src/agentdeck/*`.
-  A hand-port, not a dependency. Nothing flows back this way.
+This repo syncs with **upstream** — `crosspoint-reader/crosspoint-reader` → here.
+Reader/EPUB/rendering improvements flow in; general fixes flow back out as PRs. (The former
+downstream AgentDeck wire-contract port, `src/agentdeck/*`, was removed on 2026-09-25.)
 
 `origin` = the Pocket Daily firmware product (`puritysb/pocket-daily-firmware`),
 `upstream` = the parent project. Local `main` intentionally carries the Pocket Daily product
-stack, including the optional AgentDeck companion provider, on top of upstream. **Pocket
+stack on top of upstream. **Pocket
 Daily product code is downstream-only and never goes upstream.**
 
 ## Pulling upstream — merge, never rebase
@@ -32,20 +29,20 @@ Our `main` being far ahead of `upstream/master` is **expected, not drift**.
 
 Why merge: `main` has Pocket Daily product commits on top. A rebase replays all of them and forces
 re-resolving the same conflicts every sync; a merge resolves once and preserves the history.
-Conflicts land almost exclusively on the **AgentDeck-touched shared files** (`ActivityManager`,
-`HomeActivity`, `WifiSelectionActivity`, theme files) — **resolve by keeping BOTH sides**. New
-`src/agentdeck/*` files never conflict.
+Conflicts land almost exclusively on the **Pocket-touched shared files** (`ActivityManager`,
+`HomeActivity`, `WifiSelectionActivity`, theme files; see `docs/SEAM.md`) — **resolve by keeping
+BOTH sides**. `src/pocket_daily/*` files never conflict.
 
 ## Contributing a general feature upstream
 
-The PR must contain **zero AgentDeck files**. That is only cheap if you plan for it:
+The PR must contain **zero Pocket Daily product files**. That is only cheap if you plan for it:
 
-1. Keep reader/rendering changes and AgentDeck changes in **separate commits from the start**.
+1. Keep reader/rendering changes and product changes in **separate commits from the start**.
    Mixing concerns in one commit makes extraction painful later.
 2. Branch from upstream and cherry-pick only the relevant commits:
    ```bash
    git checkout -b feature/<name>-upstream upstream/master
-   git cherry-pick <epub-commit> [<font-commit> ...]   # exclude AgentDeck commits
+   git cherry-pick <epub-commit> [<font-commit> ...]   # exclude product commits
    ```
 3. Touching a cache format? On the **upstream branch** bump the version to
    **upstream's current value + 1** (e.g. `SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
@@ -58,46 +55,12 @@ The PR must contain **zero AgentDeck files**. That is only cheap if you plan for
      --base master --head <your-user>:feature/<name>-upstream --draft
    ```
 
-## Downstream: AgentDeck wire-contract port
-
-`src/agentdeck/*` is a **hand-port** of AgentDeck's ESP32 wire contract — the files carry a
-*"TRIMMED port of AgentDeck esp32/src/net/protocol"* header. The SSOT lives in the AgentDeck repo:
-
-- Human-readable client subset: `AgentDeck/docs/esp32-client-contract.md`
-- Machine-readable: `AgentDeck/shared/src/protocol.ts` (`DISPLAY_FORWARDED_EVENTS` /
-  `SERIAL_FORWARDED_EVENTS`) and the `sendDeviceInfo` field list in
-  `AgentDeck/esp32/src/net/protocol.cpp`
-
-There is **no C/C++ codegen** for this contract (quicktype emits Swift/Kotlin only — unusable
-on the no-PSRAM C3 with ArduinoJson). **Drift is a discipline, not a build gate.**
-
-When AgentDeck bumps the contract (adds/renames a forwarded event, changes a `device_info`
-field), re-port the affected files:
-`src/agentdeck/{ws_client,protocol,mdns_discovery,udp_discovery,agent_state,agent_commands}.*`.
-Keep the port minimal — a display-only client may accept-and-ignore any inbound `type` it
-doesn't render.
-
-The fork emits both `client_register` and `device_info` on connect, with runtime board strings
-`xteink_x3` / `xteink_x4`; `display_state` / `set_orientation` may remain accept-and-ignore for
-the reader activity. The AgentDeck side of this discipline lives in
-`AgentDeck/docs/esp32.md § Downstream client port sync`.
-
-**E-ink dashboard layout** is the one part with tooling: the allocation-free geometry SSOT is
-`esp32/src/ui/eink/eink_dashboard_layout.h` in AgentDeck, mirrored byte-for-byte here by
-AgentDeck's `scripts/sync-xteink-eink-dashboard.sh`. Run it with `--check` after any layout
-change. CrossPoint keeps its own GfxRenderer, font loading, button hints, and detail
-interaction — only header/card/usage/activity/control geometry and status classification are
-shared.
-
-The behavioural contract for that dashboard (which options become buttons) is a correctness
-invariant, not a sync step — it lives in `src/agentdeck/AGENTS.md`.
-
 ## Self-review
 
-- Merged, not rebased? Is `src/agentdeck/*` still present and building after the merge?
+- Merged, not rebased? Do `src/pocket_daily/*` and the hooks in `docs/SEAM.md` still build?
 - Conflict resolutions in shared files: did you keep **both** sides, or silently drop the
-  AgentDeck half?
-- Upstream PR: `git diff --stat upstream/master...HEAD` — does any `src/agentdeck/` path appear?
+  Pocket Daily half?
+- Upstream PR: `git diff --stat upstream/master...HEAD` — does any `src/pocket_daily/` path appear?
   If yes, the branch is not ready.
 - Cache version bumped on the correct numbering line for the branch you are on?
 - `./scripts/pio.sh run` clean before pushing.

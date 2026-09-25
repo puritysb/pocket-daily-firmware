@@ -25,7 +25,7 @@ rules. These skills load on demand.
 | `refactor-for-review` | refactoring, cleaning up, or preparing a change for PR |
 | `debug-crashes` | chasing a panic, reboot, hang, or watchdog timeout |
 | `firmware-deploy` | getting a build onto the device, over USB or SD card |
-| `fork-sync` | pulling upstream, opening an upstream PR, re-porting the AgentDeck contract |
+| `fork-sync` | pulling upstream, opening an upstream PR |
 | `generated-content` | changing i18n YAML, HTML pages, or fonts — anything a build script emits |
 
 The first five are **decision procedures**: judgment `AGENTS.md` cannot afford
@@ -34,8 +34,7 @@ only when relevant. Each ends with a self-review checklist the agent runs
 against its own diff before handing it back — those double as a fast PR rubric.
 
 Some guidance lives in **directory-scoped** `AGENTS.md` files instead:
-`lib/Epub/AGENTS.md` (cache formats and invalidation) and
-`src/agentdeck/AGENTS.md` (the attention-steering invariant). Claude Code loads
+`lib/Epub/AGENTS.md` (cache formats and invalidation). Claude Code loads
 them when it opens a file in that subtree; other agents are told by the root
 `AGENTS.md` to read them before editing there.
 

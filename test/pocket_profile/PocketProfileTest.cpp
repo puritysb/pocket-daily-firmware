@@ -28,13 +28,13 @@ std::string replaced(std::string text, const std::string& from, const std::strin
 }
 }  // namespace
 
-TEST(PocketProfile, DefaultsReproduceTheFixedPreProfileBehaviour) {
+TEST(PocketProfile, DefaultsShowReadingAndStudyWithoutRetiredItems) {
   const auto p = defaults();
   ASSERT_TRUE(valid(p));
-  ASSERT_EQ(p.homeCount, 3);
+  ASSERT_EQ(p.homeCount, 2);
   EXPECT_EQ(p.homeItems[0], HomeItem::Reading);
   EXPECT_EQ(p.homeItems[1], HomeItem::Study);
-  EXPECT_EQ(p.homeItems[2], HomeItem::Provider);
+  EXPECT_FALSE(p.shows(HomeItem::Provider));
   EXPECT_FALSE(p.shows(HomeItem::Monitor));
   EXPECT_TRUE(p.dailyWord);
   EXPECT_EQ(p.weather, WeatherPanel::Bottom);
@@ -77,7 +77,7 @@ TEST(PocketProfile, AcceptsTheDailyWordItemAndThePinnedCardSection) {
   char out[1024];
   const std::string json(out, writeJson(p, 2, "5B09AF70", out, sizeof(out)));
   EXPECT_NE(json.find(R"("items":["word","study"])"), std::string::npos);
-  EXPECT_NE(json.find(R"("homeItems":["reading","study","provider","monitor","word"])"), std::string::npos);
+  EXPECT_NE(json.find(R"("homeItems":["reading","study","word"])"), std::string::npos);
   EXPECT_NE(json.find(R"("sleepSections":["reading","study","weather","today","card"])"), std::string::npos);
   // Still at most four Home items and four sleep sections.
   EXPECT_FALSE(
@@ -125,7 +125,7 @@ TEST(PocketProfile, ResponseRoundTripsAndAdvertisesAcceptedIds) {
   const std::string json(out, n);
   EXPECT_NE(json.find(R"("generation":7)"), std::string::npos);
   EXPECT_NE(json.find(R"("deviceID":"5B09AF70")"), std::string::npos);
-  EXPECT_NE(json.find(R"("homeItems":["reading","study","provider","monitor","word"])"), std::string::npos);
+  EXPECT_NE(json.find(R"("homeItems":["reading","study","word"])"), std::string::npos);
   EXPECT_NE(json.find(R"("maxHomeItems":4)"), std::string::npos);
   // The profile part of the response is itself an accepted document.
   const auto home = json.find(R"("home":)");
@@ -136,6 +136,31 @@ TEST(PocketProfile, ResponseRoundTripsAndAdvertisesAcceptedIds) {
   EXPECT_TRUE(again);
   char tiny[64];
   EXPECT_EQ(writeJson(p, 7, "5B09AF70", tiny, sizeof(tiny)), 0u);
+}
+
+TEST(PocketProfile, RetiredItemsStillParseAndRoundTripButAreNotAdvertised) {
+  // provider/monitor were fed only by the AgentDeck daemon. Stored profiles and
+  // documents naming them must keep loading; the reader simply shows nothing.
+  bool ok = false;
+  const auto p = parse(replaced(kValid, R"("monitor","reading","study")", R"("provider","monitor","reading")"), ok);
+  ASSERT_TRUE(ok);
+  ASSERT_EQ(p.homeCount, 3);
+  EXPECT_EQ(p.homeItems[0], HomeItem::Provider);
+  EXPECT_EQ(p.homeItems[1], HomeItem::Monitor);
+  uint8_t bytes[RECORD_BYTES];
+  ASSERT_TRUE(encodeRecord(p, 3, bytes));
+  Profile decoded;
+  uint32_t generation = 0;
+  ASSERT_TRUE(decodeRecord(bytes, sizeof(bytes), decoded, generation));
+  EXPECT_EQ(decoded, p);
+  char out[1024];
+  const std::string json(out, writeJson(p, 3, "5B09AF70", out, sizeof(out)));
+  // The stored items are reported as stored; the capabilities omit them.
+  EXPECT_NE(json.find(R"("items":["provider","monitor","reading"])"), std::string::npos) << json;
+  const auto caps = json.find(R"("capabilities")");
+  ASSERT_NE(caps, std::string::npos);
+  EXPECT_EQ(json.find("provider", caps), std::string::npos) << json;
+  EXPECT_EQ(json.find("monitor", caps), std::string::npos) << json;
 }
 
 TEST(PocketProfile, RecordRoundTripsAndRejectsCorruptionOrNonCanonicalBytes) {

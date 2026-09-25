@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "ContentChecksum.h"
+#include "TextValidation.h"
 
 namespace PocketDaily::Content {
 namespace {
@@ -16,37 +17,8 @@ bool validText(const char* text, size_t capacity, bool required, bool multiline)
   for (size_t i = length + 1; i < capacity; ++i) {
     if (text[i]) return false;
   }
-  // Strict UTF-8: reject overlong encodings, surrogates, non-Unicode values,
-  // truncation and controls; LF is allowed only in body/secondary text.
-  for (size_t i = 0; i < length;) {
-    uint32_t point = static_cast<uint8_t>(text[i++]);
-    unsigned continuation = 0;
-    uint32_t minimum = 0;
-    if (point >= 0xC2 && point <= 0xDF) {
-      point &= 0x1F;
-      continuation = 1;
-      minimum = 0x80;
-    } else if (point >= 0xE0 && point <= 0xEF) {
-      point &= 0x0F;
-      continuation = 2;
-      minimum = 0x800;
-    } else if (point >= 0xF0 && point <= 0xF4) {
-      point &= 7;
-      continuation = 3;
-      minimum = 0x10000;
-    } else if (point >= 0x80) {
-      return false;
-    }
-    if (continuation > length - i) return false;
-    for (unsigned j = 0; j < continuation; ++j) {
-      const uint8_t next = static_cast<uint8_t>(text[i++]);
-      if ((next & 0xC0) != 0x80) return false;
-      point = (point << 6) | (next & 0x3F);
-    }
-    if (point < minimum || point > 0x10FFFF || (point >= 0xD800 && point <= 0xDFFF)) return false;
-    if ((point < 0x20 && !(multiline && point == '\n')) || (point >= 0x7F && point <= 0x9F)) return false;
-  }
-  return true;
+  // Strict UTF-8 without controls; LF is allowed only in body/secondary text.
+  return Text::validUtf8(text, length, multiline);
 }
 
 bool readPart(const ManifestSource& source, size_t offset, void* output, size_t size, uint32_t& crc) {

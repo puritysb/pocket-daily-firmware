@@ -5,7 +5,7 @@ add_executable(pocket_profile_test
   ${REPO_ROOT}/src/pocket_daily/PocketProfileStore.cpp
 )
 
-target_include_directories(pocket_profile_test BEFORE PRIVATE ../deck_store/stubs)
+target_include_directories(pocket_profile_test BEFORE PRIVATE ../stubs)
 target_link_libraries(pocket_profile_test PRIVATE
   crosspoint_test_common
   ArduinoJson

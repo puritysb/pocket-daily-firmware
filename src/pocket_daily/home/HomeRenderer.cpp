@@ -7,8 +7,8 @@
 #include <cstdio>
 #include <cstring>
 
-#include "agentdeck/glance_format.h"
 #include "fontIds.h"
+#include "pocket_daily/home/GlanceFormat.h"
 
 namespace PocketDaily::Home {
 using OverviewRow = Row;
@@ -35,10 +35,9 @@ int homeRowSources(const DailyProfile::Profile& profile, const RowAvailability& 
         out[n++] = RowSource::DailyWord;
         break;
       case HomeItem::Provider:
-        if (available.provider) out[n++] = RowSource::Provider;
-        break;
       case HomeItem::Monitor:
-        if (available.monitor) out[n++] = RowSource::Monitor;
+        // Retired with the AgentDeck daemon: still valid in stored profiles,
+        // never shown (docs/pocket-profile-v1.md).
         break;
     }
   }
@@ -62,8 +61,6 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   // Local names match the activity members this body was moved from.
   const PocketDaily::Glance& renderGlanceSnapshot = *view.glance;
   const Reading& renderReadingSnapshot = view.reading;
-  const char* const renderSyncedHm = view.syncedHm;
-  const char* const statusLine = view.statusLine;
   auto fontForText = [&](int uiFontId, const char* text) { return env.text.resolve(text, uiFontId); };
   auto drawReadingCover = [&](int x, int y, int width, int height) {
     return env.drawCover && env.drawCover(env.context, renderer, x, y, width, height);
@@ -76,37 +73,8 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
 
   renderer.clearScreen();
   if (env.drawHeader) env.drawHeader(env.context, renderer, 0, m.topPadding, w, m.headerHeight, s.pocketDaily, nullptr);
-  const int statusBandY = m.topPadding + m.headerHeight;
-  const int statusBandH = renderer.getLineHeight(SMALL_FONT_ID) + 4;
-  const bool syncInk = view.syncInk;
-  if (syncInk) {
-    // E-ink activity signal: invert the quiet status row, then advance four
-    // white toner blocks only when the phase/progress changes. It reads as
-    // active without a fake spinner or repeated refresh animation.
-    renderer.fillRect(pad, statusBandY, w - pad * 2, statusBandH, true);
-    const int cellsW = 52;
-    const int cellGap = 3;
-    const int cellW = (cellsW - cellGap * 3) / 4;
-    const int activeCells = view.activeCells;
-    const int cellsX = w - pad - cellsW - 7;
-    for (int i = 0; i < 4; i++) {
-      const int cellX = cellsX + i * (cellW + cellGap);
-      if (i < activeCells)
-        renderer.fillRect(cellX, statusBandY + 4, cellW, statusBandH - 8, false);
-      else
-        renderer.drawRect(cellX, statusBandY + 4, cellW, statusBandH - 8, false);
-    }
-    renderer.drawText(SMALL_FONT_ID, pad + 8, statusBandY + 1,
-                      renderer.truncatedText(SMALL_FONT_ID, statusLine, cellsX - pad - 14).c_str(), false,
-                      EpdFontFamily::BOLD);
-  } else {
-    renderer.fillRect(pad, statusBandY + 3, 3, std::max(4, statusBandH - 7), true);
-    renderer.drawText(SMALL_FONT_ID, pad + 10, statusBandY + 1,
-                      renderer.truncatedText(SMALL_FONT_ID, statusLine, w - pad * 2 - 10).c_str(), true,
-                      EpdFontFamily::BOLD);
-  }
-
-  const int contentTop = statusBandY + statusBandH + 4;
+  // Same top as the sleep face so Home and the retained frame line up.
+  const int contentTop = m.topPadding + m.headerHeight + m.verticalSpacing;
   const int hintTop = pageH - renderer.getLineHeight(SMALL_FONT_ID) - 16;
   const bool portrait = pageH > w;
 
@@ -228,58 +196,6 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
       env.drawCardImage(env.context, renderer, row.cardId, x + 12, y + 8, cw - 24, panelBottom - 10 - (y + 8));
   };
 
-  // Read-only monitoring item: carried provider usage rows and wrap-up lines
-  // with the snapshot's sync time. No actions and no live session content.
-  auto drawMonitor = [&](int x, int y, int cw, int ch) {
-    if (cw <= 16 || ch <= 16) return;
-    const int panelBottom = y + ch - 8;
-    renderer.drawRect(x, y, cw, ch, 2, true);
-    const auto& g = renderGlanceSnapshot;
-    y = sectionHeader(x + 12, y + 10, cw - 24, s.monitor, carouselPosition);
-    const int inner = cw - 24;
-    char text[48];
-    for (uint8_t i = 0; i < g.usageCount && y + line10 + 10 <= panelBottom; ++i) {
-      const auto& u = g.usage[i];
-      snprintf(text, sizeof(text), "%s %s", u.provider, u.label);
-      const int nameFont = fontForText(UI_10_FONT_ID, text);
-      renderer.drawText(nameFont, x + 12, y, renderer.truncatedText(nameFont, text, inner * 3 / 5).c_str(), true,
-                        EpdFontFamily::BOLD);
-      if (u.primaryPercent >= 0)
-        snprintf(text, sizeof(text), "%d%%%s%s%s%s", u.primaryPercent, u.primaryResetHm[0] ? " (" : "",
-                 u.primaryResetHm, u.primaryResetHm[0] ? ")" : "", u.stale ? " *" : "");
-      else
-        snprintf(text, sizeof(text), "--%s", u.stale ? " *" : "");
-      const int valueW = renderer.getTextWidth(UI_10_FONT_ID, text, EpdFontFamily::BOLD);
-      renderer.drawText(UI_10_FONT_ID, x + 12 + inner - valueW, y, text, true, EpdFontFamily::BOLD);
-      y += line10 + 3;
-      if (u.primaryPercent >= 0) {
-        renderer.drawRect(x + 12, y, inner, 6, 1, true);
-        const int fill = inner * std::min<int>(100, u.primaryPercent) / 100;
-        if (fill > 0) renderer.fillRect(x + 12, y, fill, 6, true);
-      }
-      y += 12;
-    }
-    for (uint8_t i = 0; i < g.wrapupCount && y + line10 <= panelBottom; ++i) {
-      const int f = fontForText(UI_10_FONT_ID, g.wrapup[i]);
-      const int advance = renderer.getLineHeight(f) + 3;
-      const int lines = std::min(2, (panelBottom - y) / advance);
-      if (lines < 1) break;
-      drawWrappedFixed(renderer, f, x + 12, y, g.wrapup[i], inner, lines, advance);
-      y += advance * lines + 4;
-    }
-    if (g.usageCount == 0 && g.wrapupCount == 0) {
-      const int f = fontForText(UI_10_FONT_ID, s.monitorEmpty);
-      drawWrappedFixed(renderer, f, x + 12, y, s.monitorEmpty, inner, 2, renderer.getLineHeight(f) + 3);
-    }
-    if (renderSyncedHm[0]) {
-      // Absolute sync time only: a retained frame must stay truthful.
-      snprintf(text, sizeof(text), "%s%s", renderSyncedHm, view.snapshotStale ? " SAVED" : "");
-      const int stampW = renderer.getTextWidth(SMALL_FONT_ID, text);
-      renderer.drawText(SMALL_FONT_ID, x + cw - 12 - stampW, panelBottom - renderer.getLineHeight(SMALL_FONT_ID), text,
-                        true);
-    }
-  };
-
   auto drawUtilities = [&](int x, int y, int cw, int ch) {
     const int panelBottom = y + ch;
     renderer.drawRect(x, y, cw, ch, 2, true);
@@ -320,7 +236,7 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
       const int eventTop = panelBottom - eventH;
       renderer.drawLine(x, eventTop, x + cw, eventTop);
       int ey = sectionHeader(x, eventTop + 5, cw, s.nextEvent, nullptr);
-      if (AgentDeck::GlanceFormat::formatEventLine(line, sizeof(line), renderGlanceSnapshot.events[0]) > 0) {
+      if (GlanceFormat::formatEventLine(line, sizeof(line), renderGlanceSnapshot.events[0]) > 0) {
         const int eventFont = fontForText(UI_10_FONT_ID, line);
         renderer.drawText(eventFont, x, ey, renderer.truncatedText(eventFont, line, cw, EpdFontFamily::BOLD).c_str(),
                           true, EpdFontFamily::BOLD);
@@ -337,8 +253,6 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   auto drawPrimary = [&](int x, int y, int cw, int ch) {
     if (n > 0 && rows[selectedIndex].reading)
       drawReading(x, y, cw, ch);
-    else if (n > 0 && rows[selectedIndex].monitor)
-      drawMonitor(x, y, cw, ch);
     else
       drawStudy(x, y, cw, ch);
   };
@@ -369,7 +283,7 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   if (sidePaging) HomeDraw::drawPocketSideChevrons(renderer, view.isX3);
 
   // Confirm selects the current carousel item. Right opens Pocket's account-free
-  // nearby transport; optional AgentDeck refresh continues automatically.
+  // nearby transport, where the companion sends cards and the glance.
   HomeDraw::drawPocketActionStrip(renderer, view.isX3, env.labels, s.library, s.select, s.sync);
 }
 
@@ -404,13 +318,10 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
 
   // ── Layout ──
   // The face is a set of independent sections that simply drop out when their
-  // data is absent (no calendar → no TODAY, no daemon → no AI BUDGET, …).
-  // Landscape panels (X4, 800×480) split into two columns — left: the personal
-  // plane (READING / weather / TODAY), right: the work plane (AI BUDGET /
-  // WORK) — so the wide screen reads as a dashboard, not a list. Portrait
-  // (X3) keeps the single-column flow in the same section order. Every
-  // section leads with a small labeled overline rule, so whatever subset of
-  // data exists still composes into a designed page.
+  // data is absent (no calendar → no TODAY, no weather → no forecast, …).
+  // Landscape panels (X4, 800×480) split into two columns — left: reading and
+  // cards, right: weather and TODAY. Portrait (X3) keeps a single column in the
+  // profile's order. Every section leads with a small labeled overline rule.
   const int topY = m.topPadding + m.headerHeight + m.verticalSpacing;
   const int statusY = pageH - lineS - 12;
 
@@ -588,7 +499,7 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
     y = sectionHeader(x, y, cw, s.today);
     for (uint8_t i = 0; i < g.eventCount; i++) {
       if (y + line10 >= maxY) break;
-      if (AgentDeck::GlanceFormat::formatEventLine(buf, sizeof(buf), g.events[i]) <= 0) continue;
+      if (GlanceFormat::formatEventLine(buf, sizeof(buf), g.events[i]) <= 0) continue;
       const int f = fontForText(UI_10_FONT_ID, buf);
       renderer.drawText(f, x, y, renderer.truncatedText(f, buf, cw).c_str(), true);
       y += line10 + 4;
@@ -597,8 +508,7 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   };
 
   // Pocket Glance is deliberately personal and locally meaningful: current
-  // book, one carried study item, weather and today's schedule. Provider
-  // quotas and live work/session summaries belong on AgentDeck dashboards.
+  // book, one carried study item, weather and today's schedule.
   // Sleep sections and their order come from the profile (defaults: reading,
   // study, weather, today). Study stays a fallback while a book is shown.
   using PocketDaily::DailyProfile::SleepSection;

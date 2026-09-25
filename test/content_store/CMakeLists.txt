@@ -7,7 +7,7 @@ add_executable(content_store_test ContentRevisionStoreTest.cpp
   ${REPO_ROOT}/src/pocket_daily/ContentManifest.cpp
   ${REPO_ROOT}/src/pocket_daily/ContentCard.cpp
   ${REPO_ROOT}/src/pocket_daily/ContentImage.cpp)
-target_include_directories(content_store_test BEFORE PRIVATE stubs ../deck_store/stubs ${REPO_ROOT}/lib/Memory
+target_include_directories(content_store_test BEFORE PRIVATE stubs ../stubs ${REPO_ROOT}/lib/Memory
   ${REPO_ROOT}/lib/hal)
 target_link_libraries(content_store_test PRIVATE crosspoint_test_common GTest::gtest_main)
 if(NOT APPLE)

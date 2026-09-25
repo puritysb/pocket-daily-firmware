@@ -1,5 +1,11 @@
 # Pocket deck cache v7
 
+> **Retired 2026-09-25.** The AgentDeck daemon path this document describes was
+> removed from the firmware (`src/agentdeck/` and its Pocket Daily integration
+> deleted). Weather and events now come from the companion app
+> (`docs/pocket-glance-v1.md`). Kept for history only; the files it names no
+> longer exist, and old SD files it describes are no longer read.
+
 This is the reader's internal offline cache, not a companion upload format.
 No Swift HTTP/Bluetooth contract changes. Implemented in
 [`deck_store.cpp`](../src/agentdeck/deck_store.cpp), with actual serializer

@@ -3,7 +3,13 @@
 Pocket Daily Firmware is the device-side product. CrossPoint is its
 reader/runtime foundation, the independent
 [Pocket Daily app](https://github.com/puritysb/pocket-daily) is its normal
-management channel, and AgentDeck is an optional Companion provider.
+management channel and its only content source.
+
+> **2026-09-25:** the AgentDeck Companion provider (daemon discovery, feed,
+> outbox, pull and WebSocket OTA, timed-wake cadence, `src/agentdeck/`) was
+> removed. Weather and events arrive from the app over Pocket Sync
+> (`docs/pocket-glance-v1.md`). Sections below that describe the provider,
+> Surface Protocol headers, deck/outbox caches or Companion OTA are historical.
 
 ## Stable identity
 

@@ -257,8 +257,6 @@ int32_t pdui_render_home(pdui_context* context, const pdui_profile* profile, uin
     view.selected = view.count ? static_cast<int>(std::min<uint32_t>(selected, view.count - 1)) : 0;
     view.reading = sample.reading;
     view.glance = &sample.glance;
-    view.syncedHm = (samples & (PDUI_SAMPLE_WEATHER | PDUI_SAMPLE_USAGE)) ? "07:40" : "";
-    view.statusLine = "WI-FI OFF / SYNC";
     view.profile = parsed;
     PocketDaily::Home::renderHome(context->renderer, view, PocketUIHost::hostEnv(context->renderer, context->cards));
     if (context->font.boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;

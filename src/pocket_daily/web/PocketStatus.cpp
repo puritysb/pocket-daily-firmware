@@ -33,6 +33,8 @@ String buildStatusJson(const StatusInputs& in) {
   doc["contentPresentation"] = in.contentPresentation;
   // Pocket Daily profile endpoints (docs/pocket-profile-v1.md) exist on Sync.
   if (isSyncProfile(in.profile)) doc["pocketProfile"] = 1;
+  // POST /api/pocket/v1/glance (docs/pocket-glance-v1.md) sits beside it.
+  if (isSyncProfile(in.profile)) doc["pocketGlance"] = 1;
   // GET /api/pocket/v1/content/file: read-only published revision files.
   doc["contentRead"] = 1;
   doc["version"] = CROSSPOINT_VERSION;

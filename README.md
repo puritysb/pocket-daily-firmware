@@ -4,11 +4,10 @@ Pocket Daily is offline-first firmware for Xteink X3/X4: resume the book already
 on the device, carry a small daily study deck, retain last-synced weather and
 schedule context, and keep a useful E-ink sleep frame without requiring Wi-Fi.
 
-AgentDeck is an optional Companion content provider, not the product identity.
-The firmware publishes the AgentDeck Surface Protocol v1 identity
-`io.pocketdaily.reader` with the `portable-reader/v1` profile, so AgentDeck and
-other compatible Companion implementations can provide the same bounded Feed,
-Outbox, Glance, and OTA contract. See [`agentdeck-surface.json`](./agentdeck-surface.json).
+The firmware does not depend on any daemon or cloud service. Weather and
+today's events come from the companion app over Pocket Sync
+([`docs/pocket-glance-v1.md`](./docs/pocket-glance-v1.md)); the former
+AgentDeck daemon integration was removed on 2026-09-25.
 
 Pocket Daily is built on the open-source [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader)
 engine and preserves its reader, storage, format, and recovery foundations.
@@ -22,8 +21,7 @@ learning packs, firmware, diagnostics, and direct SD-card transfers.
 - Offline-first Pocket Home with local continue-reading and daily study cards.
 - SD-backed Japanese learning packs: offline daily kanji with licensed,
   integrity-checked content and optional updates through Pocket Sync.
-- SD-backed weather, schedule, card deck, and durable offline choice outbox.
-- Brief wake/sync/sleep operation plus AgentDeck-assisted OTA when configured.
+- SD-backed weather and today's schedule sent by the companion app.
 - Retained sleep screen based only on locally durable information.
 - Coverage-tested `PocketSansJP` UI font bundle with reproducible OFL sources.
 

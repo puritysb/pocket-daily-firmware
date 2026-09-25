@@ -8,10 +8,12 @@
 #include <Memory.h>
 #include <WebServer.h>
 #include <esp_ota_ops.h>
+#include <sys/time.h>
 
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 
 #include "CrossPointSettings.h"
 #include "activities/RenderLock.h"
@@ -21,6 +23,7 @@
 #include "pocket_daily/ContentPathPolicy.h"
 #include "pocket_daily/ContentRevisionStore.h"
 #include "pocket_daily/ContentSealStore.h"
+#include "pocket_daily/PocketGlanceStore.h"
 #include "pocket_daily/PocketProfileStore.h"
 #include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/boot/DevBootReturn.h"
@@ -283,6 +286,52 @@ void handlePostProfile(WebServer& server, const RouteDeps& d) {
       break;
   }
   server.send(500, "text/plain", "Profile could not be stored; the previous profile is still in use");
+}
+
+// App-provided weather and today's events (docs/pocket-glance-v1.md). Same
+// identity and heap admission as the profile; the whole document is validated
+// before anything is stored, and the previous glance survives any failure.
+void handlePostGlance(WebServer& server, const RouteDeps& d) {
+  char deviceId[9];
+  if (!admitContentOperation(server, d, deviceId)) return;
+  const String& body = server.arg("plain");
+  // ~800 B, request-scoped; parse and save allocate only after admission.
+  auto snapshot = makeUniqueNoThrow<AppGlance::Snapshot>();
+  if (!snapshot) {
+    server.send(503, "text/plain", "Reader memory is too low for the glance");
+    return;
+  }
+  const char* error = nullptr;
+  bool outOfMemory = false;
+  if (!AppGlance::parseJson(body.c_str(), body.length(), *snapshot, error, outOfMemory)) {
+    server.send(outOfMemory ? 503 : 400, "text/plain", error ? error : "Invalid glance");
+    return;
+  }
+  switch (AppGlance::save(*snapshot)) {
+    case AppGlance::SaveResult::Ok:
+      break;
+    case AppGlance::SaveResult::Invalid:
+      server.send(400, "text/plain", "Invalid glance");
+      return;
+    case AppGlance::SaveResult::OutOfMemory:
+      server.send(503, "text/plain", "Reader memory is too low for the glance");
+      return;
+    case AppGlance::SaveResult::StorageError:
+      server.send(500, "text/plain", "Glance could not be stored; the previous glance is still in use");
+      return;
+  }
+  // The reader has no network clock of its own. An unset clock (cold boot)
+  // takes the app's compose time, a lower bound that keeps the daily word and
+  // saved-age labels honest; a set clock is never moved.
+  if (time(nullptr) < static_cast<time_t>(AppGlance::MIN_EPOCH)) {
+    const timeval now{static_cast<time_t>(snapshot->savedEpoch), 0};
+    if (settimeofday(&now, nullptr) == 0) LOG_INF("GLANCE", "Clock set from the companion glance");
+  }
+  char response[96];
+  snprintf(response, sizeof(response), "{\"schema\":1,\"deviceID\":\"%s\",\"savedEpoch\":%lu}", deviceId,
+           static_cast<unsigned long>(snapshot->savedEpoch));
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", response);
 }
 
 void retireContent(const Content::RetiredRevision& retired, const RouteDeps& d) {
@@ -995,6 +1044,10 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     routes.on("/api/pocket/v1/profile", HTTP_POST, [server = &server, deps = &d] {
       note(*deps);
       handlePostProfile(*server, *deps);
+    });
+    routes.on("/api/pocket/v1/glance", HTTP_POST, [server = &server, deps = &d] {
+      note(*deps);
+      handlePostGlance(*server, *deps);
     });
   }
   if (d.profile == Profile::POCKET_SYNC || d.profile == Profile::COMPANION) {

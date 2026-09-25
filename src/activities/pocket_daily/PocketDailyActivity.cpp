@@ -1,86 +1,42 @@
 #include "PocketDailyActivity.h"
 
 #include <Bitmap.h>
-#include <ESPmDNS.h>
 #include <EpdFontFamily.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <I18n.h>
-#include <Memory.h>
 #include <WiFi.h>
-#include <esp_ota_ops.h>
 
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <string>
-#include <vector>
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "HalGPIO.h"
-#include "HalPowerManager.h"
-#include "PowerCycle.h"
 #include "RecentBooksStore.h"
-#include "SdCardFontSystem.h"
 #include "SilentRestart.h"
-#include "WifiCredentialStore.h"
-#include "activities/network/WifiSelectionActivity.h"
 #include "agent/AgentLog.h"
-#include "agentdeck/agent_commands.h"
-#include "agentdeck/agent_state.h"
-#include "agentdeck/auth_store.h"
-#include "agentdeck/card_class.h"
-#include "agentdeck/feed_client.h"
-#include "agentdeck/glance_format.h"
-#include "agentdeck/mdns_discovery.h"
-#include "agentdeck/ota_pull.h"
-#include "agentdeck/ota_ws_receiver.h"
-#include "agentdeck/outbox_store.h"
-#include "agentdeck/udp_discovery.h"
-#include "agentdeck/ws_client.h"
 #include "components/UITheme.h"  // GUI (theme) + ThemeMetrics + Rect
-#include "components/icons/glyph_antigravity.h"
-#include "components/icons/glyph_claude.h"
-#include "components/icons/glyph_codex.h"
-#include "components/icons/glyph_openclaw.h"
-#include "components/icons/glyph_opencode.h"
 #include "fontIds.h"
-#include "pocket_daily/CardSignature.h"
 #include "pocket_daily/ContentActiveStore.h"
 #include "pocket_daily/ContentImageRenderer.h"
+#include "pocket_daily/PocketGlanceStore.h"
 #include "pocket_daily/PocketProfileStore.h"
-#include "pocket_daily/font_pack_sync.h"
+#include "pocket_daily/home/GlanceFormat.h"
 #include "pocket_daily/home/HomeDrawing.h"
 #include "pocket_daily/home/HomeRenderer.h"
 #include "pocket_daily/learning_pack.h"
-#include "pocket_daily/learning_pack_sync.h"
-#include "pocket_daily/product_identity.h"
 #include "util/PowerWakeCue.h"
 #include "util/UiCjkFont.h"
 
 namespace {
-using AgentDeck::AgentState;
-
-// esp_http_client ultimately enters lwIP's DNS path. On a cold offline boot,
-// WIFI_MODE_NULL means the TCP/IP core mutex may not exist yet; attempting a
-// cached-endpoint request then asserts inside xQueueSemaphoreTake instead of
-// returning an ordinary transport error. Keep all Pocket HTTP entry points
-// behind this shared readiness predicate.
-bool wifiReadyForHttp() { return WiFi.getMode() != WIFI_MODE_NULL && WiFi.status() == WL_CONNECTED; }
-
 // Drawing helpers live in pocket_daily/home/HomeDrawing (shared with the host
 // preview). Pull them into this translation unit's unqualified scope.
-using PocketDaily::HomeDraw::drawForecastGrid;
-using PocketDaily::HomeDraw::drawWeatherPlaceholder;
-using PocketDaily::HomeDraw::drawWeatherPoster;
-using PocketDaily::HomeDraw::drawWrappedFixed;
 using PocketDaily::HomeDraw::formatWeatherSnapshotDate;
-using PocketDaily::HomeDraw::hasVisibleText;
-using PocketDaily::HomeDraw::removeLastUtf8;
-using PocketDaily::HomeDraw::utf8Span;
 
 // The device picks an installed SD CJK font for text the built-in fonts lack.
 PocketDaily::HomeDraw::FontResolver deviceFonts(const GfxRenderer& renderer) {
@@ -88,24 +44,6 @@ PocketDaily::HomeDraw::FontResolver deviceFonts(const GfxRenderer& renderer) {
           [](void* context, const char* text, int fallback, EpdFontFamily::Style style) {
             return UiCjkFont::fontForText(*static_cast<const GfxRenderer*>(context), text, fallback, style);
           }};
-}
-
-// Per-agent creature glyph (src/components/icons/glyph_*.h). MUST be a multiple of
-// 8: EInkDisplay::drawImageTransparent reads `width/8` bytes per row, so a width
-// like 28 (→ 3 bytes, but convert_icon.py packs 4) desyncs every row into noise.
-constexpr int kGlyphPx = 32;
-
-// Canonical 1-bit creature glyph for an agent type → nullptr falls back to a dot.
-// Mirrors the AGENT_MONO_GLYPH map (shared/src/svg-renderers/agent-logos.ts). Keep
-// every wire agentType covered here — a missing branch silently degrades to a dot.
-const uint8_t* glyphForAgent(const char* a) {
-  if (!a || !a[0]) return nullptr;
-  if (strcmp(a, "claude-code") == 0) return GlyphClaude;
-  if (strncmp(a, "codex", 5) == 0) return GlyphCodex;  // codex-cli / codex-app / codex
-  if (strcmp(a, "opencode") == 0) return GlyphOpenCode;
-  if (strcmp(a, "openclaw") == 0) return GlyphOpenClaw;
-  if (strncmp(a, "antigravity", 11) == 0 || strcmp(a, "agy") == 0) return GlyphAntigravity;
-  return nullptr;
 }
 
 // True when the text contains Hangul / CJK / Kana codepoints — i.e. glyphs the
@@ -146,96 +84,6 @@ bool hasCJK(const char* s) {
   return false;
 }
 
-// Strip an "observed:<agent>:" prefix → the raw session UUID. The sessions_list
-// id for passively-observed sessions is prefixed ("observed:claude:<uuid>") while
-// timeline entries are keyed by the raw UUID, so Detail must compare the raw form.
-const char* rawSid(const char* sid) {
-  if (sid && strncmp(sid, "observed:", 9) == 0) {
-    const char* p = strchr(sid + 9, ':');
-    if (p) return p + 1;
-  }
-  return sid ? sid : "";
-}
-
-// FNV-1a over a byte range — cheap change-detection signature.
-inline uint32_t fnvUpdate(uint32_t h, const void* data, size_t len) {
-  const uint8_t* p = static_cast<const uint8_t*>(data);
-  for (size_t i = 0; i < len; i++) {
-    h ^= p[i];
-    h *= 16777619u;
-  }
-  return h;
-}
-
-const char* agentStateLabel(AgentState s) {
-  switch (s) {
-    case AgentState::IDLE:
-      return "Idle";
-    case AgentState::PROCESSING:
-      return "Working";
-    case AgentState::AWAITING_PERMISSION:
-      return "Awaiting permission";
-    case AgentState::AWAITING_OPTION:
-      return "Choosing option";
-    case AgentState::AWAITING_DIFF:
-      return "Reviewing diff";
-    case AgentState::DISCONNECTED:
-    default:
-      return "Offline";
-  }
-}
-
-// Prose form of a raw wire state for the Detail meta line.
-// Unknown strings pass through unchanged (already-pretty fallback labels).
-const char* wireStateLabel(const char* s) {
-  if (!s || !s[0]) return "";
-  if (strcmp(s, "processing") == 0) return "Working";
-  if (strcmp(s, "idle") == 0) return "Idle";
-  if (strcmp(s, "awaiting_permission") == 0) return "Awaiting permission";
-  if (strcmp(s, "awaiting_option") == 0) return "Choosing option";
-  if (strcmp(s, "awaiting_diff") == 0) return "Reviewing diff";
-  if (strcmp(s, "disconnected") == 0) return "Offline";
-  return s;
-}
-
-// E-ink timeline marker per entry type. Vocabulary is the shared SSOT
-// EINK_ICON_GLYPHS in AgentDeck shared/src/timeline-icons.ts (mirrored on the
-// Android e-ink surface) — keep in lockstep when the icon-key mapping changes.
-const char* timelineGlyph(const char* type) {
-  if (!type || !type[0]) return "[..]";
-  if (strcmp(type, "chat_start") == 0) return "[..]";
-  if (strcmp(type, "chat_end") == 0 || strcmp(type, "chat_response") == 0 || strcmp(type, "model_response") == 0 ||
-      strcmp(type, "tool_resolved") == 0 || strcmp(type, "task_milestone") == 0 || strcmp(type, "eval_result") == 0)
-    return "[OK]";
-  if (strcmp(type, "task_start") == 0 || strcmp(type, "task_end") == 0) return "[==]";
-  if (strcmp(type, "error") == 0) return "[!!]";
-  if (strcmp(type, "tool_request") == 0) return "[??]";
-  if (strcmp(type, "tool_exec") == 0) return "[T ]";
-  if (strcmp(type, "model_call") == 0) return "[M ]";
-  if (strcmp(type, "user_action") == 0) return "[U ]";
-  if (strcmp(type, "scheduled") == 0) return "[S ]";
-  if (strcmp(type, "memory_recall") == 0) return "[~ ]";
-  return "[..]";
-}
-
-// Compact age ("now" / "5m" / "2h" / "3d") from seconds. Buffer >= 6 bytes.
-void formatAge(uint32_t ageSec, char* out, size_t n) {
-  if (ageSec < 60)
-    snprintf(out, n, "now");
-  else if (ageSec < 3600)
-    snprintf(out, n, "%um", (unsigned)(ageSec / 60));
-  else if (ageSec < 86400)
-    snprintf(out, n, "%uh", (unsigned)(ageSec / 3600));
-  else
-    snprintf(out, n, "%ud", (unsigned)(ageSec / 86400));
-}
-
-const char* deviceModelName() { return gpio.deviceIsX3() ? "XTeink X3" : "XTeink X4"; }
-
-const char* deviceModelSlug() { return gpio.deviceIsX3() ? "xteink-x3" : "xteink-x4"; }
-
-const char* mdnsHostName() { return gpio.deviceIsX3() ? "agentdeck-x3" : "agentdeck-x4"; }
-
 struct JapaneseDailyWord {
   const char* word;
   const char* reading;
@@ -266,6 +114,8 @@ constexpr JapaneseDailyWord kJapaneseDailyWords[] = {
 };
 
 constexpr size_t kJapaneseDailyWordCount = sizeof(kJapaneseDailyWords) / sizeof(kJapaneseDailyWords[0]);
+
+bool clockIsSet(const time_t now) { return now >= static_cast<time_t>(PocketDaily::AppGlance::MIN_EPOCH); }
 }  // namespace
 
 void PocketDailyActivity::onEnter() {
@@ -277,1446 +127,58 @@ void PocketDailyActivity::onEnter() {
   // when the preceding reader page used a rotated orientation.
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
-  const bool agentDeckEnabled = SETTINGS.agentDeckCompanionEnabled != 0;
-  dashState = agentDeckEnabled ? DashState::WifiSelection : DashState::Offline;
-  localIp.clear();
   exitRequested = false;
+  exitToReader = false;
   exitToNearbySync = false;
-  registered = false;
-  lastSignature = 0;
-  savedWifiJoinFailed = false;
-  savedWifiScanActive = false;
-  savedWifiPickerOnFailure = false;
-  joiningSsid[0] = '\0';
+  viewMode = ViewMode::Overview;
+  glanceReason = GlanceReason::Ambient;
+  sleepFramePending = false;
 
-  // The shared state also carries cached Pocket cards, so its mutex exists in
-  // offline mode. The sockets do not: AgentDeck is an explicit opt-in plane.
-  AgentDeck::ensureStateMutex();
-  AgentDeck::lockState();
-  AgentDeck::g_state.reset();
-  AgentDeck::unlockState();
-  if (agentDeckEnabled) AgentDeck::Net::wsInit();
+  // Local books, cards and the daily word are the product. Pocket Daily never
+  // holds the radio; the companion reaches the reader through Sync.
+  if (WiFi.getMode() != WIFI_MODE_NULL) {
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+  }
 
-  // Load the persisted Pocket BEFORE the first paint so boot lands on carried
-  // content, not an empty screen. Its choices remain actionable through the SD
-  // Outbox even when no daemon or network is present.
-  cachedDeck = makeUniqueNoThrow<PocketDaily::DeckStore::Snapshot>();
-  if (!cachedDeck) {
-    LOG_ERR("POCKET", "OOM allocating %uB deck cache", (unsigned)sizeof(PocketDaily::DeckStore::Snapshot));
-  } else if (!PocketDaily::DeckStore::load(*cachedDeck)) {
-    cachedDeck->count = 0;
+  // The app-provided weather/events glance is read from SD once, before the
+  // first paint (no network). A missing or invalid record is the
+  // normal "no weather yet" state.
+  {
+    RenderLock glanceLock(*this);
+    if (!PocketDaily::AppGlance::load(glanceSnapshot)) glanceSnapshot.clear();
   }
-  // Pocket cards are day/info content, not live session state. Seed them into
-  // RAM from the deck cache so they remain readable and answerable through the
-  // SD outbox before Wi-Fi or the daemon exists.
-  if (cachedDeck && cachedDeck->pocketCount > 0) {
-    AgentDeck::lockState();
-    AgentDeck::g_state.pocketCount = cachedDeck->pocketCount;
-    memcpy(AgentDeck::g_state.pocketCards, cachedDeck->pocketCards,
-           sizeof(PocketDaily::Card) * cachedDeck->pocketCount);
-    AgentDeck::unlockState();
-  }
-  // Conditional pull: echo the sig persisted with the deck cache so a wake
-  // against an unchanged deck costs one tiny response.
-  lastFeedSig[0] = '\0';
-  if (cachedDeck && cachedDeck->deckSig[0]) {
-    strncpy(lastFeedSig, cachedDeck->deckSig, sizeof(lastFeedSig) - 1);
-    lastFeedSig[sizeof(lastFeedSig) - 1] = '\0';
-  }
-  lastDeckSig = 0;
-  lastDeckSaveMs = 0;
-  clockSynced = time(nullptr) >= 1700000000;
   localStudyOffset = 0;
   buildLocalStudyCard();
 
-  // Battery cadence: a timer wake with Pocket sync enabled syncs once over
-  // HTTP and deep-sleeps again; any button press cancels into interactive mode.
-  // USB power means docked — stay in the live WS mode regardless of the timer.
-  enterMs = millis();
-  pullMode = agentDeckEnabled && SETTINGS.agentPullSyncEnabled != 0 &&
-             gpio.getWakeupReason() == HalGPIO::WakeupReason::Timer && !gpio.isUsbConnected();
-  pullSynced = false;
-  pullEndpointTried = false;
-  manualSyncQueued = false;
-  manualSyncActive = false;
-  manualAssetSyncActive = false;
-  manualAssetAnyUpdated = false;
-  manualAssetHadFailure = false;
-  manualAssetFeedChanged = false;
-  manualAssetSyncStage = AssetSyncStage::None;
-  manualAssetRetryCount = 0;
-  manualAssetPctBucket = -1;
-  manualAssetNextAtMs = 0;
-  manualAssetDownloadedBytes = 0;
-  manualAssetTotalBytes = 0;
-  manualAssetIp[0] = '\0';
-  manualAssetPort = 0;
-  manualAssetToken[0] = '\0';
-  manualAssetBoard[0] = '\0';
-  pendingFontAdvert = {};
-  manualOtaResumePending = false;
-  manualOtaIncrementalActive = false;
-  pullOtaDownloading = false;
-  pullOtaPctBucket = -1;
-  manualOtaNoProgressRetries = 0;
-  manualOtaResumeAtMs = 0;
-  manualOtaResumeStartedMs = 0;
-  pullOtaDownloadedBytes = 0;
-  pullOtaTotalBytes = 0;
-  lastManualOtaMd5[0] = '\0';
-  manualSyncNeedsDiscovery = false;
-  manualSyncDiscoveryRetryActive = false;
-  glanceReason = GlanceReason::Ambient;
-  sleepFramePending = false;
-  pullSyncedAtMs = 0;
-  pullNextSec = 0;
-  if (pullMode) AgentLog::line("AGENT", "pull-sync wake (battery cadence)");
-
-  AgentLog::line("POCKET", "Pocket reader onEnter");
-  // Paint Pocket immediately — local reading and cached cards do not wait for
-  // Wi-Fi, discovery, or a daemon.
+  AgentLog::line("POCKET", "Pocket reader onEnter (glance %s)", glanceSnapshot.savedEpoch ? "saved" : "none");
+  // Paint Pocket immediately — local reading and carried cards need nothing.
   requestUpdate();
-
-  // Local books, study packs and cards are the product. Keep every
-  // normal Pocket entry radio-free unless the user explicitly enabled the
-  // optional AgentDeck dashboard in Settings. This early return also migrates
-  // existing devices safely: the new key is absent from their JSON and loads
-  // as false even if the legacy scheduled-sync key was true.
-  if (!agentDeckEnabled) {
-    if (WiFi.getMode() != WIFI_MODE_NULL) {
-      WiFi.disconnect(true);
-      WiFi.mode(WIFI_OFF);
-    }
-    AgentLog::line("POCKET", "local-first mode; AgentDeck companion disabled");
-    return;
-  }
-
-  // WifiSelectionActivity used to be the only owner that loaded this store.
-  // Pocket can now join without ever opening that activity, so load the tiny
-  // credential record here before starting the background scan.
-  {
-    RenderLock storageLock(*this);
-    WIFI_STORE.loadFromFile();
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    localIp = WiFi.localIP().toString().c_str();
-    onWifiSelectionComplete(true);
-    return;
-  }
-
-  // Saved credentials → background STA join, no blocking picker. The Face is
-  // already on screen; loop() promotes the state when the join lands.
-  if (startSavedWifiJoin()) return;
-
-  // First run without Wi-Fi is still a complete reader. Network setup is an
-  // explicit refresh action from the empty Pocket, never a boot gate.
-  WiFi.mode(WIFI_OFF);
-  dashState = DashState::Offline;
-  requestUpdate();
-}
-
-bool PocketDailyActivity::beginSavedWifiConnection(const char* ssid) {
-  if (!ssid || !ssid[0]) return false;
-  const WifiCredential* cred = WIFI_STORE.findCredential(ssid);
-  if (!cred) return false;
-  strncpy(joiningSsid, cred->ssid.c_str(), sizeof(joiningSsid) - 1);
-  joiningSsid[sizeof(joiningSsid) - 1] = '\0';
-  AgentLog::line("AGENT", "background wifi join: %s", joiningSsid);
-  WiFi.persistent(false);
-  if (cred->password.empty())
-    WiFi.begin(cred->ssid.c_str());
-  else
-    WiFi.begin(cred->ssid.c_str(), cred->password.c_str());
-  savedWifiScanActive = false;
-  wifiJoinStartMs = millis();
-  requestUpdate();
-  return true;
-}
-
-bool PocketDailyActivity::startSavedWifiJoin(bool pickerOnFailure) {
-  // Automatic wake retries stay bounded after one failed scan, but a fresh
-  // user Sync is new evidence (the AP may have appeared meanwhile) and must
-  // re-scan saved networks before resorting to the picker.
-  if (savedWifiJoinFailed && !pickerOnFailure) return false;
-  if (pickerOnFailure) savedWifiJoinFailed = false;
-  if (WIFI_STORE.getCredentials().empty()) return false;
-  // Refuse to raise the radio on a heap that cannot survive the driver's own
-  // event traffic. Pocket's CJK card font is the one large block we own and it
-  // reloads lazily from SD, so trade it first — exactly as the glance pull
-  // does — and only give up if that still leaves us under the floor. An
-  // offline Face holding its saved glance is strictly better than the abort()
-  // this used to end in (crash_report.txt: NetworkEvents::postEvent one loop
-  // after "background wifi scan").
-  if (ESP.getMaxAllocHeap() < kWifiBringUpMinBlock || ESP.getFreeHeap() < kWifiBringUpMinFree) {
-    // Font families belong to the renderer, so the release must hold its mutex
-    // or a queued paint can use the family after it is gone.
-    RenderLock fontRenderLock(*this);
-    sdFontSystem.releaseLoaded(renderer);
-  }
-  if (ESP.getMaxAllocHeap() < kWifiBringUpMinBlock || ESP.getFreeHeap() < kWifiBringUpMinFree) {
-    if (!wifiHeapBlocked) {
-      wifiHeapBlocked = true;
-      AgentLog::line("AGENT", "wifi bring-up skipped: heap free=%u largest=%u", (unsigned)ESP.getFreeHeap(),
-                     (unsigned)ESP.getMaxAllocHeap());
-    }
-    savedWifiJoinFailed = true;
-    savedWifiScanActive = false;
-    dashState = DashState::Offline;
-    requestUpdate();
-    return false;
-  }
-  wifiHeapBlocked = false;
-  logHeapStage("wifi/pre-radio");
-  savedWifiPickerOnFailure = pickerOnFailure;
-  joiningSsid[0] = '\0';
-  // Scan asynchronously before choosing a credential. Connecting only to the
-  // last SSID made a saved home/hotspot set behave as if no credentials
-  // existed whenever that one AP was absent. The Face stays fully interactive
-  // while scanComplete() is polled from loop().
-  WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect(false, false);
-  WiFi.scanDelete();
-  WiFi.scanNetworks(true);
-  dashState = DashState::WifiJoining;
-  savedWifiScanActive = true;
-  wifiJoinStartMs = millis();
-  AgentLog::line("AGENT", "background wifi scan: %u saved networks", (unsigned)WIFI_STORE.getCredentials().size());
-  requestUpdate();
-  return true;
-}
-
-void PocketDailyActivity::launchWifiPicker() {
-  dashState = DashState::WifiSelection;
-  requestUpdate();
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                         [this](const ActivityResult& result) {
-                           if (!result.isCancelled) {
-                             const auto& wifi = std::get<WifiResult>(result.data);
-                             localIp = wifi.ip;
-                           }
-                           onWifiSelectionComplete(!result.isCancelled);
-                         });
-}
-
-void PocketDailyActivity::onWifiSelectionComplete(const bool connected) {
-  if (!connected) {
-    AgentLog::line("POCKET", "wifi selection cancelled — staying offline");
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
-    dashState = DashState::Offline;
-    requestUpdate();
-    return;
-  }
-  savedWifiJoinFailed = false;
-  if (localIp.empty()) localIp = WiFi.localIP().toString().c_str();
-  AgentLog::line("AGENT", "wifi up: %s", localIp.c_str());
-  startNetworking();
-}
-
-void PocketDailyActivity::logHeapStage(const char* stage) const {
-  AgentLog::line("HEAP", "%s: free=%u largest=%u minEver=%u", stage, (unsigned)ESP.getFreeHeap(),
-                 (unsigned)ESP.getMaxAllocHeap(), (unsigned)ESP.getMinFreeHeap());
-}
-
-void PocketDailyActivity::ensureDiscoveryServices() {
-  if (discoveryServicesUp) {
-    // udpInit() is idempotent and cheap; WiFi may not have been up when the
-    // socket was first bound, so keep letting the Discovering tick retry it.
-    AgentDeck::Net::udpInit();
-    return;
-  }
-  discoveryServicesUp = true;
-  AgentDeck::Net::mdnsInit(mdnsHostName());
-  logHeapStage("disc/mdns");
-  AgentDeck::Net::udpInit();
-  logHeapStage("disc/udp");
-}
-
-void PocketDailyActivity::startNetworking() {
-  logHeapStage("net/enter");
-  // Best-effort wall clock for saved-deck age and retained-frame sync times.
-  // Non-blocking: Pocket remains fully usable while SNTP updates in background.
-  configTime(0, 0, "pool.ntp.org", "time.google.com");
-  logHeapStage("net/sntp");
-  AgentDeck::OtaWs::configureIdentity(gpio.deviceIsX3() ? "xteink_x3" : "xteink_x4");
-
-  // Once paired, Pocket is a short-pull appliance rather than a live
-  // dashboard. Reuse the cached endpoint immediately and keep the X3's scarce
-  // heap for HTTP/JSON and CJK rendering instead of a permanent WebSocket.
-  char endpointIp[16] = {0};
-  char endpointToken[40] = {0};
-  uint16_t endpointPort = 0;
-  if (!pullMode && AgentDeck::AuthStore::load(endpointToken, sizeof(endpointToken)) &&
-      AgentDeck::Feed::loadEndpoint(endpointIp, sizeof(endpointIp), endpointPort, endpointToken,
-                                    sizeof(endpointToken))) {
-    dashState = DashState::Online;
-    manualSyncQueued = true;
-    requestUpdate();
-    return;
-  }
-  // Only now is discovery genuinely needed, so pay for its services here
-  // rather than on every wake.
-  ensureDiscoveryServices();
-  dashState = DashState::Discovering;
-  discoveryStartMs = millis();
-  discoveryNoticeShown = false;
-  requestUpdate();
-}
-
-void PocketDailyActivity::sendClientRegister() {
-  // {"type":"client_register","clientType":"eink-device","clientLabel":"XTeink X4",
-  //  "devices":[{"id":"<mac>","name":"XTeink X4","family":"xteink-x4","columns":W,"rows":H}]}
-  String mac = WiFi.macAddress();
-  const char* modelName = deviceModelName();
-  const char* modelSlug = deviceModelSlug();
-  char clientLabel[48];
-  snprintf(clientLabel, sizeof(clientLabel), "%s · %s", PocketDaily::PRODUCT_NAME, modelName);
-  char buf[768];
-  int n = snprintf(buf, sizeof(buf),
-                   "{\"type\":\"client_register\",\"clientType\":\"eink-device\","
-                   "\"clientLabel\":\"%s\",\"productId\":\"%s\","
-                   "\"surface\":{\"protocol\":%u,\"clientId\":\"%s\",\"clientVersion\":\"%s\","
-                   "\"productId\":\"%s\",\"profiles\":[{\"id\":\"%s\",\"capabilities\":%s}]},"
-                   "\"devices\":[{\"id\":\"%s\",\"name\":\"%s\",\"family\":\"%s\","
-                   "\"columns\":%d,\"rows\":%d}]}",
-                   clientLabel, PocketDaily::PRODUCT_ID, PocketDaily::SURFACE_PROTOCOL_REVISION, PocketDaily::CLIENT_ID,
-                   CROSSPOINT_VERSION, PocketDaily::PRODUCT_ID, PocketDaily::SURFACE_PROFILE,
-                   PocketDaily::SURFACE_CAPABILITIES_JSON, mac.c_str(), modelName, modelSlug, renderer.getScreenWidth(),
-                   renderer.getScreenHeight());
-  if (n > 0 && (size_t)n < sizeof(buf)) {
-    AgentDeck::Net::wsSend(buf);
-    AgentLog::line("AGENT", "client_register sent model=%s family=%s mac=%s", modelName, modelSlug, mac.c_str());
-  }
-  // Ask for initial usage; the daemon pushes state_update/sessions_list on connect.
-  AgentDeck::Net::wsSend("{\"type\":\"query_usage\"}");
-}
-
-void PocketDailyActivity::sendDeviceInfo() {
-  // Announce as a first-class AgentDeck ESP32 device so the daemon registers it
-  // in its device registry (Node daemon: type "esp32-wifi"; see AgentDeck
-  // docs/esp32-client-contract.md). This is complementary to sendClientRegister():
-  // the eink-device roster drives the macOS Dashboard E-ink rail, while device_info
-  // drives the ESP32 device registry + OTA identity across all daemons. The board
-  // wire string uses the underscore convention (ips_10, ulanzi_tc001, …), distinct
-  // from the hyphen family slug in client_register.
-  //
-  // AgentDeck WiFi OTA v1 supported (src/agentdeck/ota_ws_receiver.*): chunks
-  // stream to an SD cache, then flash via the raw-partition path (NOT the
-  // Arduino Update class — X4 silicon rejects the patched image through
-  // esp_image_verify). Slot capability comes from the live partition table.
-  const char* board = gpio.deviceIsX3() ? "xteink_x3" : "xteink_x4";
-  String ip = WiFi.localIP().toString();
-  uint8_t timelineCount = 0, sessionCount = 0;
-  AgentDeck::lockState();
-  timelineCount = AgentDeck::g_state.timelineCount;
-  sessionCount = AgentDeck::g_state.sessionCount;
-  AgentDeck::unlockState();
-  const esp_partition_t* otaDest = esp_ota_get_next_update_partition(nullptr);
-  const unsigned otaSlotSize = otaDest ? (unsigned)otaDest->size : 0;
-  // buildHash = trailing token of CROSSPOINT_VERSION ("1.4.1-dev-master-<sha>").
-  const char* buildHash = strrchr(CROSSPOINT_VERSION, '-');
-  buildHash = buildHash ? buildHash + 1 : CROSSPOINT_VERSION;
-  char buf[640];
-  int n = snprintf(buf, sizeof(buf),
-                   "{\"type\":\"device_info\",\"productId\":\"%s\",\"productName\":\"%s\","
-                   "\"surfaceProfile\":\"%s\",\"surfaceProtocol\":%u,\"sourceProvider\":\"%s\","
-                   "\"board\":\"%s\",\"updateChannel\":\"%s\",\"version\":\"%s\",\"buildHash\":\"%s\","
-                   "\"protocolRevision\":%u,\"wifiConfigured\":true,\"wifiConnected\":true,"
-                   "\"ip\":\"%s\",\"otaSupported\":%s,\"otaSlotCount\":2,\"otaSlotSize\":%u,"
-                   "\"otaFreeSketchSpace\":%u,"
-                   "\"timelineCount\":%u,\"sessionCount\":%u}",
-                   PocketDaily::PRODUCT_ID, PocketDaily::PRODUCT_NAME, PocketDaily::SURFACE_PROFILE,
-                   PocketDaily::SURFACE_PROTOCOL_REVISION, PocketDaily::AGENTDECK_PROVIDER_ID, board,
-                   PocketDaily::UPDATE_CHANNEL, CROSSPOINT_VERSION, buildHash,
-                   (unsigned)AgentDeckCfg::PROTOCOL_REVISION, ip.c_str(), otaDest ? "true" : "false", otaSlotSize,
-                   otaSlotSize, (unsigned)timelineCount, (unsigned)sessionCount);
-  if (n > 0 && (size_t)n < sizeof(buf)) {
-    AgentDeck::Net::wsSend(buf);
-    AgentLog::line("AGENT", "device_info sent board=%s ver=%s ip=%s", board, CROSSPOINT_VERSION, ip.c_str());
-  }
-}
-
-uint32_t PocketDailyActivity::computeStateSignature() const {
-  uint32_t h = 2166136261u;
-  AgentDeck::lockState();
-  const auto& s = AgentDeck::g_state;
-  h = fnvUpdate(h, &s.wsConnected, sizeof(s.wsConnected));
-  h = fnvUpdate(h, &s.dataReceived, sizeof(s.dataReceived));
-  h = PocketDaily::cardsSignature(h, s.pocketCards, s.pocketCount);
-  h = fnvUpdate(h, &s.glance, sizeof(s.glance));
-  AgentDeck::unlockState();
-  // Local view/cursor state so navigation repaints.
-  uint8_t vm = static_cast<uint8_t>(viewMode);
-  h = fnvUpdate(h, &vm, sizeof(vm));
-  h = fnvUpdate(h, &overviewCursor, sizeof(overviewCursor));
-  h = fnvUpdate(h, &optionCursor, sizeof(optionCursor));
-  return h;
 }
 
 void PocketDailyActivity::loop() {
-  // Abort a stalled OTA receive (sender died mid-push) so `receiving()` can't
-  // swallow input forever. Runs before the receive/flash checks below.
-  AgentDeck::OtaWs::service();
-
-  // OTA: a fully-received, validated image is waiting. Paint the blocking
-  // notice, then flash + restart from this (main) task — never from the WS
-  // callback. serviceFlash() only returns on failure.
-  if (AgentDeck::OtaWs::flashPending()) {
-    otaFlashNotice = true;
-    requestUpdateAndWait();
-    AgentDeck::OtaWs::serviceFlash();
-    otaFlashNotice = false;
-    requestUpdate();
-    return;
-  }
-  // Receive-phase progress: repaint the Face status line in 5% steps (e-ink).
-  if (AgentDeck::OtaWs::receiving()) {
-    const uint32_t total = AgentDeck::OtaWs::totalBytes();
-    const int bucket = total ? (int)((uint64_t)AgentDeck::OtaWs::receivedBytes() * 20 / total) : 0;
-    if (bucket != otaPctBucket) {
-      otaPctBucket = bucket;
-      requestUpdate();
-    }
-  } else {
-    otaPctBucket = -1;
-  }
-
-  // Heap decay watch. The abort this instruments left a 7-minute telemetry gap
-  // between a healthy sync and the fatal scan, so sample slowly and log only a
-  // new low-water mark (a full step below the last one). Bounded to a handful
-  // of SD lines per boot even on a steadily leaking run.
-  if ((int32_t)(millis() - heapWatchNextMs) >= 0) {
-    heapWatchNextMs = millis() + heapWatchIntervalMs;
-    if (heapWatchIntervalMs < kHeapWatchSlowMs)
-      heapWatchIntervalMs = std::min(kHeapWatchSlowMs, heapWatchIntervalMs * 2);
-    const uint32_t freeNow = ESP.getFreeHeap();
-    if (heapWatchLowFree == 0 || freeNow + kHeapWatchStepBytes <= heapWatchLowFree) {
-      heapWatchLowFree = freeNow;
-      AgentLog::line("AGENT", "heap low-water: free=%u largest=%u minEver=%u", (unsigned)freeNow,
-                     (unsigned)ESP.getMaxAllocHeap(), (unsigned)ESP.getMinFreeHeap());
-    }
-  }
-
-  // Handle input FIRST so Back stays responsive: the discovery/connect steps
-  // below can block (mDNS queryService ~1s, WS connect) and would otherwise
-  // starve the button poll, making "go back" feel dead while not yet connected.
   handleButtons();
-  if (exitRequested) {
-    finish();
+  if (!exitRequested) return;
+  exitRequested = false;
+  // Confirm on the reading row resumes the open book. Pocket Daily keeps the
+  // radio off, so no defrag restart is needed; Home's own book selection opens
+  // the reader the same way.
+  if (exitToReader && !APP_STATE.openEpubPath.empty() && WiFi.getMode() == WIFI_MODE_NULL) {
+    exitToReader = false;
+    activityManager.goToReader(APP_STATE.openEpubPath);
     return;
   }
-  // Presence cancels the cadence pass: the user pressed something, so this
-  // wake continues into the normal interactive WS flow instead of sleeping.
-  if (pullMode && lastUserInputMs != 0) {
-    AgentLog::line("AGENT", "pull-sync cancelled by input — interactive mode");
-    pullMode = false;
-    requestUpdate();
-  }
-
-  // Course/font payloads advance one bounded response per pass. This runs
-  // after handleButtons(), so Back/carousel/card actions are observed before
-  // the next socket is opened; onExit() cancels the inactive temp candidate.
-  if (manualAssetSyncActive && !AgentDeck::OtaWs::receiving() && !AgentDeck::OtaWs::flashPending() &&
-      (int32_t)(millis() - manualAssetNextAtMs) >= 0) {
-    serviceManualAssetSync();
-  }
-
-  // Deferred connect-edge glance pull, queued by the Connected transition and
-  // run here where the call stack is shallowest. Waits out an active OTA
-  // receive (a 1-2s blocking fetch mid-stream feeds the rx-stall abort);
-  // a dropped link just unqueues — the reconnect edge re-queues it.
-  if (glanceRefreshQueued && !manualAssetSyncActive) {
-    if (dashState != DashState::Connected) {
-      glanceRefreshQueued = false;
-    } else if (!AgentDeck::OtaWs::receiving()) {
-      glanceRefreshQueued = false;
-      const uint32_t maxAgeMs = forceGlanceRefresh ? 0 : 30 * 60 * 1000;
-      forceGlanceRefresh = false;
-      if (refreshGlanceIfStale(maxAgeMs)) requestUpdate();
-      // Diagnosis instruments: stack headroom (the 16c1674b overflow) and
-      // heap (the 53a55377 bad_alloc abort — free 7 KB / largest 3.9 KB at
-      // power-off). Numbers trending down across a day of logs are the early
-      // warning; investigate before either panics again.
-      AgentLog::line("AGENT", "post-refresh: stack min-free=%uB heap free=%u largest=%u",
-                     (unsigned)uxTaskGetStackHighWaterMark(nullptr), (unsigned)ESP.getFreeHeap(),
-                     (unsigned)ESP.getMaxAllocHeap());
-    }
-  }
-
-  // Front Sync is an explicit pull request, not merely a repaint. Run the
-  // HTTP handshake here at the shallowest loop frame. The multi-megabyte OTA
-  // body is serviced separately in bounded chunks so input is polled between
-  // every network burst.
-  if (manualOtaIncrementalActive && !manualAssetSyncActive && !AgentDeck::OtaWs::receiving() &&
-      !AgentDeck::OtaWs::flashPending() && (int32_t)(millis() - manualOtaResumeAtMs) >= 0) {
-    if (WiFi.status() != WL_CONNECTED) {
-      AgentDeck::OtaPull::cancelInteractive();
-      manualOtaIncrementalActive = false;
-      pullOtaDownloading = false;
-      manualOtaResumePending = true;
-      manualOtaResumeAtMs = millis() + 2000;
-      savedWifiJoinFailed = false;
-      startSavedWifiJoin();
-      requestUpdate();
-    } else {
-      // Render and SD-font loading pause only for this small chunk, never for
-      // the complete image. On a healthy LAN the lock is held for well under
-      // one second; then queued paints and all controls run normally.
-      AgentDeck::OtaPull::InteractiveStep step;
-      {
-        RenderLock chunkLock(*this);
-        sdFontSystem.releaseLoaded(renderer);
-        step = AgentDeck::OtaPull::serviceInteractive();
-      }
-      pullOtaDownloadedBytes =
-          pullOtaTotalBytes ? AgentDeck::OtaPull::savedBytes(lastManualOtaMd5) : pullOtaDownloadedBytes;
-      if (step == AgentDeck::OtaPull::InteractiveStep::Progress) {
-        manualOtaNoProgressRetries = 0;
-        // Yield one UI loop between complete 128 KiB responses. The old 180 ms
-        // pause added several seconds of pure idle time to every image.
-        manualOtaResumeAtMs = millis() + 60;
-        const int bucket = pullOtaTotalBytes ? (int)((uint64_t)pullOtaDownloadedBytes * 10 / pullOtaTotalBytes) : 0;
-        if (bucket != pullOtaPctBucket) {
-          pullOtaPctBucket = bucket;
-          requestUpdate();
-        }
-      } else if (step == AgentDeck::OtaPull::InteractiveStep::Retry ||
-                 step == AgentDeck::OtaPull::InteractiveStep::Deferred) {
-        if (manualOtaNoProgressRetries < 6) manualOtaNoProgressRetries++;
-        manualOtaResumeAtMs = millis() + std::min<uint32_t>(15000, 500u << manualOtaNoProgressRetries);
-        if (manualOtaNoProgressRetries >= 3) {
-          AgentDeck::OtaPull::cancelInteractive();
-          manualOtaIncrementalActive = false;
-          pullOtaDownloading = false;
-          manualSyncNeedsDiscovery = true;
-          manualOtaResumePending = true;
-          requestUpdate();
-        }
-      } else if (step == AgentDeck::OtaPull::InteractiveStep::Staged) {
-        manualOtaIncrementalActive = false;
-        manualOtaResumePending = false;
-        pullOtaDownloading = false;
-        pullOtaDownloadedBytes = pullOtaTotalBytes;
-        pullOtaPctBucket = 10;
-        requestUpdate();
-      } else if (step == AgentDeck::OtaPull::InteractiveStep::Failed ||
-                 step == AgentDeck::OtaPull::InteractiveStep::Idle) {
-        AgentDeck::OtaPull::cancelInteractive();
-        manualOtaIncrementalActive = false;
-        pullOtaDownloading = false;
-        manualOtaResumePending = false;
-        requestUpdate();
-      }
-    }
-  }
-
-  if (manualOtaResumePending && !manualAssetSyncActive && !manualSyncQueued && !manualSyncActive &&
-      !AgentDeck::OtaWs::receiving() && !AgentDeck::OtaWs::flashPending()) {
-    const uint32_t now = millis();
-    if (manualOtaResumeStartedMs && now - manualOtaResumeStartedMs >= kManualOtaResumeWindowMs) {
-      manualOtaResumePending = false;
-      pullOtaDownloading = false;
-      AgentLog::line("OTA", "automatic resume window spent at %u/%u — keeping SD progress",
-                     (unsigned)pullOtaDownloadedBytes, (unsigned)pullOtaTotalBytes);
-      requestUpdate();
-    } else if ((int32_t)(now - manualOtaResumeAtMs) >= 0) {
-      if (WiFi.status() == WL_CONNECTED) {
-        if (dashState == DashState::Discovering || dashState == DashState::Connecting) {
-          // The normal discovery/connect state machine owns route recovery;
-          // do not race it with another request to the stale cached address.
-          manualOtaResumeAtMs = now + 1000;
-        } else if (manualSyncNeedsDiscovery) {
-          manualSyncNeedsDiscovery = false;
-          manualSyncDiscoveryRetryActive = true;
-          AgentDeck::Net::mdnsRefresh();
-          dashState = DashState::Discovering;
-          discoveryStartMs = now;
-          discoveryNoticeShown = false;
-          AgentLog::line("OTA", "automatic resume: refreshing daemon route");
-        } else {
-          manualSyncQueued = true;
-          AgentLog::line("OTA", "automatic resume: retrying at %u/%u", (unsigned)pullOtaDownloadedBytes,
-                         (unsigned)pullOtaTotalBytes);
-        }
-        requestUpdate();
-      } else if (dashState != DashState::WifiJoining && dashState != DashState::WifiSelection) {
-        // A transfer may drop the STA along with its TCP socket. Rejoin the
-        // saved network in the background; never open an interactive picker
-        // from an automatic retry.
-        savedWifiJoinFailed = false;
-        if (startSavedWifiJoin()) {
-          manualOtaResumeAtMs = now + 2000;
-          AgentLog::line("OTA", "automatic resume: rejoining saved Wi-Fi");
-        } else {
-          manualOtaResumePending = false;
-          AgentLog::line("OTA", "automatic resume paused: %s",
-                         wifiHeapBlocked ? "heap too low to raise Wi-Fi" : "no saved Wi-Fi");
-          requestUpdate();
-        }
-      }
-    }
-  }
-
-  if (manualSyncQueued && !manualAssetSyncActive && !AgentDeck::OtaWs::receiving()) {
-    manualSyncQueued = false;
-    manualSyncActive = true;
-    requestUpdateAndWait();
-    logHeapStage("sync/before");
-    attemptManualSync();
-    logHeapStage("sync/after");
-    manualSyncActive = false;
-    requestUpdate();
-  }
-
-  if (dashState == DashState::WifiJoining) {
-    // Background scan/join in progress. The Face and its carousel remain live;
-    // only the small status line changes while radio work advances here.
-    if (WiFi.status() == WL_CONNECTED) {
-      localIp = WiFi.localIP().toString().c_str();
-      if (!joiningSsid[0]) {
-        strncpy(joiningSsid, WiFi.SSID().c_str(), sizeof(joiningSsid) - 1);
-        joiningSsid[sizeof(joiningSsid) - 1] = '\0';
-      }
-      WIFI_STORE.setLastConnectedSsid(joiningSsid);
-      savedWifiJoinFailed = false;
-      savedWifiScanActive = false;
-      savedWifiPickerOnFailure = false;
-      AgentLog::line("AGENT", "wifi joined %s (%s)", joiningSsid, localIp.c_str());
-      logHeapStage("wifi/joined");
-      startNetworking();
-    } else if (savedWifiScanActive) {
-      const int16_t scanResult = WiFi.scanComplete();
-      if (scanResult == WIFI_SCAN_RUNNING && millis() - wifiJoinStartMs <= kWifiJoinTimeoutMs) return;
-
-      char bestSsid[33] = {0};
-      const std::string& lastSsid = WIFI_STORE.getLastConnectedSsid();
-      if (scanResult >= 0) {
-        int bestScore = -1000;
-        for (int i = 0; i < scanResult; i++) {
-          const String found = WiFi.SSID(i);
-          if (found.isEmpty() || !WIFI_STORE.hasSavedCredential(found.c_str())) continue;
-          // Prefer the strongest saved AP, with a small stickiness bonus for
-          // the last winner so two similarly strong mesh/home networks do not
-          // alternate on every wake.
-          const int score = (int)WiFi.RSSI(i) + (lastSsid == found.c_str() ? 12 : 0);
-          if (score > bestScore) {
-            bestScore = score;
-            strncpy(bestSsid, found.c_str(), sizeof(bestSsid) - 1);
-          }
-        }
-      }
-      WiFi.scanDelete();
-      savedWifiScanActive = false;
-      if (bestSsid[0] && beginSavedWifiConnection(bestSsid)) return;
-
-      AgentLog::line("POCKET", "background wifi scan found no saved network");
-      WiFi.disconnect(true);
-      WiFi.mode(WIFI_OFF);
-      savedWifiJoinFailed = true;
-      dashState = DashState::Offline;
-      requestUpdate();
-      if (!pullMode && savedWifiPickerOnFailure) {
-        savedWifiPickerOnFailure = false;
-        launchWifiPicker();
-      } else if (pullMode) {
-        beginTimedSleep(kPullDefaultSec);
-      }
-    } else if (millis() - wifiJoinStartMs > kWifiJoinTimeoutMs) {
-      if (pullMode) {
-        // Unattended wake must never end on an interactive picker: give up
-        // this cycle and retry on the next timer wake.
-        AgentLog::line("AGENT", "wifi join timeout in pull mode — sleeping");
-        beginTimedSleep(kPullDefaultSec);
-        return;
-      }
-      AgentLog::line("POCKET", "wifi join timeout (%s) — keeping saved Pocket", joiningSsid);
-      WiFi.disconnect(true);
-      WiFi.mode(WIFI_OFF);
-      savedWifiJoinFailed = true;
-      dashState = DashState::Offline;
-      requestUpdate();
-      if (savedWifiPickerOnFailure) {
-        savedWifiPickerOnFailure = false;
-        launchWifiPicker();
-      }
-    }
-    return;
-  }
-
-  if (dashState == DashState::Discovering) {
-    // Flap cool-down: after kFlapThreshold short-lived connections, stop
-    // touching the radio for a while. The Face keeps rendering the last-known
-    // deck; the status line says the link is unstable instead of pretending a
-    // scan is about to succeed.
-    if (nextConnectAllowedMs != 0 && (int32_t)(millis() - nextConnectAllowedMs) < 0) {
-      return;
-    }
-    if (nextConnectAllowedMs != 0) {
-      nextConnectAllowedMs = 0;
-      flapShortLived = 0;  // fresh chances after the cool-down
-      requestUpdate();
-    }
-    // Every route into Discovering lands here before the first poll, including
-    // the two sync-failover paths that jump straight from Online. Idempotent.
-    ensureDiscoveryServices();
-
-    // M6 pull mode: cached-endpoint fast path — don't spend the battery window
-    // on mDNS when the daemon rarely moves. Failure (daemon restarted onto a
-    // different port) falls through to normal discovery below.
-    if (pullMode && !pullSynced && !pullEndpointTried) {
-      pullEndpointTried = true;
-      AgentDeck::Net::EndpointCandidates endpoints;
-      char token[40] = {0};
-      if (AgentDeck::Feed::loadEndpointCandidates(endpoints, token, sizeof(token))) {
-        attemptPullSync(endpoints, token);
-      }
-    }
-
-    AgentDeck::Net::BridgeInfo bridge;
-    // mDNS first (all SRV-target IPv4 addresses, daemon/canonical-port priority),
-    // then fall back to the UDP beacon — same BridgeInfo shape, lower trust
-    // because anyone on the subnet can broadcast, but the remoteIP/subnet
-    // guards in udpPoll() keep it safe.
-    bool found = !pullSynced && AgentDeck::Net::mdnsPoll(bridge);
-    if (!found && !pullSynced) found = AgentDeck::Net::udpPoll(bridge);
-    if (found && bridge.found) {
-      if (pullMode) {
-        // Pull mode answers discovery with one HTTP sync, not a WS connect.
-        attemptPullSync(bridge.endpoints, bridge.token);
-      } else {
-        char storedToken[40] = {0};
-        if (AgentDeck::AuthStore::load(storedToken, sizeof(storedToken))) {
-          // Persist the complete service address set before the deferred HTTP
-          // pull. If the TXT-preferred interface fails, attemptManualSync()
-          // immediately tries the next A record and promotes the winner.
-          AgentDeck::Feed::saveEndpointCandidates(bridge.endpoints, storedToken);
-          dashState = DashState::Online;
-          manualSyncQueued = true;
-          discoveryNoticeShown = false;
-          requestUpdate();
-        } else {
-          // The only reason an unpaired Pocket opens a WebSocket is to receive
-          // auth_provision from `agentdeck pair --adopt <ip>`.
-          AgentLog::line("AGENT", "daemon @ %s:%u (agent=%s) — pairing", bridge.primaryIp(),
-                         (unsigned)bridge.endpoints.port, bridge.agent);
-          AgentDeck::Net::wsConnect(bridge.primaryIp(), bridge.endpoints.port, bridge.token,
-                                    gpio.deviceIsX3() ? "xteink_x3" : "xteink_x4");
-          dashState = DashState::Connecting;
-          connectStartMs = millis();
-          discoveryNoticeShown = false;
-          requestUpdate();
-        }
-      }
-    } else if (!discoveryNoticeShown && millis() - discoveryStartMs >= kDiscoveryNotFoundMs) {
-      discoveryNoticeShown = true;
-      requestUpdate();
-    }
-  } else if (dashState == DashState::Connecting || dashState == DashState::Connected) {
-    AgentDeck::Net::wsLoop();
-    AgentDeck::Net::pumpOutbound();
-
-    const bool nowConnected = AgentDeck::Net::wsConnected();
-    if (nowConnected && dashState == DashState::Connecting) {
-      dashState = DashState::Connected;
-      lastConnectedMs = millis();
-      // Note: flapShortLived resets only after this connection PROVES healthy
-      // (survives kHealthyUptimeMs) — see the drop branch. Resetting here
-      // would let a connect-then-die-in-2s loop bypass the cool-down forever.
-      if (!registered) {
-        sendClientRegister();
-        sendDeviceInfo();
-        registered = true;
-      }
-      // Cache the live endpoint for the M6 pull cadence: a later timer wake
-      // syncs against it over HTTP without re-running discovery.
-      AgentDeck::Feed::saveEndpoint(AgentDeck::Net::wsBridgeIp(), AgentDeck::Net::wsBridgePort(),
-                                    AgentDeck::Net::wsBridgeToken());
-      // The WS will now stream sessions/usage, but weather and the wrap-up
-      // only ride /feed — queue a fetch so the ambient face is complete. NOT
-      // inline: the connect pass already sits deep in the loop call chain, and
-      // stacking the HTTP+JSON+SD sync chain on top of it overflowed the 8 KB
-      // loop task stack (stack-canary panic right after device_info, 3/3).
-      // The top of loop() runs it next pass from the shallowest frame.
-      glanceRefreshQueued = true;
-      requestUpdate();
-    } else if (!nowConnected && dashState == DashState::Connecting) {
-      char storedToken[40] = {0};
-      if (AgentDeck::AuthStore::load(storedToken, sizeof(storedToken))) {
-        // auth_provision was persisted and the unauthenticated socket was
-        // deliberately closed. Move directly into bounded HTTP sync mode.
-        dashState = DashState::Online;
-        manualSyncQueued = true;
-        registered = false;
-        requestUpdate();
-        return;
-      }
-      // The cached ip:port isn't accepting — most likely the daemon moved to a
-      // different port (dynamic 9120→fallback). Don't sit on a stale endpoint:
-      // after a grace window, re-resolve fresh via mDNS.
-      if (millis() - connectStartMs > kConnectTimeoutMs) {
-        AgentLog::line("AGENT", "connect timeout — re-resolving via mDNS");
-        AgentDeck::Net::wsDisconnect();  // clears saved ip:port, stops stale auto-reconnect
-        AgentDeck::Net::mdnsRefresh();   // force an immediate fresh query
-        dashState = DashState::Discovering;
-        discoveryStartMs = millis();
-        discoveryNoticeShown = false;
-        registered = false;
-        requestUpdate();
-      }
-    }
-    // A connection that survives the healthy window clears the flap ladder.
-    if (nowConnected && dashState == DashState::Connected && flapShortLived != 0 &&
-        millis() - lastConnectedMs >= kHealthyUptimeMs) {
-      flapShortLived = 0;
-    }
-    if (!nowConnected && dashState == DashState::Connected) {
-      const uint32_t uptime = millis() - lastConnectedMs;
-      registered = false;
-      // Flap ladder: consecutive short-lived connections pause reconnection
-      // entirely for a cool-down instead of hammering discovery+connect —
-      // the cached Face stays up, which is exactly what it is for.
-      if (uptime < kHealthyUptimeMs) {
-        flapShortLived++;
-        if (flapShortLived >= kFlapThreshold) {
-          nextConnectAllowedMs = millis() + kFlapCooldownMs;
-          AgentLog::line("AGENT", "link flapping (%d short-lived) — cooling down %us", flapShortLived,
-                         (unsigned)(kFlapCooldownMs / 1000));
-        }
-      }
-      if (uptime >= kHealthyUptimeMs) {
-        // Was a healthy connection that dropped (transient / daemon restart on the
-        // same port): retry the SAME endpoint — the ws_client library auto-reconnects
-        // to it. Avoids flapping across multiple daemons on the LAN. If it stays
-        // unreachable, the connect-timeout above falls back to a fresh mDNS resolve.
-        AgentLog::line("AGENT", "ws dropped after %ums — retrying same endpoint", (unsigned)uptime);
-        dashState = DashState::Connecting;
-        connectStartMs = millis();
-      } else {
-        // Endpoint accepted then dropped us quickly — a flaky/duplicate daemon.
-        // Re-resolve to try a different advertiser instead of hammering this one.
-        AgentLog::line("AGENT", "ws dropped after %ums — re-resolving (flaky endpoint)", (unsigned)uptime);
-        AgentDeck::Net::wsDisconnect();
-        AgentDeck::Net::mdnsRefresh();
-        dashState = DashState::Discovering;
-        discoveryStartMs = millis();
-        discoveryNoticeShown = false;
-      }
-      requestUpdate();
-    }
-
-    // Repaint only when the rendered state actually changed. Throttled: the loop
-    // runs with skipLoopDelay(), so an unthrottled check would re-hash all sessions,
-    // timeline entries, and usage strings under g_stateMutex thousands of times per
-    // second (pure CPU/power waste + mutex contention with the render task). The
-    // interval also coalesces rapid state_update bursts into ≤2 repaints/sec, which
-    // is all the e-ink panel can usefully show anyway.
-    if (dashState == DashState::Connected && millis() - lastSigCheckMs >= kSigCheckIntervalMs) {
-      lastSigCheckMs = millis();
-      serviceCard();         // auto-surface / auto-resolve the Decision Card first, so
-                             // the signature check below repaints the flip in this tick
-      serviceDeckPersist();  // M5.5: keep the SD deck cache in sync (throttled)
-      uint32_t sig = computeStateSignature();
-      if (sig != lastSignature) {
-        lastSignature = sig;
-        requestUpdate();
-      }
-    }
-  }
-
-  // SNTP landing upgrades the cached Face's "as of" line from bare to an actual
-  // age — repaint once on that transition (it happens at most once per boot).
-  const bool nowSynced = time(nullptr) >= 1700000000;
-  if (nowSynced != clockSynced) {
-    clockSynced = nowSynced;
-    requestUpdate();
-  }
-
-  // ── M6 power ladder: decide whether this wake goes back to sleep ──
-  if (pullMode) {
-    servicePullSync();
-  } else {
-    serviceIdleCadence();
-  }
-}
-
-bool PocketDailyActivity::refreshGlanceIfStale(uint32_t maxAgeMs) {
-  {
-    uint32_t at = 0;
-    bool valid = false;
-    AgentDeck::lockState();
-    at = AgentDeck::g_state.glanceAtMs;
-    valid = AgentDeck::g_state.glance.valid;
-    AgentDeck::unlockState();
-    if (valid && at != 0 && millis() - at < maxAgeMs) return false;
-  }
-  // A Pocket sleep frame is offline-capable. A stale endpoint is not evidence
-  // that the radio is usable, so preserve the durable glance without touching
-  // DNS/networking when Wi-Fi was never initialized or has disconnected.
-  if (!wifiReadyForHttp()) {
-    AgentLog::line("AGENT", "glance refresh skipped: Wi-Fi offline");
-    return false;
-  }
-  // Font families belong to the renderer. Hold its mutex for the entire
-  // release + HTTP transaction so a queued second paint cannot reload or use
-  // the family after requestUpdateAndWait() has returned from an earlier paint.
-  RenderLock fontRenderLock(*this);
-  // A full feed accumulates into one contiguous string, and esp_http_client
-  // itself wants ~5 KB of buffers. On a starved heap the pull cannot succeed
-  // — and before the OOM guards landed it aborted the whole device at
-  // power-off (X4: free 7 KB / largest 3.9 KB when the feed arrived). An
-  // honest stale glance beats a doomed attempt.
-  if (ESP.getMaxAllocHeap() < 12 * 1024) {
-    // Pocket's CJK card font is the usual owner of the missing contiguous
-    // block on X3. It is reloadable from SD after the fetch, so trade that
-    // cache for the HTTP/JSON working set before declaring the sync impossible.
-    sdFontSystem.releaseLoaded(renderer);
-  }
-  if (ESP.getMaxAllocHeap() < 12 * 1024) {
-    AgentLog::line("AGENT", "glance refresh skipped after font release: heap free=%u largest=%u",
-                   (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
-    return false;
-  }
-  AgentDeck::Net::EndpointCandidates endpoints;
-  char token[40] = {0};
-  if (dashState == DashState::Connected && AgentDeck::Net::wsConnected()) {
-    endpoints.port = AgentDeck::Net::wsBridgePort();
-    AgentDeck::Net::endpointCandidateAdd(endpoints, AgentDeck::Net::wsBridgeIp());
-    snprintf(token, sizeof(token), "%s", AgentDeck::Net::wsBridgeToken());
-  } else if (!AgentDeck::Feed::loadEndpointCandidates(endpoints, token, sizeof(token))) {
-    return false;  // no endpoint known — the cached glance (if any) is all there is
-  }
-  const char* board = gpio.deviceIsX3() ? "xteink_x3" : "xteink_x4";
-  // The no-PSRAM X3 can have less than 3 KB of contiguous heap after the CJK
-  // card font is resident. HTTP + JSON needs substantially more, so release
-  // the single SD-font slot before pulling. The next render lazily reloads it;
-  // an accepted OTA restarts before that is necessary.
-  sdFontSystem.releaseLoaded(renderer);
-  AgentLog::line("AGENT", "manual sync heap: free=%u largest=%u", (unsigned)ESP.getFreeHeap(),
-                 (unsigned)ESP.getMaxAllocHeap());
-  AgentDeck::Feed::SyncTelemetry tel;
-  tel.battPct = (int)powerManager.getBatteryPercentage();
-  tel.rssiDbm = (WiFi.status() == WL_CONNECTED) ? (int)WiFi.RSSI() : 0;
-  // The full feed apply also rewrites sessions — same daemon, same roster the
-  // WS already delivered, so this is a refresh, not a conflict. On `unchanged`
-  // the persisted glance in the deck cache is already current.
-  // Put a candidate that currently accepts TCP at the front before spending a
-  // full request on the wrong one. Persist a reorder so the next wake starts
-  // there instead of relearning it.
-  if (AgentDeck::Feed::orderByReachability(endpoints))
-    AgentDeck::Feed::saveEndpoint(endpoints.ips[0], endpoints.port, token);
-  AgentDeck::Feed::SyncResult r;
-  for (uint8_t i = 0; i < endpoints.count; i++) {
-    r = AgentDeck::Feed::syncOnce(endpoints.ips[i], endpoints.port, token, board, lastFeedSig, tel);
-    if (r.ok) break;
-    if (i + 1 < endpoints.count)
-      AgentLog::line("AGENT", "glance endpoint %s failed — trying %s", endpoints.ips[i], endpoints.ips[i + 1]);
-  }
-  if (r.ok && !r.unchanged) {
-    strncpy(lastFeedSig, r.deckSig, sizeof(lastFeedSig) - 1);
-    lastFeedSig[sizeof(lastFeedSig) - 1] = '\0';
-    lastDeckSaveMs = 0;
-    serviceDeckPersist();
-  }
-  if (r.ok) {
-    // A background refresh is also proof that discovery recovered. Do not
-    // leave a stale SYNC FAILED banner after the same route just succeeded.
-    manualSyncNeedsDiscovery = false;
-    manualSyncDiscoveryRetryActive = false;
-  }
-  AgentLog::line("AGENT", "glance refresh: %s%s", r.ok ? "ok" : "failed", r.unchanged ? " (unchanged)" : "");
-  return r.ok && !r.unchanged;
-}
-
-bool PocketDailyActivity::beginPendingFontSync() {
-  const PocketDaily::FontPackSync::BeginResult result = PocketDaily::FontPackSync::begin(
-      manualAssetIp, manualAssetPort, manualAssetToken, manualAssetBoard, pendingFontAdvert);
-  pendingFontAdvert = {};
-  if (result == PocketDaily::FontPackSync::BeginResult::Started) {
-    manualAssetSyncActive = true;
-    manualAssetSyncStage = AssetSyncStage::Font;
-    manualAssetRetryCount = 0;
-    manualAssetPctBucket = -1;
-    manualAssetDownloadedBytes = 0;
-    manualAssetTotalBytes = PocketDaily::FontPackSync::totalBytes();
-    manualAssetNextAtMs = millis();
-    AgentLog::line("FONT", "cooperative font sync armed");
-    requestUpdate();
-    return true;
-  }
-  if (result == PocketDaily::FontPackSync::BeginResult::Failed) {
-    manualAssetHadFailure = true;
-    AgentLog::line("FONT", "manual font sync failed; previous SD font retained");
-  }
-  return false;
-}
-
-void PocketDailyActivity::finishManualAssetSync() {
-  manualAssetSyncActive = false;
-  manualAssetSyncStage = AssetSyncStage::None;
-  manualAssetRetryCount = 0;
-  manualAssetPctBucket = -1;
-  manualAssetDownloadedBytes = 0;
-  manualAssetTotalBytes = 0;
-  lastSyncOutcome = (manualAssetFeedChanged || manualAssetAnyUpdated) ? SyncOutcome::Updated : SyncOutcome::UpToDate;
-  lastSyncOutcomeMs = millis();
-  AgentLog::line("ASSET", "foreground assets done: updated=%u failed=%u", manualAssetAnyUpdated ? 1U : 0U,
-                 manualAssetHadFailure ? 1U : 0U);
-  requestUpdate();
-}
-
-void PocketDailyActivity::serviceManualAssetSync() {
-  if (!manualAssetSyncActive) return;
-  if (!wifiReadyForHttp()) {
-    PocketDaily::LearningPackSync::cancel();
-    PocketDaily::FontPackSync::cancel();
-    manualAssetHadFailure = true;
-    manualSyncNeedsDiscovery = true;
-    finishManualAssetSync();
-    return;
-  }
-
-  const AssetSyncStage stage = manualAssetSyncStage;
-  bool progressed = false;
-  bool retry = false;
-  bool updated = false;
-  bool failed = false;
-  {
-    // The renderer's SD font is released only for this bounded response, not
-    // for the complete 11 MB transfer. This preserves the measured X3 heap
-    // margin while allowing queued paints between chunks.
-    RenderLock chunkLock(*this);
-    sdFontSystem.releaseLoaded(renderer);
-    if (stage == AssetSyncStage::Learning) {
-      const PocketDaily::LearningPackSync::Step step = PocketDaily::LearningPackSync::service();
-      progressed = step == PocketDaily::LearningPackSync::Step::Progress;
-      retry = step == PocketDaily::LearningPackSync::Step::Retry;
-      updated = step == PocketDaily::LearningPackSync::Step::Updated;
-      failed = step == PocketDaily::LearningPackSync::Step::Failed || step == PocketDaily::LearningPackSync::Step::Idle;
-      manualAssetDownloadedBytes = updated ? manualAssetTotalBytes : PocketDaily::LearningPackSync::downloadedBytes();
-    } else if (stage == AssetSyncStage::Font) {
-      const PocketDaily::FontPackSync::Step step = PocketDaily::FontPackSync::service();
-      progressed = step == PocketDaily::FontPackSync::Step::Progress;
-      retry = step == PocketDaily::FontPackSync::Step::Retry;
-      updated = step == PocketDaily::FontPackSync::Step::Updated;
-      failed = step == PocketDaily::FontPackSync::Step::Failed || step == PocketDaily::FontPackSync::Step::Idle;
-      manualAssetDownloadedBytes = updated ? manualAssetTotalBytes : PocketDaily::FontPackSync::downloadedBytes();
-    } else {
-      failed = true;
-    }
-  }
-
-  if (progressed) {
-    manualAssetRetryCount = 0;
-    manualAssetNextAtMs = millis() + 40;
-    const int bucket =
-        manualAssetTotalBytes ? (int)((uint64_t)manualAssetDownloadedBytes * 20 / manualAssetTotalBytes) : 0;
-    if (bucket != manualAssetPctBucket) {
-      manualAssetPctBucket = bucket;
-      requestUpdate();
-    }
-    return;
-  }
-  if (retry) {
-    if (manualAssetRetryCount < 5) manualAssetRetryCount++;
-    if (manualAssetRetryCount < 3) {
-      manualAssetNextAtMs = millis() + (500U << manualAssetRetryCount);
-      return;
-    }
-    if (stage == AssetSyncStage::Learning)
-      PocketDaily::LearningPackSync::cancel();
-    else
-      PocketDaily::FontPackSync::cancel();
-    failed = true;
-  }
-
-  if (updated) {
-    manualAssetAnyUpdated = true;
-    if (stage == AssetSyncStage::Learning) {
-      localStudyPackVersion = 0;
-      localStudyPackRecordCount = 0;
-      buildLocalStudyCard();
-    } else if (stage == AssetSyncStage::Font) {
-      sdFontSystem.markRegistryDirty();
-    }
-  }
-  if (failed) {
-    manualAssetHadFailure = true;
-    AgentLog::line(stage == AssetSyncStage::Learning ? "LEARN" : "FONT",
-                   "cooperative transfer failed; previous SD asset retained");
-  }
-
-  if (stage == AssetSyncStage::Learning && beginPendingFontSync()) return;
-  finishManualAssetSync();
-}
-
-bool PocketDailyActivity::attemptManualSync() {
-  if (!wifiReadyForHttp()) {
-    manualSyncNeedsDiscovery = true;
-    return false;
-  }
-
-  AgentDeck::Net::EndpointCandidates endpoints;
-  char token[40] = {0};
-  if (dashState == DashState::Connected && AgentDeck::Net::wsConnected()) {
-    endpoints.port = AgentDeck::Net::wsBridgePort();
-    AgentDeck::Net::endpointCandidateAdd(endpoints, AgentDeck::Net::wsBridgeIp());
-    snprintf(token, sizeof(token), "%s", AgentDeck::Net::wsBridgeToken());
-  } else if (!AgentDeck::Feed::loadEndpointCandidates(endpoints, token, sizeof(token))) {
-    AgentLog::line("AGENT", "manual sync: no cached endpoint — refreshing discovery");
-    AgentDeck::Net::mdnsRefresh();
-    dashState = DashState::Discovering;
-    discoveryStartMs = millis();
-    discoveryNoticeShown = false;
-    return false;
-  }
-
-  const char* board = gpio.deviceIsX3() ? "xteink_x3" : "xteink_x4";
-  // A deferred paint can still be queued behind requestUpdateAndWait(). Keep
-  // every renderer/font access excluded until the HTTP/OTA working set is
-  // released; this is the crash barrier for the no-PSRAM X3.
-  RenderLock fontRenderLock(*this);
-  sdFontSystem.releaseLoaded(renderer);
-
-  // Discovery is only an address lookup. Keeping mDNS and UDP alive while
-  // allocating the HTTP/TLS-independent feed client consumed ~7 KB on X3 and
-  // produced the observed 6 KB/2.4 KB abort. Recreate discovery on demand if
-  // the cached endpoint later fails.
-  AgentDeck::Net::udpStop();
-  AgentDeck::Net::mdnsStop();
-  discoveryServicesUp = false;
-  if (ESP.getFreeHeap() < kAgentSyncMinFree || ESP.getMaxAllocHeap() < kAgentSyncMinBlock) {
-    lastSyncOutcome = SyncOutcome::Unreachable;
-    lastSyncOutcomeMs = millis();
-    dashState = DashState::Online;
-    manualSyncNeedsDiscovery = false;
-    AgentLog::line("AGENT", "sync refused: heap free=%u largest=%u", (unsigned)ESP.getFreeHeap(),
-                   (unsigned)ESP.getMaxAllocHeap());
-    return false;
-  }
-  AgentDeck::Feed::SyncTelemetry tel;
-  tel.battPct = (int)powerManager.getBatteryPercentage();
-  tel.rssiDbm = (int)WiFi.RSSI();
-  // Put a candidate that currently accepts TCP at the front before spending a
-  // full request on the wrong one. Persist a reorder so the next wake starts
-  // there instead of relearning it.
-  if (AgentDeck::Feed::orderByReachability(endpoints))
-    AgentDeck::Feed::saveEndpoint(endpoints.ips[0], endpoints.port, token);
-  AgentDeck::Feed::SyncResult r;
-  char successfulIp[16] = {0};
-  for (uint8_t i = 0; i < endpoints.count; i++) {
-    r = AgentDeck::Feed::syncOnce(endpoints.ips[i], endpoints.port, token, board, lastFeedSig, tel);
-    if (r.ok) {
-      snprintf(successfulIp, sizeof(successfulIp), "%s", r.endpointIp[0] ? r.endpointIp : endpoints.ips[i]);
-      break;
-    }
-    if (i + 1 < endpoints.count)
-      AgentLog::line("AGENT", "sync endpoint %s failed — trying %s", endpoints.ips[i], endpoints.ips[i + 1]);
-  }
-  if (!r.ok) {
-    lastSyncOutcome = SyncOutcome::Unreachable;
-    lastSyncOutcomeMs = millis();
-    AgentLog::line("AGENT", "manual sync failed: %u candidates on port %u", (unsigned)endpoints.count,
-                   (unsigned)endpoints.port);
-    if (manualOtaResumePending) {
-      // A failed resume used to leave resumeAt in the past, causing an
-      // mDNS→Feed retry storm every loop (measured: 3.7 MB agentdeck.log and
-      // hundreds of doomed sockets). Preserve progress but back off the next
-      // route probe; a front-button Sync can still request one immediately.
-      if (manualOtaNoProgressRetries < 6) manualOtaNoProgressRetries++;
-      const uint32_t retryDelay = std::min<uint32_t>(60000, 1000u << manualOtaNoProgressRetries);
-      manualOtaResumeAtMs = millis() + retryDelay;
-      AgentLog::line("OTA", "resume feed failed — retry in %ums", (unsigned)retryDelay);
-    }
-    // One automatic mDNS retry migrates an ADE1 cache to the complete dual-NIC
-    // address set. The retry flag makes this bounded: if every freshly
-    // discovered candidate also fails, stop on the cached Pocket instead of
-    // recreating the old discovery→GET loop.
-    if (!manualSyncDiscoveryRetryActive) {
-      manualSyncDiscoveryRetryActive = true;
-      manualSyncNeedsDiscovery = false;
-      AgentDeck::Net::mdnsRefresh();
-      dashState = DashState::Discovering;
-      discoveryStartMs = millis();
-      discoveryNoticeShown = false;
-      AgentLog::line("AGENT", "cached endpoints exhausted — one mDNS failover refresh");
-    } else {
-      manualSyncDiscoveryRetryActive = false;
-      manualSyncNeedsDiscovery = true;
-      dashState = DashState::Online;
-    }
-    return false;
-  }
-  manualSyncNeedsDiscovery = false;
-  manualSyncDiscoveryRetryActive = false;
-  manualOtaNoProgressRetries = 0;
-  manualAssetAnyUpdated = false;
-  manualAssetHadFailure = false;
-  manualAssetFeedChanged = !r.unchanged;
-  manualAssetSyncStage = AssetSyncStage::None;
-  manualAssetRetryCount = 0;
-  manualAssetPctBucket = -1;
-  manualAssetDownloadedBytes = 0;
-  manualAssetTotalBytes = 0;
-  snprintf(manualAssetIp, sizeof(manualAssetIp), "%s", successfulIp);
-  manualAssetPort = endpoints.port;
-  snprintf(manualAssetToken, sizeof(manualAssetToken), "%s", token);
-  snprintf(manualAssetBoard, sizeof(manualAssetBoard), "%s", board);
-  pendingFontAdvert = r.fontPack;
-
-  const PocketDaily::LearningPackSync::BeginResult learningBegin = PocketDaily::LearningPackSync::begin(
-      manualAssetIp, manualAssetPort, manualAssetToken, manualAssetBoard, r.learningPack);
-  if (learningBegin == PocketDaily::LearningPackSync::BeginResult::Started) {
-    manualAssetSyncActive = true;
-    manualAssetSyncStage = AssetSyncStage::Learning;
-    manualAssetTotalBytes = r.learningPack.size;
-    manualAssetNextAtMs = millis();
-    AgentLog::line("LEARN", "cooperative content sync armed");
-  } else {
-    if (learningBegin == PocketDaily::LearningPackSync::BeginResult::Failed) {
-      manualAssetHadFailure = true;
-      AgentLog::line("LEARN", "manual content sync failed; previous SD pack retained");
-    }
-    manualAssetSyncActive = false;
-    beginPendingFontSync();
-  }
-  // A low battery is only a flash risk when the device is actually running
-  // from it. USB power is the safest update posture, so preserve the honest
-  // telemetry value in the Feed while bypassing the battery-only OTA gate.
-  const int otaBatteryPct = gpio.isUsbConnected() ? -1 : tel.battPct;
-  if (r.fwSize) {
-    if (AgentDeck::OtaPull::alreadyApplied(r.fwMd5)) {
-      manualOtaResumePending = false;
-      pullOtaDownloading = false;
-      pullOtaDownloadedBytes = 0;
-      pullOtaTotalBytes = 0;
-    } else {
-      const uint32_t before = AgentDeck::OtaPull::savedBytes(r.fwMd5);
-      if (!manualOtaResumeStartedMs) manualOtaResumeStartedMs = millis();
-      pullOtaTotalBytes = r.fwSize;
-      pullOtaDownloadedBytes = before;
-      snprintf(lastManualOtaMd5, sizeof(lastManualOtaMd5), "%s", r.fwMd5);
-      pullOtaDownloading = true;
-      const bool batteryEligible = otaBatteryPct < 0 || otaBatteryPct >= 30;
-      if (batteryEligible && AgentDeck::OtaPull::beginInteractive(successfulIp, endpoints.port, token, board, r.fwSize,
-                                                                  r.fwMd5, otaBatteryPct)) {
-        // Return to loop() immediately. The Face remains interactive while
-        // serviceInteractive() advances this MD5-bound SD offset in 128 KiB
-        // bursts and repaints only when the visible 10% bucket changes.
-        manualOtaIncrementalActive = true;
-        manualOtaResumePending = false;
-        manualOtaNoProgressRetries = 0;
-        manualOtaResumeAtMs = millis();
-        pullOtaPctBucket = (int)((uint64_t)before * 10 / r.fwSize);
-        AgentLog::line("OTA", "interactive download armed at %u/%u", (unsigned)before, (unsigned)r.fwSize);
-      } else {
-        pullOtaDownloading = false;
-        manualOtaIncrementalActive = false;
-        manualOtaResumePending = false;
-      }
-    }
-  }
-  if (!r.unchanged) {
-    strncpy(lastFeedSig, r.deckSig, sizeof(lastFeedSig) - 1);
-    lastFeedSig[sizeof(lastFeedSig) - 1] = '\0';
-    lastDeckSaveMs = 0;
-    serviceDeckPersist();
-  }
-  if (!manualAssetSyncActive) finishManualAssetSync();
-  AgentLog::line("AGENT", "manual sync: %s%s", r.unchanged ? "unchanged" : "updated",
-                 manualAssetSyncActive ? " (asset transfer continues)" : "");
-  return true;
-}
-
-bool PocketDailyActivity::attemptPullSync(const AgentDeck::Net::EndpointCandidates& endpoints, const char* token) {
-  if (!wifiReadyForHttp()) {
-    AgentLog::line("AGENT", "pull sync skipped: Wi-Fi offline");
-    return false;
-  }
-  char storedToken[40] = {0};
-  const char* resolvedToken = token;
-  if ((!resolvedToken || !resolvedToken[0]) && AgentDeck::AuthStore::load(storedToken, sizeof(storedToken))) {
-    resolvedToken = storedToken;
-  }
-  // Keep the complete discovered set before probing it. syncOnce() promotes
-  // the winner in this same record, so later timer wakes start with the path
-  // that was actually proven while retaining the fallback addresses.
-  AgentDeck::Feed::saveEndpointCandidates(endpoints, resolvedToken);
-  const char* board = gpio.deviceIsX3() ? "xteink_x3" : "xteink_x4";
-  // Timer wakes can overlap the immediate cached-Pocket paint. Serialize font
-  // eviction and the HTTP working set with that render just like front Sync.
-  RenderLock fontRenderLock(*this);
-  sdFontSystem.releaseLoaded(renderer);
-  // Telemetry rides the pull — the only battery/link observability a sleeping
-  // device has (the daemon logs it per client).
-  AgentDeck::Feed::SyncTelemetry tel;
-  tel.battPct = (int)powerManager.getBatteryPercentage();
-  tel.rssiDbm = (WiFi.status() == WL_CONNECTED) ? (int)WiFi.RSSI() : 0;
-  // Put a candidate that currently accepts TCP at the front before spending a
-  // full request on the wrong one. Persist a reorder so the next wake starts
-  // there instead of relearning it.
-  // The pull path receives its candidates by const reference (they may belong to
-  // a discovery result the caller still owns), so reorder a local copy.
-  AgentDeck::Net::EndpointCandidates ordered = endpoints;
-  if (AgentDeck::Feed::orderByReachability(ordered))
-    AgentDeck::Feed::saveEndpoint(ordered.ips[0], ordered.port, resolvedToken);
-  AgentDeck::Feed::SyncResult r;
-  char successfulIp[16] = {0};
-  for (uint8_t i = 0; i < ordered.count; i++) {
-    r = AgentDeck::Feed::syncOnce(ordered.ips[i], ordered.port, resolvedToken, board, lastFeedSig, tel);
-    if (r.ok) {
-      snprintf(successfulIp, sizeof(successfulIp), "%s", r.endpointIp[0] ? r.endpointIp : ordered.ips[i]);
-      break;
-    }
-    if (i + 1 < ordered.count)
-      AgentLog::line("AGENT", "pull endpoint %s failed — trying %s", ordered.ips[i], ordered.ips[i + 1]);
-  }
-  if (!r.ok) return false;
-  pullSynced = true;
-  pullSyncedAtMs = millis();
-  pullNextSec = r.nextPullSec;
-  // Feed-carried OTA (contract § Pull OTA): a staged build advertised in the
-  // feed installs itself on this wake — the flashPending guards in loop() /
-  // servicePullSync keep the device awake through download + flash + restart.
-  const int otaBatteryPct = gpio.isUsbConnected() ? -1 : tel.battPct;
-  if (r.fwSize && !AgentDeck::OtaPull::alreadyApplied(r.fwMd5)) {
-    pullOtaTotalBytes = r.fwSize;
-    pullOtaDownloadedBytes = AgentDeck::OtaPull::savedBytes(r.fwMd5);
-    pullOtaDownloading = true;
-    const bool staged = AgentDeck::OtaPull::tryInstall(successfulIp, endpoints.port, resolvedToken, board, r.fwSize,
-                                                       r.fwMd5, otaBatteryPct);
-    pullOtaDownloadedBytes = staged ? r.fwSize : AgentDeck::OtaPull::savedBytes(r.fwMd5);
-    pullOtaDownloading = false;
-    if (staged) {
-      requestUpdate();
-      return true;
-    }
-    if (pullOtaDownloadedBytes < r.fwSize && (otaBatteryPct < 0 || otaBatteryPct >= 30)) {
-      // Unattended cadence is already an automatic retry state machine. A
-      // partial image wakes again in five minutes instead of waiting the
-      // ordinary hourly content cadence.
-      pullNextSec = kPullMinSec;
-      AgentLog::line("OTA", "partial cadence image %u/%u — next resume in %us", (unsigned)pullOtaDownloadedBytes,
-                     (unsigned)r.fwSize, (unsigned)pullNextSec);
-    }
-  }
-  if (r.unchanged) {
-    // Deck unchanged since the last sync: the persisted cache is already
-    // exactly what the daemon would have sent. Nothing to parse or persist —
-    // this wake's remaining job is repainting the times and sleeping.
-    AgentLog::line("AGENT", "pull sync: deck unchanged (sig %s)", lastFeedSig);
-    requestUpdate();
-    return true;
-  }
-  strncpy(lastFeedSig, r.deckSig, sizeof(lastFeedSig) - 1);
-  lastFeedSig[sizeof(lastFeedSig) - 1] = '\0';
-  // Persist immediately (unthrottled): the frozen Face and the wake-time cache
-  // must agree on what was just pulled.
-  lastDeckSaveMs = 0;
-  serviceDeckPersist();
-  requestUpdate();
-  return true;
-}
-
-void PocketDailyActivity::servicePullSync() {
-  // Never sleep out from under a firmware transfer.
-  if (AgentDeck::OtaWs::receiving() || AgentDeck::OtaWs::flashPending()) return;
-  const uint32_t now = millis();
-  if (pullSynced) {
-    // Linger briefly so a present user can grab the device (any press cancels
-    // pull mode above); then freeze the Face and sleep until the next pull.
-    if (now - pullSyncedAtMs >= kPullLingerMs) {
-      beginTimedSleep(pullNextSec ? pullNextSec : kPullDefaultSec);
-    }
-    return;
-  }
-  // Unsynced: Wi-Fi joined but the daemon never answered within the budget —
-  // don't burn the battery scanning; retry on the next cadence tick.
-  if (now - enterMs >= kPullBudgetMs) {
-    AgentLog::line("AGENT", "pull-sync budget exhausted — sleeping unsynced");
-    beginTimedSleep(kPullDefaultSec);
-  }
-}
-
-void PocketDailyActivity::serviceIdleCadence() {
-  if (SETTINGS.agentDeckCompanionEnabled == 0 || SETTINGS.agentPullSyncEnabled == 0) return;
-  if (gpio.isUsbConnected()) return;              // docked → stay in the live WS mode
-  if (dashState != DashState::Connected) return;  // pre-connected states keep their own budgets
-  if (viewMode != ViewMode::Overview) return;     // never sleep under a Card/Detail
-  if (AgentDeck::OtaWs::receiving() || AgentDeck::OtaWs::flashPending()) return;
-  // A foreground Sync owns the awake period until it finishes or its bounded
-  // retry window expires. Cadence sleep during a resumable transfer was the
-  // main reason users saw a fast burst turn into multi-minute gaps.
-  if (manualSyncActive || manualAssetSyncActive || manualOtaIncrementalActive || manualOtaResumePending ||
-      pullOtaDownloading)
-    return;
-  const uint32_t idleAnchor = lastUserInputMs ? lastUserInputMs : enterMs;
-  if (millis() - idleAnchor < kIdleToCadenceMs) return;
-  // Agent activity no longer controls this product's power policy. Use the
-  // most recent Pocket-feed hint when available, otherwise the hourly default.
-  AgentLog::line("POCKET", "idle on battery — entering Pocket cadence");
-  beginTimedSleep(pullNextSec ? pullNextSec : kPullDefaultSec);
-}
-
-void PocketDailyActivity::beginTimedSleep(uint32_t seconds) {
-  if (seconds < kPullMinSec) seconds = kPullMinSec;
-  // Idle-cadence entry from WS mode never pulled a feed — fetch the glance
-  // (weather / wrap-up) before freezing the frame. The pull-mode path synced
-  // seconds ago, so this is a no-op there.
-  refreshGlanceIfStale(10 * 60 * 1000);
-  // Final deck persist (unthrottled) so the frozen Face and the cache agree.
-  lastDeckSaveMs = 0;
-  serviceDeckPersist();
-  // Absolute wall times for the frozen frame ("Synced HH:MM · next ~HH:MM").
-  // Derived from the feed's daemon-local serverHm — the only honest wall clock
-  // this device has (no timezone). Empty when no pull anchored it this boot;
-  // the glance then falls back to a plain sleep-duration line.
-  sleepForSec = seconds;
-  sleepNextHm[0] = '\0';
-  {
-    char baseHm[6] = {0};
-    uint32_t baseAtMs = 0;
-    AgentDeck::lockState();
-    memcpy(baseHm, AgentDeck::g_state.serverHm, sizeof(baseHm));
-    baseAtMs = AgentDeck::g_state.serverHmAtMs;
-    AgentDeck::unlockState();
-    if (baseHm[0])
-      AgentDeck::GlanceFormat::addToHm(sleepNextHm, sizeof(sleepNextHm), baseHm,
-                                       (millis() - baseAtMs) / 1000UL + seconds);
-  }
-  // Paint the sleep glance one last time so the retained frame is honest about
-  // being a snapshot. The paint serial drives the ghost-clearing FULL_REFRESH.
-  bumpTimedSleepPaintSerial();
-  glanceReason = GlanceReason::TimedSleep;
-  sleepFramePending = true;
-  requestUpdateAndWait();
-  AgentLog::line("AGENT", "timed deep sleep: %us", (unsigned)seconds);
-  enterTimedDeepSleep(seconds, bestEpochNow());
+  finish();
 }
 
 void PocketDailyActivity::onExit() {
   Activity::onExit();
   appContent.reset();
 
-  PocketDaily::LearningPackSync::cancel();
-  PocketDaily::FontPackSync::cancel();
-  manualAssetSyncActive = false;
-
-  // Cooperative OTA has no background task, so cancellation is immediate and
-  // the durable SD offset remains available for the next Pocket Sync.
-  AgentDeck::OtaPull::cancelInteractive();
-  manualOtaIncrementalActive = false;
-
-  AgentDeck::Net::wsDisconnect();
-  AgentDeck::Net::udpStop();
-  AgentDeck::Net::mdnsStop();
-  MDNS.end();
-
-  // Pocket Daily's reader/font/network lifetime fragments the X3's internal
-  // heap even after every reloadable owner is released. Starting NimBLE in the
-  // same process can therefore fail its contiguous-allocation preflight and
-  // appear to bounce straight back to Pocket. Reboot directly into the Nearby
+  // Pocket Daily's reader/font lifetime fragments the X3's internal heap even
+  // after every reloadable owner is released. Starting NimBLE in the same
+  // process can therefore fail its contiguous-allocation preflight and appear
+  // to bounce straight back to Pocket. Reboot directly into the Nearby
   // activity: the retained e-ink popup hides the short reset, while the clean
   // heap makes BLE startup deterministic.
   if (exitToNearbySync) {
@@ -1733,58 +195,13 @@ void PocketDailyActivity::onExit() {
     WiFi.disconnect(false);
     delay(30);
     // Defrag restart (mirrors CalibreConnectActivity::onExit). Confirm on the
-    // glance face targets the reader; every other exit lands on Home.
+    // Daily Brief targets the reader; every other exit lands on Home.
     if (exitToReader && !APP_STATE.openEpubPath.empty()) {
       silentRestartToReader();
     } else {
       silentRestart();
     }
   }
-}
-
-bool PocketDailyActivity::findAwaiting(const char* selected, AwaitingItem& out) const {
-  auto cp = [](char* d, size_t n, const char* s) {
-    strncpy(d, s, n - 1);
-    d[n - 1] = '\0';
-  };
-  bool found = false;
-  AgentDeck::lockState();
-  const auto& s = AgentDeck::g_state;
-  for (uint8_t i = 0; i < s.sessionCount; i++) {
-    const auto& se = s.sessions[i];
-    if (strncmp(se.state, "awaiting", 8) != 0 || !selected || strcmp(se.id, selected) != 0) continue;
-    cp(out.sid, sizeof(out.sid), se.id);
-    cp(out.requestId, sizeof(out.requestId), se.requestId);
-    // Options are actionable only when the daemon explicitly identifies this
-    // session as their owner. Merely being focused is not enough: aggregate
-    // state_update packets can focus an observed session while carrying options
-    // left over from another managed PTY.
-    const bool optionsCorrelated = s.optionSessionId[0] != '\0' && strcmp(se.id, s.optionSessionId) == 0;
-    cp(out.question, sizeof(out.question), optionsCorrelated && s.question[0] ? s.question : se.question);
-    out.optionCount = optionsCorrelated ? s.optionCount : 0;
-    out.attentionMode = AgentDeck::classifyAttention(true, AgentDeck::isObservedSession(se.controlMode, se.id),
-                                                     se.requestId[0] != '\0', optionsCorrelated, out.optionCount);
-    found = true;
-    break;
-  }
-  // Focused-state fallback: sessions_list can lag a just-arrived state_update,
-  // so accept it only when its session id is the Detail row being inspected.
-  if (!found && (s.state == AgentState::AWAITING_PERMISSION || s.state == AgentState::AWAITING_OPTION ||
-                 s.state == AgentState::AWAITING_DIFF)) {
-    const char* stateSid = s.sessionId[0] ? s.sessionId : s.focusedSessionId;
-    if (!selected || strcmp(stateSid, selected) == 0) {
-      cp(out.sid, sizeof(out.sid), stateSid);
-      cp(out.question, sizeof(out.question), s.question);
-      cp(out.requestId, sizeof(out.requestId), s.requestId);
-      const bool optionsCorrelated = stateSid[0] && s.optionSessionId[0] && strcmp(stateSid, s.optionSessionId) == 0;
-      out.optionCount = optionsCorrelated ? s.optionCount : 0;
-      out.attentionMode = AgentDeck::classifyAttention(true, AgentDeck::isObservedSession("", stateSid),
-                                                       out.requestId[0] != '\0', optionsCorrelated, out.optionCount);
-      found = true;
-    }
-  }
-  AgentDeck::unlockState();
-  return found;
 }
 
 bool PocketDailyActivity::findPocketCard(const char* cardId, PocketDaily::Card& out) const {
@@ -1797,57 +214,11 @@ bool PocketDailyActivity::findPocketCard(const char* cardId, PocketDaily::Card& 
       }
     }
   }
-  bool found = false;
-  AgentDeck::lockState();
   if (localStudyCard.cardId[0] && strcmp(localStudyCard.cardId, cardId) == 0) {
     out = localStudyCard;
-    found = true;
+    return true;
   }
-  for (uint8_t i = 0; !found && i < AgentDeck::g_state.pocketCount; i++) {
-    if (strcmp(AgentDeck::g_state.pocketCards[i].cardId, cardId) != 0) continue;
-    out = AgentDeck::g_state.pocketCards[i];
-    found = true;
-    break;
-  }
-  if (!found && cachedDeck) {
-    for (uint8_t i = 0; i < cachedDeck->pocketCount; i++) {
-      if (strcmp(cachedDeck->pocketCards[i].cardId, cardId) != 0) continue;
-      out = cachedDeck->pocketCards[i];
-      found = true;
-      break;
-    }
-  }
-  AgentDeck::unlockState();
-  return found;
-}
-
-bool PocketDailyActivity::cardUsesSoftkeys(const AgentDeck::AttentionMode mode, const uint8_t optionCount) {
-  // Direct button↔choice binding needs every choice on a physical key: slot 1 is
-  // always Later, leaving three. Everything else (incl. >3 options) falls back to
-  // the cursor grammar inside the card.
-  if (mode == AgentDeck::AttentionMode::RealOptions) return optionCount <= 3;
-  return mode == AgentDeck::AttentionMode::PermissionGate || mode == AgentDeck::AttentionMode::WaitingForOptions ||
-         mode == AgentDeck::AttentionMode::RespondInTerminal;
-}
-
-void PocketDailyActivity::serviceCard() {
-  if (AgentDeck::OtaWs::receiving() || AgentDeck::OtaWs::flashPending()) return;  // no card takeovers mid-OTA
-
-  if (viewMode == ViewMode::Card) {
-    PocketDaily::Card pocket{};
-    if (findPocketCard(cardSid, pocket)) {
-      // Pocket cards are stable day/info snapshots. They do not auto-resolve
-      // with session state; a choice or Later removes them locally.
-      return;
-    }
-    // Live session decisions are intentionally not a Pocket-reader surface.
-    // If legacy state left one selected, return to the portable library.
-    cardSid[0] = '\0';
-    cardSig = 0;
-    viewMode = ViewMode::Overview;
-    requestUpdate();
-    return;
-  }
+  return false;
 }
 
 int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
@@ -1862,14 +233,11 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
     memset(&o, 0, sizeof(o));
     cp(o.sid, sizeof(o.sid), card.cardId);
     cp(o.project, sizeof(o.project), card.title[0] ? card.title : "POCKET");
-    cp(o.agentType, sizeof(o.agentType), "pocket");
-    cp(o.controlMode, sizeof(o.controlMode), "pocket");
-    cp(o.state, sizeof(o.state), "POCKET");
     cp(o.activity, sizeof(o.activity), card.question);
     // The local SD lesson is a recall prompt on Home: show only the target
     // glyph there. Opening it reveals the word, reading, meaning and example
-    // through renderPocketCard(). Provider-authored information cards keep
-    // their existing question + context overview summary.
+    // through renderPocketCard(). The companion's cards keep their text +
+    // context overview summary.
     if (strcmp(card.module, "local") != 0 && card.context[0] && strcmp(o.activity, card.context) != 0) {
       const size_t used = strlen(o.activity);
       const size_t extra = (used ? 3 : 0) + strlen(card.context);
@@ -1881,16 +249,13 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
     o.pocket = true;
   };
 
-  // The local book, when one exists. This data lives entirely on SD and
-  // remains useful on a device that has never met a daemon.
+  // The local book, when one exists. This data lives entirely on SD.
   auto appendReading = [&]() {
     if (APP_STATE.openEpubPath.empty() || n >= cap) return;
     OverviewRow& o = out[n++];
     memset(&o, 0, sizeof(o));
     cp(o.sid, sizeof(o.sid), "local:reading");
     cp(o.project, sizeof(o.project), tr(STR_POCKET_CONTINUE_READING));
-    cp(o.agentType, sizeof(o.agentType), "reader");
-    cp(o.state, sizeof(o.state), tr(STR_POCKET_READING));
     const char* title = nullptr;
     const char* author = nullptr;
     for (const auto& book : RECENT_BOOKS.getBooks()) {
@@ -1924,43 +289,16 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
     }
   };
   auto appendDailyWord = [&]() {
-    AgentDeck::lockState();
-    const PocketDaily::Card local = localStudyCard;
-    AgentDeck::unlockState();
     const int before = n;
-    appendPocket(local);
+    appendPocket(localStudyCard);
     if (n > before) out[before].word = true;
   };
 
-  // Daemon-authored Pocket items. Live sessions never become top-level rows;
-  // they are merely signals the daemon may distil into a portable card.
-  auto appendProvider = [&]() {
-    AgentDeck::lockState();
-    const auto& s = AgentDeck::g_state;
-    for (uint8_t i = 0; i < s.pocketCount && n < cap; i++) appendPocket(s.pocketCards[i]);
-    AgentDeck::unlockState();
-  };
-
-  // Read-only monitoring (decision-card relaxation): only when carried usage or
-  // wrap-up data exists; it has no actions and opens nothing.
-  auto appendMonitor = [&]() {
-    if (n >= cap || !hasMonitorData()) return;
-    OverviewRow& o = out[n++];
-    memset(&o, 0, sizeof(o));
-    cp(o.sid, sizeof(o.sid), "local:monitor");
-    cp(o.project, sizeof(o.project), tr(STR_POCKET_MONITOR));
-    cp(o.agentType, sizeof(o.agentType), "monitor");
-    cp(o.state, sizeof(o.state), "MONITOR");
-    o.monitor = true;
-  };
-
-  // Pocket Daily profile (docs/pocket-profile-v1.md); defaults keep the
-  // original order: reading, study, provider.
+  // Pocket Daily profile (docs/pocket-profile-v1.md). Retired provider and
+  // monitoring items still parse but never produce a row.
   PocketDaily::Home::RowAvailability available;
   available.book = !APP_STATE.openEpubPath.empty();
   available.appCards = appCards && appCards->count;
-  available.provider = true;  // appendProvider adds nothing when no card was carried
-  available.monitor = hasMonitorData();
   PocketDaily::Home::RowSource sources[PocketDaily::DailyProfile::HOME_ITEM_CAP];
   const int count = PocketDaily::Home::homeRowSources(PocketDaily::DailyProfile::current(), available, sources);
   for (int k = 0; k < count && n < cap; ++k) {
@@ -1974,44 +312,25 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
       case PocketDaily::Home::RowSource::DailyWord:
         appendDailyWord();
         break;
-      case PocketDaily::Home::RowSource::Provider:
-        appendProvider();
-        break;
-      case PocketDaily::Home::RowSource::Monitor:
-        appendMonitor();
-        break;
     }
   }
   return n;
 }
 
-bool PocketDailyActivity::hasMonitorData() const {
-  AgentDeck::lockState();
-  const auto& live = AgentDeck::g_state.glance;
-  const bool present = live.valid
-                           ? (live.usageCount > 0 || live.wrapupCount > 0)
-                           : (cachedDeck && (cachedDeck->glance.usageCount > 0 || cachedDeck->glance.wrapupCount > 0));
-  AgentDeck::unlockState();
-  return present;
-}
-
-uint32_t PocketDailyActivity::bestEpochNow() {
-  // NTP system clock first; else the daemon-clock estimate carried by timeline
-  // events (works before SNTP lands). 0 = genuinely no clock source this boot.
-  const time_t t = time(nullptr);
-  if (t >= 1700000000) return (uint32_t)t;
-  uint32_t epochSec = 0, epochAtMs = 0;
-  AgentDeck::lockState();
-  epochSec = AgentDeck::g_state.daemonEpochSec;
-  epochAtMs = AgentDeck::g_state.daemonEpochAtMs;
-  AgentDeck::unlockState();
-  if (epochSec) return epochSec + (millis() - epochAtMs) / 1000UL;
-  return 0;
+uint32_t PocketDailyActivity::studyEpoch() const {
+  const time_t now = time(nullptr);
+  if (clockIsSet(now)) return static_cast<uint32_t>(now);
+  // The companion's compose time is a lower bound on the real date. The POST
+  // handler sets an unset clock from it; this covers a boot since then.
+  return glanceSnapshot.savedEpoch;
 }
 
 void PocketDailyActivity::buildLocalStudyCard() {
-  const uint32_t epoch = bestEpochNow();
-  const uint32_t day = epoch ? epoch / 86400UL : 0;
+  // The daily word turns over at the companion's local midnight when a glance
+  // carried its UTC offset, else at UTC midnight.
+  const uint32_t epoch = studyEpoch();
+  const int64_t localEpoch = epoch ? static_cast<int64_t>(epoch) + glanceSnapshot.utcOffsetMinutes * 60 : 0;
+  const uint32_t day = localEpoch > 0 ? static_cast<uint32_t>(localEpoch / 86400) : 0;
   PocketDaily::Card card{};
   snprintf(card.module, sizeof(card.module), "local");
   snprintf(card.actionClass, sizeof(card.actionClass), "day");
@@ -2056,309 +375,42 @@ void PocketDailyActivity::buildLocalStudyCard() {
     snprintf(card.choices[i].label, sizeof(card.choices[i].label), "%s", labels[i]);
   }
 
-  AgentDeck::lockState();
-  localStudyCard = card;
-  AgentDeck::unlockState();
+  {
+    RenderLock studyLock(*this);
+    localStudyCard = card;
+  }
   AgentLog::line("POCKET", "offline JP lesson ready: source=%s day=%lu index=%u", fromPack ? "sd-pack" : "firmware",
                  (unsigned long)day, (unsigned)index);
-}
-
-void PocketDailyActivity::serviceDeckPersist() {
-  if (!cachedDeck) return;
-  // Never compete with a firmware transfer for SD bandwidth / the WS socket.
-  if (AgentDeck::OtaWs::receiving() || AgentDeck::OtaWs::flashPending()) return;
-  if (lastDeckSaveMs != 0 && millis() - lastDeckSaveMs < kDeckSaveIntervalMs) return;
-
-  // Content signature of the portable Pocket deck. Live session churn is not
-  // product state and must not cause SD writes or e-ink refreshes.
-  uint32_t sig = 2166136261u;
-  bool dataReceived = false;
-  AgentDeck::lockState();
-  {
-    const auto& s = AgentDeck::g_state;
-    dataReceived = s.dataReceived;
-    sig = PocketDaily::cardsSignature(sig, s.pocketCards, s.pocketCount);
-    // The glance block (weather / quota / wrap-up) is part of the persisted
-    // snapshot: a weather-only change must still refresh the cache. POD bytes,
-    // clear()-normalized, so the raw-memory hash is stable.
-    sig = fnvUpdate(sig, reinterpret_cast<const char*>(&s.glance), sizeof(s.glance));
-  }
-  AgentDeck::unlockState();
-  sig = fnvUpdate(sig, lastFeedSig, strlen(lastFeedSig));
-  if (!dataReceived) return;  // nothing real to persist yet
-  if (sig == lastDeckSig) return;
-
-  // Build the snapshot into a scratch heap buffer (never the C3 stack), write it
-  // to SD without holding the state lock, then swap it in as the RAM fallback
-  // under the lock (the render task reads cachedDeck through g_stateMutex).
-  //
-  // This is deliberately a transient allocation. Preallocating a permanent
-  // partner buffer was tried and measured worse: the momentary peak is two
-  // snapshots either way, so pinning the second one merely moved 6,244 B out of
-  // everyone else's headroom for good — worst-case free heap fell from 11,000 B
-  // to 1,104 B across a session. Deferring mDNS/UDP already leaves enough
-  // contiguous room for this request to succeed.
-  auto snap = makeUniqueNoThrow<PocketDaily::DeckStore::Snapshot>();
-  if (!snap) {
-    LOG_ERR("POCKET", "OOM allocating %uB deck snapshot", (unsigned)sizeof(PocketDaily::DeckStore::Snapshot));
-    return;
-  }
-  memset(snap.get(), 0, sizeof(*snap));
-  snap->glance.clear();
-  strncpy(snap->deckSig, lastFeedSig, sizeof(snap->deckSig) - 1);
-  AgentDeck::lockState();
-  {
-    const auto& s = AgentDeck::g_state;
-    snap->glance = s.glance;  // sleep-glance content rides the deck cache (v2)
-    snprintf(snap->serverHm, sizeof(snap->serverHm), "%s", s.serverHm);
-    snap->pocketCount = s.pocketCount > PocketDaily::CARD_CAP ? PocketDaily::CARD_CAP : s.pocketCount;
-    memcpy(snap->pocketCards, s.pocketCards, sizeof(PocketDaily::Card) * snap->pocketCount);
-    snap->count = 0;  // legacy session records are never part of Pocket Home
-  }
-  AgentDeck::unlockState();
-  snap->savedEpoch = bestEpochNow();
-
-  lastDeckSaveMs = millis();
-  if (!PocketDaily::DeckStore::save(*snap)) return;  // SD hiccup — retry on next change
-  lastDeckSig = sig;
-  AgentDeck::lockState();
-  cachedDeck.swap(snap);
-  AgentDeck::unlockState();
-  AgentLog::line("POCKET", "deck persisted: %u items", (unsigned)cachedDeck->pocketCount);
 }
 
 void PocketDailyActivity::handleButtons() {
   using Btn = MappedInputManager::Button;
 
-  // Stamp any press: auto-surface must not steal the screen mid-navigation.
-  if (mappedInput.wasAnyPressed()) lastUserInputMs = millis();
-
-  // A WiFi OTA transfer rides this activity's WS socket — exiting (or any other
-  // action) mid-transfer would tear it down. Swallow input until it resolves.
-  if (AgentDeck::OtaWs::receiving() || AgentDeck::OtaWs::flashPending()) return;
-
-  // Pocket Home uses the four physical front positions directly. Card/Detail
-  // screens below retain their own explicit grammars.
+  // Pocket Home uses the four physical front positions directly.
   if (gpio.wasPressed(HalGPIO::BTN_BACK)) backPressMs = millis();
 
-  // Autonomous Pocket cards remain answerable offline: a press writes the SD
-  // outbox first and the next HTTP feed pushes it. This branch intentionally
-  // precedes the connection guard below.
+  // Cards are local: a press answers the daily word or closes the card.
   if (viewMode == ViewMode::Card) {
     PocketDaily::Card pocket{};
-    if (findPocketCard(cardSid, pocket)) {
-      const int raw = mappedInput.getPressedFrontButton();
-      if (raw == HalGPIO::BTN_BACK) {
-        deferPocketCard(pocket);
-      } else {
-        int pos = -1;
-        if (raw == HalGPIO::BTN_CONFIRM)
-          pos = 0;
-        else if (raw == HalGPIO::BTN_LEFT)
-          pos = 1;
-        else if (raw == HalGPIO::BTN_RIGHT)
-          pos = 2;
-        if (pos >= 0 && pos < pocket.choiceCount) applyPocketChoice(pocket, pos);
-      }
-      return;
-    }
-  }
-
-  // Not connected yet (WiFi select / discovering / connecting): Back = leave the
-  // dashboard, and when the glance face is up, Confirm = resume the open book.
-  // Keep both responsive in every pre-Connected state so the user is never
-  // trapped on a "searching…" screen with no way out.
-  if (dashState != DashState::Connected) {
-    OverviewRow* const rows = inputRows;
-    int n = collectOverview(rows, kOverviewCap);
-    const int selected = overviewCursor >= 0 && overviewCursor < n ? overviewCursor : 0;
-
-    // Reading and Study are one content carousel. The side keys move through
-    // it; Confirm always opens exactly what the panel currently shows.
-    if (mappedInput.wasReleased(Btn::Up) && n > 1) {
-      overviewCursor = (selected - 1 + n) % n;
-      requestUpdate();
-      return;
-    }
-    if (mappedInput.wasReleased(Btn::Down) && n > 1) {
-      overviewCursor = (selected + 1) % n;
-      requestUpdate();
-      return;
-    }
-    if (gpio.wasReleased(HalGPIO::BTN_CONFIRM) && n > 0) {
-      if (rows[selected].reading) {
-        exitToReader = true;
-        exitRequested = true;
-      } else if (rows[selected].pocket) {
-        strncpy(cardSid, rows[selected].sid, sizeof(cardSid) - 1);
-        cardSid[sizeof(cardSid) - 1] = '\0';
-        viewMode = ViewMode::Card;
-        requestUpdate();
-      }
-      return;
-    }
-    const bool syncReleased =
-        gpio.wasReleased(HalGPIO::BTN_RIGHT) || (gpio.wasReleased(HalGPIO::BTN_CONFIRM) && n == 0);
-    if (syncReleased && manualAssetSyncActive) return;
-    if (syncReleased) {
-      exitToNearbySync = true;
-      activityManager.goToPocketNearbySync();
-      return;
-    }
-    if (ambientGlanceShown && gpio.wasReleased(HalGPIO::BTN_CONFIRM) && !APP_STATE.openEpubPath.empty()) {
-      exitToReader = true;
-      exitRequested = true;
-      return;
-    }
-    if (gpio.wasReleased(HalGPIO::BTN_BACK) && backPressMs != 0) exitRequested = true;
-    return;
-  }
-
-  // ── CARD: full-screen decision — one question, direct physical choices ──
-  if (viewMode == ViewMode::Card) {
-    AwaitingItem item = {};
-    if (!findAwaiting(cardSid, item) || item.attentionMode == AgentDeck::AttentionMode::None) {
-      // Resolved between service ticks; serviceCard will repaint — just don't act.
-      return;
-    }
-    const AgentDeck::AttentionMode mode = item.attentionMode;
-    const int optCount = (mode == AgentDeck::AttentionMode::PermissionGate) ? 2
-                         : (mode == AgentDeck::AttentionMode::RealOptions)  ? item.optionCount
-                                                                            : 0;
-
-    // Dismiss ("Later"): remember this prompt's signature so it never re-surfaces
-    // unchanged, and clear backPressMs so the release can't read as "exit" from
-    // the Overview branch on the next frame.
-    const auto dismissCard = [&]() {
-      dismissedSigs[dismissedHead] = cardSig;
-      dismissedHead = static_cast<uint8_t>((dismissedHead + 1) % kDismissedCap);
-      AgentLog::line("AGENT", "card dismissed sid=%s", cardSid);
+    if (!findPocketCard(cardSid, pocket)) {
+      // The card changed underneath (for example the daily word turned over).
       cardSid[0] = '\0';
-      cardSig = 0;
       viewMode = ViewMode::Overview;
-      backPressMs = 0;
       requestUpdate();
-    };
-    // Open this session's Detail (timeline). The decision stays available there
-    // via the inline fallback grammar. Cooldown-stamp so the mapped release of
-    // the same physical press can't immediately fire an inline decision.
-    const auto openDetail = [&]() {
-      strncpy(selectedSid, cardSid, sizeof(selectedSid) - 1);
-      selectedSid[sizeof(selectedSid) - 1] = '\0';
-      optionCursor = 0;
-      detailScroll = 0;
-      viewMode = ViewMode::Detail;
-      lastDecisionMs = millis();
-      backPressMs = 0;
-      swallowConfirmRelease = true;
-      if (!AgentDeck::isObservedSession("", selectedSid)) AgentDeck::Commands::sendFocusSession(selectedSid);
-      AgentDeck::Commands::sendQuerySessionTimeline(selectedSid);
-      requestUpdate();
-    };
-
-    if (cardUsesSoftkeys(mode, item.optionCount)) {
-      // Raw physical order (left→right: BTN_BACK, BTN_CONFIRM, BTN_LEFT,
-      // BTN_RIGHT) — renderCard draws hint labels in the same positional order,
-      // bypassing the user's logical remap, so display and input always agree.
-      const int raw = mappedInput.getPressedFrontButton();
-      if (raw == HalGPIO::BTN_BACK) {  // slot 1: Later
-        dismissCard();
-        return;
-      }
-      if (mode == AgentDeck::AttentionMode::PermissionGate) {
-        if (raw == HalGPIO::BTN_CONFIRM)
-          openDetail();  // slot 2: Detail
-        else if (raw == HalGPIO::BTN_LEFT)
-          applyDecision(item, 1);  // slot 3: Deny
-        else if (raw == HalGPIO::BTN_RIGHT)
-          applyDecision(item, 0);  // slot 4: Allow
-      } else if (mode == AgentDeck::AttentionMode::RealOptions) {
-        int pos = -1;
-        if (raw == HalGPIO::BTN_CONFIRM)
-          pos = 0;  // slot 2: option 1
-        else if (raw == HalGPIO::BTN_LEFT)
-          pos = 1;  // slot 3: option 2
-        else if (raw == HalGPIO::BTN_RIGHT)
-          pos = 2;  // slot 4: option 3
-        if (pos >= 0 && pos < optCount) applyDecision(item, pos);
-      } else {                                          // WaitingForOptions / RespondInTerminal: read-only card
-        if (raw == HalGPIO::BTN_CONFIRM) openDetail();  // slot 2: Detail
-      }
       return;
     }
-
-    // Cursor grammar (>3 options): side/front navigation moves the highlight,
-    // OK selects, Back = Later. Mirrors the Detail inline decision gestures.
-    if (mappedInput.wasReleased(Btn::NavNext) && optionCursor < optCount - 1) {
-      optionCursor++;
-      requestUpdate();
-    }
-    if (mappedInput.wasReleased(Btn::NavPrevious) && optionCursor > 0) {
-      optionCursor--;
-      requestUpdate();
-    }
-    if (mappedInput.wasReleased(Btn::Confirm) && optCount > 0) {
-      applyDecision(item, optionCursor);
-      requestUpdate();
-    }
-    if (mappedInput.wasReleased(Btn::Back) && backPressMs != 0) dismissCard();
-    return;
-  }
-
-  // ── DETAIL: session timeline + (when awaiting) the decision options inline ──
-  if (viewMode == ViewMode::Detail) {
-    // Resolve the attention contract for this session. Only a requestId gate or
-    // explicitly-correlated real options is actionable; observed terminal-only
-    // prompts never acquire synthetic buttons.
-    AwaitingItem item = {};
-    const bool awaiting = findAwaiting(selectedSid, item);
-    AgentDeck::AttentionMode attentionMode = AgentDeck::AttentionMode::None;
-    int optCount = 0;
-    if (awaiting) {
-      attentionMode = item.attentionMode;
-      if (attentionMode == AgentDeck::AttentionMode::PermissionGate)
-        optCount = 2;  // real PreToolUse gate: Allow / Deny
-      else if (attentionMode == AgentDeck::AttentionMode::RealOptions)
-        optCount = item.optionCount;
-    }
-    if (optCount > 0) {
-      if (optionCursor >= optCount) optionCursor = optCount - 1;
-      if (optionCursor < 0) optionCursor = 0;
-    }
-    const bool atBottom = (detailScroll >= detailMaxScroll);
-
-    // Up/Down: scroll the content; once at the bottom (options in view) the same
-    // buttons move the option highlight, so it's one continuous gesture.
-    if (mappedInput.wasReleased(Btn::NavNext)) {  // Down
-      if (awaiting && atBottom && optionCursor < optCount - 1)
-        optionCursor++;
-      else if (detailScroll < detailMaxScroll)
-        detailScroll++;
-      requestUpdate();
-    }
-    if (mappedInput.wasReleased(Btn::NavPrevious)) {  // Up
-      if (awaiting && atBottom && optionCursor > 0)
-        optionCursor--;
-      else if (detailScroll > 0)
-        detailScroll--;
-      requestUpdate();
-    }
-
-    // OK confirms the highlighted option once the decision is in view.
-    if (swallowConfirmRelease && mappedInput.wasReleased(Btn::Confirm)) {
-      // The release of the raw press that opened Detail from the Card — inert.
-      swallowConfirmRelease = false;
-    } else if (mappedInput.wasReleased(Btn::Confirm) && AgentDeck::attentionIsActionable(attentionMode) &&
-               optCount > 0 && atBottom) {
-      applyDecision(item, optionCursor);
-      // Stay in Detail until the daemon confirms the state transition. This
-      // avoids making a dropped/no-op command look successful on slow e-ink.
-      requestUpdate();
-    }
-
-    if (mappedInput.wasReleased(Btn::Back)) {
-      viewMode = ViewMode::Overview;
-      requestUpdate();
+    const int raw = mappedInput.getPressedFrontButton();
+    if (raw == HalGPIO::BTN_BACK) {
+      closePocketCard(pocket);
+    } else {
+      int pos = -1;
+      if (raw == HalGPIO::BTN_CONFIRM)
+        pos = 0;
+      else if (raw == HalGPIO::BTN_LEFT)
+        pos = 1;
+      else if (raw == HalGPIO::BTN_RIGHT)
+        pos = 2;
+      if (pos >= 0 && pos < pocket.choiceCount) applyPocketChoice(pocket, pos);
     }
     return;
   }
@@ -2368,6 +420,8 @@ void PocketDailyActivity::handleButtons() {
   const int n = collectOverview(rows, kOverviewCap);
   const int selected = overviewCursor >= 0 && overviewCursor < n ? overviewCursor : 0;
 
+  // Reading and Study are one content carousel. The side keys move through
+  // it; Confirm always opens exactly what the panel currently shows.
   if (mappedInput.wasReleased(Btn::Up) && n > 1) {
     overviewCursor = (selected - 1 + n) % n;
     requestUpdate();
@@ -2378,7 +432,6 @@ void PocketDailyActivity::handleButtons() {
     requestUpdate();
     return;
   }
-
   if (gpio.wasReleased(HalGPIO::BTN_CONFIRM) && n > 0) {
     if (rows[selected].reading) {
       exitToReader = true;
@@ -2386,141 +439,38 @@ void PocketDailyActivity::handleButtons() {
     } else if (rows[selected].pocket) {
       strncpy(cardSid, rows[selected].sid, sizeof(cardSid) - 1);
       cardSid[sizeof(cardSid) - 1] = '\0';
-      optionCursor = 0;
       viewMode = ViewMode::Card;
       requestUpdate();
     }
     return;
   }
+  // Sync opens Pocket Nearby Sync, where the companion sends cards, the
+  // profile and the weather/events glance.
   if (gpio.wasReleased(HalGPIO::BTN_RIGHT) || (gpio.wasReleased(HalGPIO::BTN_CONFIRM) && n == 0)) {
-    if (manualAssetSyncActive) return;
     exitToNearbySync = true;
     activityManager.goToPocketNearbySync();
     return;
   }
+  // With neither a book nor a card row the ambient Daily Brief is the face;
+  // Confirm there resumes the open book.
+  if (ambientGlanceShown && gpio.wasReleased(HalGPIO::BTN_CONFIRM) && !APP_STATE.openEpubPath.empty()) {
+    exitToReader = true;
+    exitRequested = true;
+    return;
+  }
 
-  // Back exits the dashboard (guard a stale release from a prior activity).
+  // Back exits Pocket Daily (guard a stale release from a prior activity).
   if (gpio.wasReleased(HalGPIO::BTN_BACK) && backPressMs != 0) exitRequested = true;
 }
 
-bool PocketDailyActivity::applyDecision(const AwaitingItem& it, int selectedCursor) {
-  if (millis() - lastDecisionMs < kDecisionCooldownMs) return false;
-
-  if (it.attentionMode == AgentDeck::AttentionMode::PermissionGate) {
-    if (!it.requestId[0] || (selectedCursor != 0 && selectedCursor != 1)) return false;
-    AgentDeck::Commands::sendPermissionDecision(it.requestId, selectedCursor == 0 ? "allow" : "deny");
-    AgentLog::line("AGENT", "permission_decision=%s sid=%s req=%s", selectedCursor == 0 ? "allow" : "deny", it.sid,
-                   it.requestId);
-  } else if (it.attentionMode == AgentDeck::AttentionMode::RealOptions) {
-    int optionIndex = -1;
-    bool navigable = false;
-    char action[40] = {0};
-    AgentDeck::lockState();
-    const auto& s = AgentDeck::g_state;
-    const bool stillCorrelated = it.sid[0] && s.optionSessionId[0] && strcmp(it.sid, s.optionSessionId) == 0;
-    if (stillCorrelated && selectedCursor >= 0 && selectedCursor < s.optionCount) {
-      optionIndex = s.options[selectedCursor].index;
-      navigable = s.navigable;
-      strncpy(action, s.options[selectedCursor].action, sizeof(action) - 1);
-    }
-    AgentDeck::unlockState();
-    if (optionIndex < 0) return false;
-    if (navigable) {
-      AgentDeck::Commands::sendSelectOption(it.sid, optionIndex);
-      AgentLog::line("AGENT", "select_option idx=%d sid=%s", optionIndex, it.sid);
-    } else {
-      if (!action[0]) return false;
-      AgentDeck::Commands::sendRespond(action);
-      AgentLog::line("AGENT", "respond shortcut=%s sid=%s", action, it.sid);
-    }
-  } else {
-    return false;
-  }
-
+bool PocketDailyActivity::closePocketCard(const PocketDaily::Card& card) {
+  if (millis() - lastDecisionMs < kDecisionCooldownMs || !card.cardId[0]) return false;
+  // Back/Later on a card simply closes it; nothing is queued anywhere.
   lastDecisionMs = millis();
-  requestUpdate();
-  return true;
-}
-
-void PocketDailyActivity::dismissPocketCard(const char* cardId) {
-  if (!cardId || !cardId[0]) return;
-  bool cachedCardRemoved = false;
-  bool liveDeckAvailable = false;
-  AgentDeck::lockState();
-  auto& state = AgentDeck::g_state;
-  for (uint8_t i = 0; i < state.pocketCount; i++) {
-    if (strcmp(state.pocketCards[i].cardId, cardId) != 0) continue;
-    if (i + 1 < state.pocketCount)
-      memmove(&state.pocketCards[i], &state.pocketCards[i + 1],
-              sizeof(PocketDaily::Card) * (state.pocketCount - i - 1));
-    state.pocketCount--;
-    memset(&state.pocketCards[state.pocketCount], 0, sizeof(PocketDaily::Card));
-    break;
-  }
-  liveDeckAvailable = state.dataReceived;
-  if (cachedDeck) {
-    for (uint8_t i = 0; i < cachedDeck->pocketCount; i++) {
-      if (strcmp(cachedDeck->pocketCards[i].cardId, cardId) != 0) continue;
-      if (i + 1 < cachedDeck->pocketCount)
-        memmove(&cachedDeck->pocketCards[i], &cachedDeck->pocketCards[i + 1],
-                sizeof(PocketDaily::Card) * (cachedDeck->pocketCount - i - 1));
-      cachedDeck->pocketCount--;
-      memset(&cachedDeck->pocketCards[cachedDeck->pocketCount], 0, sizeof(PocketDaily::Card));
-      cachedCardRemoved = true;
-      break;
-    }
-  }
-  AgentDeck::unlockState();
-
-  // Pocket choices are deliberately usable without a daemon. Persist the
-  // local removal immediately as well as the outbox decision; otherwise a
-  // reboot before the next successful feed would resurrect the cached card and
-  // allow the same choice to be queued twice. Keep the original savedEpoch:
-  // removing a card locally does not make the rest of the snapshot fresher.
-  if (liveDeckAvailable) {
-    // A freshly-received card may not exist in cachedDeck yet. Bypass the
-    // normal five-second throttle and snapshot the now-updated live deck.
-    lastDeckSaveMs = 0;
-    serviceDeckPersist();
-    // cachedDeck is populated during onEnter(); cppcheck loses that member state
-    // across the lock boundary above.
-    // cppcheck-suppress knownConditionTrueFalse
-  } else if (cachedDeck && cachedCardRemoved && !PocketDaily::DeckStore::save(*cachedDeck)) {
-    AgentLog::line("POCKET", "card cache removal not persisted: %s", cardId);
-  }
-  AgentLog::line("POCKET", "card hidden: %s", cardId);
   cardSid[0] = '\0';
-  cardSig = 0;
   viewMode = ViewMode::Overview;
   backPressMs = 0;
   requestUpdate();
-}
-
-bool PocketDailyActivity::deferPocketCard(const PocketDaily::Card& card) {
-  if (millis() - lastDecisionMs < kDecisionCooldownMs || !card.cardId[0]) return false;
-  if (strcmp(card.module, "local") == 0 || strcmp(card.module, "app") == 0) {
-    // Back/Later on a local/app card simply closes it. It is not a daemon
-    // decision and must not poison the offline outbox with an unknown module.
-    lastDecisionMs = millis();
-    cardSid[0] = '\0';
-    viewMode = ViewMode::Overview;
-    backPressMs = 0;
-    requestUpdate();
-    return true;
-  }
-  PocketDaily::OutboxStore::Record rec{};
-  strncpy(rec.cardId, card.cardId, sizeof(rec.cardId) - 1);
-  strncpy(rec.action, "card_choice", sizeof(rec.action) - 1);
-  strncpy(rec.choiceId, "later", sizeof(rec.choiceId) - 1);
-  rec.index = -1;
-  rec.recordedEpoch = bestEpochNow();
-  if (!PocketDaily::OutboxStore::append(rec)) {
-    AgentLog::line("POCKET", "Later not queued: %s", card.cardId);
-    return false;
-  }
-  lastDecisionMs = millis();
-  dismissPocketCard(card.cardId);
-  glanceRefreshQueued = true;
   return true;
 }
 
@@ -2529,37 +479,17 @@ bool PocketDailyActivity::applyPocketChoice(const PocketDaily::Card& card, int s
     return false;
   const auto& choice = card.choices[selectedCursor];
   if (!card.cardId[0] || !choice.id[0]) return false;
-  if (strcmp(card.module, "local") == 0) {
-    // Again keeps today's word; Next and Known move through the offline starter
-    // deck immediately. A future spaced-repetition store can refine this without
-    // changing the card/button contract.
-    if (strcmp(choice.id, "next") == 0 || strcmp(choice.id, "known") == 0) {
-      ++localStudyOffset;
-      buildLocalStudyCard();
-    }
-    lastDecisionMs = millis();
-    cardSid[0] = '\0';
-    viewMode = ViewMode::Overview;
-    backPressMs = 0;
-    requestUpdate();
-    return true;
+  // Only the local daily word carries choices. Again keeps today's word; Next
+  // and Known move through the offline deck immediately.
+  if (strcmp(card.module, "local") == 0 && (strcmp(choice.id, "next") == 0 || strcmp(choice.id, "known") == 0)) {
+    ++localStudyOffset;
+    buildLocalStudyCard();
   }
-  PocketDaily::OutboxStore::Record rec{};
-  strncpy(rec.cardId, card.cardId, sizeof(rec.cardId) - 1);
-  strncpy(rec.action, "card_choice", sizeof(rec.action) - 1);
-  strncpy(rec.choiceId, choice.id, sizeof(rec.choiceId) - 1);
-  rec.index = -1;
-  rec.recordedEpoch = bestEpochNow();
-  if (!PocketDaily::OutboxStore::append(rec)) {
-    AgentLog::line("POCKET", "choice not queued: %s", card.cardId);
-    return false;
-  }
-  AgentLog::line("POCKET", "choice queued: %s=%s", card.cardId, choice.id);
   lastDecisionMs = millis();
-  dismissPocketCard(card.cardId);
-  // The next shallow loop pass pushes the outbox before fetching a replacement
-  // feed. Never run the deep HTTP/JSON/SD chain from this button stack.
-  glanceRefreshQueued = true;
+  cardSid[0] = '\0';
+  viewMode = ViewMode::Overview;
+  backPressMs = 0;
+  requestUpdate();
   return true;
 }
 
@@ -2569,32 +499,24 @@ int PocketDailyActivity::fontForText(int uiFontId, const char* text) const {
 }
 
 void PocketDailyActivity::preparePersonalSnapshot() {
-  renderGlanceSnapshot.clear();
-  renderSyncedHm[0] = '\0';
-  renderSavedEpoch = 0;
+  // A glance saved on an earlier local day drops that day's schedule and past
+  // forecast days (docs/pocket-glance-v1.md). Needs a set clock; the app's UTC
+  // offset gives the local date without a timezone database.
+  const time_t now = time(nullptr);
+  if (glanceSnapshot.savedEpoch && clockIsSet(now)) {
+    char savedIso[11];
+    char todayIso[11];
+    if (PocketDaily::GlanceFormat::formatLocalIsoDate(savedIso, sizeof(savedIso), glanceSnapshot.savedEpoch,
+                                                      glanceSnapshot.utcOffsetMinutes) &&
+        PocketDaily::GlanceFormat::formatLocalIsoDate(todayIso, sizeof(todayIso), now, glanceSnapshot.utcOffsetMinutes))
+      PocketDaily::GlanceFormat::rollToLocalDay(glanceSnapshot.glance, savedIso, todayIso);
+  }
+
   memset(&renderPocketSnapshot, 0, sizeof(renderPocketSnapshot));
-
-  AgentDeck::lockState();
-  if (AgentDeck::g_state.glance.valid)
-    renderGlanceSnapshot = AgentDeck::g_state.glance;
-  else if (cachedDeck)
-    renderGlanceSnapshot = cachedDeck->glance;
-
-  if (AgentDeck::g_state.serverHm[0])
-    snprintf(renderSyncedHm, sizeof(renderSyncedHm), "%s", AgentDeck::g_state.serverHm);
-  else if (cachedDeck && cachedDeck->serverHm[0])
-    snprintf(renderSyncedHm, sizeof(renderSyncedHm), "%s", cachedDeck->serverHm);
-  if (cachedDeck) renderSavedEpoch = cachedDeck->savedEpoch;
-
   if (const auto* appCards = appContent.cards(); appCards && appCards->count)
     renderPocketSnapshot = appCards->cards[0].card;
   else if (localStudyCard.cardId[0])
     renderPocketSnapshot = localStudyCard;
-  else if (AgentDeck::g_state.pocketCount > 0)
-    renderPocketSnapshot = AgentDeck::g_state.pocketCards[0];
-  else if (cachedDeck && cachedDeck->pocketCount > 0)
-    renderPocketSnapshot = cachedDeck->pocketCards[0];
-  AgentDeck::unlockState();
 
   renderReadingSnapshot.clear();
   if (APP_STATE.openEpubPath.empty()) return;
@@ -2683,8 +605,7 @@ void PocketDailyActivity::drawBrandedHeader(const char* title, const char* subti
   const auto& m = UITheme::getInstance().getMetrics();
   const int w = renderer.getScreenWidth();
   const Rect r{0, m.topPadding, w, m.headerHeight};
-  // Product identity is Pocket itself. AgentDeck is an invisible sync source,
-  // so its logo and wordmark never appear in the reader shell.
+  // Product identity is Pocket itself; card titles are content.
   GUI.drawHeader(renderer, r, title, subtitle);
 }
 
@@ -2698,8 +619,6 @@ PocketDaily::Home::Strings PocketDailyActivity::homeStrings() {
   s.myCards = tr(STR_POCKET_MY_CARDS);
   s.word = tr(STR_POCKET_DAILY_WORD);
   s.empty = tr(STR_POCKET_EMPTY);
-  s.monitor = tr(STR_POCKET_MONITOR);
-  s.monitorEmpty = tr(STR_POCKET_MONITOR_EMPTY);
   s.weather = tr(STR_POCKET_WEATHER);
   s.noWeather = tr(STR_POCKET_NO_WEATHER);
   s.weatherHint = tr(STR_POCKET_WEATHER_HINT);
@@ -2724,7 +643,7 @@ PocketDaily::Home::Env PocketDailyActivity::homeEnv() const {
   env.drawHeader = [](void* self, const GfxRenderer& renderer, int x, int y, int width, int height, const char* title,
                       const char* subtitle) {
     (void)self;
-    // Product identity is Pocket itself; AgentDeck never brands the shell.
+    // Product identity is Pocket itself.
     GUI.drawHeader(renderer, Rect{x, y, width, height}, title, subtitle);
   };
   env.drawCover = [](void* self, GfxRenderer&, int x, int y, int width, int height) {
@@ -2736,111 +655,12 @@ PocketDaily::Home::Env PocketDailyActivity::homeEnv() const {
   return env;
 }
 
-void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awaitingCount, bool fromCache,
-                                         uint32_t asOfEpoch) {
-  (void)awaitingCount;  // live Agent attention is not a Pocket Home concern
-
+void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n) {
   preparePersonalSnapshot();
-  char statusLine[96];
-  if (AgentDeck::OtaWs::receiving()) {
-    const uint32_t total = AgentDeck::OtaWs::totalBytes();
-    const unsigned pct = total ? (unsigned)((uint64_t)AgentDeck::OtaWs::receivedBytes() * 100 / total) : 0;
-    snprintf(statusLine, sizeof(statusLine), "%s \xC2\xB7 %u%%", tr(STR_POCKET_FIRMWARE), pct);
-  } else if (manualAssetSyncActive && manualAssetTotalBytes > 0) {
-    const unsigned pct = (unsigned)((uint64_t)manualAssetDownloadedBytes * 100 / manualAssetTotalBytes);
-    snprintf(statusLine, sizeof(statusLine), "%s \xC2\xB7 %u%% \xC2\xB7 DOWNLOADING",
-             manualAssetSyncStage == AssetSyncStage::Learning ? "LEARNING" : "FONT", pct);
-  } else if (pullOtaTotalBytes > 0 && pullOtaDownloadedBytes < pullOtaTotalBytes) {
-    const unsigned pct = (unsigned)((uint64_t)pullOtaDownloadedBytes * 100 / pullOtaTotalBytes);
-    if (pullOtaDownloading || manualSyncActive)
-      snprintf(statusLine, sizeof(statusLine), "%s \xC2\xB7 %u%% \xC2\xB7 DOWNLOADING", tr(STR_POCKET_FIRMWARE), pct);
-    else if (manualOtaResumePending)
-      snprintf(statusLine, sizeof(statusLine), "%s \xC2\xB7 %u%% \xC2\xB7 AUTO RESUME", tr(STR_POCKET_FIRMWARE), pct);
-    else
-      snprintf(statusLine, sizeof(statusLine), "%s \xC2\xB7 %u%% \xC2\xB7 SYNC TO RESUME", tr(STR_POCKET_FIRMWARE),
-               pct);
-  } else if (manualSyncQueued || manualSyncActive) {
-    // The pull blocks this task, so the Face cannot animate. Naming the upper
-    // bound is the honest substitute for a progress bar we cannot draw.
-    snprintf(statusLine, sizeof(statusLine), tr(STR_POCKET_CHECKING_FORMAT), kSyncWorstCaseSec);
-  } else if (lastSyncOutcome != SyncOutcome::None && millis() - lastSyncOutcomeMs < kSyncOutcomeHoldMs) {
-    // A Sync press must leave a visible answer behind, not just return to idle.
-    const char* outcome = lastSyncOutcome == SyncOutcome::Updated    ? tr(STR_POCKET_SYNC_UPDATED)
-                          : lastSyncOutcome == SyncOutcome::UpToDate ? tr(STR_POCKET_SYNC_UP_TO_DATE)
-                                                                     : tr(STR_POCKET_SYNC_UNREACHABLE);
-    snprintf(statusLine, sizeof(statusLine), "%s", outcome);
-  } else if (manualSyncNeedsDiscovery) {
-    snprintf(statusLine, sizeof(statusLine), "%s", tr(STR_POCKET_SYNC_RETRY));
-  } else if (pullMode && pullSynced) {
-    snprintf(statusLine, sizeof(statusLine), "%s \xC2\xB7 %s", tr(STR_POCKET_UPDATED), tr(STR_POCKET_SLEEPING));
-  } else if (pullMode) {
-    snprintf(statusLine, sizeof(statusLine), "%s", tr(STR_POCKET_CHECKING));
-  } else {
-    // Link truth comes from the radio itself. dashState describes what Pocket
-    // is trying to do and can lag a disconnect/reconnect edge by one loop, so
-    // it must never be the sole source of an ONLINE label.
-    const bool wifiUp = WiFi.status() == WL_CONNECTED;
-    if (dashState == DashState::WifiSelection) {
-      snprintf(statusLine, sizeof(statusLine), "WI-FI SETUP");
-    } else if (!wifiUp && dashState == DashState::WifiJoining) {
-      if (savedWifiScanActive)
-        snprintf(statusLine, sizeof(statusLine), "WI-FI SEARCHING / SAVED NETWORKS");
-      else
-        snprintf(statusLine, sizeof(statusLine), "WI-FI JOINING%s%s", joiningSsid[0] ? " / " : "", joiningSsid);
-    } else if (!wifiUp) {
-      snprintf(statusLine, sizeof(statusLine), "WI-FI OFF / SYNC");
-    } else if ((dashState == DashState::Connected && AgentDeck::Net::wsConnected()) || dashState == DashState::Online) {
-      const String currentIp = WiFi.localIP().toString();
-      snprintf(statusLine, sizeof(statusLine), "ONLINE / %s", currentIp.c_str());
-    } else if (dashState == DashState::Connecting) {
-      snprintf(statusLine, sizeof(statusLine), "WI-FI OK / DECK CONNECT");
-    } else {
-      snprintf(statusLine, sizeof(statusLine), "WI-FI OK / DECK SEARCH");
-    }
-  }
-  if (fromCache) {
-    char savedStatus[40];
-    const time_t nowT = time(nullptr);
-    if (asOfEpoch && nowT >= 1700000000 && (uint32_t)nowT >= asOfEpoch) {
-      const uint32_t age = (uint32_t)nowT - asOfEpoch;
-      if (age >= 60) {
-        char a[8];
-        formatAge(age, a, sizeof(a));
-        snprintf(savedStatus, sizeof(savedStatus), "%s \xC2\xB7 %s", tr(STR_POCKET_SAVED), a);
-      } else {
-        snprintf(savedStatus, sizeof(savedStatus), "%s", tr(STR_POCKET_SAVED));
-      }
-    } else {
-      snprintf(savedStatus, sizeof(savedStatus), "%s", tr(STR_POCKET_SAVED));
-    }
-    // Keep connectivity first: a saved deck must never make an offline device
-    // look online. The second phrase explains why its content is still usable.
-    char linkStatus[sizeof(statusLine)];
-    snprintf(linkStatus, sizeof(linkStatus), "%s", statusLine);
-    snprintf(statusLine, sizeof(statusLine), "%s \xC2\xB7 %s", linkStatus, savedStatus);
-  }
-  // Network truth gets its own bounded row. Theme headers were designed for a
-  // short subtitle; long Wi-Fi/Deck/Saved combinations could run into battery
-  // or control chrome and became unreadable on X3.
-  // The active Overview already has a dedicated network/status band and the
-  // weather panel owns its snapshot date. Repeating date + sync time in the
-  // compact header collides with the hero copy on X3 and visually crowds the
-  // physical Sync key, so keep this header product-only. Retained sleep Glance
-  // continues to show its immutable snapshot metadata separately.
   // Drawing is shared with the host preview (pocket_daily/home/HomeRenderer).
-  const bool syncInk = savedWifiScanActive || manualSyncQueued || manualSyncActive || manualAssetSyncActive ||
-                       manualOtaIncrementalActive || pullOtaDownloading || AgentDeck::OtaWs::receiving();
-  // E-ink activity signal cells advance only when the phase/progress changes.
-  int activeCells = savedWifiScanActive ? 1 : (manualSyncQueued || manualSyncActive ? 2 : 1);
-  if (pullOtaTotalBytes && pullOtaDownloadedBytes < pullOtaTotalBytes)
-    activeCells = std::max(
-        1, std::min(4, (int)(((uint64_t)pullOtaDownloadedBytes * 4 + pullOtaTotalBytes - 1) / pullOtaTotalBytes)));
-  else if (manualAssetSyncActive && manualAssetTotalBytes)
-    activeCells = std::max(1, std::min(4, (int)(((uint64_t)manualAssetDownloadedBytes * 4 + manualAssetTotalBytes - 1) /
-                                                manualAssetTotalBytes)));
   PocketDaily::Home::Row homeRows[kOverviewCap];
   for (int i = 0; i < n && i < kOverviewCap; ++i)
-    homeRows[i] = {rows[i].reading,  rows[i].pocket, rows[i].monitor, rows[i].mine,    rows[i].word,
+    homeRows[i] = {rows[i].reading,  rows[i].pocket, rows[i].mine,    rows[i].word,
                    rows[i].hasImage, rows[i].sid,    rows[i].project, rows[i].activity};
   PocketDaily::Home::HomeView view;
   view.isX3 = gpio.deviceIsX3();
@@ -2849,309 +669,11 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
   view.selected = overviewCursor;
   view.reading = {renderReadingSnapshot.valid, renderReadingSnapshot.title, renderReadingSnapshot.author,
                   renderReadingSnapshot.percent};
-  view.glance = &renderGlanceSnapshot;
-  view.syncedHm = renderSyncedHm;
-  view.snapshotStale = PocketDaily::HomeDraw::snapshotIsStale(renderSavedEpoch, time(nullptr));
-  view.statusLine = statusLine;
-  view.syncInk = syncInk;
-  view.activeCells = activeCells;
+  view.glance = &glanceSnapshot.glance;
+  view.snapshotStale = PocketDaily::HomeDraw::snapshotIsStale(glanceSnapshot.savedEpoch, time(nullptr));
   view.profile = PocketDaily::DailyProfile::current();
   view.strings = homeStrings();
   PocketDaily::Home::renderHome(renderer, view, homeEnv());
-  renderer.displayBuffer();
-}
-
-void PocketDailyActivity::renderDetail() {
-  const auto& m = UITheme::getInstance().getMetrics();
-  const int w = renderer.getScreenWidth();
-  const int pageH = renderer.getScreenHeight();
-  const int pad = m.contentSidePadding;
-  const int line10 = renderer.getLineHeight(UI_10_FONT_ID);
-  const int lineS = renderer.getLineHeight(SMALL_FONT_ID);
-
-  // Snapshot the selected session + its timeline entries under one lock.
-  char project[40] = {0}, agentType[16] = {0}, model[32] = {0}, state[20] = {0}, tool[40] = {0};
-  char activity[AgentDeck::SESSION_ACTIVITY_CAP] = {0};
-  uint32_t elapsed = 0;
-  bool found = false;
-  char tlText[AgentDeck::DashboardState::TIMELINE_CAP][96];
-  char tlType[AgentDeck::DashboardState::TIMELINE_CAP][20];
-  uint32_t tlTs[AgentDeck::DashboardState::TIMELINE_CAP];
-  uint32_t epochSec = 0, epochAtMs = 0;
-  int tlCount = 0;
-  AgentDeck::lockState();
-  const auto& s = AgentDeck::g_state;
-  for (uint8_t i = 0; i < s.sessionCount; i++) {
-    if (selectedSid[0] && strcmp(s.sessions[i].id, selectedSid) == 0) {
-      const auto& se = s.sessions[i];
-      strncpy(project, se.projectName, sizeof(project) - 1);
-      strncpy(agentType, se.agentType, sizeof(agentType) - 1);
-      strncpy(model, se.modelName, sizeof(model) - 1);
-      strncpy(state, se.state, sizeof(state) - 1);
-      strncpy(tool, se.currentTool, sizeof(tool) - 1);
-      strncpy(activity, se.activity, sizeof(activity) - 1);
-      elapsed = se.elapsedSec;
-      found = true;
-      break;
-    }
-  }
-  if (!found) {  // observed/single-session fallback → render the focused state
-    strncpy(project, s.projectName, sizeof(project) - 1);
-    strncpy(agentType, s.agentType, sizeof(agentType) - 1);
-    strncpy(model, s.modelName, sizeof(model) - 1);
-    strncpy(tool, s.currentTool, sizeof(tool) - 1);
-    strncpy(activity, s.currentTool, sizeof(activity) - 1);
-    strncpy(state, agentStateLabel(s.state), sizeof(state) - 1);
-    found = s.dataReceived;
-  }
-  // Matching timeline entries, oldest → newest (ring: head is oldest when full).
-  // Unattributed rows (empty sid) are global error/scheduled signals — show them
-  // in every session's Detail, matching the other dashboard surfaces.
-  const int cnt = s.timelineCount;
-  for (int k = 0; k < cnt; k++) {
-    int idx = (s.timelineCount < AgentDeck::DashboardState::TIMELINE_CAP)
-                  ? k
-                  : (s.timelineHead + k) % AgentDeck::DashboardState::TIMELINE_CAP;
-    const AgentDeck::TimelineItem& t = s.timeline[idx];
-    if (t.sid[0] != '\0' && selectedSid[0] && strcmp(rawSid(t.sid), rawSid(selectedSid)) != 0) continue;
-    if (t.text[0] == '\0') continue;
-    strncpy(tlText[tlCount], t.text, sizeof(tlText[0]) - 1);
-    tlText[tlCount][sizeof(tlText[0]) - 1] = '\0';
-    strncpy(tlType[tlCount], t.type, sizeof(tlType[0]) - 1);
-    tlType[tlCount][sizeof(tlType[0]) - 1] = '\0';
-    tlTs[tlCount] = t.tsSec;
-    if (++tlCount >= AgentDeck::DashboardState::TIMELINE_CAP) break;
-  }
-  epochSec = s.daemonEpochSec;
-  epochAtMs = s.daemonEpochAtMs;
-  AgentDeck::unlockState();
-
-  // Turn grouping (mirrors the Apple/Android projection): a chat_start whose
-  // turn has already completed is redundant with its chat_end/chat_response
-  // row — showing both renders every turn twice. Keep only in-flight starts.
-  bool tlShow[AgentDeck::DashboardState::TIMELINE_CAP];
-  for (int k = 0; k < tlCount; k++) {
-    tlShow[k] = true;
-    if (strcmp(tlType[k], "chat_start") != 0) continue;
-    for (int j = k + 1; j < tlCount; j++) {
-      if (strcmp(tlType[j], "chat_end") == 0 || strcmp(tlType[j], "chat_response") == 0) {
-        tlShow[k] = false;
-        break;
-      }
-    }
-  }
-
-  // Estimated "daemon now" for per-entry ages (no RTC on this device).
-  const uint32_t daemonNowSec = epochSec ? epochSec + (millis() - epochAtMs) / 1000UL : 0;
-
-  renderer.clearScreen();
-  drawBrandedHeader("Session", nullptr);
-  int y = m.topPadding + m.headerHeight + m.verticalSpacing;
-
-  if (!found) {
-    renderer.drawText(UI_10_FONT_ID, pad, y, tr(STR_POCKET_SESSION_ENDED), true, EpdFontFamily::BOLD);
-    const auto labels = mappedInput.mapLabels("Back", "", "", "");
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    renderer.displayBuffer();
-    return;
-  }
-
-  // Title row: glyph + project.
-  const uint8_t* g = glyphForAgent(agentType);
-  int textX = pad;
-  if (g) {
-    renderer.drawIcon(g, pad, y, kGlyphPx, kGlyphPx);
-    textX = pad + kGlyphPx + 12;
-  }
-  renderer.drawText(
-      UI_10_FONT_ID, textX, y + (kGlyphPx - line10) / 2,
-      renderer.truncatedText(UI_10_FONT_ID, project[0] ? project : "session", w - textX - pad, EpdFontFamily::BOLD)
-          .c_str(),
-      true, EpdFontFamily::BOLD);
-  y += (g ? kGlyphPx : line10) + 8;
-
-  // Compact one-line meta: agent · model · state (· elapsed).
-  char meta[140];
-  int mo = snprintf(meta, sizeof(meta), "%s", agentType[0] ? agentType : "agent");
-  if (model[0]) mo += snprintf(meta + mo, sizeof(meta) - mo, " \xC2\xB7 %s", model);
-  if (state[0]) mo += snprintf(meta + mo, sizeof(meta) - mo, " \xC2\xB7 %s", wireStateLabel(state));
-  if (elapsed > 0) {
-    if (elapsed >= 60)
-      mo += snprintf(meta + mo, sizeof(meta) - mo, " \xC2\xB7 %um", (unsigned)(elapsed / 60));
-    else
-      mo += snprintf(meta + mo, sizeof(meta) - mo, " \xC2\xB7 %us", (unsigned)elapsed);
-  }
-  renderer.drawText(SMALL_FONT_ID, pad, y, renderer.truncatedText(SMALL_FONT_ID, meta, w - pad * 2).c_str(), true);
-  y += lineS + 6;
-  if (activity[0]) {
-    renderer.drawText(SMALL_FONT_ID, pad, y, tr(STR_POCKET_CURRENT_WORK), true, EpdFontFamily::BOLD);
-    y += lineS + 2;
-    const int activityFont = fontForText(SMALL_FONT_ID, activity);
-    const int activityAdvance = renderer.getLineHeight(activityFont) + 2;
-    const int activityLines =
-        drawWrappedFixed(renderer, activityFont, pad, y, activity, w - pad * 2, 3, activityAdvance);
-    y += activityLines * activityAdvance + 4;
-  } else if (tool[0]) {
-    char tl[80];
-    snprintf(tl, sizeof(tl), "Now: %s", tool);
-    renderer.drawText(SMALL_FONT_ID, pad, y, renderer.truncatedText(SMALL_FONT_ID, tl, w - pad * 2).c_str(), true);
-    y += lineS + 6;
-  }
-
-  // Collect the attention state for this session. A real requestId gate gets
-  // Allow/Deny; a managed prompt gets only its correlated daemon options; an
-  // observed terminal prompt stays read-only and says so explicitly.
-  AwaitingItem attention = {};
-  const bool awaiting = findAwaiting(selectedSid, attention);
-  const AgentDeck::AttentionMode attentionMode = awaiting ? attention.attentionMode : AgentDeck::AttentionMode::None;
-  char optLabels[8][80];
-  int optCount = 0;
-  if (attentionMode == AgentDeck::AttentionMode::RealOptions) {
-    AgentDeck::lockState();
-    const auto& ds = AgentDeck::g_state;
-    if (selectedSid[0] && ds.optionSessionId[0] && strcmp(selectedSid, ds.optionSessionId) == 0) {
-      optCount = ds.optionCount;
-      if (optCount > 8) optCount = 8;
-      for (int i = 0; i < optCount; i++) {
-        strncpy(optLabels[i], ds.options[i].label, sizeof(optLabels[0]) - 1);
-        optLabels[i][sizeof(optLabels[0]) - 1] = '\0';
-      }
-    }
-    AgentDeck::unlockState();
-  } else if (attentionMode == AgentDeck::AttentionMode::PermissionGate) {
-    optCount = 2;
-    strncpy(optLabels[0], "Allow", sizeof(optLabels[0]) - 1);
-    strncpy(optLabels[1], "Deny", sizeof(optLabels[0]) - 1);
-    optLabels[0][sizeof(optLabels[0]) - 1] = '\0';
-    optLabels[1][sizeof(optLabels[0]) - 1] = '\0';
-  }
-
-  // ── Scrollable content: timeline (oldest→newest) then the decision block ──
-  renderer.drawLine(pad, y, w - pad, y);
-  y += 8;
-  const char* activityHeading = "Activity";
-  if (AgentDeck::attentionIsActionable(attentionMode))
-    activityHeading = "Activity \xC2\xB7 scroll down to decide";
-  else if (attentionMode == AgentDeck::AttentionMode::RespondInTerminal)
-    activityHeading = "Activity \xC2\xB7 terminal response required";
-  else if (attentionMode == AgentDeck::AttentionMode::WaitingForOptions)
-    activityHeading = "Activity \xC2\xB7 loading choices";
-  renderer.drawText(SMALL_FONT_ID, pad, y, activityHeading, true, EpdFontFamily::BOLD);
-  y += lineS + 4;
-
-  const int listTop = y;
-  const int listBottom = pageH - m.buttonHintsHeight - 8;
-
-  // Flat line list. lineOpt: -1 normal, -2 heading (bold), >=0 = option index.
-  // Reserve the worst case up front (timeline entries × 3 wrap lines + decision
-  // block) — this repaints on every state change, and unreserved push_back growth
-  // fragments DRAM (AGENTS.md resource protocol).
-  const size_t maxLines = static_cast<size_t>(tlCount) * 3 + 12 + static_cast<size_t>(optCount);
-  std::vector<std::string> lines;
-  std::vector<int> lineFonts;
-  std::vector<int> lineOpt;
-  lines.reserve(maxLines);
-  lineFonts.reserve(maxLines);
-  lineOpt.reserve(maxLines);
-  int tlShown = 0;
-  for (int k = 0; k < tlCount; k++) {  // chronological
-    if (!tlShow[k]) continue;
-    // Row prefix: "[OK] 5m " — type marker (shared EINK_ICON_GLYPHS vocabulary)
-    // plus the entry age from the daemon-clock estimate. Continuation lines
-    // indent under the text.
-    char pfx[16];
-    if (daemonNowSec && tlTs[k] && daemonNowSec >= tlTs[k]) {
-      char age[8];
-      formatAge(daemonNowSec - tlTs[k], age, sizeof(age));
-      snprintf(pfx, sizeof(pfx), "%s %s ", timelineGlyph(tlType[k]), age);
-    } else {
-      snprintf(pfx, sizeof(pfx), "%s ", timelineGlyph(tlType[k]));
-    }
-    const int fid = fontForText(SMALL_FONT_ID, tlText[k]);
-    const int pfxW = renderer.getTextWidth(SMALL_FONT_ID, pfx);
-    auto wrapped = renderer.wrappedText(fid, tlText[k], w - pad * 2 - pfxW, 3);
-    for (size_t li = 0; li < wrapped.size(); li++) {
-      lines.push_back((li == 0 ? std::string(pfx) : std::string("   ")) + wrapped[li]);
-      lineFonts.push_back(fid);
-      lineOpt.push_back(-1);
-    }
-    tlShown++;
-  }
-  if (tlShown == 0) {
-    lines.push_back("Detailed events will appear as work progresses.");
-    lineFonts.push_back(SMALL_FONT_ID);
-    lineOpt.push_back(-1);
-  }
-  if (awaiting) {
-    lines.push_back("");
-    lineFonts.push_back(SMALL_FONT_ID);
-    lineOpt.push_back(-1);
-    lines.push_back(AgentDeck::attentionIsActionable(attentionMode) ? "Needs your decision:" : "Needs your attention:");
-    lineFonts.push_back(SMALL_FONT_ID);
-    lineOpt.push_back(-2);
-    if (attention.question[0]) {
-      const int qf = fontForText(SMALL_FONT_ID, attention.question);
-      auto qlines = renderer.wrappedText(qf, attention.question, w - pad * 2, 4);
-      for (auto& ql : qlines) {
-        lines.push_back(ql);
-        lineFonts.push_back(qf);
-        lineOpt.push_back(-1);
-      }
-    }
-    if (attentionMode == AgentDeck::AttentionMode::RespondInTerminal) {
-      lines.push_back("Respond in the agent terminal.");
-      lineFonts.push_back(SMALL_FONT_ID);
-      lineOpt.push_back(-2);
-      lines.push_back("This observed session did not expose its choices remotely.");
-      lineFonts.push_back(SMALL_FONT_ID);
-      lineOpt.push_back(-1);
-    } else if (attentionMode == AgentDeck::AttentionMode::WaitingForOptions) {
-      lines.push_back("Loading choices from the managed session...");
-      lineFonts.push_back(SMALL_FONT_ID);
-      lineOpt.push_back(-1);
-    }
-    for (int i = 0; i < optCount; i++) {
-      lines.push_back(optLabels[i]);
-      lineFonts.push_back(fontForText(SMALL_FONT_ID, optLabels[i]));
-      lineOpt.push_back(i);
-    }
-  }
-
-  const int visibleLines = (listBottom - listTop) / lineS;
-  detailMaxScroll = (int)lines.size() - visibleLines;
-  if (detailMaxScroll < 0) detailMaxScroll = 0;
-  if (detailScroll > detailMaxScroll) detailScroll = detailMaxScroll;
-  if (detailScroll < 0) detailScroll = 0;
-
-  int ly = listTop;
-  for (int i = detailScroll; i < (int)lines.size(); i++) {
-    const int lh = renderer.getLineHeight(lineFonts[i]);
-    if (ly + lh > listBottom) break;
-    const bool isOpt = lineOpt[i] >= 0;
-    const bool sel = isOpt && lineOpt[i] == optionCursor;
-    const auto style = (lineOpt[i] == -2 || sel) ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
-    if (sel) {  // highlighted option: inverted bar + caret
-      renderer.fillRect(pad - 4, ly - 1, w - pad * 2 + 8, lh, true);
-      char row[100];
-      snprintf(row, sizeof(row), "\xE2\x96\xB6 %s", lines[i].c_str());
-      renderer.drawText(lineFonts[i], pad, ly, row, false, style);
-    } else if (isOpt) {
-      char row[100];
-      snprintf(row, sizeof(row), "  %s", lines[i].c_str());
-      renderer.drawText(lineFonts[i], pad, ly, row, true, style);
-    } else {
-      renderer.drawText(lineFonts[i], pad, ly, lines[i].c_str(), true, style);
-    }
-    ly += lh;
-  }
-
-  // Hint bar. OK selects the highlighted option only once scrolled to the
-  // decision (atBottom); the heading nudges the user to scroll down to it.
-  const bool atBottom = detailScroll >= detailMaxScroll;
-  const auto labels = mappedInput.mapLabels(
-      "Back", (AgentDeck::attentionIsActionable(attentionMode) && optCount > 0 && atBottom) ? "Select" : "", "Up",
-      "Down");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }
 
@@ -3188,8 +710,8 @@ void PocketDailyActivity::renderPocketCard(const PocketDaily::Card& card) {
   const int lineS = renderer.getLineHeight(SMALL_FONT_ID);
 
   renderer.clearScreen();
-  // The item title is content; the shell remains visibly Pocket even though a
-  // local daemon authored the payload.
+  // The item title is content; the shell remains visibly Pocket even though
+  // the companion authored the payload.
   drawBrandedHeader(card.title[0] ? card.title : tr(STR_POCKET_TITLE), tr(STR_POCKET_SUBTITLE));
   int y = m.topPadding + m.headerHeight + m.verticalSpacing + 8;
 
@@ -3241,206 +763,6 @@ void PocketDailyActivity::renderPocketCard(const PocketDaily::Card& card) {
   renderer.displayBuffer();
 }
 
-void PocketDailyActivity::renderCard() {
-  PocketDaily::Card pocket{};
-  if (findPocketCard(cardSid, pocket)) {
-    renderPocketCard(pocket);
-    return;
-  }
-  const auto& m = UITheme::getInstance().getMetrics();
-  const int w = renderer.getScreenWidth();
-  const int pageH = renderer.getScreenHeight();
-  const int pad = m.contentSidePadding;
-  const int lineS = renderer.getLineHeight(SMALL_FONT_ID);
-
-  AwaitingItem item = {};
-  const bool present = findAwaiting(cardSid, item) && item.attentionMode != AgentDeck::AttentionMode::None;
-  const AgentDeck::AttentionMode mode = present ? item.attentionMode : AgentDeck::AttentionMode::None;
-
-  // Session meta + correlated option labels under one lock.
-  char project[40] = {0}, agentType[16] = {0};
-  char activityLine[AgentDeck::SESSION_ACTIVITY_CAP] = {0};
-  char optLabels[8][80];
-  bool optRecommended[8] = {false};
-  int optCount = 0;
-  AgentDeck::lockState();
-  {
-    const auto& s = AgentDeck::g_state;
-    for (uint8_t i = 0; i < s.sessionCount; i++) {
-      if (cardSid[0] && strcmp(s.sessions[i].id, cardSid) == 0) {
-        strncpy(project, s.sessions[i].projectName, sizeof(project) - 1);
-        strncpy(agentType, s.sessions[i].agentType, sizeof(agentType) - 1);
-        strncpy(activityLine, s.sessions[i].activity, sizeof(activityLine) - 1);
-        break;
-      }
-    }
-    if (!project[0]) strncpy(project, s.projectName, sizeof(project) - 1);
-    if (!agentType[0]) strncpy(agentType, s.agentType, sizeof(agentType) - 1);
-    if (mode == AgentDeck::AttentionMode::RealOptions && s.optionSessionId[0] &&
-        strcmp(s.optionSessionId, cardSid) == 0) {
-      optCount = s.optionCount > 8 ? 8 : s.optionCount;
-      for (int i = 0; i < optCount; i++) {
-        strncpy(optLabels[i], s.options[i].label, sizeof(optLabels[0]) - 1);
-        optLabels[i][sizeof(optLabels[0]) - 1] = '\0';
-        optRecommended[i] = s.options[i].recommended;
-      }
-    }
-  }
-  AgentDeck::unlockState();
-  if (mode == AgentDeck::AttentionMode::PermissionGate) {
-    // applyDecision cursor order: 0 = Allow, 1 = Deny.
-    optCount = 2;
-    snprintf(optLabels[0], sizeof(optLabels[0]), "Allow");
-    snprintf(optLabels[1], sizeof(optLabels[1]), "Deny");
-    optRecommended[0] = optRecommended[1] = false;
-  }
-
-  renderer.clearScreen();
-  drawBrandedHeader("Decision", nullptr);
-  int y = m.topPadding + m.headerHeight + m.verticalSpacing;
-
-  if (!present) {  // resolved between service ticks; serviceCard flips home next tick
-    renderer.drawText(UI_10_FONT_ID, pad, y, tr(STR_POCKET_RESOLVED), true, EpdFontFamily::BOLD);
-    renderer.displayBuffer();
-    return;
-  }
-
-  // Title row: glyph + project.
-  const int line10 = renderer.getLineHeight(UI_10_FONT_ID);
-  const uint8_t* g = glyphForAgent(agentType);
-  int textX = pad;
-  if (g) {
-    renderer.drawIcon(g, pad, y, kGlyphPx, kGlyphPx);
-    textX = pad + kGlyphPx + 12;
-  }
-  renderer.drawText(
-      UI_10_FONT_ID, textX, y + (kGlyphPx - line10) / 2,
-      renderer.truncatedText(UI_10_FONT_ID, project[0] ? project : "session", w - textX - pad, EpdFontFamily::BOLD)
-          .c_str(),
-      true, EpdFontFamily::BOLD);
-  y += (g ? kGlyphPx : line10) + 6;
-
-  const char* metaTail = AgentDeck::attentionIsActionable(mode) ? "needs your decision" : "needs your attention";
-  char meta[80];
-  snprintf(meta, sizeof(meta), "%s \xC2\xB7 %s", agentType[0] ? agentType : "agent", metaTail);
-  renderer.drawText(SMALL_FONT_ID, pad, y, renderer.truncatedText(SMALL_FONT_ID, meta, w - pad * 2).c_str(), true);
-  y += lineS + 6;
-  renderer.drawLine(pad, y, w - pad, y);
-  y += 10;
-
-  const bool softkeys = cardUsesSoftkeys(mode, item.optionCount);
-
-  // ── Options block: measured first so the question knows its floor ──
-  // Softkey grammar rows are "[n] label" where n is the physical button slot
-  // (2..4; slot 1 is Later). Cursor grammar rows are "▶ label" with highlight.
-  const int optFontBase = UI_10_FONT_ID;
-  int rowFonts[8];
-  int rowsH = 0;
-  for (int i = 0; i < optCount; i++) {
-    rowFonts[i] = fontForText(optFontBase, optLabels[i]);
-    rowsH += renderer.getLineHeight(rowFonts[i]) + 6;
-  }
-  int noteLines = 0;  // read-only card note (WaitingForOptions / RespondInTerminal)
-  const char* note = nullptr;
-  if (mode == AgentDeck::AttentionMode::WaitingForOptions) {
-    note = "Loading choices from the managed session...";
-    noteLines = 1;
-  } else if (mode == AgentDeck::AttentionMode::RespondInTerminal) {
-    note = "Respond in the agent terminal \xE2\x80\x94 this observed session did not expose its choices remotely.";
-    noteLines = 2;
-  }
-  const int hintTop = pageH - m.buttonHintsHeight - 6;
-  const int optionsTop = hintTop - rowsH - noteLines * (lineS + 2) - 4;
-
-  // ── Question — the card's center. Bigger face, CJK-aware, floor-clamped ──
-  const char* q = item.question[0]
-                      ? item.question
-                      : (mode == AgentDeck::AttentionMode::PermissionGate ? "Approve this tool call?" : "Your turn.");
-  const int qFont = fontForText(UI_12_FONT_ID, q);
-  const int qAdvance = renderer.getLineHeight(qFont) + 4;
-  {
-    auto qLines = renderer.wrappedText(qFont, q, w - pad * 2, 6);
-    for (const auto& ql : qLines) {
-      if (y + qAdvance > optionsTop - lineS - 8) break;  // keep room for context
-      renderer.drawText(qFont, pad, y, ql.c_str(), true, EpdFontFamily::BOLD);
-      y += qAdvance;
-    }
-  }
-  y += 4;
-  // Context: what the agent was doing (one line, quiet).
-  if (activityLine[0] && y + lineS <= optionsTop - 4) {
-    const int aFont = fontForText(SMALL_FONT_ID, activityLine);
-    renderer.drawText(aFont, pad, y, renderer.truncatedText(aFont, activityLine, w - pad * 2).c_str(), true);
-  }
-
-  // ── Draw the options block bottom-anchored ──
-  y = optionsTop;
-  if (note) {
-    auto nLines = renderer.wrappedText(SMALL_FONT_ID, note, w - pad * 2, noteLines);
-    for (const auto& nl : nLines) {
-      renderer.drawText(SMALL_FONT_ID, pad, y, nl.c_str(), true);
-      y += lineS + 2;
-    }
-  }
-  for (int i = 0; i < optCount; i++) {
-    const int lh = renderer.getLineHeight(rowFonts[i]);
-    char row[96];
-    if (softkeys) {
-      // Physical slot numbers: PermissionGate puts Deny on 3, Allow on 4;
-      // options map in order onto 2..4. Keep in lockstep with handleButtons.
-      const int keycap = (mode == AgentDeck::AttentionMode::PermissionGate) ? (i == 0 ? 4 : 3) : (2 + i);
-      snprintf(row, sizeof(row), "[%d] %s", keycap, optLabels[i]);
-      renderer.drawText(rowFonts[i], pad, y, renderer.truncatedText(rowFonts[i], row, w - pad * 2).c_str(), true,
-                        optRecommended[i] ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
-    } else {
-      const bool sel = (i == optionCursor);
-      if (sel) {
-        renderer.fillRect(pad - 4, y - 1, w - pad * 2 + 8, lh + 2, true);
-        snprintf(row, sizeof(row), "\xE2\x96\xB6 %s", optLabels[i]);
-        renderer.drawText(rowFonts[i], pad, y, renderer.truncatedText(rowFonts[i], row, w - pad * 2).c_str(), false,
-                          EpdFontFamily::BOLD);
-      } else {
-        snprintf(row, sizeof(row), "  %s", optLabels[i]);
-        renderer.drawText(rowFonts[i], pad, y, renderer.truncatedText(rowFonts[i], row, w - pad * 2).c_str(), true,
-                          optRecommended[i] ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
-      }
-    }
-    y += lh + 6;
-  }
-
-  // ── Hint bar ──
-  if (softkeys) {
-    // Positional labels matching getPressedFrontButton's raw physical order —
-    // deliberately NOT mapLabels(), which applies the user's logical remap.
-    char h2[24] = {0}, h3[24] = {0}, h4[24] = {0};
-    const auto hintFor = [&](char* out, size_t cap, const char* label, int keycap) {
-      if (!label || !label[0]) {
-        out[0] = '\0';
-        return;
-      }
-      if (!hasCJK(label)) {
-        snprintf(out, cap, "%s", renderer.truncatedText(UI_10_FONT_ID, label, 96).c_str());
-      } else {
-        snprintf(out, cap, "%d", keycap);  // body row carries the CJK label
-      }
-    };
-    if (mode == AgentDeck::AttentionMode::PermissionGate) {
-      GUI.drawButtonHints(renderer, "Later", "Detail", "Deny", "Allow");
-    } else if (mode == AgentDeck::AttentionMode::RealOptions) {
-      hintFor(h2, sizeof(h2), optCount > 0 ? optLabels[0] : "", 2);
-      hintFor(h3, sizeof(h3), optCount > 1 ? optLabels[1] : "", 3);
-      hintFor(h4, sizeof(h4), optCount > 2 ? optLabels[2] : "", 4);
-      GUI.drawButtonHints(renderer, "Later", h2, h3, h4);
-    } else {
-      GUI.drawButtonHints(renderer, "Later", "Detail", "", "");
-    }
-  } else {
-    const auto labels = mappedInput.mapLabels("Later", "Select", "Up", "Down");
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  }
-  renderer.displayBuffer();
-}
-
 void PocketDailyActivity::renderGlance(GlanceReason reason) {
   const bool isSleep = reason != GlanceReason::Ambient;
 
@@ -3448,69 +770,35 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
   // first carried Pocket item so a useful daily study prompt survives offline
   // and remains visible while the panel is asleep.
   preparePersonalSnapshot();
-  const PocketDaily::Glance& g = renderGlanceSnapshot;
-  char syncedHm[6] = {0};
-  snprintf(syncedHm, sizeof(syncedHm), "%s", renderSyncedHm);
+  const PocketDaily::Glance& g = glanceSnapshot.glance;
+  const char* syncedHm = glanceSnapshot.syncedHm;
+  const bool stale = PocketDaily::HomeDraw::snapshotIsStale(glanceSnapshot.savedEpoch, time(nullptr));
 
-  // Sleep has no interactive connection state; its immutable sync time stays
-  // in the bottom line. Ambient uses the snapshot's date/time instead of a
-  // clock that would become false on a retained e-ink frame.
+  // A powered-off frame may remain unchanged for days. Date and sync time add
+  // little value there and eventually become misleading, so the ambient face
+  // alone carries the snapshot's date and the app's compose time.
   char glanceHeaderMeta[40] = {0};
-  // A powered-off frame may remain unchanged for days. Date and Sync time add
-  // little value there and eventually become misleading, so reserve metadata
-  // for the automatic cadence snapshot only.
-  if (reason != GlanceReason::PoweredOff) {
+  if (reason == GlanceReason::Ambient) {
     char snapshotDate[8] = {0};
     int metaChars = 0;
     if (formatWeatherSnapshotDate(snapshotDate, sizeof(snapshotDate), g.weather))
       metaChars = snprintf(glanceHeaderMeta, sizeof(glanceHeaderMeta), "%s", snapshotDate);
     if (syncedHm[0] && metaChars < (int)sizeof(glanceHeaderMeta))
       snprintf(glanceHeaderMeta + metaChars, sizeof(glanceHeaderMeta) - metaChars, "%s%s %s",
-               metaChars ? " \xC2\xB7 " : "",
-               PocketDaily::HomeDraw::snapshotIsStale(renderSavedEpoch, time(nullptr)) ? "SAVED" : "SYNC", syncedHm);
+               metaChars ? " \xC2\xB7 " : "", stale ? "SAVED" : "SYNC", syncedHm);
   }
   // ── Bottom status: absolute times only — a retained frame must stay true
   // without a repaint, so never a relative age here. ──
-  char status[112];
-  if (pullOtaTotalBytes > 0 && pullOtaDownloadedBytes < pullOtaTotalBytes) {
-    const unsigned pct = (unsigned)((uint64_t)pullOtaDownloadedBytes * 100 / pullOtaTotalBytes);
-    if (pullOtaDownloading || manualSyncActive)
-      snprintf(status, sizeof(status), "%s \xC2\xB7 %u%% \xC2\xB7 DOWNLOADING", tr(STR_POCKET_FIRMWARE), pct);
-    else if (manualOtaResumePending)
-      snprintf(status, sizeof(status), "%s \xC2\xB7 %u%% \xC2\xB7 AUTO RESUME", tr(STR_POCKET_FIRMWARE), pct);
-    else
-      snprintf(status, sizeof(status), "%s \xC2\xB7 %u%% \xC2\xB7 SYNC TO RESUME", tr(STR_POCKET_FIRMWARE), pct);
-  } else
-    switch (reason) {
-      case GlanceReason::TimedSleep:
-        if (syncedHm[0] && sleepNextHm[0])
-          snprintf(status, sizeof(status), "%s %s \xC2\xB7 ~%s", tr(STR_POCKET_UPDATED), syncedHm, sleepNextHm);
-        else if (pullSynced)
-          snprintf(status, sizeof(status), "%s \xC2\xB7 ~%um", tr(STR_POCKET_SLEEPING), (unsigned)(sleepForSec / 60));
-        else
-          snprintf(status, sizeof(status), "%s \xC2\xB7 ~%um", tr(STR_POCKET_OFFLINE), (unsigned)(sleepForSec / 60));
-        break;
-      case GlanceReason::PoweredOff:
-        // The physical wake tab communicates the important state. Do not repeat
-        // a stale date or the last Sync time beside the front-button area.
-        snprintf(status, sizeof(status), "%s", tr(STR_POCKET_POWERED_OFF));
-        break;
-      case GlanceReason::Ambient:
-      default: {
-        // Live face with nothing running: say where the data came from and how the
-        // link stands, so the panel is honest without being an apology.
-        const char* link = dashState == DashState::Connected     ? tr(STR_POCKET_UPDATED)
-                           : dashState == DashState::Connecting  ? tr(STR_POCKET_CONNECTING)
-                           : dashState == DashState::WifiJoining ? tr(STR_POCKET_CHECKING)
-                           : dashState == DashState::Discovering ? tr(STR_POCKET_SEARCHING)
-                                                                 : tr(STR_POCKET_OFFLINE);
-        if (syncedHm[0])
-          snprintf(status, sizeof(status), "%s \xC2\xB7 %s", link, syncedHm);
-        else
-          snprintf(status, sizeof(status), "%s", link);
-        break;
-      }
-    }
+  char status[64];
+  if (reason == GlanceReason::PoweredOff) {
+    // The physical wake tab communicates the important state. Do not repeat
+    // a stale date or the last Sync time beside the front-button area.
+    snprintf(status, sizeof(status), "%s", tr(STR_POCKET_POWERED_OFF));
+  } else if (syncedHm[0]) {
+    snprintf(status, sizeof(status), "%s \xC2\xB7 %s", tr(STR_POCKET_OFFLINE), syncedHm);
+  } else {
+    snprintf(status, sizeof(status), "%s", tr(STR_POCKET_OFFLINE));
+  }
   // Drawing is shared with the host preview (pocket_daily/home/HomeRenderer).
   PocketDaily::Home::BriefView view;
   view.isSleep = isSleep;
@@ -3525,19 +813,18 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
     view.pinnedCard = &appCards->cards[0].card;
     view.pinnedHasImage = appCards->cards[0].imagePath[0] != '\0';
   }
-  view.snapshotStale = PocketDaily::HomeDraw::snapshotIsStale(renderSavedEpoch, time(nullptr));
+  view.snapshotStale = stale;
   view.status = status;
   view.profile = PocketDaily::DailyProfile::current();
   view.strings = homeStrings();
   PocketDaily::Home::renderBrief(renderer, view, homeEnv());
   if (isSleep) {
     PowerWakeCue::draw(renderer);
-    // Ghost management: fast refreshes accumulate residue on a frame the panel
-    // will hold for hours — insert a full waveform every Nth sleep paint.
-    const bool fullClean = (timedSleepPaintSerial() % kGlanceFullRefreshEvery) == 0;
-    renderer.displayBuffer(fullClean ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
+    // The panel holds this frame for hours or days: always clear the ghosting
+    // with a full waveform (it is painted once, at power-off).
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
   } else {
-    // Confirm resumes the open book (M9 stage 1) — label it only when there is one.
+    // Confirm resumes the open book — label it only when there is one.
     const auto labels = mappedInput.mapLabels(tr(STR_POCKET_LIBRARY),
                                               APP_STATE.openEpubPath.empty() ? "" : tr(STR_POCKET_READ), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -3551,11 +838,9 @@ bool PocketDailyActivity::paintSleepFrame() {
   if (PocketDaily::DailyProfile::current().sleepMode == PocketDaily::DailyProfile::SleepMode::Reader) return false;
   // Pocket Daily owns its retained e-ink frame. Delegating to SleepActivity
   // redraws the last book cover over the dashboard just before the panel powers
-  // down, which looks like Pocket Daily disappeared. Paint the already-designed
-  // powered-off Daily Brief instead; unlike a cadence frame it promises no next
-  // sync time and stays truthful if the device remains off for days.
-  sleepForSec = 0;
-  sleepNextHm[0] = '\0';
+  // down, which looks like Pocket Daily disappeared. Paint the powered-off
+  // Daily Brief instead; it promises no next sync time and stays truthful if
+  // the device remains off for days.
   glanceReason = GlanceReason::PoweredOff;
   sleepFramePending = true;
   requestUpdateAndWait();
@@ -3565,102 +850,38 @@ bool PocketDailyActivity::paintSleepFrame() {
 
 void PocketDailyActivity::render(RenderLock&&) {
   // Assume a non-ambient face until the Ambient branch below proves otherwise;
-  // every other path (sleep frame, OTA, Card/Detail, Overview) must not leave
-  // Confirm bound to "resume reading".
+  // every other path (sleep frame, Card, Overview) must not leave Confirm bound
+  // to "resume reading".
   ambientGlanceShown = false;
 
   // Frozen sleep frame: a local Daily Brief painted once immediately before
-  // timed deep sleep or power-off. It deliberately uses only persisted device
-  // state (book position, carried study card, cached weather and schedule), so
-  // the retained panel remains useful and truthful without a network.
+  // power-off. It deliberately uses only persisted device state (book
+  // position, carried card, the saved weather and schedule), so the retained
+  // panel remains useful and truthful without a network.
   if (sleepFramePending) {
     renderGlance(glanceReason);
     return;
   }
 
-  // Blocking OTA flash notice: painted once via requestUpdateAndWait() right
-  // before the raw-partition write starts, so the panel holds this frame for
-  // the ~1 minute of flashing and through the restart.
-  if (otaFlashNotice) {
-    const auto& mm = UITheme::getInstance().getMetrics();
-    const int pad = mm.contentSidePadding;
-    renderer.clearScreen();
-    drawBrandedHeader("Firmware Update", nullptr);
-    int y = mm.topPadding + mm.headerHeight + mm.verticalSpacing * 2;
-    renderer.drawText(UI_12_FONT_ID, pad, y, tr(STR_POCKET_INSTALLING_UPDATE), true, EpdFontFamily::BOLD);
-    y += renderer.getLineHeight(UI_12_FONT_ID) + 10;
-    renderer.drawText(UI_10_FONT_ID, pad, y, tr(STR_POCKET_DO_NOT_POWER_OFF), true, EpdFontFamily::BOLD);
-    y += renderer.getLineHeight(UI_10_FONT_ID) + 6;
-    renderer.drawText(SMALL_FONT_ID, pad, y, tr(STR_POCKET_RESTART_WHEN_DONE), true);
-    renderer.displayBuffer();
+  // Cards are local and remain valid offline. The render-owned card buffer
+  // keeps the ~700 B copy off the render stack.
+  if (viewMode == ViewMode::Card && findPocketCard(cardSid, renderPocketSnapshot)) {
+    renderPocketCard(renderPocketSnapshot);
     return;
   }
 
-  // Pocket cards are day-class and queue choices locally, so their Card view
-  // remains valid offline. Session decisions / Detail still require Connected.
-  if (viewMode == ViewMode::Card) {
-    PocketDaily::Card pocket{};
-    if (findPocketCard(cardSid, pocket)) {
-      renderPocketCard(pocket);
-      return;
-    }
-  }
-
-  // Session Card (decision) / Detail (timeline) exist only while Connected.
-  if (dashState == DashState::Connected) {
-    if (viewMode == ViewMode::Card) {
-      renderCard();
-      return;
-    }
-    if (viewMode == ViewMode::Detail) {
-      renderDetail();
-      return;
-    }
-  }
-
-  // ── Face: content-first shell in EVERY connection state. The Face renders
-  // whatever is known (or an honest empty state); joining/discovering/connecting
-  // progress is a status line inside renderOverview, never a screen that
-  // replaces the content. ──
+  // ── Face: content-first shell. The Face renders whatever is known (or an
+  // honest empty state). ──
   OverviewRow* const rows = renderRows;
-  int n = collectOverview(rows, kOverviewCap);
+  const int n = collectOverview(rows, kOverviewCap);
 
-  // No live data yet (boot / daemon lost): append persisted Pocket cards after
-  // the local Continue Reading row. Once any live feed arrives it wins, even
-  // when empty; the cache must never mask fresher truth.
-  bool fromCache = false;
-  uint32_t asOfEpoch = 0;
-  bool dataReceived;
-  AgentDeck::lockState();
-  dataReceived = AgentDeck::g_state.dataReceived;
-  asOfEpoch = cachedDeck ? cachedDeck->savedEpoch : 0;
-  AgentDeck::unlockState();
-  fromCache = !dataReceived && cachedDeck && cachedDeck->pocketCount > 0;
-
-  // With neither a book nor a Pocket item, personal glance remains useful as
-  // an offline retained frame (reading/weather/today). It never outranks saved
-  // items that can be opened and consumed.
-  if (n == 0) {
-    bool haveGlance = false;
-    AgentDeck::lockState();
-    haveGlance = AgentDeck::g_state.glance.valid || (cachedDeck && cachedDeck->glance.valid);
-    AgentDeck::unlockState();
-    // The local plane (open book) alone justifies the glance face: a device
-    // that never met a daemon still shows the book + weatherless strip instead
-    // of an empty deck apology.
-    if (haveGlance || !APP_STATE.openEpubPath.empty()) {
-      renderGlance(GlanceReason::Ambient);
-      ambientGlanceShown = true;
-      return;
-    }
+  // With neither a book nor a card row, the personal glance remains useful as
+  // an offline face (weather/today). It never outranks items that can be
+  // opened.
+  if (n == 0 && (glanceSnapshot.glance.valid || !APP_STATE.openEpubPath.empty())) {
+    renderGlance(GlanceReason::Ambient);
+    ambientGlanceShown = true;
+    return;
   }
-
-  int awaiting = 0;
-  if (!fromCache) {
-    // Live only: a cached "awaiting" is a snapshot of the past, and the banner
-    // is a call to action the user cannot take offline.
-    for (int i = 0; i < n; i++)
-      if (rows[i].awaiting) awaiting++;
-  }
-  renderOverview(rows, n, awaiting, fromCache, fromCache ? asOfEpoch : 0);
+  renderOverview(rows, n);
 }

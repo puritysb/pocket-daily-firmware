@@ -1,5 +1,11 @@
 # Offline-first Pocket Reader — product contract
 
+> **Retired 2026-09-25.** The AgentDeck daemon path this document describes was
+> removed from the firmware (`src/agentdeck/` and its Pocket Daily integration
+> deleted). Weather and events now come from the companion app
+> (`docs/pocket-glance-v1.md`). Kept for history only; the files it names no
+> longer exist, and old SD files it describes are no longer read.
+
 This fork turns XTeink X3/X4 into an **offline-first Pocket reader**. It is not
 an AgentDeck peripheral and not a live-session dashboard. CrossPoint remains the
 device OS and EPUB engine; AgentDeck is one invisible background source that

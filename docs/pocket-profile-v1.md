@@ -3,6 +3,17 @@
 Status: design accepted by the product owner; implementation in phases below.
 Contract between this repository and the companion app (`pocket-daily`).
 
+> **2026-09-25 — provider and monitor retired.** Their only data source, the
+> AgentDeck daemon, was removed from the firmware. `provider` and `monitor`
+> remain valid IDs: stored profiles and documents naming them still load,
+> validate and round-trip unchanged (record encoding is unchanged), but the
+> reader no longer lists them in `capabilities.homeItems` and
+> `homeRowSources` resolves them to no page. The default Home items are now
+> `reading`, `study`. Weather and today's events on Home and the Daily Brief
+> come from the companion app (`POST /api/pocket/v1/glance`,
+> `docs/pocket-glance-v1.md`). Statements below about provider cards, the
+> monitoring card and the AgentDeck toggles are historical.
+
 ## Why
 
 The companion should configure Pocket Daily itself — which Home items appear,
@@ -60,7 +71,7 @@ theme is Lyra (spacing 16), so the "exact" canvas differed on default readers.
 {
   "schema": 1,
   "home": {
-    "items": ["reading", "study", "provider"],
+    "items": ["reading", "study"],
     "dailyWord": true,
     "weather": "bottom",
     "nextEvent": true
@@ -72,9 +83,9 @@ theme is Lyra (spacing 16), so the "exact" canvas differed on default readers.
 }
 ```
 
-- `home.items`: ordered, distinct subset of `reading`, `study`, `provider`,
-  `monitor`, `word`; at least one, at most four. An item with no data is
-  skipped as today (no book, no provider cards, no usage data).
+- `home.items`: ordered, distinct subset of `reading`, `study`, `word` (and the
+  retired `provider`, `monitor`, which are accepted but never shown); at least
+  one, at most four. An item with no data is skipped (no book, no cards).
 - `study` is the companion's own cards ("My cards", up to three pages, each
   drawn with its image on Home). Without a `word` item it falls back to the
   daily word when there are no cards and `dailyWord` is true (the v1
@@ -93,8 +104,9 @@ theme is Lyra (spacing 16), so the "exact" canvas differed on default readers.
   a QR code for a lost reader.
 - A sleep section that cannot fit its header and first line is skipped rather
   than drawn over the status line.
-- Readers advertise the IDs they accept in `capabilities`; the companion offers
-  only those, and refuses a stored document with IDs it does not know.
+- Readers advertise the IDs they offer in `capabilities` (`homeItems` is
+  `reading`, `study`, `word` since 2026-09-25); the companion offers only
+  those, and refuses a stored document with IDs it does not know.
 - Sleep frame: weather fills to its bottom bound only when it is the last
   section; otherwise it gets Home's fixed 272px panel. Reading's cover shrinks
   to the space left and falls back to the compact text form below 108px.
@@ -103,11 +115,8 @@ theme is Lyra (spacing 16), so the "exact" canvas differed on default readers.
   Daily Brief status line. Built-in fonts are ASCII only, so a non-ASCII
   translation falls back to English on this path.
 - Home shows at most `maxHomeItems` (4, the existing `kOverviewCap`) items;
-  when the ordered sources produce more, later ones are dropped. `monitor`
-  appears only when carried usage or wrap-up data exists; OK does nothing on
-  it (read-only) and it shows the snapshot's absolute sync time.
-- The defaults above reproduce today's behaviour exactly; a reader with no
-  stored profile behaves as before.
+  when the ordered sources produce more, later ones are dropped.
+- A reader with no stored profile uses the defaults above.
 - Unknown keys, unknown IDs, duplicates, wrong types or an empty item list
   reject the whole document (400). Nothing is applied partially.
 

@@ -92,14 +92,18 @@ class SyncRoutesTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         activity = (root / "src/activities/pocket_daily/PocketDailyActivity.cpp").read_text()
         collect = activity[activity.index("int PocketDailyActivity::collectOverview("):
-                           activity.index("bool PocketDailyActivity::hasMonitorData()")]
+                           activity.index("uint32_t PocketDailyActivity::studyEpoch()")]
         # Order, visibility and the daily-word fallback come only from the
         # shared homeRowSources, which the host preview uses too (HomeRowSources
         # host test); the activity only appends rows for the resolved sources.
         self.assertIn("PocketDaily::Home::homeRowSources(PocketDaily::DailyProfile::current(), available, sources)",
                       collect)
-        for source in ("Reading", "AppCards", "DailyWord", "Provider", "Monitor"):
+        for source in ("Reading", "AppCards", "DailyWord"):
             self.assertIn(f"RowSource::{source}:", collect)
+        # Provider and monitor (AgentDeck daemon data) are retired: they still
+        # parse in stored profiles but resolve to no Home source.
+        for retired in ("Provider", "Monitor"):
+            self.assertNotIn(f"RowSource::{retired}", collect)
         self.assertNotIn("homeItems", collect)
         shared = (root / "src/pocket_daily/home/HomeRenderer.cpp").read_text()
         self.assertIn("for (uint8_t k = 0; k < profile.homeCount && k < DailyProfile::HOME_ITEM_CAP; ++k)", shared)
@@ -112,6 +116,38 @@ class SyncRoutesTest(unittest.TestCase):
         body = endpoints[endpoints.index("void configurePocketRoutes("):endpoints.index("void registerPocketRoutes(")]
         self.assertIn('routes.on("/api/pocket/v1/profile", HTTP_GET', body)
         self.assertIn('routes.on("/api/pocket/v1/profile", HTTP_POST', body)
+
+    def test_app_glance_route_is_admitted_validated_then_stored(self):
+        root = Path(__file__).resolve().parents[1]
+        endpoints = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
+        body = endpoints[endpoints.index("void configurePocketRoutes("):endpoints.index("void registerPocketRoutes(")]
+        # Registered on the Sync profiles, in the same block as the profile.
+        sync = body[body.index("if (isSyncProfile(d.profile)) {"):]
+        sync = sync[:sync.index("\n  }\n")]
+        self.assertIn('routes.on("/api/pocket/v1/profile", HTTP_POST', sync)
+        self.assertIn('routes.on("/api/pocket/v1/glance", HTTP_POST', sync)
+        self.assertNotIn('"/api/pocket/v1/glance", HTTP_GET', endpoints)
+        handler = endpoints[endpoints.index("void handlePostGlance("):endpoints.index("void retireContent(")]
+        # Identity + heap admission first, the whole document parsed before
+        # anything is stored, and the clock set only after a stored glance.
+        admit = handler.index("if (!admitContentOperation(server, d, deviceId)) return;")
+        parse = handler.index("AppGlance::parseJson(")
+        save = handler.index("AppGlance::save(")
+        clock = handler.index("settimeofday(")
+        self.assertLess(admit, parse)
+        self.assertLess(parse, save)
+        self.assertLess(save, clock)
+        self.assertIn("time(nullptr) < static_cast<time_t>(AppGlance::MIN_EPOCH)", handler)
+        status = (root / "src/pocket_daily/web/PocketStatus.cpp").read_text()
+        self.assertIn('if (isSyncProfile(in.profile)) doc["pocketGlance"] = 1;', status)
+        activity = (root / "src/activities/pocket_daily/PocketDailyActivity.cpp").read_text()
+        enter = activity[activity.index("void PocketDailyActivity::onEnter() {"):
+                         activity.index("void PocketDailyActivity::loop() {")]
+        self.assertLess(enter.index("PocketDaily::AppGlance::load(glanceSnapshot)"), enter.index("requestUpdate();"))
+        # No daemon, discovery or radio bring-up is left in Pocket Daily.
+        for gone in ("AgentDeck::", "WiFi.begin(", "WiFi.scanNetworks(", "MDNS", "enterTimedDeepSleep"):
+            self.assertNotIn(gone, activity)
+        self.assertFalse((root / "src/agentdeck").exists())
 
     def test_theme_routes_are_unconditional_in_production_registration(self):
         root = Path(__file__).resolve().parents[1]

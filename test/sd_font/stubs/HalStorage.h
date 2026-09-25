@@ -1,5 +1,5 @@
 #pragma once
-#include "../../deck_store/stubs/HalStorage.h"
+#include "../../stubs/HalStorage.h"
 
 // Font-specific adapter over the shared fake SD; production uses locked HAL.
 class FontFile : public HalFile {

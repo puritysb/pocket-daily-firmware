@@ -9,13 +9,13 @@
 class GfxRenderer;
 
 namespace PocketUIHost {
+// Mirrors PDUI_SAMPLE_*. Provider (4) and usage (32) came from the retired
+// AgentDeck daemon; they stay valid in the mask and draw nothing.
 enum SampleFlag : uint32_t {
   SampleBook = 1u,
   SampleStudy = 2u,
-  SampleProvider = 4u,
   SampleWeather = 8u,
   SampleEvents = 16u,
-  SampleUsage = 32u,
 };
 
 struct Sample {

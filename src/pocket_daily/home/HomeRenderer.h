@@ -14,15 +14,15 @@ class GfxRenderer;
 // supplies them through Env. Neither function presents the framebuffer.
 namespace PocketDaily::Home {
 // Where Home pages come from. Study resolves to the active app cards, or to
-// the firmware daily word when there are none and the profile keeps it.
-enum class RowSource : uint8_t { Reading, AppCards, DailyWord, Provider, Monitor };
+// the firmware daily word when there are none and the profile keeps it. The
+// retired `provider` and `monitor` profile items (AgentDeck daemon data) still
+// parse but resolve to no source.
+enum class RowSource : uint8_t { Reading, AppCards, DailyWord };
 
 // What content exists right now; a source without content adds no page.
 struct RowAvailability {
   bool book = false;      // an open book to continue
   bool appCards = false;  // at least one active app-authored card
-  bool provider = false;  // provider cards may exist (the caller appends none when empty)
-  bool monitor = false;   // carried usage or wrap-up data
 };
 
 // The profile's Home items resolved to sources, in page order. The device
@@ -34,7 +34,6 @@ int homeRowSources(const DailyProfile::Profile& profile, const RowAvailability& 
 struct Row {
   bool reading = false;
   bool pocket = false;
-  bool monitor = false;
   bool mine = false;          // one of the companion's cards ("My cards")
   bool word = false;          // the firmware daily word
   bool hasImage = false;      // mine: the card carries an image
@@ -60,8 +59,6 @@ struct Strings {
   const char* myCards = "My Cards";
   const char* word = "Daily Word";
   const char* empty = "";
-  const char* monitor = "Monitoring";
-  const char* monitorEmpty = "";
   const char* weather = "Weather";
   const char* noWeather = "";
   const char* weatherHint = "";
@@ -101,11 +98,7 @@ struct HomeView {
   int selected = 0;
   Reading reading;
   const PocketDaily::Glance* glance = nullptr;  // required
-  const char* syncedHm = "";
   bool snapshotStale = false;
-  const char* statusLine = "";
-  bool syncInk = false;  // inverted status band with progress cells
-  int activeCells = 1;
   DailyProfile::Profile profile = DailyProfile::defaults();
   Strings strings;
 };

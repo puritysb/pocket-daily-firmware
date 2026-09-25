@@ -13,6 +13,12 @@ struct Name {
   uint8_t value;
 };
 constexpr Name kHomeItems[] = {{"reading", 1}, {"study", 2}, {"provider", 3}, {"monitor", 4}, {"word", 5}};
+// `provider` and `monitor` were fed only by the retired AgentDeck daemon. Stored
+// profiles and documents naming them stay valid (and round-trip), but the
+// reader no longer advertises them and never shows them.
+constexpr bool retiredHomeItem(const uint8_t id) {
+  return id == static_cast<uint8_t>(HomeItem::Provider) || id == static_cast<uint8_t>(HomeItem::Monitor);
+}
 constexpr Name kWeather[] = {{"bottom", 0}, {"top", 1}, {"off", 2}};
 constexpr Name kSleepModes[] = {{"brief", 0}, {"reader", 1}};
 constexpr Name kSleepSections[] = {{"reading", 1}, {"study", 2}, {"weather", 3}, {"today", 4}, {"card", 5}};
@@ -136,7 +142,8 @@ size_t writeJson(const Profile& p, const uint32_t generation, const char* device
     sections.add(nameOf(kSleepSections, static_cast<uint8_t>(p.sleepSections[i])));
   auto caps = doc["capabilities"].to<JsonObject>();
   auto homeIds = caps["homeItems"].to<JsonArray>();
-  for (const auto& name : kHomeItems) homeIds.add(name.text);
+  for (const auto& name : kHomeItems)
+    if (!retiredHomeItem(name.value)) homeIds.add(name.text);
   caps["maxHomeItems"] = HOME_ITEM_CAP;
   auto weather = caps["weather"].to<JsonArray>();
   for (const auto& name : kWeather) weather.add(name.text);
