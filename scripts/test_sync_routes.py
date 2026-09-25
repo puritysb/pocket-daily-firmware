@@ -103,7 +103,7 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertNotIn("homeItems", collect)
         shared = (root / "src/pocket_daily/home/HomeRenderer.cpp").read_text()
         self.assertIn("for (uint8_t k = 0; k < profile.homeCount && k < DailyProfile::HOME_ITEM_CAP; ++k)", shared)
-        self.assertIn("else if (profile.dailyWord)", shared)
+        self.assertIn("else if (profile.dailyWord && !profile.shows(HomeItem::Word))", shared)
         sleep = activity[activity.index("bool PocketDailyActivity::paintSleepFrame() {"):]
         self.assertLess(sleep.index("SleepMode::Reader) return false;"), sleep.index("requestUpdateAndWait();"))
         boot = (root / "src/pocket_daily/boot/ProductBoot.cpp").read_text()

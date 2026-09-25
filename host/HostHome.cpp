@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include "fontIds.h"
+#include "pocket_daily/ContentImageRenderer.h"
 
 // Host preview inputs for the shared Home / Daily Brief painters. Sample data
 // is representative, not a reader's content; strings stay the English defaults.
@@ -54,8 +55,28 @@ void registerUiFonts(GfxRenderer& renderer) {
   renderer.insertFont(SMALL_FONT_ID, smallFamily);
 }
 
-PocketDaily::Home::Env hostEnv(GfxRenderer& renderer) {
+PocketDaily::Home::Env hostEnv(GfxRenderer& renderer, const UserCards& cards) {
   PocketDaily::Home::Env env;
+  env.context = const_cast<UserCards*>(&cards);
+  env.drawCardImage = [](void* context, GfxRenderer& r, const char* cardId, int x, int y, int width, int height) {
+    for (const auto& card : *static_cast<const UserCards*>(context)) {
+      if (card.image.empty() || strcmp(card.card.cardId, cardId) != 0) continue;
+      const PocketDaily::Content::ManifestSource source{
+          const_cast<std::vector<uint8_t>*>(&card.image), card.image.size(),
+          [](void* bytes, size_t offset, uint8_t* output, size_t count) {
+            const auto& image = *static_cast<const std::vector<uint8_t>*>(bytes);
+            if (offset > image.size() || count > image.size() - offset) return false;
+            if (count) std::memcpy(output, image.data() + offset, count);
+            return true;
+          }};
+      const int drawn = PocketDaily::Content::contentImageHeight(r, source, x, y, width, height);
+      return drawn > 0 && PocketDaily::Content::renderContentImage(r, source, x, y, width, height) ==
+                              PocketDaily::Content::ImageResult::Ok
+                 ? drawn
+                 : 0;
+    }
+    return 0;
+  };
   // Base theme values (BaseTheme.h); the device reports its own via display.
   env.metrics = {5, 45, 10, 20, 30};
   // Built-in fonts cover Latin; anything else uses the context's cpfont (id 1).
@@ -153,11 +174,14 @@ Sample buildSample(uint32_t samples) {
     copy(s.glance.wrapup[s.glance.wrapupCount++], PocketDaily::Glance::WRAPUP_BYTES, "Finished the sync fix.");
     s.glance.valid = true;
   }
+  copy(s.word.cardId, sizeof(s.word.cardId), "local:word");
+  copy(s.word.title, sizeof(s.word.title), "Daily word");
+  copy(s.word.question, sizeof(s.word.question), "serendipity - finding something good without looking for it");
   if (samples & SampleStudy) {
     copy(s.card.cardId, sizeof(s.card.cardId), "sample:study");
     copy(s.card.module, sizeof(s.card.module), "app");
-    copy(s.card.title, sizeof(s.card.title), "Word of the day");
-    copy(s.card.question, sizeof(s.card.question), "serendipity - finding something good without looking for it");
+    copy(s.card.title, sizeof(s.card.title), "Today's question");
+    copy(s.card.question, sizeof(s.card.question), "What is one thing from yesterday's reading you want to keep?");
   }
   s.reading = {(samples & SampleBook) != 0, "Pride and Prejudice", "Jane Austen", 42};
   return s;
@@ -165,11 +189,11 @@ Sample buildSample(uint32_t samples) {
 
 // Mirrors PocketDailyActivity::collectOverview's profile loop over sources.
 int buildRows(const PocketDaily::DailyProfile::Profile& profile, const Sample& sample, uint32_t samples,
-              PocketDaily::Home::Row* rows, int cap) {
+              const UserCards& cards, PocketDaily::Home::Row* rows, int cap) {
   using PocketDaily::Home::RowSource;
   PocketDaily::Home::RowAvailability available;
   available.book = samples & SampleBook;
-  available.appCards = samples & SampleStudy;
+  available.appCards = !cards.empty() || (samples & SampleStudy);
   available.provider = samples & SampleProvider;
   available.monitor = samples & SampleUsage;
   RowSource sources[PocketDaily::DailyProfile::HOME_ITEM_CAP];
@@ -178,19 +202,34 @@ int buildRows(const PocketDaily::DailyProfile::Profile& profile, const Sample& s
   for (int k = 0; k < count && n < cap; ++k) {
     switch (sources[k]) {
       case RowSource::Reading:
-        rows[n++] = {true, false, false, "Continue Reading", "Pride and Prejudice"};
+        rows[n++] = {true, false, false, false, false, false, "", "Continue Reading", "Pride and Prejudice"};
         break;
       case RowSource::AppCards:
-        rows[n++] = {false, true, false, sample.card.title, sample.card.question};
+        if (cards.empty()) {
+          rows[n++] = {
+              false, true, false, true, false, false, sample.card.cardId, sample.card.title, sample.card.question};
+          break;
+        }
+        for (size_t i = 0; i < cards.size() && n < cap; ++i)
+          rows[n++] = {false,
+                       true,
+                       false,
+                       true,
+                       false,
+                       !cards[i].image.empty(),
+                       cards[i].card.cardId,
+                       cards[i].card.title,
+                       cards[i].summary.c_str()};
         break;
       case RowSource::DailyWord:
-        rows[n++] = {false, true, false, "Daily word", "An offline word from the reader"};
+        rows[n++] = {
+            false, true, false, false, true, false, sample.word.cardId, sample.word.title, sample.word.question};
         break;
       case RowSource::Provider:
-        rows[n++] = {false, true, false, "Pocket item", "A carried provider card"};
+        rows[n++] = {false, true, false, false, false, false, "", "Pocket item", "A carried provider card"};
         break;
       case RowSource::Monitor:
-        rows[n++] = {false, false, true, "Monitoring", ""};
+        rows[n++] = {false, false, true, false, false, false, "", "Monitoring", ""};
         break;
     }
   }

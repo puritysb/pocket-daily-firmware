@@ -85,7 +85,10 @@ class PocketDailyActivity final : public Activity {
     bool awaiting;
     bool pocket;
     bool reading;
-    bool monitor;  // read-only provider usage/wrap-up item (profile opt-in)
+    bool monitor;   // read-only provider usage/wrap-up item (profile opt-in)
+    bool mine;      // one of the companion's cards
+    bool word;      // the firmware daily word
+    bool hasImage;  // mine: the card carries an image
   };
 
   // Local reading + three portable slots. Active app cards take priority over
@@ -116,7 +119,8 @@ class PocketDailyActivity final : public Activity {
   // Immutable after onEnter, read by loop/render; released after render stops.
   // <=2400B only when app content is active, not a permanent radio allocation.
   PocketDaily::Content::ContentViewState appContent;
-  void drawAppCardImage(const char* cardId, int x, int y, int width, int height) const;
+  // Returns the height drawn; 0 when the card has no drawable image.
+  int drawAppCardImage(const char* cardId, int x, int y, int width, int height) const;
   uint16_t localStudyOffset = 0;
   uint32_t localStudyPackVersion = 0;
   uint32_t localStudyPackRecordCount = 0;

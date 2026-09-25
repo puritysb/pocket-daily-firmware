@@ -35,6 +35,10 @@ struct Row {
   bool reading = false;
   bool pocket = false;
   bool monitor = false;
+  bool mine = false;          // one of the companion's cards ("My cards")
+  bool word = false;          // the firmware daily word
+  bool hasImage = false;      // mine: the card carries an image
+  const char* cardId = "";    // mine: identifies the card for Env::drawCardImage
   const char* project = "";   // item title
   const char* activity = "";  // item body text
 };
@@ -53,6 +57,8 @@ struct Strings {
   const char* noOpenBook = "No open book";
   const char* startReading = "Start reading";
   const char* study = "Today's Study";
+  const char* myCards = "My Cards";
+  const char* word = "Daily Word";
   const char* empty = "";
   const char* monitor = "Monitoring";
   const char* monitorEmpty = "";
@@ -82,6 +88,10 @@ struct Env {
   void (*drawHeader)(void* context, const GfxRenderer& renderer, int x, int y, int width, int height, const char* title,
                      const char* subtitle) = nullptr;
   bool (*drawCover)(void* context, GfxRenderer& renderer, int x, int y, int width, int height) = nullptr;
+  // Draws the image of one of the companion's cards fitted into the box (shrunk,
+  // never enlarged) and returns the height used; 0 when nothing was drawn.
+  int (*drawCardImage)(void* context, GfxRenderer& renderer, const char* cardId, int x, int y, int width,
+                       int height) = nullptr;
 };
 
 struct HomeView {
@@ -111,6 +121,8 @@ struct BriefView {
   Reading reading;
   bool sleepCover = true;                         // SETTINGS.pocketDailySleepCover
   const PocketDaily::Card* pocketCard = nullptr;  // required; empty cardId = none
+  const PocketDaily::Card* pinnedCard = nullptr;  // first of the companion's cards, or nullptr
+  bool pinnedHasImage = false;
   bool snapshotStale = false;
   const char* status = "";  // bottom line, absolute times only
   DailyProfile::Profile profile = DailyProfile::defaults();

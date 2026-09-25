@@ -65,9 +65,9 @@ bool operator==(const Profile& a, const Profile& b) {
 }
 
 bool valid(const Profile& p) {
-  return distinctKnown(p.homeItems, p.homeCount, HOME_ITEM_CAP, 4) &&
-         distinctKnown(p.sleepSections, p.sleepCount, SLEEP_SECTION_CAP, 4) && static_cast<uint8_t>(p.weather) <= 2 &&
-         static_cast<uint8_t>(p.sleepMode) <= 1;
+  return distinctKnown(p.homeItems, p.homeCount, HOME_ITEM_CAP, HOME_ITEM_MAX_ID) &&
+         distinctKnown(p.sleepSections, p.sleepCount, SLEEP_SECTION_CAP, SLEEP_SECTION_MAX_ID) &&
+         static_cast<uint8_t>(p.weather) <= 2 && static_cast<uint8_t>(p.sleepMode) <= 1;
 }
 
 bool encodeRecord(const Profile& p, const uint32_t generation, uint8_t (&bytes)[RECORD_BYTES]) {

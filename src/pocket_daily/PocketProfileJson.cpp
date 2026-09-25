@@ -12,10 +12,10 @@ struct Name {
   const char* text;
   uint8_t value;
 };
-constexpr Name kHomeItems[] = {{"reading", 1}, {"study", 2}, {"provider", 3}, {"monitor", 4}};
+constexpr Name kHomeItems[] = {{"reading", 1}, {"study", 2}, {"provider", 3}, {"monitor", 4}, {"word", 5}};
 constexpr Name kWeather[] = {{"bottom", 0}, {"top", 1}, {"off", 2}};
 constexpr Name kSleepModes[] = {{"brief", 0}, {"reader", 1}};
-constexpr Name kSleepSections[] = {{"reading", 1}, {"study", 2}, {"weather", 3}, {"today", 4}};
+constexpr Name kSleepSections[] = {{"reading", 1}, {"study", 2}, {"weather", 3}, {"today", 4}, {"card", 5}};
 
 template <size_t N>
 bool lookup(const Name (&names)[N], const char* text, uint8_t& value) {

@@ -25,10 +25,14 @@ int homeRowSources(const DailyProfile::Profile& profile, const RowAvailability& 
         if (available.book) out[n++] = RowSource::Reading;
         break;
       case HomeItem::Study:
+        // Without its own Word item, v1 keeps the daily word as the fallback.
         if (available.appCards)
           out[n++] = RowSource::AppCards;
-        else if (profile.dailyWord)
+        else if (profile.dailyWord && !profile.shows(HomeItem::Word))
           out[n++] = RowSource::DailyWord;
+        break;
+      case HomeItem::Word:
+        out[n++] = RowSource::DailyWord;
         break;
       case HomeItem::Provider:
         if (available.provider) out[n++] = RowSource::Provider;
@@ -203,7 +207,7 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
       return;
     }
     const OverviewRow& row = rows[selectedPocketIndex];
-    y = sectionHeader(x + 12, y + 10, cw - 24, s.study, carouselPosition);
+    y = sectionHeader(x + 12, y + 10, cw - 24, row.mine ? s.myCards : row.word ? s.word : s.study, carouselPosition);
     const int titleFont = fontForText(UI_12_FONT_ID, row.project);
     renderer.drawText(titleFont, x + 12, y,
                       renderer.truncatedText(titleFont, row.project, cw - 24, EpdFontFamily::BOLD).c_str(), true,
@@ -212,10 +216,16 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     if (y + 8 >= panelBottom) return;
     const int bodyFont = fontForText(UI_10_FONT_ID, row.activity);
     const int advance = renderer.getLineHeight(bodyFont) + 3;
+    // A card image (a QR code, a map) takes the rest of the panel below at
+    // most three lines of text, so it stays large enough to use.
+    const bool image = row.mine && row.hasImage && env.drawCardImage;
     int maxLines = (panelBottom - y - 8) / advance;
     if (maxLines < 1) return;
     if (maxLines > (portrait ? 7 : 8)) maxLines = portrait ? 7 : 8;
-    drawWrappedFixed(renderer, bodyFont, x + 12, y, row.activity, cw - 24, maxLines, advance);
+    if (image && maxLines > 3) maxLines = 3;
+    y += drawWrappedFixed(renderer, bodyFont, x + 12, y, row.activity, cw - 24, maxLines, advance) * advance;
+    if (image && panelBottom - 10 - (y + 8) >= 48)
+      env.drawCardImage(env.context, renderer, row.cardId, x + 12, y + 8, cw - 24, panelBottom - 10 - (y + 8));
   };
 
   // Read-only monitoring item: carried provider usage rows and wrap-up lines
@@ -419,7 +429,7 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   // no daemon, no network, and no cached deck, which is what makes the glance
   // meaningful on a fully offline device. ──
   auto drawReading = [&](int x, int y, int cw, int maxY) -> int {
-    if (!renderReadingSnapshot.valid) return y;
+    if (!renderReadingSnapshot.valid || y + line12 * 2 + 12 >= maxY) return y;
     y = sectionHeader(x, y, cw, s.continueReading);
 
     // The retained face gives the current book a real visual identity. The
@@ -501,7 +511,7 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   // deliberately read-only here: wake/open enters the normal Pocket card where
   // choices are durably queued before the item disappears.
   auto drawStudy = [&](int x, int y, int cw, int maxY) -> int {
-    if (!renderPocketSnapshot.cardId[0] || y >= maxY) return y;
+    if (!renderPocketSnapshot.cardId[0] || y + line12 * 2 + 12 >= maxY) return y;
     y = sectionHeader(x, y, cw, s.study);
     const int titleFont = fontForText(UI_12_FONT_ID, renderPocketSnapshot.title);
     renderer.drawText(
@@ -521,9 +531,34 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
     return y + 12;
   };
 
+  // The first of the companion's cards, shown whether or not a book is open
+  // (for example "if found, please contact"), with its image when it fits.
+  auto drawPinned = [&](int x, int y, int cw, int maxY) -> int {
+    const PocketDaily::Card* card = view.pinnedCard;
+    if (!card || !card->cardId[0] || y + line12 * 2 + 12 >= maxY) return y;
+    y = sectionHeader(x, y, cw, s.myCards);
+    const int titleFont = fontForText(UI_12_FONT_ID, card->title);
+    renderer.drawText(titleFont, x, y, renderer.truncatedText(titleFont, card->title, cw, EpdFontFamily::BOLD).c_str(),
+                      true, EpdFontFamily::BOLD);
+    y += renderer.getLineHeight(titleFont) + 5;
+    const int bodyFont = fontForText(UI_10_FONT_ID, card->question);
+    const int advance = renderer.getLineHeight(bodyFont) + 2;
+    int maxLines = (maxY - y) / advance;
+    if (maxLines > 3) maxLines = 3;
+    if (maxLines > 0) y += drawWrappedFixed(renderer, bodyFont, x, y, card->question, cw, maxLines, advance) * advance;
+    if (view.pinnedHasImage && env.drawCardImage) {
+      const int imageH = std::min(maxY - y - 6, 300);
+      const int drawn = imageH >= 48 ? env.drawCardImage(env.context, renderer, card->cardId, x, y + 6, cw, imageH) : 0;
+      if (drawn > 0) y += 6 + drawn;
+    }
+    return y + 12;
+  };
+
   // ── Weather (the walking-out-the-door read; label = place name) ──
   auto drawWeather = [&](int x, int y, int cw, int maxY) -> int {
-    if (!g.weather.valid) return y;
+    // A section that cannot fit its header and the temperature poster is
+    // skipped rather than drawn over the status line.
+    if (!g.weather.valid || y + line12 + 58 >= maxY) return y;
     char weatherLabel[56] = {0};
     snprintf(weatherLabel, sizeof(weatherLabel), "%s", g.weather.place[0] ? g.weather.place : s.weather);
     char snapshotDate[8] = {0};
@@ -592,6 +627,9 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
         case SleepSection::Today:
           y = drawToday(pad, y, w - pad * 2, statusY - 8);
           break;
+        case SleepSection::Card:
+          y = drawPinned(pad, y, w - pad * 2, statusY - 8);
+          break;
       }
     }
   } else if (isSleep) {
@@ -599,7 +637,8 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
     const int gap = 20;
     const int colW = (w - pad * 2 - gap) / 2;
     int leftY = profile.sleeps(SleepSection::Reading) ? drawReading(pad, topY, colW, statusY - 8) : topY;
-    if (profile.sleeps(SleepSection::Study) && studyShown) drawStudy(pad, leftY, colW, statusY - 8);
+    if (profile.sleeps(SleepSection::Study) && studyShown) leftY = drawStudy(pad, leftY, colW, statusY - 8);
+    if (profile.sleeps(SleepSection::Card)) drawPinned(pad, leftY, colW, statusY - 8);
     int rightY = profile.sleeps(SleepSection::Weather) ? drawWeather(pad + colW + gap, topY, colW, statusY - 8) : topY;
     if (profile.sleeps(SleepSection::Today)) drawToday(pad + colW + gap, rightY, colW, statusY - 8);
   } else if (pageH > w) {

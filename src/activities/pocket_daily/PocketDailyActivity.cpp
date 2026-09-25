@@ -50,6 +50,7 @@
 #include "fontIds.h"
 #include "pocket_daily/CardSignature.h"
 #include "pocket_daily/ContentActiveStore.h"
+#include "pocket_daily/ContentImageRenderer.h"
 #include "pocket_daily/PocketProfileStore.h"
 #include "pocket_daily/font_pack_sync.h"
 #include "pocket_daily/home/HomeDrawing.h"
@@ -1913,13 +1914,22 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
   // (homeRowSources decides which, from the profile).
   const auto* appCards = appContent.cards();
   auto appendAppCards = [&]() {
-    for (uint8_t i = 0; appCards && i < appCards->count && n < cap; ++i) appendPocket(appCards->cards[i].card);
+    for (uint8_t i = 0; appCards && i < appCards->count && n < cap; ++i) {
+      const int before = n;
+      appendPocket(appCards->cards[i].card);
+      if (n > before) {
+        out[before].mine = true;
+        out[before].hasImage = appCards->cards[i].imagePath[0] != '\0';
+      }
+    }
   };
   auto appendDailyWord = [&]() {
     AgentDeck::lockState();
     const PocketDaily::Card local = localStudyCard;
     AgentDeck::unlockState();
+    const int before = n;
     appendPocket(local);
+    if (n > before) out[before].word = true;
   };
 
   // Daemon-authored Pocket items. Live sessions never become top-level rows;
@@ -2685,6 +2695,8 @@ PocketDaily::Home::Strings PocketDailyActivity::homeStrings() {
   s.noOpenBook = tr(STR_NO_OPEN_BOOK);
   s.startReading = tr(STR_START_READING);
   s.study = tr(STR_POCKET_STUDY);
+  s.myCards = tr(STR_POCKET_MY_CARDS);
+  s.word = tr(STR_POCKET_DAILY_WORD);
   s.empty = tr(STR_POCKET_EMPTY);
   s.monitor = tr(STR_POCKET_MONITOR);
   s.monitorEmpty = tr(STR_POCKET_MONITOR_EMPTY);
@@ -2717,6 +2729,9 @@ PocketDaily::Home::Env PocketDailyActivity::homeEnv() const {
   };
   env.drawCover = [](void* self, GfxRenderer&, int x, int y, int width, int height) {
     return static_cast<PocketDailyActivity*>(self)->drawReadingCover(x, y, width, height);
+  };
+  env.drawCardImage = [](void* self, GfxRenderer&, const char* cardId, int x, int y, int width, int height) {
+    return static_cast<PocketDailyActivity*>(self)->drawAppCardImage(cardId, x, y, width, height);
   };
   return env;
 }
@@ -2825,7 +2840,8 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
                                                 manualAssetTotalBytes)));
   PocketDaily::Home::Row homeRows[kOverviewCap];
   for (int i = 0; i < n && i < kOverviewCap; ++i)
-    homeRows[i] = {rows[i].reading, rows[i].pocket, rows[i].monitor, rows[i].project, rows[i].activity};
+    homeRows[i] = {rows[i].reading,  rows[i].pocket, rows[i].monitor, rows[i].mine,    rows[i].word,
+                   rows[i].hasImage, rows[i].sid,    rows[i].project, rows[i].activity};
   PocketDaily::Home::HomeView view;
   view.isX3 = gpio.deviceIsX3();
   view.rows = homeRows;
@@ -3139,9 +3155,9 @@ void PocketDailyActivity::renderDetail() {
   renderer.displayBuffer();
 }
 
-void PocketDailyActivity::drawAppCardImage(const char* cardId, int x, int y, int width, int height) const {
+int PocketDailyActivity::drawAppCardImage(const char* cardId, int x, int y, int width, int height) const {
   const auto* appCards = appContent.cards();
-  if (!appCards || !appContent.revision()[0] || width <= 0 || height <= 0) return;
+  if (!appCards || !appContent.revision()[0] || width <= 0 || height <= 0) return 0;
   for (uint8_t i = 0; i < appCards->count; ++i) {
     const auto& card = appCards->cards[i];
     if (!card.imagePath[0] || strcmp(card.card.cardId, cardId) != 0) continue;
@@ -3150,7 +3166,7 @@ void PocketDailyActivity::drawAppCardImage(const char* cardId, int x, int y, int
     HalFile file = Storage.open(path, O_RDONLY);
     if (!file) {
       LOG_ERR("CONTENT", "Card image unavailable");
-      return;
+      return 0;
     }
     const PocketDaily::Content::ManifestSource source{
         &file, file.size(), [](void* context, size_t offset, uint8_t* bytes, size_t count) {
@@ -3158,9 +3174,10 @@ void PocketDailyActivity::drawAppCardImage(const char* cardId, int x, int y, int
           auto& file = *static_cast<HalFile*>(context);
           return file.seek(offset) && file.read(bytes, count) == static_cast<int>(count);
         }};
-    GUI.drawContentImage(renderer, source, x, y, width, height);
-    return;
+    const int drawn = PocketDaily::Content::contentImageHeight(renderer, source, x, y, width, height);
+    return drawn > 0 && GUI.drawContentImage(renderer, source, x, y, width, height) ? drawn : 0;
   }
+  return 0;
 }
 
 void PocketDailyActivity::renderPocketCard(const PocketDaily::Card& card) {
@@ -3503,6 +3520,11 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
                   renderReadingSnapshot.percent};
   view.sleepCover = SETTINGS.pocketDailySleepCover;
   view.pocketCard = &renderPocketSnapshot;
+  // The companion's first card stays in appContent for the whole paint.
+  if (const auto* appCards = appContent.cards(); appCards && appCards->count) {
+    view.pinnedCard = &appCards->cards[0].card;
+    view.pinnedHasImage = appCards->cards[0].imagePath[0] != '\0';
+  }
   view.snapshotStale = PocketDaily::HomeDraw::snapshotIsStale(renderSavedEpoch, time(nullptr));
   view.status = status;
   view.profile = PocketDaily::DailyProfile::current();

@@ -60,6 +60,31 @@ TEST(PocketProfile, ParsesAFullDocumentInOrder) {
   EXPECT_EQ(p.sleepSections[0], SleepSection::Weather);
 }
 
+TEST(PocketProfile, AcceptsTheDailyWordItemAndThePinnedCardSection) {
+  bool ok = false;
+  const auto p = parse(replaced(replaced(kValid, R"("monitor","reading","study")", R"("word","study")"),
+                                R"(["weather","reading"])", R"(["card","reading"])"),
+                       ok);
+  ASSERT_TRUE(ok);
+  EXPECT_EQ(p.homeItems[0], HomeItem::Word);
+  EXPECT_EQ(p.sleepSections[0], SleepSection::Card);
+  uint8_t bytes[RECORD_BYTES];
+  ASSERT_TRUE(encodeRecord(p, 2, bytes));
+  Profile decoded;
+  uint32_t generation = 0;
+  ASSERT_TRUE(decodeRecord(bytes, sizeof(bytes), decoded, generation));
+  EXPECT_EQ(decoded, p);
+  char out[1024];
+  const std::string json(out, writeJson(p, 2, "5B09AF70", out, sizeof(out)));
+  EXPECT_NE(json.find(R"("items":["word","study"])"), std::string::npos);
+  EXPECT_NE(json.find(R"("homeItems":["reading","study","provider","monitor","word"])"), std::string::npos);
+  EXPECT_NE(json.find(R"("sleepSections":["reading","study","weather","today","card"])"), std::string::npos);
+  // Still at most four Home items and four sleep sections.
+  EXPECT_FALSE(
+      parse(replaced(kValid, R"("monitor","reading","study")", R"("monitor","reading","study","provider","word")"), ok)
+          .homeCount);
+}
+
 TEST(PocketProfile, RejectsAnyInvalidDocumentWithoutPartialResult) {
   const std::string cases[] = {
       replaced(kValid, R"("schema":1)", R"("schema":2)"),
@@ -100,7 +125,7 @@ TEST(PocketProfile, ResponseRoundTripsAndAdvertisesAcceptedIds) {
   const std::string json(out, n);
   EXPECT_NE(json.find(R"("generation":7)"), std::string::npos);
   EXPECT_NE(json.find(R"("deviceID":"5B09AF70")"), std::string::npos);
-  EXPECT_NE(json.find(R"("homeItems":["reading","study","provider","monitor"])"), std::string::npos);
+  EXPECT_NE(json.find(R"("homeItems":["reading","study","provider","monitor","word"])"), std::string::npos);
   EXPECT_NE(json.find(R"("maxHomeItems":4)"), std::string::npos);
   // The profile part of the response is itself an accepted document.
   const auto home = json.find(R"("home":)");

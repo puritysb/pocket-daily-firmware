@@ -5,6 +5,16 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-25 My cards (docs/pocket-profile-v1.md): profile IDs `word` (Home
+  item 5, the daily word as its own page; Study then shows only app cards) and
+  `card` (sleep section 5, first app card with its image, shown even while a
+  book is open). App-card Home pages and the pinned sleep card draw the card
+  image via Env::drawCardImage (device: drawAppCardImage from the active
+  revision; host: pdui_set_cards). Images shrink to fit, never enlarge
+  (fitContentImage/contentImageHeight). Brief sections that cannot fit are
+  skipped instead of overlapping the status line. Strings STR_POCKET_MY_CARDS
+  and STR_POCKET_DAILY_WORD (en, ko). 406 host tests; static RAM unchanged.
+
 - 2026-09-25 content read (docs/content-read-v1.md): GET
   /api/pocket/v1/content/file serves 4 KiB chunks of a published revision's
   manifest/card/image leaves read-only (content admission, no active stream

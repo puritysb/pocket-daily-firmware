@@ -80,6 +80,7 @@ struct pdui_context {
   SdCardFont font;
   HalDisplay panel;
   GfxRenderer renderer;
+  PocketUIHost::UserCards cards;
   bool frameValid = false;
   pdui_context(uint32_t width, uint32_t height, const uint8_t* bytes, size_t size)
       : fontBytes(bytes, bytes + size), fontAsset{fontPath, fontBytes}, panel(width, height), renderer(panel) {}
@@ -183,6 +184,37 @@ int32_t pdui_render_content(pdui_context* context, const uint8_t* cardBytes, siz
   }
 }
 
+int32_t pdui_set_cards(pdui_context* context, const pdui_card_input* cards, uint32_t count) noexcept {
+  if (!context || count > 3 || (count && !cards)) return PDUI_INVALID_ARGUMENT;
+  try {
+    PocketUIHost::UserCards parsed;
+    for (uint32_t i = 0; i < count; ++i) {
+      const auto& in = cards[i];
+      if (!in.card || !in.card_size || (in.image == nullptr) != (in.image_size == 0) || in.image_size > maxImageBytes)
+        return PDUI_INVALID_ARGUMENT;
+      ContentCard card{};
+      Bytes input{in.card, in.card_size}, image{in.image, in.image_size};
+      if (decodeContentCard(input.source(), card) != CardResult::Ok) return PDUI_INVALID_CARD;
+      if ((card.imagePath[0] != 0) != (in.image_size != 0)) return PDUI_INVALID_IMAGE;
+      ImageInfo imageInfo;
+      if (in.image_size && validateContentImage(image.source(), imageInfo) != ImageResult::Ok) return PDUI_INVALID_IMAGE;
+      PocketUIHost::UserCard user;
+      user.card = card.card;
+      // Same Home summary as the reader: text, then context when it fits.
+      user.summary = card.card.question;
+      if (card.card.context[0]) user.summary += std::string(" - ") + card.card.context;
+      if (in.image_size) user.image.assign(in.image, in.image + in.image_size);
+      parsed.push_back(std::move(user));
+    }
+    context->cards = std::move(parsed);
+    return PDUI_OK;
+  } catch (const std::bad_alloc&) {
+    return PDUI_OUT_OF_MEMORY;
+  } catch (...) {
+    return PDUI_INTERNAL_ERROR;
+  }
+}
+
 namespace {
 bool toProfile(const pdui_profile& in, PocketDaily::DailyProfile::Profile& out) {
   using namespace PocketDaily::DailyProfile;
@@ -220,14 +252,15 @@ int32_t pdui_render_home(pdui_context* context, const pdui_profile* profile, uin
     PocketDaily::Home::HomeView view;
     view.isX3 = isX3Panel(context->panel);
     view.rows = rows;
-    view.count = PocketUIHost::buildRows(parsed, sample, samples, rows, PocketDaily::DailyProfile::HOME_ITEM_CAP);
+    view.count = PocketUIHost::buildRows(parsed, sample, samples, context->cards, rows,
+                                         PocketDaily::DailyProfile::HOME_ITEM_CAP);
     view.selected = view.count ? static_cast<int>(std::min<uint32_t>(selected, view.count - 1)) : 0;
     view.reading = sample.reading;
     view.glance = &sample.glance;
     view.syncedHm = (samples & (PDUI_SAMPLE_WEATHER | PDUI_SAMPLE_USAGE)) ? "07:40" : "";
     view.statusLine = "WI-FI OFF / SYNC";
     view.profile = parsed;
-    PocketDaily::Home::renderHome(context->renderer, view, PocketUIHost::hostEnv(context->renderer));
+    PocketDaily::Home::renderHome(context->renderer, view, PocketUIHost::hostEnv(context->renderer, context->cards));
     if (context->font.boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
     context->frameValid = true;
     return PDUI_OK;
@@ -251,10 +284,15 @@ int32_t pdui_render_brief(pdui_context* context, const pdui_profile* profile, ui
     view.isSleep = true;
     view.glance = &sample.glance;
     view.reading = sample.reading;
-    view.pocketCard = &sample.card;
+    // As on the reader: the first own card, else the sample, else the daily word.
+    const PocketDaily::Card* first = context->cards.empty() ? nullptr : &context->cards.front().card;
+    const PocketDaily::Card* sampleCard = sample.card.cardId[0] ? &sample.card : nullptr;
+    view.pocketCard = first ? first : sampleCard ? sampleCard : &sample.word;
+    view.pinnedCard = first ? first : sampleCard;
+    view.pinnedHasImage = first && !context->cards.front().image.empty();
     view.status = "Powered off";
     view.profile = parsed;
-    PocketDaily::Home::renderBrief(context->renderer, view, PocketUIHost::hostEnv(context->renderer));
+    PocketDaily::Home::renderBrief(context->renderer, view, PocketUIHost::hostEnv(context->renderer, context->cards));
     if (context->font.boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
     context->frameValid = true;
     return PDUI_OK;

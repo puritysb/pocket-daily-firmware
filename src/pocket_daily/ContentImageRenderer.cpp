@@ -5,6 +5,17 @@
 #include <algorithm>
 
 namespace PocketDaily::Content {
+int contentImageHeight(const GfxRenderer& renderer, const ManifestSource& source, int x, int y, int width, int height) {
+  if (x < 0 || y < 0 || x >= renderer.getScreenWidth() || y >= renderer.getScreenHeight() || width <= 0 || height <= 0)
+    return 0;
+  ImageInfo info;
+  if (validateContentImage(source, info) != ImageResult::Ok) return 0;
+  uint16_t fittedWidth = 0, fittedHeight = 0;
+  fitContentImage(info, std::min({width, renderer.getScreenWidth() - x, 512}),
+                  std::min({height, renderer.getScreenHeight() - y, 512}), fittedWidth, fittedHeight);
+  return fittedHeight;
+}
+
 ImageResult renderContentImage(const GfxRenderer& renderer, const ManifestSource& source, int x, int y, int width,
                                int height) {
   if (x < 0 || y < 0 || x >= renderer.getScreenWidth() || y >= renderer.getScreenHeight() || width <= 0 || height <= 0)

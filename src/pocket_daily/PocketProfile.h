@@ -7,10 +7,17 @@
 // and in what order, the weather panel and next-event line, and the sleep frame.
 // Pure model and codecs; storage lives in PocketProfileStore.
 namespace PocketDaily::DailyProfile {
-enum class HomeItem : uint8_t { Reading = 1, Study = 2, Provider = 3, Monitor = 4 };
+// Study is the companion's own cards ("My cards"); Word is the firmware's daily
+// word from the built-in list or an SD learning pack. Without Word in the
+// profile, Study falls back to the daily word when `dailyWord` is set (v1).
+enum class HomeItem : uint8_t { Reading = 1, Study = 2, Provider = 3, Monitor = 4, Word = 5 };
 enum class WeatherPanel : uint8_t { Bottom = 0, Top = 1, Off = 2 };
 enum class SleepMode : uint8_t { Brief = 0, Reader = 1 };
-enum class SleepSection : uint8_t { Reading = 1, Study = 2, Weather = 3, Today = 4 };
+// Card is the first of the companion's cards, shown whether or not a book is
+// open (for example contact details for a lost reader, with its image).
+enum class SleepSection : uint8_t { Reading = 1, Study = 2, Weather = 3, Today = 4, Card = 5 };
+inline constexpr uint8_t HOME_ITEM_MAX_ID = 5;
+inline constexpr uint8_t SLEEP_SECTION_MAX_ID = 5;
 
 inline constexpr uint8_t HOME_ITEM_CAP = 4;
 inline constexpr uint8_t SLEEP_SECTION_CAP = 4;

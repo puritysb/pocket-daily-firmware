@@ -41,20 +41,25 @@ ImageResult validateContentImage(const ManifestSource& source, ImageInfo& info) 
   info = {width, height, rowBytes, static_cast<uint16_t>(offset)};
   return ImageResult::Ok;
 }
+void fitContentImage(const ImageInfo& info, uint16_t maxWidth, uint16_t maxHeight, uint16_t& width, uint16_t& height) {
+  width = info.width < maxWidth ? info.width : maxWidth;
+  height = info.width ? static_cast<uint32_t>(width) * info.height / info.width : 0;
+  if (!height) height = 1;
+  if (height > maxHeight) {
+    height = maxHeight;
+    width = info.height ? static_cast<uint32_t>(height) * info.width / info.height : 0;
+    if (!width) width = 1;
+  }
+}
+
 ImageResult rasterizeContentImage(const ManifestSource& source, uint16_t maxWidth, uint16_t maxHeight,
                                   const ImageSink& sink) {
   if (!sink.pixel || !maxWidth || !maxHeight) return ImageResult::Dimensions;
   ImageInfo info;
   const auto result = validateContentImage(source, info);
   if (result != ImageResult::Ok) return result;
-  uint16_t width = info.width < maxWidth ? info.width : maxWidth;
-  uint16_t height = static_cast<uint32_t>(width) * info.height / info.width;
-  if (!height) height = 1;
-  if (height > maxHeight) {
-    height = maxHeight;
-    width = static_cast<uint32_t>(height) * info.width / info.height;
-    if (!width) width = 1;
-  }
+  uint16_t width = 0, height = 0;
+  fitContentImage(info, maxWidth, maxHeight, width, height);
   uint8_t row[64];
   for (uint16_t y = 0; y < height; ++y) {
     const uint16_t sourceY = static_cast<uint32_t>(y) * info.height / height;

@@ -73,16 +73,28 @@ theme is Lyra (spacing 16), so the "exact" canvas differed on default readers.
 ```
 
 - `home.items`: ordered, distinct subset of `reading`, `study`, `provider`,
-  `monitor`; at least one. An item with no data is skipped as today (no book,
-  no provider cards, no usage data).
-- `study`: active app cards; when none, the built-in daily word if
-  `dailyWord` is true.
+  `monitor`, `word`; at least one, at most four. An item with no data is
+  skipped as today (no book, no provider cards, no usage data).
+- `study` is the companion's own cards ("My cards", up to three pages, each
+  drawn with its image on Home). Without a `word` item it falls back to the
+  daily word when there are no cards and `dailyWord` is true (the v1
+  behaviour). `word` (added 2026-09-25, additive) is the daily word from the
+  built-in list or an SD learning pack as its own page; with it, `study`
+  never repeats the word. `PocketDaily::Home::homeRowSources` holds these rules
+  for the device and the host preview.
 - `weather`: `bottom` (today), `top` or `off` (main panel takes the space).
 - `sleep.mode`: `brief` (Daily Brief) or `reader` (the upstream sleep screen
   chosen in the reader's own Sleep Screen setting).
 - `sleep.sections`: ordered distinct subset of `reading`, `study`, `weather`,
-  `today`; `study` keeps today's rule of appearing only without an open book
-  while `reading` is also selected (it always appears when `reading` is not).
+  `today`, `card`; `study` keeps today's rule of appearing only without an open
+  book while `reading` is also selected (it always appears when `reading` is
+  not). `card` (added 2026-09-25, additive) is the first of My cards with its
+  image, shown whether or not a book is open, for example contact details or
+  a QR code for a lost reader.
+- A sleep section that cannot fit its header and first line is skipped rather
+  than drawn over the status line.
+- Readers advertise the IDs they accept in `capabilities`; the companion offers
+  only those, and refuses a stored document with IDs it does not know.
 - Sleep frame: weather fills to its bottom bound only when it is the last
   section; otherwise it gets Home's fixed 272px panel. Reading's cover shrinks
   to the space left and falls back to the compact text form below 108px.
@@ -149,6 +161,12 @@ every reader, which is why previews use the resolved display state.
 | P1-2 | Profile store, endpoints, Home/sleep application, monitoring card | Host tests (11) and source checks pass; device w15cb1e54: GET defaults at generation 0, invalid 400, stale generation 409, identity 409, valid save generation 1 read back and kept across reboots. User confirmed on X3: Home order and weather-top layout; sleep frame after the w1e22398f fix (weather capped at 272px when sections follow, reading cover shrinks to the room left) |
 | P1-3 | Extract a pure Home/sleep renderer shared by device and host; host ABI for Home preview | **Pipeline done 2026-09-25, tuning pending**: `src/pocket_daily/home/` (HomeRenderer, HomeDrawing) draws Home and the Daily Brief on both targets; `pdui_render_home`/`pdui_render_brief` (ABI 1, additive) with a `pdui_profile` and `PDUI_SAMPLE_*` sample mask; 14 host tests (determinism, placement, order, selection, empty samples, invalid profiles on 792×528 and 800×480). Remaining: device capture comparison with pinned clock/battery, then golden hashes |
 | P2 | App studio edits the profile on the Home canvas and sends it | UI tests; physical acceptance |
+
+Host preview of My cards: `pdui_set_cards` passes the companion's PDCT cards
+and PBM images (validated like `pdui_render_content`) so the Home and Daily
+Brief previews show them instead of the sample study card. Card images are
+shrunk to fit, never enlarged (`fitContentImage`), so the companion sizes QR
+codes itself (about 240 px, whole-pixel modules).
 
 P1-3 host stand-ins and known tuning items (compare against a reader capture):
 the host header is a plain title and rule, not the device theme header; the

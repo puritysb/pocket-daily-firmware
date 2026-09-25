@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
+#include "pocket_daily/ContentChecksum.h"
 #include "pocket_daily/home/HomeRenderer.h"
 
 // Shared Home / Daily Brief painters through the host ABI (P1-3). These pin
@@ -38,6 +40,31 @@ std::vector<uint8_t> tinyFont() {
     std::memcpy(bytes.data() + glyphStart + i * 16, &glyph, sizeof(glyph));
     bytes[bitmapStart + i] = 0xC0;
   }
+  return bytes;
+}
+
+// One PDCT card (docs/content-card-v1.md) as the companion encodes it.
+std::vector<uint8_t> pdct(const char* id, const char* title, const char* text, const char* image = "") {
+  std::vector<uint8_t> bytes(512, 0);
+  std::memcpy(bytes.data(), "PDCT", 4);
+  bytes[4] = 1;
+  bytes[6] = 16;
+  bytes[9] = 2;
+  std::strcpy(reinterpret_cast<char*>(bytes.data() + 16), id);
+  std::strcpy(reinterpret_cast<char*>(bytes.data() + 49), title);
+  std::strcpy(reinterpret_cast<char*>(bytes.data() + 74), text);
+  std::strcpy(reinterpret_cast<char*>(bytes.data() + 427), image);
+  const uint32_t crc = PocketDaily::Content::contentCrcUpdate(UINT32_MAX, bytes.data(), 508) ^ UINT32_MAX;
+  for (unsigned i = 0; i < 4; ++i) bytes[508 + i] = static_cast<uint8_t>(crc >> (8 * i));
+  return bytes;
+}
+
+// A 64x64 checkerboard PBM, dark enough to count.
+std::vector<uint8_t> checkerPbm() {
+  const std::string header = "P4\n64 64\n";
+  std::vector<uint8_t> bytes(header.begin(), header.end());
+  for (int row = 0; row < 64; ++row)
+    for (int column = 0; column < 8; ++column) bytes.push_back(((row / 8) + column) % 2 ? 0xFF : 0x00);
   return bytes;
 }
 
@@ -202,6 +229,71 @@ TEST(HomeRowSources, FollowProfileOrderAndSkipItemsWithoutContent) {
   ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, all, out), 2);
   EXPECT_EQ(out[0], RowSource::Monitor);
   EXPECT_EQ(out[1], RowSource::AppCards);
+  // A Word item of its own: Study shows only the app cards, never the word twice.
+  profile.dailyWord = true;
+  profile.homeItems[0] = PocketDaily::DailyProfile::HomeItem::Word;
+  ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, none, out), 1);
+  EXPECT_EQ(out[0], RowSource::DailyWord);
+  ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, all, out), 2);
+  EXPECT_EQ(out[1], RowSource::AppCards);
+}
+
+TEST_P(HomePreview, MyCardsReplaceTheSampleAndShowTheirImage) {
+  auto p = defaults();
+  p.home_items[0] = 2;  // My cards first, so the first page is the card
+  p.home_items[1] = 1;
+  const auto sample = home(p);
+  const auto plain = pdct("note", "Reading goal", "Chapter three today");
+  const auto withImage = pdct("note", "Reading goal", "Chapter three today", "qr.pbm");
+  const auto qr = checkerPbm();
+  pdui_card_input cards[1] = {{plain.data(), plain.size(), nullptr, 0}};
+  ASSERT_EQ(pdui_set_cards(context.get(), cards, 1), PDUI_OK);
+  const auto mine = home(p);
+  EXPECT_NE(mine, sample);
+  cards[0] = {withImage.data(), withImage.size(), qr.data(), qr.size()};
+  ASSERT_EQ(pdui_set_cards(context.get(), cards, 1), PDUI_OK);
+  const auto pictured = home(p);
+  EXPECT_GT(ink(pictured), ink(mine) + 500) << "The card image is drawn on Home";
+
+  // Invalid input leaves the previous set in place.
+  auto broken = withImage;
+  broken[60] ^= 1;
+  cards[0] = {broken.data(), broken.size(), qr.data(), qr.size()};
+  EXPECT_EQ(pdui_set_cards(context.get(), cards, 1), PDUI_INVALID_CARD);
+  cards[0] = {withImage.data(), withImage.size(), nullptr, 0};
+  EXPECT_EQ(pdui_set_cards(context.get(), cards, 1), PDUI_INVALID_IMAGE) << "Named image missing";
+  EXPECT_EQ(pdui_set_cards(context.get(), nullptr, 4), PDUI_INVALID_ARGUMENT);
+  EXPECT_EQ(home(p), pictured);
+  ASSERT_EQ(pdui_set_cards(context.get(), nullptr, 0), PDUI_OK);
+  EXPECT_EQ(home(p), sample);
+}
+
+TEST_P(HomePreview, DailyWordItemAndPinnedCardSection) {
+  // Word as its own item: without app cards, Study adds nothing extra.
+  auto p = defaults();
+  p.home_items[0] = 5;
+  p.home_count = 1;
+  const auto word = home(p, PDUI_SAMPLE_ALL & ~PDUI_SAMPLE_STUDY);
+  EXPECT_GT(ink(word), 2000u);
+  p.home_items[1] = 2;
+  p.home_count = 2;
+  // Study with Word present does not repeat the daily word, so paging stays on one item.
+  EXPECT_EQ(home(p, PDUI_SAMPLE_ALL & ~PDUI_SAMPLE_STUDY, 1), home(p, PDUI_SAMPLE_ALL & ~PDUI_SAMPLE_STUDY, 0));
+
+  auto sleep = defaults();
+  sleep.sleep_sections[0] = 5;
+  sleep.sleep_count = 1;
+  const auto none = brief(sleep, PDUI_SAMPLE_ALL & ~PDUI_SAMPLE_STUDY);
+  const auto withCard = pdct("contact", "If found", "Please call 010-0000-0000", "qr.pbm");
+  const auto qr = checkerPbm();
+  pdui_card_input cards[1] = {{withCard.data(), withCard.size(), qr.data(), qr.size()}};
+  ASSERT_EQ(pdui_set_cards(context.get(), cards, 1), PDUI_OK);
+  const auto pinned = brief(sleep, PDUI_SAMPLE_ALL & ~PDUI_SAMPLE_STUDY);
+  EXPECT_GT(ink(pinned), ink(none) + 500) << "The pinned card and its image are on the sleep frame";
+  // It stays while a book is open, unlike the study section.
+  sleep.sleep_sections[1] = 1;
+  sleep.sleep_count = 2;
+  EXPECT_GT(ink(brief(sleep)), ink(pinned));
 }
 
 INSTANTIATE_TEST_SUITE_P(Panels, HomePreview, testing::Values(std::make_pair(792u, 528u), std::make_pair(800u, 480u)));

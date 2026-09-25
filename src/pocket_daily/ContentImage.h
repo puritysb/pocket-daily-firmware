@@ -19,6 +19,8 @@ struct ImageSink {
 // Validates before emitting pixels; nearest-neighbor fit, no upscaling.
 // <=64B row scratch. Caller owns immutable source and must clear its drawing
 // area on a late read failure (a sink may already have received some rows).
+// Size an image is drawn at inside a box: shrunk to fit, never enlarged.
+void fitContentImage(const ImageInfo& info, uint16_t maxWidth, uint16_t maxHeight, uint16_t& width, uint16_t& height);
 ImageResult rasterizeContentImage(const ManifestSource& source, uint16_t maxWidth, uint16_t maxHeight,
                                   const ImageSink& sink);
 }  // namespace PocketDaily::Content
