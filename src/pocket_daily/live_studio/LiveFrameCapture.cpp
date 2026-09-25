@@ -52,6 +52,18 @@ void maybeCapture(const uint8_t* framebuffer, int width, int height) {
   }
 }
 
+uint32_t captureNow(const uint8_t* framebuffer, int width, int height) {
+  if (ESP.getFreeHeap() < 10240) return 0;
+  if (!ScreenshotUtil::saveFramebufferAsBmp(LIVE_FRAME_PATH, framebuffer, width, height)) return 0;
+  HalFile file = Storage.open(LIVE_FRAME_PATH);
+  const uint32_t size = file && !file.isDirectory() ? static_cast<uint32_t>(file.size()) : 0;
+  if (size) {
+    gSeq.fetch_add(1);
+    gBytes.store(size);
+  }
+  return size;
+}
+
 uint32_t seq() { return gSeq.load(); }
 uint32_t bytes() { return gBytes.load(); }
 

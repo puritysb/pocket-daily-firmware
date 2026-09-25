@@ -9,6 +9,7 @@
 #include "components/UITheme.h"
 #include "components/themes/BaseTheme.h"
 #include "pocket_daily/ContentPageRenderer.h"
+#include "pocket_daily/ContentPageStyle.h"
 #include "pocket_daily/ContentRevisionStore.h"
 
 namespace {
@@ -28,16 +29,25 @@ bool image(const GfxRenderer& renderer, const char* revision, const char* name, 
 }
 }  // namespace
 
+namespace PocketDaily::Content {
+ContentPageStyle currentContentPageStyle() {
+  const auto& m = UITheme::getInstance().getMetrics();
+  return {static_cast<int16_t>(m.contentSidePadding), static_cast<int16_t>(m.topPadding),
+          static_cast<int16_t>(m.verticalSpacing), tr(STR_POCKET_TITLE), tr(STR_POCKET_EMPTY)};
+}
+}  // namespace PocketDaily::Content
+
 bool BaseTheme::drawContentPage(GfxRenderer& renderer, const PocketDaily::Content::ContentCard* card,
                                 const char* revision, int fontId, const char* const labels[4]) const {
   if (!sdFontSystem.boundedUiFontReady(fontId)) return false;
-  const auto& m = UITheme::getInstance().getMetrics();
+  // Same values the display endpoint reports (ContentPageStyle.h).
+  const auto style = PocketDaily::Content::currentContentPageStyle();
   const PocketDaily::Content::ContentPageOptions options{fontId,
-                                                         m.contentSidePadding,
-                                                         m.topPadding,
-                                                         m.verticalSpacing,
-                                                         tr(STR_POCKET_TITLE),
-                                                         tr(STR_POCKET_EMPTY),
+                                                         style.sidePadding,
+                                                         style.topPadding,
+                                                         style.spacing,
+                                                         style.title,
+                                                         style.empty,
                                                          {labels[0], labels[1], labels[2], labels[3]}};
   struct ImageContext {
     const GfxRenderer& renderer;

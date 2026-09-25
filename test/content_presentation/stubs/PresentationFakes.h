@@ -21,10 +21,16 @@ inline std::vector<char> titles;
 inline std::vector<std::string> checkedText;
 inline std::vector<std::string> labels;
 inline std::function<void()> duringDisplay;
+inline uint8_t orientation = 0;
+inline bool familyInstalled = true;
+inline uint8_t pointSize = 12;
+inline std::string requestedFamily;
 }  // namespace PresentationFake
 
 class GfxRenderer {
  public:
+  enum Orientation { Portrait, LandscapeClockwise, PortraitInverted, LandscapeCounterClockwise };
+  Orientation getOrientation() const { return static_cast<Orientation>(PresentationFake::orientation); }
   int ensureSdCardFontReady(int, const char* text, uint8_t) {
     PresentationFake::checkedText.emplace_back(text);
     return PresentationFake::missingGlyphs;
@@ -48,7 +54,28 @@ class SdCardFont {
  public:
   enum class LoadMode { Cached, BoundedUI };
 };
+struct FakeFontFile {
+  uint8_t pointSize;
+};
+struct FakeFontFamily {
+  const FakeFontFile* findClosestReaderSize(uint8_t) const {
+    static FakeFontFile file;
+    file.pointSize = PresentationFake::pointSize;
+    return &file;
+  }
+};
+struct FakeFontRegistry {
+  const FakeFontFamily* findFamily(const std::string& name) const {
+    static FakeFontFamily family;
+    PresentationFake::requestedFamily = name;
+    return PresentationFake::familyInstalled ? &family : nullptr;
+  }
+};
 struct FakeFontSystem {
+  const FakeFontRegistry& registry() const {
+    static FakeFontRegistry registry;
+    return registry;
+  }
   int ensureUiFamilyLoaded(GfxRenderer&, const char*, SdCardFont::LoadMode mode, void (*)()) {
     ++PresentationFake::loads;
     return mode == SdCardFont::LoadMode::BoundedUI && PresentationFake::fontAvailable ? 1 : 0;

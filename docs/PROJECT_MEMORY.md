@@ -5,6 +5,18 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-25 P1-1 (docs/pocket-profile-v1.md): `GET /api/pocket/v1/display`
+  reports the reader's resolved content-page inputs from the same helpers the
+  device draws with (`currentContentPageStyle`, `ContentPresentation::pageLabels`,
+  font size lookup). Dev-only `POST dev/capture` + `GET dev/frame` read the
+  completed content frame in Sync. Installed wbfc03fa5 (one timeout at
+  5.2MB/6.1MB, reader recovered without reset, one resume from the retained
+  staging, CRC 0312E2DA). The X3 runs the classic theme (spacing 10) and draws
+  "« Back"; neither the old Base nor a Lyra assumption matches every reader.
+  App PocketParityTests: gen7 card with image, 0 of 418,176 pixels differ;
+  "Back" label control 600. 370 host tests, default/gh_release, strict
+  cppcheck pass. Decision-card relaxed for an opt-in read-only monitoring item.
+
 - 2026-09-24 repeated Apply memory fixed on X3 dedicated Sync. Cause: stock
   WebServer actively closes every response, and lwIP kept each PCB in
   TIME_WAIT for120s (~256B, cap16). Eight status reads fell19,016->17,468B

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "I18n.h"
 #include "PresentationFakes.h"
 #include "pocket_daily/ContentPresentation.h"
 
@@ -27,6 +28,8 @@ void ContentViewState::reset() {
   revision_[0] = 0;
   generation_ = 0;
 }
+// Device definition lives in ContentPage.cpp (UITheme + I18n).
+ContentPageStyle currentContentPageStyle() { return {20, 5, 16, tr(STR_POCKET_TITLE), tr(STR_POCKET_EMPTY)}; }
 }  // namespace PocketDaily::Content
 
 using namespace PocketDaily::Content;
@@ -42,6 +45,10 @@ class ContentPresentationTest : public testing::Test {
     checkedText.clear();
     labels.clear();
     duringDisplay = {};
+    orientation = 0;
+    familyInstalled = true;
+    pointSize = 12;
+    requestedFamily.clear();
   }
   void TearDown() override { PresentationFake::duringDisplay = {}; }
   const char* revision = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -261,4 +268,29 @@ TEST_F(ContentPresentationTest, CaptureRequiresCompletedDisplayAndRejectsPending
   PresentationFake::loadResult = ContentViewState::LoadResult::Unavailable;
   EXPECT_FALSE(presentation.prepare(revision, renderer));
   EXPECT_FALSE(presentation.canCaptureFrame());
+}
+
+TEST_F(ContentPresentationTest, DescribeReportsExactlyTheInputsRenderDraws) {
+  ASSERT_TRUE(presentation.prepare(revision, renderer));
+  ASSERT_TRUE(presentation.render(renderer, input));
+  PresentationFake::orientation = 2;
+  const auto page = ContentPresentation::describe(renderer, input);
+  EXPECT_EQ(std::vector<std::string>(page.labels, page.labels + 4), PresentationFake::labels);
+  EXPECT_EQ(page.orientation, 2);
+  EXPECT_EQ(page.style.sidePadding, 20);
+  EXPECT_EQ(page.style.topPadding, 5);
+  EXPECT_EQ(page.style.spacing, 16);
+  EXPECT_STREQ(page.style.title, "Pocket");
+  EXPECT_STREQ(page.style.empty, "Empty");
+  EXPECT_STREQ(page.fontFamily, "PocketSansWorld");
+  EXPECT_EQ(PresentationFake::requestedFamily, "PocketSansWorld");
+  EXPECT_EQ(page.fontPointSize, 12);
+}
+
+TEST_F(ContentPresentationTest, DescribeNeverLoadsFontsAndReportsMissingFamilyAsZero) {
+  PresentationFake::familyInstalled = false;
+  const auto page = ContentPresentation::describe(renderer, input);
+  EXPECT_EQ(page.fontPointSize, 0);
+  EXPECT_EQ(PresentationFake::loads, 0);
+  EXPECT_EQ(PresentationFake::draws, 0);
 }

@@ -31,9 +31,16 @@ Pocket Home is a bounded physical list:
    adaptive feed;
 3. **Personal Glance** — reading/weather/today when there are no queued items.
 
-Live AgentDeck sessions, provider quotas, terminal prompts and AgentDeck
-branding are forbidden on Pocket Home. Sessions may influence daemon-authored
-NUDGE/PULSE/QUEST items, but they never become rows or THREAD digests themselves.
+Live AgentDeck sessions, terminal prompts and AgentDeck branding are forbidden
+on Pocket Home. Sessions may influence daemon-authored NUDGE/PULSE/QUEST items,
+but they never become rows or THREAD digests themselves.
+
+Relaxed 2026-09-24 by the product owner: when the Pocket Daily profile enables
+it, one read-only **monitoring** item may show provider usage and wrap-up lines
+from the carried glance. It has no actions, never auto-surfaces, and does not
+change the button grammar. Item order and visibility come from the profile
+(see [pocket-profile-v1.md](pocket-profile-v1.md)); the defaults keep the list
+above.
 
 ## Offline data lifecycle
 

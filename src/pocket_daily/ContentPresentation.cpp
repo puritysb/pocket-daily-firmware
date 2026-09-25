@@ -7,11 +7,37 @@
 #include <cstring>
 
 #include "ContentTextLayout.h"
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "SdCardFontSystem.h"
 #include "components/UITheme.h"
 
 namespace PocketDaily::Content {
+namespace {
+constexpr char kPageFontFamily[] = "PocketSansWorld";
+}
+
+void ContentPresentation::pageLabels(const MappedInputManager& input, const char* (&out)[4]) {
+  const auto mapped = input.mapLabels(tr(STR_BACK), "", tr(STR_CONTENT_PREVIOUS), tr(STR_CONTENT_NEXT));
+  out[0] = mapped.btn1;
+  out[1] = mapped.btn2;
+  out[2] = mapped.btn3;
+  out[3] = mapped.btn4;
+}
+
+PageDescription ContentPresentation::describe(const GfxRenderer& renderer, const MappedInputManager& input) {
+  PageDescription page;
+  page.orientation = static_cast<uint8_t>(renderer.getOrientation());
+  page.style = currentContentPageStyle();
+  pageLabels(input, page.labels);
+  page.fontFamily = kPageFontFamily;
+  // Same size selection as ensureUiFamilyLoaded(..., SMALL) in prepareFont.
+  if (const auto* family = sdFontSystem.registry().findFamily(kPageFontFamily))
+    if (const auto* file = family->findClosestReaderSize(CrossPointSettings::SMALL))
+      page.fontPointSize = file->pointSize;
+  return page;
+}
+
 bool ContentPresentation::enqueue(const char* revision, uint32_t generation) {
   if (busy() || !generation || !revision || strlen(revision) != 64) return false;
   for (unsigned i = 0; i < 64; ++i)
@@ -73,7 +99,7 @@ bool ContentPresentation::prepare(const char* revision, GfxRenderer& renderer) {
 }
 
 bool ContentPresentation::prepareFont(GfxRenderer& renderer) {
-  font_ = sdFontSystem.ensureUiFamilyLoaded(renderer, "PocketSansWorld", SdCardFont::LoadMode::BoundedUI,
+  font_ = sdFontSystem.ensureUiFamilyLoaded(renderer, kPageFontFamily, SdCardFont::LoadMode::BoundedUI,
                                             HalSystem::feedWatchdogIfRegistered);
   if (!font_) return false;
   const auto fail = [&] {
@@ -114,8 +140,8 @@ bool ContentPresentation::render(GfxRenderer& renderer, const MappedInputManager
   if (phase_ == PresentationPhase::Rendered || phase_ == PresentationPhase::Failed) return true;
   const auto* cards = view_.cards();
   const auto* card = cards && index_ < cards->count ? &cards->cards[index_] : nullptr;
-  const auto mapped = input.mapLabels(tr(STR_BACK), "", tr(STR_CONTENT_PREVIOUS), tr(STR_CONTENT_NEXT));
-  const char* labels[]{mapped.btn1, mapped.btn2, mapped.btn3, mapped.btn4};
+  const char* labels[4];
+  pageLabels(input, labels);
   if (!GUI.drawContentPage(renderer, card, view_.revision(), font_, labels)) {
     failure_ = PresentationFailure::Display;
     phase_ = PresentationPhase::Failed;

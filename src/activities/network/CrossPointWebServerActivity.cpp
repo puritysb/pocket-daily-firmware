@@ -22,6 +22,7 @@
 #include "activities/network/CalibreConnectActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "pocket_daily/live_studio/LiveFrameCapture.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "util/QrUtils.h"
 
@@ -566,7 +567,22 @@ void CrossPointWebServerActivity::startWebServer() {
          // by rendering, through an atomic. Never block HTTP on a slow panel.
          return static_cast<CrossPointWebServerActivity*>(self)->contentPresentation.receipt();
        },
-       [](void* self) { return static_cast<CrossPointWebServerActivity*>(self)->contentPresentation.busy(); }});
+       [](void* self) { return static_cast<CrossPointWebServerActivity*>(self)->contentPresentation.busy(); },
+       [](void* self, PocketDaily::Content::PageDescription& page) {
+         // Same helpers render() uses; configuration reads only, no RenderLock.
+         auto& activity = *static_cast<CrossPointWebServerActivity*>(self);
+         page = PocketDaily::Content::ContentPresentation::describe(activity.renderer, activity.mappedInput);
+         return true;
+       },
+       [](void* self) -> uint32_t {
+         // Only a frame the display driver completed for app content qualifies.
+         auto& activity = *static_cast<CrossPointWebServerActivity*>(self);
+         RenderLock lock;
+         if (!activity.contentPresentation.canCaptureFrame()) return 0;
+         return PocketDaily::LiveFrameCapture::captureNow(activity.renderer.getFrameBuffer(),
+                                                          activity.renderer.getDisplayWidth(),
+                                                          activity.renderer.getDisplayHeight());
+       }});
   webServer->begin();
 
   if (webServer->isRunning()) {

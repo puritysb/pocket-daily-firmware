@@ -23,6 +23,9 @@ bool requested();
 // spacing) and writes the BMP row-by-row without a framebuffer allocation.
 void maybeCapture(const uint8_t* framebuffer, int width, int height);
 
+// Developer builds: capture the given framebuffer now, bypassing subscription
+// and cadence (not the heap floor). Returns the BMP size, 0 on failure.
+uint32_t captureNow(const uint8_t* framebuffer, int width, int height);
 uint32_t seq();
 uint32_t bytes();
 

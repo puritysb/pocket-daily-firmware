@@ -5,6 +5,7 @@
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <WebServer.h>
 #include <esp_ota_ops.h>
 
@@ -28,6 +29,7 @@
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/live_studio/StackReport.h"
 #include "pocket_daily/live_studio/UiPackStore.h"
+#include "pocket_daily/web/DisplayState.h"
 #include "pocket_daily/web/ExactRouteDispatch.h"
 #include "pocket_daily/web/PocketStatus.h"
 #include "pocket_daily/web/TcpCensus.h"
@@ -188,6 +190,41 @@ void handleContentState(WebServer& server, const RouteDeps& d) {
     return;
   }
   sendContentState(server, deviceId, active);
+}
+
+// Resolved render inputs for the companion preview (docs/pocket-profile-v1.md).
+// Same identity/heap admission as content state; configuration reads only.
+void handleDisplay(WebServer& server, const RouteDeps& d) {
+  char deviceId[9];
+  if (!admitContentOperation(server, d, deviceId)) return;
+  Content::PageDescription page;
+  if (!d.presentation.describe || !d.presentation.describe(d.presentation.self, page)) {
+    server.send(503, "text/plain", "Display state is unavailable");
+    return;
+  }
+  DisplayInputs in;
+  in.deviceId = deviceId;
+  in.theme = themeName(SETTINGS.uiTheme);
+  in.orientation = page.orientation;
+  in.fontFamily = page.fontFamily;
+  in.fontPointSize = page.fontPointSize;
+  in.sidePadding = page.style.sidePadding;
+  in.topPadding = page.style.topPadding;
+  in.spacing = page.style.spacing;
+  in.title = page.style.title;
+  in.empty = page.style.empty;
+  for (int i = 0; i < 4; ++i) in.labels[i] = page.labels[i];
+  static constexpr size_t kCap = 1024;  // request-scoped; admission reserved heap
+  auto json = makeUniqueNoThrow<char[]>(kCap);
+  if (!json) {
+    server.send(503, "text/plain", "Reader memory is too low for display state");
+    return;
+  }
+  if (!writeDisplayJson(in, json.get(), kCap)) {
+    server.send(500, "text/plain", "Display state could not be encoded");
+    return;
+  }
+  server.send(200, "application/json", json.get());
 }
 
 void retireContent(const Content::RetiredRevision& retired, const RouteDeps& d) {
@@ -811,6 +848,10 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
       note(*deps);
       handlePresentation(*server, *deps, false);
     });
+    routes.on("/api/pocket/v1/display", HTTP_GET, [server = &server, deps = &d] {
+      note(*deps);
+      handleDisplay(*server, *deps);
+    });
   }
   if (d.profile == Profile::POCKET_SYNC && d.apMode) {
     routes.on("/api/pocket/v1/session/end", HTTP_POST,
@@ -887,6 +928,25 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
   // Developer builds only: flash the staged /update.bin over the LAN so
   // iteration does not walk the on-device Settings menus. Absent from
   // gh_release builds by build flag, not by request filtering.
+  // Host/device parity evidence (docs/pocket-profile-v1.md P1-1): capture the
+  // completed content frame, then read it in chunks like screen-live.
+  if (d.presentation.captureFrame) {
+    routes.on("/api/pocket/v1/dev/capture", HTTP_POST, [server = &server, deps = &d] {
+      note(*deps);
+      const uint32_t bytes = deps->presentation.captureFrame(deps->presentation.self);
+      if (!bytes) {
+        server->send(409, "text/plain", "No completed content frame to capture");
+        return;
+      }
+      char json[48];
+      snprintf(json, sizeof(json), "{\"bytes\":%lu}", static_cast<unsigned long>(bytes));
+      server->send(200, "application/json", json);
+    });
+    routes.on("/api/pocket/v1/dev/frame", HTTP_GET, [server = &server, deps = &d] {
+      note(*deps);
+      handleScreenLive(*server);
+    });
+  }
   routes.on("/api/pocket/v1/dev/transfer-stats", HTTP_GET, [server = &server, deps = &d] {
     note(*deps);
     if (!deps->stream || deps->stream->receiving()) {

@@ -136,6 +136,11 @@ block-ACK window, using no heap. Diagnostic buffers are separately gated by
   probes or forced reconnect actions; the driver owns association recovery.
 - The NearbySync state-machine drive and render stay here by design (already
   exemplary in shape; extraction is not a merge problem).
+- `setContentPresentation(...)` thunk block: enqueue/receipt/busy plus
+  `describe` (resolved display inputs via `ContentPresentation::describe`) and
+  the developer `captureFrame` (`LiveFrameCapture::captureNow` under
+  RenderLock, only for a completed content frame); one `LiveFrameCapture.h`
+  include.
 
 ### Already-clean registrations
 
