@@ -33,6 +33,7 @@
 #include "pocket_daily/web/DisplayState.h"
 #include "pocket_daily/web/ExactRouteDispatch.h"
 #include "pocket_daily/web/PocketStatus.h"
+#include "pocket_daily/web/PreferencesUpdate.h"
 #include "pocket_daily/web/TcpCensus.h"
 #include "util/BookCacheUtils.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
@@ -639,44 +640,29 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
     server.send(400, "text/plain", "Missing JSON body");
     return;
   }
-
-  JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, server.arg("plain"));
-  if (err) {
-    server.send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
+  // Validate the whole body first; settings change only when every field is
+  // valid, and a failed save restores the previous values (PreferencesUpdate.h).
+  const String& body = server.arg("plain");
+  const PreferenceLimits limits{CrossPointSettings::STARTUP_APP_COUNT, CrossPointSettings::MIN_SLEEP_TIMEOUT_MINUTES,
+                                CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES, CrossPointSettings::FONT_SIZE_COUNT};
+  PreferencesUpdate update;
+  const char* error = nullptr;
+  if (!parsePreferences(body.c_str(), body.length(), limits, update, error)) {
+    server.send(400, "text/plain", error ? error : "Invalid preferences");
     return;
   }
-
-  if (!doc["startupApp"].isNull()) {
-    const int value = doc["startupApp"].as<int>();
-    if (value < 0 || value >= CrossPointSettings::STARTUP_APP_COUNT) {
-      server.send(400, "text/plain", "Invalid startupApp");
-      return;
-    }
-    SETTINGS.startupApp = static_cast<uint8_t>(value);
-  }
-  if (!doc["pocketDailySleepCover"].isNull()) {
-    SETTINGS.pocketDailySleepCover = doc["pocketDailySleepCover"].as<int>() ? 1 : 0;
-  }
-  if (!doc["sleepTimeoutMinutes"].isNull()) {
-    const int value = doc["sleepTimeoutMinutes"].as<int>();
-    if (value < CrossPointSettings::MIN_SLEEP_TIMEOUT_MINUTES ||
-        value > CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES) {
-      server.send(400, "text/plain", "Invalid sleepTimeoutMinutes");
-      return;
-    }
-    SETTINGS.sleepTimeoutMinutes = static_cast<uint8_t>(value);
-  }
-  if (!doc["fontSize"].isNull()) {
-    const int value = doc["fontSize"].as<int>();
-    if (value < 0 || value >= CrossPointSettings::FONT_SIZE_COUNT) {
-      server.send(400, "text/plain", "Invalid fontSize");
-      return;
-    }
-    SETTINGS.fontSize = static_cast<uint8_t>(value);
-  }
+  const uint8_t previous[4] = {SETTINGS.startupApp, SETTINGS.pocketDailySleepCover, SETTINGS.sleepTimeoutMinutes,
+                               SETTINGS.fontSize};
+  if (update.hasStartupApp) SETTINGS.startupApp = update.startupApp;
+  if (update.hasSleepCover) SETTINGS.pocketDailySleepCover = update.sleepCover;
+  if (update.hasSleepTimeout) SETTINGS.sleepTimeoutMinutes = update.sleepTimeoutMinutes;
+  if (update.hasFontSize) SETTINGS.fontSize = update.fontSize;
 
   if (!SETTINGS.saveToFile()) {
+    SETTINGS.startupApp = previous[0];
+    SETTINGS.pocketDailySleepCover = previous[1];
+    SETTINGS.sleepTimeoutMinutes = previous[2];
+    SETTINGS.fontSize = previous[3];
     server.send(500, "text/plain", "Could not save Pocket preferences");
     return;
   }

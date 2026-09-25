@@ -5,6 +5,15 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-25 preferences POST is all-or-nothing: PreferencesUpdate validates
+  the whole body (JSON integers only, ranges from CrossPointSettings, cover
+  accepts bool or int, unknown keys ignored) before any SETTINGS change, and a
+  failed save restores the previous values. Fixes the P0 finding where a valid
+  startupApp stayed live after a later field returned 400. 4 host tests; local
+  cppcheck 2.20 found nothing new. The PlatformIO strict check stays blocked:
+  the espressif32 platform reinstalls tool-cppcheck 2.20 while `pio check`
+  wants ~1.21100 and its mirror download loops on DNS failures.
+
 - 2026-09-25 P1-2 (docs/pocket-profile-v1.md): Pocket Daily profile model,
   strict ArduinoJson parser, 32-byte two-slot record store loaded at boot in
   ProductBoot, GET/POST /api/pocket/v1/profile (identity/heap gated, CAS on

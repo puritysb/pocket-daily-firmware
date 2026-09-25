@@ -30,7 +30,8 @@ Existing toggles hide no Home region: `agentDeckCompanionEnabled` gates the
 radio only (cached provider cards still show), `agentPullSyncEnabled`,
 `pocketDailySleepCover`, `startupApp`.
 
-Known drift found (not changed by this design): decision-card says background
+Known drift found (not changed by this design; the preferences partial-apply
+issue was fixed on 2026-09-25): decision-card says background
 sync defaults on (code: off), OK is Sync (code: Right), boot always lands on
 Pocket (code honours `startupApp`); a ~6.2KB deck cache is allocated on every
 entry even with AgentDeck off; `buildLocalStudyCard` keeps a 928B record on the
