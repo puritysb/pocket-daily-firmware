@@ -3,7 +3,10 @@ project(pdui_host LANGUAGES C CXX)
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 # Single host archive; no GoogleTest or device-only dependencies.
 add_library(pdui_host STATIC
-  PocketUIHost.cpp HostChecksums.cpp
+  PocketUIHost.cpp HostChecksums.cpp HostHome.cpp
+  ${REPO_ROOT}/src/pocket_daily/home/HomeDrawing.cpp
+  ${REPO_ROOT}/src/pocket_daily/home/HomeRenderer.cpp
+  ${REPO_ROOT}/src/pocket_daily/PocketProfile.cpp
   ${REPO_ROOT}/src/pocket_daily/ContentCard.cpp
   ${REPO_ROOT}/src/pocket_daily/ContentManifest.cpp
   ${REPO_ROOT}/src/pocket_daily/ContentPageRenderer.cpp
@@ -32,3 +35,5 @@ target_include_directories(pdui_host PUBLIC include hal ${REPO_ROOT} ${REPO_ROOT
 find_package(ZLIB REQUIRED)
 target_compile_options(pdui_host PRIVATE -Wall -Wextra -pedantic)
 target_link_libraries(pdui_host PUBLIC ZLIB::ZLIB)
+# Generated built-in font headers omit a trailing optional field.
+set_source_files_properties(HostHome.cpp PROPERTIES COMPILE_OPTIONS -Wno-missing-field-initializers)

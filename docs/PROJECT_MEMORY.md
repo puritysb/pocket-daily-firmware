@@ -5,6 +5,17 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-25 P1-3 (reader battery empty; host only): Home and Daily Brief
+  drawing moved out of PocketDailyActivity into src/pocket_daily/home
+  (HomeRenderer: renderHome/renderBrief with Env callbacks for header, cover and
+  font resolution; HomeDrawing: glyphs, poster, strips). The activity builds
+  views and calls them. PocketProfileJson.cpp split from PocketProfile.cpp so
+  the host links the model without ArduinoJson. Host ABI adds
+  pdui_render_home/pdui_render_brief (ABI 1) via host/HostHome.cpp. 399 host
+  tests pass; default and gh_release build with no warnings, static RAM
+  unchanged at 129,944 B; local cppcheck 2.20 finds nothing new. Not yet
+  flashed or compared with a device capture.
+
 - 2026-09-25 preferences POST is all-or-nothing: PreferencesUpdate validates
   the whole body (JSON integers only, ranges from CrossPointSettings, cover
   accepts bool or int, unknown keys ignored) before any SETTINGS change, and a

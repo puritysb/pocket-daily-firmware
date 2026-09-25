@@ -1,5 +1,6 @@
 add_subdirectory(${REPO_ROOT}/host ${CMAKE_CURRENT_BINARY_DIR}/host)
-add_executable(gfx_host_test GfxHostTest.cpp ContentImageHostTest.cpp HostStorageTest.cpp HostAbiTest.cpp)
+add_executable(gfx_host_test GfxHostTest.cpp ContentImageHostTest.cpp HostStorageTest.cpp HostAbiTest.cpp
+  HomePreviewTest.cpp)
 target_link_libraries(gfx_host_test PRIVATE pdui_host GTest::gtest_main)
 gtest_discover_tests(gfx_host_test)
 add_executable(gfx_font_fixture_check GfxFontFixtureCheck.cpp)

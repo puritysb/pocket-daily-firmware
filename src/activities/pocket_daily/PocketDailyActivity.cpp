@@ -52,6 +52,8 @@
 #include "pocket_daily/ContentActiveStore.h"
 #include "pocket_daily/PocketProfileStore.h"
 #include "pocket_daily/font_pack_sync.h"
+#include "pocket_daily/home/HomeDrawing.h"
+#include "pocket_daily/home/HomeRenderer.h"
 #include "pocket_daily/learning_pack.h"
 #include "pocket_daily/learning_pack_sync.h"
 #include "pocket_daily/product_identity.h"
@@ -68,460 +70,23 @@ using AgentDeck::AgentState;
 // behind this shared readiness predicate.
 bool wifiReadyForHttp() { return WiFi.getMode() != WIFI_MODE_NULL && WiFi.status() == WL_CONNECTED; }
 
-enum class WeatherGlyph : uint8_t { Clear, PartlyCloudy, Cloud, Fog, Rain, Snow, Storm };
+// Drawing helpers live in pocket_daily/home/HomeDrawing (shared with the host
+// preview). Pull them into this translation unit's unqualified scope.
+using PocketDaily::HomeDraw::drawForecastGrid;
+using PocketDaily::HomeDraw::drawWeatherPlaceholder;
+using PocketDaily::HomeDraw::drawWeatherPoster;
+using PocketDaily::HomeDraw::drawWrappedFixed;
+using PocketDaily::HomeDraw::formatWeatherSnapshotDate;
+using PocketDaily::HomeDraw::hasVisibleText;
+using PocketDaily::HomeDraw::removeLastUtf8;
+using PocketDaily::HomeDraw::utf8Span;
 
-WeatherGlyph weatherGlyphFor(int16_t code, const char* summary) {
-  if (code == 0) return WeatherGlyph::Clear;
-  if (code == 1 || code == 2) return WeatherGlyph::PartlyCloudy;
-  if (code == 3) return WeatherGlyph::Cloud;
-  if (code == 45 || code == 48) return WeatherGlyph::Fog;
-  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return WeatherGlyph::Rain;
-  if ((code >= 71 && code <= 77) || code == 85 || code == 86) return WeatherGlyph::Snow;
-  if (code >= 95 && code <= 99) return WeatherGlyph::Storm;
-  // Older daemons omitted WMO code. Preserve a useful local glyph for their
-  // short English summary without making network images a dependency.
-  if (summary) {
-    if (strstr(summary, "Thunder") || strstr(summary, "Storm")) return WeatherGlyph::Storm;
-    if (strstr(summary, "Snow")) return WeatherGlyph::Snow;
-    if (strstr(summary, "Rain") || strstr(summary, "Drizzle") || strstr(summary, "Shower")) return WeatherGlyph::Rain;
-    if (strstr(summary, "Fog") || strstr(summary, "Mist")) return WeatherGlyph::Fog;
-    if (strstr(summary, "Cloud") || strstr(summary, "Overcast")) return WeatherGlyph::Cloud;
-    if (strstr(summary, "Clear") || strstr(summary, "Fair") || strstr(summary, "Sunny")) return WeatherGlyph::Clear;
-  }
-  return WeatherGlyph::PartlyCloudy;
-}
-
-void drawCircleOutline(const GfxRenderer& renderer, int cx, int cy, int radius, int stroke) {
-  renderer.drawArc(radius, cx, cy, -1, -1, stroke, true);
-  renderer.drawArc(radius, cx, cy, 1, -1, stroke, true);
-  renderer.drawArc(radius, cx, cy, -1, 1, stroke, true);
-  renderer.drawArc(radius, cx, cy, 1, 1, stroke, true);
-}
-
-void drawSunGlyph(const GfxRenderer& renderer, int cx, int cy, int radius, int stroke) {
-  // A complete eight-ray mark keeps the restrained outline language of the
-  // Pocket face while surviving both small forecast cells and X3 fast refresh.
-  drawCircleOutline(renderer, cx, cy, radius, stroke);
-  const int ray0 = radius + std::max(3, stroke);
-  const int ray1 = ray0 + std::max(6, radius / 2);
-  renderer.drawLine(cx, cy - ray0, cx, cy - ray1, stroke, true);
-  renderer.drawLine(cx, cy + ray0, cx, cy + ray1, stroke, true);
-  renderer.drawLine(cx - ray0, cy, cx - ray1, cy, stroke, true);
-  renderer.drawLine(cx + ray0, cy, cx + ray1, cy, stroke, true);
-  const int d0 = radius * 3 / 4 + std::max(2, stroke);
-  const int d1 = d0 + std::max(4, radius / 3);
-  renderer.drawLine(cx - d0, cy - d0, cx - d1, cy - d1, stroke, true);
-  renderer.drawLine(cx + d0, cy - d0, cx + d1, cy - d1, stroke, true);
-  renderer.drawLine(cx - d0, cy + d0, cx - d1, cy + d1, stroke, true);
-  renderer.drawLine(cx + d0, cy + d0, cx + d1, cy + d1, stroke, true);
-}
-
-int drawCloudGlyph(const GfxRenderer& renderer, int x, int y, int w, int h, int stroke) {
-  const int baseY = y + h * 62 / 100;
-  const int left = x + w * 13 / 100;
-  const int right = x + w * 88 / 100;
-  const int smallR = std::max(4, std::min(w, h) * 15 / 100);
-  const int bigR = std::max(6, std::min(w, h) * 23 / 100);
-  const int c1x = left + smallR;
-  const int c2x = x + w * 51 / 100;
-  const int c3x = right - smallR;
-  renderer.drawArc(smallR, c1x, baseY, -1, -1, stroke, true);
-  renderer.drawArc(smallR, c1x, baseY, 1, -1, stroke, true);
-  renderer.drawArc(bigR, c2x, baseY, -1, -1, stroke, true);
-  renderer.drawArc(bigR, c2x, baseY, 1, -1, stroke, true);
-  renderer.drawArc(smallR, c3x, baseY, -1, -1, stroke, true);
-  renderer.drawArc(smallR, c3x, baseY, 1, -1, stroke, true);
-  renderer.drawLine(left, baseY, right, baseY, stroke, true);
-  return baseY;
-}
-
-void drawWeatherGlyph(const GfxRenderer& renderer, int x, int y, int w, int h, int16_t code, const char* summary) {
-  if (w < 24 || h < 24) return;
-  const WeatherGlyph glyph = weatherGlyphFor(code, summary);
-  const int minDimension = std::min(w, h);
-  const int stroke = std::max(2, (minDimension + 15) / 20);
-  if (glyph == WeatherGlyph::Clear) {
-    drawSunGlyph(renderer, x + w / 2, y + h / 2, minDimension / 4, stroke);
-    return;
-  }
-
-  if (glyph == WeatherGlyph::PartlyCloudy) {
-    drawSunGlyph(renderer, x + w * 68 / 100, y + h * 29 / 100, std::max(4, minDimension / 6), stroke);
-  }
-  const int baseY = drawCloudGlyph(renderer, x, y + h / 12, w, h * 3 / 4, stroke);
-  if (glyph == WeatherGlyph::Fog) {
-    renderer.drawLine(x + w / 5, baseY + h / 8, x + w * 4 / 5, baseY + h / 8, stroke, true);
-    renderer.drawLine(x + w / 3, baseY + h / 4, x + w * 5 / 6, baseY + h / 4, stroke, true);
-  } else if (glyph == WeatherGlyph::Rain) {
-    for (int i = 0; i < 3; i++) {
-      const int rx = x + w * (28 + i * 22) / 100;
-      renderer.drawLine(rx, baseY + 7, rx - w / 15, baseY + h / 5, stroke, true);
-    }
-  } else if (glyph == WeatherGlyph::Snow) {
-    for (int i = 0; i < 3; i++) {
-      const int sx = x + w * (27 + i * 23) / 100;
-      const int sy = baseY + h / 7;
-      const int arm = std::max(3, minDimension / 11);
-      renderer.drawLine(sx - arm, sy, sx + arm, sy, stroke, true);
-      renderer.drawLine(sx, sy - arm, sx, sy + arm, stroke, true);
-    }
-  } else if (glyph == WeatherGlyph::Storm) {
-    const int bx = x + w / 2;
-    const int by = baseY + 4;
-    const int xs[] = {bx + 4, bx - 6, bx + 1, bx - 8};
-    const int ys[] = {by, by + h / 8, by + h / 8, by + h / 3};
-    renderer.drawLine(xs[0], ys[0], xs[1], ys[1], stroke + 1, true);
-    renderer.drawLine(xs[1], ys[1], xs[2], ys[2], stroke + 1, true);
-    renderer.drawLine(xs[2], ys[2], xs[3], ys[3], stroke + 1, true);
-  }
-}
-
-// ── Poster numerals ─────────────────────────────────────────────────────────
-// The largest bundled face is 18 px — far too small for the temperature to
-// anchor the panel the way the approved concept does. A display font is the
-// obvious answer and the wrong one here: glyph rendering data is cached in
-// DRAM on first use, and this device has ~26 KB of heap left once the radio is
-// up. So the number is stroked directly instead. Every edge is axis-aligned,
-// which is exactly what a 1-bit panel renders best — no anti-aliasing to smear
-// at large sizes, and it costs neither flash nor DRAM.
-//
-// Segments are the classic seven, drawn with square joins and heavy stems so
-// the result reads as condensed display type rather than a calculator.
-constexpr int POSTER_DIGIT_W_PCT = 54;    // digit width as % of cap height
-constexpr int POSTER_DIGIT_GAP_PCT = 14;  // inter-digit gap as % of cap height
-constexpr int POSTER_STROKE_PCT = 30;     // stem weight as % of digit width
-
-void drawPosterDigit(const GfxRenderer& renderer, int x, int y, int w, int h, int stroke, char digit) {
-  // A=top B=upper-right C=lower-right D=bottom E=lower-left F=upper-left G=middle
-  static const char* const kSegments[10] = {
-      "ABCDEF",   // 0
-      "BC",       // 1
-      "ABDEG",    // 2
-      "ABCDG",    // 3
-      "BCFG",     // 4
-      "ACDFG",    // 5
-      "ACDEFG",   // 6
-      "ABC",      // 7
-      "ABCDEFG",  // 8
-      "ABCDFG",   // 9
-  };
-  if (digit == '-') {  // minus keeps the middle bar only, inset like a real dash
-    renderer.fillRect(x + w / 6, y + (h - stroke) / 2, w - w / 3, stroke, true);
-    return;
-  }
-  if (digit < '0' || digit > '9') return;
-
-  // A bare "BC" would hug the right edge of its cell and read as a gap. Centre
-  // the single stem so "1" sits where the eye expects it.
-  if (digit == '1') {
-    renderer.fillRect(x + (w - stroke) / 2, y, stroke, h, true);
-    return;
-  }
-
-  const char* segments = kSegments[digit - '0'];
-  const int right = x + w - stroke;
-  const int midY = y + (h - stroke) / 2;
-  const int bottom = y + h - stroke;
-  for (const char* s = segments; *s; ++s) {
-    switch (*s) {
-      case 'A':
-        renderer.fillRect(x, y, w, stroke, true);
-        break;
-      case 'B':
-        renderer.fillRect(right, y, stroke, midY - y + stroke, true);
-        break;
-      case 'C':
-        renderer.fillRect(right, midY, stroke, bottom - midY + stroke, true);
-        break;
-      case 'D':
-        renderer.fillRect(x, bottom, w, stroke, true);
-        break;
-      case 'E':
-        renderer.fillRect(x, midY, stroke, bottom - midY + stroke, true);
-        break;
-      case 'F':
-        renderer.fillRect(x, y, stroke, midY - y + stroke, true);
-        break;
-      case 'G':
-        renderer.fillRect(x, midY, w, stroke, true);
-        break;
-      default:
-        break;
-    }
-  }
-}
-
-int posterNumberWidth(int capHeight, const char* digits) {
-  const int dw = capHeight * POSTER_DIGIT_W_PCT / 100;
-  const int gap = capHeight * POSTER_DIGIT_GAP_PCT / 100;
-  int width = 0;
-  for (const char* c = digits; *c; ++c) width += (width ? gap : 0) + dw;
-  return width;
-}
-
-// Draws the number and returns its width. The degree ring is drawn by the
-// caller so it can sit against the cap line rather than the digit baseline.
-int drawPosterNumber(const GfxRenderer& renderer, int x, int y, int capHeight, const char* digits) {
-  const int dw = capHeight * POSTER_DIGIT_W_PCT / 100;
-  const int gap = capHeight * POSTER_DIGIT_GAP_PCT / 100;
-  const int stroke = std::max(3, dw * POSTER_STROKE_PCT / 100);
-  int cursor = x;
-  for (const char* c = digits; *c; ++c) {
-    drawPosterDigit(renderer, cursor, y, dw, capHeight, stroke, *c);
-    cursor += dw + gap;
-  }
-  return cursor - gap - x;
-}
-
-// Hero row: place-scale temperature on the left, condition and today's range on
-// the right. Replaces the old icon+18px+H/L cluster, which competed with the
-// forecast strip instead of leading it.
-int drawWeatherPoster(const GfxRenderer& renderer, const PocketDaily::Weather& weather, int x, int y, int width,
-                      int maxHeight) {
-  if (width < 150 || maxHeight < 52) return 0;
-
-  char digits[8] = {0};
-  if (weather.tempC != PocketDaily::GLANCE_TEMP_NONE)
-    snprintf(digits, sizeof(digits), "%d", (int)weather.tempC);
-  else
-    snprintf(digits, sizeof(digits), "--");
-
-  // Today's rain window is the single most actionable fact on this panel, so it
-  // gets the line directly under the number rather than a column of its own.
-  char rain[40] = {0};
-  const bool hasRain = AgentDeck::GlanceFormat::formatRainLine(rain, sizeof(rain), weather) > 0;
-  const int rainH = hasRain ? renderer.getLineHeight(SMALL_FONT_ID) + 4 : 0;
-  const int heroH = maxHeight - rainH;
-  // Runtime font metrics can make the rain line taller than cppcheck infers.
-  // cppcheck-suppress knownConditionTrueFalse
-  if (heroH < 44) return 0;
-
-  // Size the number to the room available, then shrink until the right-hand
-  // column still has a readable width.
-  constexpr int kRightMinW = 96;
-  int cap = std::min(96, heroH - 4);
-  while (cap > 40 && posterNumberWidth(cap, digits) + cap / 4 + kRightMinW > width) cap -= 4;
-  const int numberW = posterNumberWidth(cap, digits);
-  drawPosterNumber(renderer, x, y, cap, digits);
-
-  // Degree ring rides the cap line, never the baseline.
-  const int degD = std::max(8, cap / 5);
-  const int degStroke = std::max(2, degD / 4);
-  renderer.drawRoundedRect(x + numberW + degD / 3, y, degD, degD, degStroke, degD / 2, true);
-
-  const int rightX = x + numberW + degD / 3 + degD + cap / 5;
-  const int rightW = x + width - rightX;
-  if (rightW >= 60) {
-    // Use the available cap height for the condition itself. The old ring and
-    // one-third-column cap reduced the meaningful mark to roughly 45 px on X3.
-    const int iconD = std::min(cap * 4 / 5, std::max(42, rightW / 2));
-    drawWeatherGlyph(renderer, rightX, y, iconD, iconD, weather.code, weather.summary);
-
-    int ry = y + iconD + 4;
-    if (weather.summary[0] && ry + renderer.getLineHeight(SMALL_FONT_ID) <= y + heroH) {
-      renderer.drawText(SMALL_FONT_ID, rightX, ry,
-                        renderer.truncatedText(SMALL_FONT_ID, weather.summary, rightW, EpdFontFamily::BOLD).c_str(),
-                        true, EpdFontFamily::BOLD);
-      ry += renderer.getLineHeight(SMALL_FONT_ID) + 2;
-    }
-    if (weather.todayMaxC != PocketDaily::GLANCE_TEMP_NONE && weather.todayMinC != PocketDaily::GLANCE_TEMP_NONE) {
-      char hi[12];
-      char lo[12];
-      snprintf(hi, sizeof(hi), "H %d\xC2\xB0", (int)weather.todayMaxC);
-      snprintf(lo, sizeof(lo), "L %d\xC2\xB0", (int)weather.todayMinC);
-      if (ry + renderer.getLineHeight(UI_10_FONT_ID) <= y + heroH) {
-        renderer.drawText(UI_10_FONT_ID, rightX, ry, hi, true, EpdFontFamily::BOLD);
-        ry += renderer.getLineHeight(UI_10_FONT_ID);
-      }
-      if (ry + renderer.getLineHeight(UI_10_FONT_ID) <= y + heroH)
-        renderer.drawText(UI_10_FONT_ID, rightX, ry, lo, true, EpdFontFamily::BOLD);
-    }
-  }
-
-  if (hasRain) {
-    const int rainFont = SMALL_FONT_ID;
-    renderer.drawText(rainFont, x, y + heroH + 2,
-                      renderer.truncatedText(rainFont, rain, width, EpdFontFamily::BOLD).c_str(), true,
-                      EpdFontFamily::BOLD);
-  }
-  return maxHeight;
-}
-
-// Placeholder for a device that has never received weather. The old empty
-// state was a single small line pinned to the top-left of a ~150 px card, so
-// the panel read as broken rather than as waiting. Same grammar as the
-// populated poster — ringed mark, one honest line, the action that fixes it —
-// centred so the reserved space looks deliberate.
-void drawWeatherPlaceholder(const GfxRenderer& renderer, int x, int y, int width, int height) {
-  if (width < 80 || height < 40) {
-    renderer.drawText(SMALL_FONT_ID, x, y, tr(STR_POCKET_NO_WEATHER), true);
-    return;
-  }
-  const int ringD = std::min(46, std::max(26, height / 3));
-  const int lineH = renderer.getLineHeight(SMALL_FONT_ID);
-  const int hintH = renderer.getLineHeight(UI_10_FONT_ID);
-  const int blockH = ringD + 8 + lineH + 2 + hintH;
-  int cy = y + std::max(0, (height - blockH) / 2);
-  const int cx = x + width / 2;
-
-  const int ring = std::max(2, ringD / 16);
-  renderer.drawRoundedRect(cx - ringD / 2, cy, ringD, ringD, ring, ringD / 2, true);
-  // A neutral dash, not a condition glyph: we are not claiming a forecast.
-  renderer.drawRect(cx - ringD / 5, cy + ringD / 2 - ring / 2, ringD * 2 / 5, std::max(2, ring), true);
-  cy += ringD + 8;
-
-  const char* label = tr(STR_POCKET_NO_WEATHER);
-  int tw = renderer.getTextWidth(SMALL_FONT_ID, label, EpdFontFamily::BOLD);
-  renderer.drawText(SMALL_FONT_ID, cx - tw / 2, cy, label, true, EpdFontFamily::BOLD);
-  cy += lineH + 2;
-
-  const char* hint = tr(STR_POCKET_WEATHER_HINT);
-  tw = renderer.getTextWidth(UI_10_FONT_ID, hint);
-  renderer.drawText(UI_10_FONT_ID, cx - tw / 2, cy, hint, true);
-}
-
-// Five-day grid. Each column is weekday / condition / high-low / rain, ruled
-// apart. The wettest day is inverted rather than annotated: on 1-bit e-ink a
-// filled chip is the only emphasis that survives at a glance, and it answers
-// "what should I actually notice today" without spending a line of prose.
-int drawForecastGrid(const GfxRenderer& renderer, const PocketDaily::Weather& weather, int x, int y, int width,
-                     int maxHeight) {
-  const int count = std::min<int>(weather.dayCount, PocketDaily::WEATHER_DAY_CAP);
-  if (count < 2 || width < count * 44 || maxHeight < 74) return 0;
-
-  const int dayLine = renderer.getLineHeight(SMALL_FONT_ID);
-  const int tempLine = renderer.getLineHeight(UI_10_FONT_ID);
-  const int colW = width / count;
-  const int glyphSize = std::min(38, std::max(26, colW * 55 / 100));
-  const int height = std::min(maxHeight, dayLine + glyphSize + tempLine * 2 + 20);
-
-  // Emphasise the wettest day, but only when it is actually worth a warning.
-  int notable = -1;
-  int notableRain = 39;
-  for (int i = 0; i < count; i++) {
-    if (weather.days[i].rainProbability > notableRain) {
-      notableRain = weather.days[i].rainProbability;
-      notable = i;
-    }
-  }
-
-  renderer.drawLine(x, y, x + width, y);
-  const int chipTop = y + 3;
-  const int chipH = dayLine + 2;
-  const int glyphY = chipTop + chipH + 4;
-  const int tempY = glyphY + glyphSize + 3;
-  const int rainY = tempY + tempLine + 2;
-
-  for (int i = 0; i < count; i++) {
-    const PocketDaily::DayWeather& day = weather.days[i];
-    const int left = x + i * colW;
-    const int right = i == count - 1 ? x + width : left + colW;
-    const int cx = left + (right - left) / 2;
-    const bool highlight = i == notable;
-    if (i > 0) renderer.drawLine(left, y + 2, left, y + height - 2);
-
-    char weekday[4] = {0};
-    if (!AgentDeck::GlanceFormat::formatWeekday(weekday, sizeof(weekday), day.date))
-      snprintf(weekday, sizeof(weekday), "D%d", i + 1);
-    const int dw = renderer.getTextWidth(SMALL_FONT_ID, weekday, EpdFontFamily::BOLD);
-    if (highlight) renderer.fillRect(cx - dw / 2 - 6, chipTop, dw + 12, chipH, true);
-    renderer.drawText(SMALL_FONT_ID, cx - dw / 2, chipTop + 1, weekday, !highlight, EpdFontFamily::BOLD);
-
-    drawWeatherGlyph(renderer, cx - glyphSize / 2, glyphY, glyphSize, glyphSize, day.code, day.summary);
-
-    char temps[18] = {0};
-    if (day.minC != PocketDaily::GLANCE_TEMP_NONE && day.maxC != PocketDaily::GLANCE_TEMP_NONE)
-      snprintf(temps, sizeof(temps), "%d\xC2\xB0/%d\xC2\xB0", (int)day.maxC, (int)day.minC);
-    else if (day.maxC != PocketDaily::GLANCE_TEMP_NONE)
-      snprintf(temps, sizeof(temps), "%d\xC2\xB0", (int)day.maxC);
-    if (temps[0]) {
-      const int tw = renderer.getTextWidth(UI_10_FONT_ID, temps, EpdFontFamily::BOLD);
-      renderer.drawText(UI_10_FONT_ID, cx - tw / 2, tempY, temps, true, EpdFontFamily::BOLD);
-    }
-
-    if (day.rainProbability >= 0 && rainY + tempLine <= y + height) {
-      char rain[8];
-      snprintf(rain, sizeof(rain), "%d%%", (int)day.rainProbability);
-      const int rw = renderer.getTextWidth(UI_10_FONT_ID, rain, EpdFontFamily::BOLD);
-      if (highlight) renderer.fillRect(cx - rw / 2 - 6, rainY - 1, rw + 12, tempLine + 2, true);
-      renderer.drawText(UI_10_FONT_ID, cx - rw / 2, rainY, rain, !highlight, EpdFontFamily::BOLD);
-    }
-  }
-  return height;
-}
-
-struct PocketHardwareGeometry {
-  int frontCenters[4];
-  int previousSideY;
-  int nextSideY;
-};
-
-const PocketHardwareGeometry& pocketHardwareGeometry() {
-  // Physical portrait-panel coordinates: X3 has two front rockers and
-  // opposed side keys; X4 has four narrower front keys plus a right-side
-  // power/page stack. Do not replace these with framebuffer fractions.
-  static constexpr PocketHardwareGeometry x3{{91, 207, 321, 437}, 194, 194};
-  static constexpr PocketHardwareGeometry x4{{78, 183, 298, 403}, 385, 465};
-  return gpio.deviceIsX3() ? x3 : x4;
-}
-
-void drawPocketSideChevrons(GfxRenderer& renderer) {
-  const auto original = renderer.getOrientation();
-  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
-  const PocketHardwareGeometry& hardware = pocketHardwareGeometry();
-  const int halfH = 10;
-  const int inset = 5;
-  const int arm = 11;
-  const int right = renderer.getScreenWidth() - 1;
-  if (gpio.deviceIsX3()) {
-    renderer.drawLine(inset + arm, hardware.previousSideY - halfH, inset, hardware.previousSideY, 2, true);
-    renderer.drawLine(inset, hardware.previousSideY, inset + arm, hardware.previousSideY + halfH, 2, true);
-    renderer.drawLine(right - inset - arm, hardware.nextSideY - halfH, right - inset, hardware.nextSideY, 2, true);
-    renderer.drawLine(right - inset, hardware.nextSideY, right - inset - arm, hardware.nextSideY + halfH, 2, true);
-  } else {
-    renderer.drawLine(right - inset, hardware.previousSideY - halfH, right - inset - arm, hardware.previousSideY, 2,
-                      true);
-    renderer.drawLine(right - inset - arm, hardware.previousSideY, right - inset, hardware.previousSideY + halfH, 2,
-                      true);
-    renderer.drawLine(right - inset - arm, hardware.nextSideY - halfH, right - inset, hardware.nextSideY, 2, true);
-    renderer.drawLine(right - inset, hardware.nextSideY, right - inset - arm, hardware.nextSideY + halfH, 2, true);
-  }
-  renderer.setOrientation(original);
-}
-
-bool formatWeatherSnapshotDate(char* out, size_t cap, const PocketDaily::Weather& weather) {
-  if (!out || cap == 0) return false;
-  out[0] = '\0';
-  const char* iso = weather.dayCount > 0 ? weather.days[0].date : weather.tomorrow.date;
-  if (!iso || strlen(iso) != 10 || iso[4] != '-' || iso[7] != '-') return false;
-  snprintf(out, cap, "%c%c.%c%c", iso[5], iso[6], iso[8], iso[9]);
-  return true;
-}
-
-bool snapshotIsStale(uint32_t savedEpoch) {
-  const time_t now = time(nullptr);
-  return savedEpoch != 0 && now >= 1700000000 && (uint32_t)now > savedEpoch && (uint32_t)now - savedEpoch > 36 * 3600UL;
-}
-
-void drawPocketActionStrip(GfxRenderer& renderer, const char* first, const char* second, const char* fourth) {
-  // Pocket's front controls are physical objects, not virtual rounded buttons.
-  // Four edge ticks align with their real centers; labels float above only for
-  // actions that exist in this context, leaving the content visually open.
-  const auto original = renderer.getOrientation();
-  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
-  const int h = renderer.getScreenHeight();
-  const PocketHardwareGeometry& hardware = pocketHardwareGeometry();
-  const char* labels[] = {first, second, "", fourth};
-  for (int i = 0; i < 4; i++) {
-    const int cx = hardware.frontCenters[i];
-    renderer.drawLine(cx - 8, h - 3, cx + 8, h - 3, 2, true);
-    if (!labels[i] || !labels[i][0]) continue;
-    const int font = UiCjkFont::fontForText(renderer, labels[i], SMALL_FONT_ID, EpdFontFamily::BOLD);
-    const int textW = renderer.getTextWidth(font, labels[i], EpdFontFamily::BOLD);
-    renderer.drawText(font, cx - textW / 2, h - renderer.getLineHeight(font) - 12, labels[i], true,
-                      EpdFontFamily::BOLD);
-  }
-  renderer.setOrientation(original);
+// The device picks an installed SD CJK font for text the built-in fonts lack.
+PocketDaily::HomeDraw::FontResolver deviceFonts(const GfxRenderer& renderer) {
+  return {const_cast<GfxRenderer*>(&renderer),
+          [](void* context, const char* text, int fallback, EpdFontFamily::Style style) {
+            return UiCjkFont::fontForText(*static_cast<const GfxRenderer*>(context), text, fallback, style);
+          }};
 }
 
 // Per-agent creature glyph (src/components/icons/glyph_*.h). MUST be a multiple of
@@ -578,97 +143,6 @@ bool hasCJK(const char* s) {
       return true;
   }
   return false;
-}
-
-size_t utf8Span(const char* p) {
-  if (!p || !p[0]) return 0;
-  const unsigned char c = static_cast<unsigned char>(p[0]);
-  size_t n = c < 0x80 ? 1 : ((c & 0xE0) == 0xC0 ? 2 : ((c & 0xF0) == 0xE0 ? 3 : 4));
-  for (size_t i = 1; i < n; i++)
-    if (!p[i] || (static_cast<unsigned char>(p[i]) & 0xC0) != 0x80) return 1;
-  return n;
-}
-
-void removeLastUtf8(char* text) {
-  size_t n = strlen(text);
-  if (n == 0) return;
-  n--;
-  while (n > 0 && (static_cast<unsigned char>(text[n]) & 0xC0) == 0x80) n--;
-  text[n] = '\0';
-}
-
-bool hasVisibleText(const char* p) {
-  while (p && (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t')) p++;
-  return p && *p;
-}
-
-// Draw bounded UTF-8 text without std::string/vector allocations. This is used
-// by every overview card during a render pass, so it must not fragment the C3's
-// no-PSRAM heap. Returns the number of lines drawn.
-int drawWrappedFixed(const GfxRenderer& renderer, int fontId, int x, int y, const char* text, int maxWidth,
-                     int maxLines, int lineAdvance, EpdFontFamily::Style style = EpdFontFamily::REGULAR) {
-  if (!text || !text[0] || maxWidth <= 0 || maxLines <= 0) return 0;
-  const char* p = text;
-  int drawn = 0;
-  while (hasVisibleText(p) && drawn < maxLines) {
-    while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t') p++;
-    char line[AgentDeck::SESSION_ACTIVITY_CAP];
-    line[0] = '\0';
-    size_t scan = 0, lastFit = 0, lastSpace = 0;
-    bool explicitBreak = false;
-    while (p[scan]) {
-      if (p[scan] == '\n' || p[scan] == '\r') {
-        explicitBreak = true;
-        break;
-      }
-      const size_t cp = utf8Span(p + scan);
-      if (cp == 0 || scan + cp >= sizeof(line)) break;
-      memcpy(line + scan, p + scan, cp);
-      line[scan + cp] = '\0';
-      if (renderer.getTextWidth(fontId, line, style) > maxWidth) break;
-      if (p[scan] == ' ') lastSpace = scan;
-      scan += cp;
-      lastFit = scan;
-    }
-
-    size_t chosen = lastFit;
-    size_t consumed = scan;
-    if (p[scan] && !explicitBreak) {
-      if (lastSpace > 0) {
-        chosen = lastSpace;
-        consumed = lastSpace + 1;
-      } else {
-        consumed = lastFit;
-      }
-    } else if (explicitBreak) {
-      consumed = scan + 1;
-    }
-    if (chosen == 0 && p[0]) {
-      chosen = utf8Span(p);
-      if (chosen >= sizeof(line)) chosen = sizeof(line) - 1;
-      memcpy(line, p, chosen);
-      consumed = chosen;
-    }
-    line[chosen] = '\0';
-    while (chosen > 0 && line[chosen - 1] == ' ') line[--chosen] = '\0';
-
-    const bool more = hasVisibleText(p + consumed);
-    if (drawn == maxLines - 1 && more) {
-      constexpr const char* dots = "...";
-      while (line[0]) {
-        char candidate[AgentDeck::SESSION_ACTIVITY_CAP];
-        snprintf(candidate, sizeof(candidate), "%s%s", line, dots);
-        if (renderer.getTextWidth(fontId, candidate, style) <= maxWidth) break;
-        removeLastUtf8(line);
-      }
-      strncat(line, dots, sizeof(line) - strlen(line) - 1);
-    }
-    renderer.drawText(fontId, x, y + drawn * lineAdvance, line, true, style);
-    drawn++;
-    if (consumed == 0) break;
-    p += consumed;
-  }
-  return drawn;
 }
 
 // Strip an "observed:<agent>:" prefix → the raw session UUID. The sessions_list
@@ -3196,22 +2670,54 @@ void PocketDailyActivity::drawBrandedHeader(const char* title, const char* subti
   GUI.drawHeader(renderer, r, title, subtitle);
 }
 
+PocketDaily::Home::Strings PocketDailyActivity::homeStrings() {
+  PocketDaily::Home::Strings s;
+  s.pocketDaily = tr(STR_POCKET_DAILY);
+  s.continueReading = tr(STR_POCKET_CONTINUE_READING);
+  s.noOpenBook = tr(STR_NO_OPEN_BOOK);
+  s.startReading = tr(STR_START_READING);
+  s.study = tr(STR_POCKET_STUDY);
+  s.empty = tr(STR_POCKET_EMPTY);
+  s.monitor = tr(STR_POCKET_MONITOR);
+  s.monitorEmpty = tr(STR_POCKET_MONITOR_EMPTY);
+  s.weather = tr(STR_POCKET_WEATHER);
+  s.noWeather = tr(STR_POCKET_NO_WEATHER);
+  s.weatherHint = tr(STR_POCKET_WEATHER_HINT);
+  s.nextEvent = tr(STR_POCKET_NEXT_EVENT);
+  s.today = tr(STR_POCKET_TODAY);
+  s.library = tr(STR_POCKET_LIBRARY);
+  s.select = tr(STR_SELECT);
+  s.sync = tr(STR_POCKET_SYNC);
+  return s;
+}
+
+PocketDaily::Home::Env PocketDailyActivity::homeEnv() const {
+  const auto& m = UITheme::getInstance().getMetrics();
+  PocketDaily::Home::Env env;
+  env.metrics = {m.topPadding, m.headerHeight, m.verticalSpacing, m.contentSidePadding, m.sideButtonHintsWidth};
+  env.text = {const_cast<PocketDailyActivity*>(this),
+              [](void* self, const char* text, int fallback, EpdFontFamily::Style) {
+                return static_cast<PocketDailyActivity*>(self)->fontForText(fallback, text);
+              }};
+  env.labels = deviceFonts(renderer);
+  env.context = const_cast<PocketDailyActivity*>(this);
+  env.drawHeader = [](void* self, const GfxRenderer& renderer, int x, int y, int width, int height, const char* title,
+                      const char* subtitle) {
+    (void)self;
+    // Product identity is Pocket itself; AgentDeck never brands the shell.
+    GUI.drawHeader(renderer, Rect{x, y, width, height}, title, subtitle);
+  };
+  env.drawCover = [](void* self, GfxRenderer&, int x, int y, int width, int height) {
+    return static_cast<PocketDailyActivity*>(self)->drawReadingCover(x, y, width, height);
+  };
+  return env;
+}
+
 void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awaitingCount, bool fromCache,
                                          uint32_t asOfEpoch) {
-  const auto& m = UITheme::getInstance().getMetrics();
-  const int w = renderer.getScreenWidth();
-  const int pageH = renderer.getScreenHeight();
-  const bool sidePaging = n > 1;
-  // X3 gets borderless edge chevrons instead of the old 30px PREV/NEXT rails.
-  // X4 has enough width to retain its hardware-aligned side hints.
-  const int pad = sidePaging && !gpio.deviceIsX3() ? std::max(m.contentSidePadding, m.sideButtonHintsWidth + 6)
-                                                   : m.contentSidePadding;
-  const int line12 = renderer.getLineHeight(UI_12_FONT_ID);
-  const int line10 = renderer.getLineHeight(UI_10_FONT_ID);
   (void)awaitingCount;  // live Agent attention is not a Pocket Home concern
 
   preparePersonalSnapshot();
-  renderer.clearScreen();
   char statusLine[96];
   if (AgentDeck::OtaWs::receiving()) {
     const uint32_t total = AgentDeck::OtaWs::totalBytes();
@@ -3298,306 +2804,36 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
   // compact header collides with the hero copy on X3 and visually crowds the
   // physical Sync key, so keep this header product-only. Retained sleep Glance
   // continues to show its immutable snapshot metadata separately.
-  drawBrandedHeader(tr(STR_POCKET_DAILY), nullptr);
-  const int statusBandY = m.topPadding + m.headerHeight;
-  const int statusBandH = renderer.getLineHeight(SMALL_FONT_ID) + 4;
+  // Drawing is shared with the host preview (pocket_daily/home/HomeRenderer).
   const bool syncInk = savedWifiScanActive || manualSyncQueued || manualSyncActive || manualAssetSyncActive ||
                        manualOtaIncrementalActive || pullOtaDownloading || AgentDeck::OtaWs::receiving();
-  if (syncInk) {
-    // E-ink activity signal: invert the quiet status row, then advance four
-    // white toner blocks only when the phase/progress changes. It reads as
-    // active without a fake spinner or repeated refresh animation.
-    renderer.fillRect(pad, statusBandY, w - pad * 2, statusBandH, true);
-    const int cellsW = 52;
-    const int cellGap = 3;
-    const int cellW = (cellsW - cellGap * 3) / 4;
-    int activeCells = savedWifiScanActive ? 1 : (manualSyncQueued || manualSyncActive ? 2 : 1);
-    if (pullOtaTotalBytes && pullOtaDownloadedBytes < pullOtaTotalBytes)
-      activeCells = std::max(
-          1, std::min(4, (int)(((uint64_t)pullOtaDownloadedBytes * 4 + pullOtaTotalBytes - 1) / pullOtaTotalBytes)));
-    else if (manualAssetSyncActive && manualAssetTotalBytes)
-      activeCells =
-          std::max(1, std::min(4, (int)(((uint64_t)manualAssetDownloadedBytes * 4 + manualAssetTotalBytes - 1) /
-                                        manualAssetTotalBytes)));
-    const int cellsX = w - pad - cellsW - 7;
-    for (int i = 0; i < 4; i++) {
-      const int cellX = cellsX + i * (cellW + cellGap);
-      if (i < activeCells)
-        renderer.fillRect(cellX, statusBandY + 4, cellW, statusBandH - 8, false);
-      else
-        renderer.drawRect(cellX, statusBandY + 4, cellW, statusBandH - 8, false);
-    }
-    renderer.drawText(SMALL_FONT_ID, pad + 8, statusBandY + 1,
-                      renderer.truncatedText(SMALL_FONT_ID, statusLine, cellsX - pad - 14).c_str(), false,
-                      EpdFontFamily::BOLD);
-  } else {
-    renderer.fillRect(pad, statusBandY + 3, 3, std::max(4, statusBandH - 7), true);
-    renderer.drawText(SMALL_FONT_ID, pad + 10, statusBandY + 1,
-                      renderer.truncatedText(SMALL_FONT_ID, statusLine, w - pad * 2 - 10).c_str(), true,
-                      EpdFontFamily::BOLD);
-  }
-
-  const int contentTop = statusBandY + statusBandH + 4;
-  const int hintTop = pageH - renderer.getLineHeight(SMALL_FONT_ID) - 16;
-  const bool portrait = pageH > w;
-
-  // The row list is also the visible carousel: the current book and carried
-  // study items use the same large content area instead of competing cards.
-  const int selectedIndex = overviewCursor >= 0 && overviewCursor < n ? overviewCursor : 0;
-  const int selectedPocketIndex = n > 0 && rows[selectedIndex].pocket ? selectedIndex : -1;
-  char carouselPosition[16] = {0};
-  if (n > 1) snprintf(carouselPosition, sizeof(carouselPosition), "%d/%d", selectedIndex + 1, n);
-
-  auto sectionHeader = [&](int x, int y, int cw, const char* label, const char* right) -> int {
-    const int labelFont = fontForText(SMALL_FONT_ID, label);
-    renderer.drawText(labelFont, x, y, label, true, EpdFontFamily::BOLD);
-    int rightW = 0;
-    int headerH = renderer.getLineHeight(labelFont);
-    if (right && right[0]) {
-      const int rightFont = fontForText(SMALL_FONT_ID, right);
-      rightW = renderer.getTextWidth(rightFont, right);
-      renderer.drawText(rightFont, x + cw - rightW, y, right, true);
-      headerH = std::max(headerH, renderer.getLineHeight(rightFont));
-    }
-    const int labelW = renderer.getTextWidth(labelFont, label, EpdFontFamily::BOLD);
-    const int ruleStart = x + labelW + 9;
-    const int ruleEnd = x + cw - (rightW ? rightW + 9 : 0);
-    if (ruleStart < ruleEnd) renderer.drawLine(ruleStart, y + headerH / 2, ruleEnd, y + headerH / 2);
-    return y + headerH + 7;
-  };
-
-  auto drawReading = [&](int x, int y, int cw, int ch) {
-    const int panelBottom = y + ch;
-    renderer.drawRect(x, y, cw, ch, 2, true);
-    const bool hasBook = renderReadingSnapshot.valid;
-    if (!hasBook) {
-      y = sectionHeader(x + 12, y + 10, cw - 24, tr(STR_POCKET_CONTINUE_READING), carouselPosition);
-      renderer.drawCenteredText(UI_10_FONT_ID, y + (panelBottom - y) / 2 - line10, tr(STR_NO_OPEN_BOOK), true,
-                                EpdFontFamily::BOLD);
-      renderer.drawCenteredText(SMALL_FONT_ID, y + (panelBottom - y) / 2 + 6, tr(STR_START_READING), true);
-      return;
-    }
-
-    // One flat editorial grid: artwork and metadata share the same top/bottom
-    // baselines. Removing the floating slab makes the enlarged cover feel like
-    // part of the page instead of a card placed on top of another card.
-    const int coverW = std::min(cw * 60 / 100, std::max(cw * 47 / 100, ch * 2 / 3));
-    drawReadingCover(x, y, coverW, ch);
-    const int metaX = x + coverW;
-    renderer.drawLine(metaX, y, metaX, panelBottom, 2, true);
-    const int textX = metaX + 14;
-    const int textW = x + cw - textX - 13;
-    const char* readingLabel = tr(STR_POCKET_CONTINUE_READING);
-    const int labelFont = fontForText(SMALL_FONT_ID, readingLabel);
-    renderer.drawText(labelFont, textX, y + 14,
-                      renderer.truncatedText(labelFont, readingLabel, textW - (carouselPosition[0] ? 34 : 0)).c_str(),
-                      true, EpdFontFamily::BOLD);
-    if (carouselPosition[0]) {
-      const int posW = renderer.getTextWidth(SMALL_FONT_ID, carouselPosition);
-      renderer.drawText(SMALL_FONT_ID, x + cw - 13 - posW, y + 14, carouselPosition, true);
-    }
-    const int titleFont = fontForText(UI_12_FONT_ID, renderReadingSnapshot.title);
-    auto titleLines = renderer.wrappedText(titleFont, renderReadingSnapshot.title, textW, 4, EpdFontFamily::BOLD);
-    int ty = y + 14 + renderer.getLineHeight(labelFont) + 22;
-    for (const auto& titleLine : titleLines) {
-      renderer.drawText(titleFont, textX, ty, titleLine.c_str(), true, EpdFontFamily::BOLD);
-      ty += renderer.getLineHeight(titleFont) + 2;
-    }
-    if (renderReadingSnapshot.author[0]) {
-      const int authorFont = fontForText(SMALL_FONT_ID, renderReadingSnapshot.author);
-      ty += 5;
-      renderer.drawText(authorFont, textX, ty,
-                        renderer.truncatedText(authorFont, renderReadingSnapshot.author, textW).c_str(), true);
-    }
-    if (renderReadingSnapshot.percent >= 0) {
-      char pct[8];
-      snprintf(pct, sizeof(pct), "%d%%", renderReadingSnapshot.percent);
-      const int progressY = panelBottom - line12 - 24;
-      renderer.drawText(UI_12_FONT_ID, textX, progressY, pct, true, EpdFontFamily::BOLD);
-      const char* resume = "RESUME";
-      const int resumeW = renderer.getTextWidth(SMALL_FONT_ID, resume, EpdFontFamily::BOLD);
-      renderer.drawText(SMALL_FONT_ID, textX + textW - resumeW, progressY + line12 - line10, resume, true,
-                        EpdFontFamily::BOLD);
-      const int barY = panelBottom - 10;
-      renderer.drawLine(textX, barY, textX + textW, barY);
-      const int fillW = textW * renderReadingSnapshot.percent / 100;
-      if (fillW > 0) renderer.drawLine(textX, barY - 2, textX + fillW, barY - 2, 4, true);
-    }
-  };
-
-  auto drawStudy = [&](int x, int y, int cw, int ch) {
-    if (cw <= 16 || ch <= 16) return;
-    const int panelBottom = y + ch;
-    renderer.drawRect(x, y, cw, ch, 2, true);
-    if (selectedPocketIndex < 0) {
-      y = sectionHeader(x + 12, y + 10, cw - 24, tr(STR_POCKET_STUDY), nullptr);
-      const int emptyFont = fontForText(UI_10_FONT_ID, tr(STR_POCKET_EMPTY));
-      const int emptyAdvance = renderer.getLineHeight(emptyFont) + 3;
-      const int emptyY = y + std::max(0, (panelBottom - y - emptyAdvance * 2) / 2);
-      drawWrappedFixed(renderer, emptyFont, x + 12, emptyY, tr(STR_POCKET_EMPTY), cw - 24, 2, emptyAdvance);
-      return;
-    }
-    const OverviewRow& row = rows[selectedPocketIndex];
-    y = sectionHeader(x + 12, y + 10, cw - 24, tr(STR_POCKET_STUDY), carouselPosition);
-    const int titleFont = fontForText(UI_12_FONT_ID, row.project);
-    renderer.drawText(titleFont, x + 12, y,
-                      renderer.truncatedText(titleFont, row.project, cw - 24, EpdFontFamily::BOLD).c_str(), true,
-                      EpdFontFamily::BOLD);
-    y += renderer.getLineHeight(titleFont) + 8;
-    if (y + 8 >= panelBottom) return;
-    const int bodyFont = fontForText(UI_10_FONT_ID, row.activity);
-    const int advance = renderer.getLineHeight(bodyFont) + 3;
-    int maxLines = (panelBottom - y - 8) / advance;
-    if (maxLines < 1) return;
-    if (maxLines > (portrait ? 7 : 8)) maxLines = portrait ? 7 : 8;
-    drawWrappedFixed(renderer, bodyFont, x + 12, y, row.activity, cw - 24, maxLines, advance);
-  };
-
-  // Read-only monitoring item: carried provider usage rows and wrap-up lines
-  // with the snapshot's sync time. No actions and no live session content.
-  auto drawMonitor = [&](int x, int y, int cw, int ch) {
-    if (cw <= 16 || ch <= 16) return;
-    const int panelBottom = y + ch - 8;
-    renderer.drawRect(x, y, cw, ch, 2, true);
-    const auto& g = renderGlanceSnapshot;
-    y = sectionHeader(x + 12, y + 10, cw - 24, tr(STR_POCKET_MONITOR), carouselPosition);
-    const int inner = cw - 24;
-    char text[48];
-    for (uint8_t i = 0; i < g.usageCount && y + line10 + 10 <= panelBottom; ++i) {
-      const auto& u = g.usage[i];
-      snprintf(text, sizeof(text), "%s %s", u.provider, u.label);
-      const int nameFont = fontForText(UI_10_FONT_ID, text);
-      renderer.drawText(nameFont, x + 12, y, renderer.truncatedText(nameFont, text, inner * 3 / 5).c_str(), true,
-                        EpdFontFamily::BOLD);
-      if (u.primaryPercent >= 0)
-        snprintf(text, sizeof(text), "%d%%%s%s%s%s", u.primaryPercent, u.primaryResetHm[0] ? " (" : "",
-                 u.primaryResetHm, u.primaryResetHm[0] ? ")" : "", u.stale ? " *" : "");
-      else
-        snprintf(text, sizeof(text), "--%s", u.stale ? " *" : "");
-      const int valueW = renderer.getTextWidth(UI_10_FONT_ID, text, EpdFontFamily::BOLD);
-      renderer.drawText(UI_10_FONT_ID, x + 12 + inner - valueW, y, text, true, EpdFontFamily::BOLD);
-      y += line10 + 3;
-      if (u.primaryPercent >= 0) {
-        renderer.drawRect(x + 12, y, inner, 6, 1, true);
-        const int fill = inner * std::min<int>(100, u.primaryPercent) / 100;
-        if (fill > 0) renderer.fillRect(x + 12, y, fill, 6, true);
-      }
-      y += 12;
-    }
-    for (uint8_t i = 0; i < g.wrapupCount && y + line10 <= panelBottom; ++i) {
-      const int f = fontForText(UI_10_FONT_ID, g.wrapup[i]);
-      const int advance = renderer.getLineHeight(f) + 3;
-      const int lines = std::min(2, (panelBottom - y) / advance);
-      if (lines < 1) break;
-      drawWrappedFixed(renderer, f, x + 12, y, g.wrapup[i], inner, lines, advance);
-      y += advance * lines + 4;
-    }
-    if (g.usageCount == 0 && g.wrapupCount == 0) {
-      const int f = fontForText(UI_10_FONT_ID, tr(STR_POCKET_MONITOR_EMPTY));
-      drawWrappedFixed(renderer, f, x + 12, y, tr(STR_POCKET_MONITOR_EMPTY), inner, 2, renderer.getLineHeight(f) + 3);
-    }
-    if (renderSyncedHm[0]) {
-      // Absolute sync time only: a retained frame must stay truthful.
-      snprintf(text, sizeof(text), "%s%s", renderSyncedHm, snapshotIsStale(renderSavedEpoch) ? " SAVED" : "");
-      const int stampW = renderer.getTextWidth(SMALL_FONT_ID, text);
-      renderer.drawText(SMALL_FONT_ID, x + cw - 12 - stampW, panelBottom - renderer.getLineHeight(SMALL_FONT_ID), text,
-                        true);
-    }
-  };
-
-  auto drawUtilities = [&](int x, int y, int cw, int ch) {
-    const int panelBottom = y + ch;
-    renderer.drawRect(x, y, cw, ch, 2, true);
-    const int inset = 12;
-    x += inset;
-    y += 10;
-    cw -= inset * 2;
-    const bool hasEvent = PocketDaily::DailyProfile::current().nextEvent && renderGlanceSnapshot.eventCount > 0;
-    const int eventH = hasEvent ? line10 + line12 + 18 : 0;
-    const int weatherBottom = panelBottom - 9 - eventH;
-    if (renderGlanceSnapshot.weather.valid) {
-      const char* place =
-          renderGlanceSnapshot.weather.place[0] ? renderGlanceSnapshot.weather.place : tr(STR_POCKET_WEATHER);
-      const int placeFont = fontForText(SMALL_FONT_ID, place);
-      renderer.drawText(placeFont, x, y, renderer.truncatedText(placeFont, place, cw * 2 / 3).c_str(), true,
-                        EpdFontFamily::BOLD);
-      char weatherStamp[20] = {0};
-      if (formatWeatherSnapshotDate(weatherStamp, sizeof(weatherStamp), renderGlanceSnapshot.weather)) {
-        if (snapshotIsStale(renderSavedEpoch))
-          strncat(weatherStamp, " SAVED", sizeof(weatherStamp) - strlen(weatherStamp) - 1);
-        const int stampW = renderer.getTextWidth(SMALL_FONT_ID, weatherStamp, EpdFontFamily::BOLD);
-        renderer.drawText(SMALL_FONT_ID, x + cw - stampW, y, weatherStamp, true, EpdFontFamily::BOLD);
-      }
-
-      // Hero across the full width, grid beneath. The wrapped rain sentence and
-      // its divider are gone: they stole a third of the row to say what the
-      // grid's inverted chip now says at a glance.
-      const int nowY = y + renderer.getLineHeight(placeFont) + 6;
-      const int gridRoom = weatherBottom - nowY - 58;
-      const int gridH = renderGlanceSnapshot.weather.dayCount >= 2 && gridRoom >= 74 ? std::min(116, gridRoom) : 0;
-      const int gridY = weatherBottom - gridH;
-      drawWeatherPoster(renderer, renderGlanceSnapshot.weather, x, nowY, cw, std::max(52, gridY - nowY - 6));
-      if (gridH > 0) drawForecastGrid(renderer, renderGlanceSnapshot.weather, x, gridY, cw, gridH);
-    } else {
-      drawWeatherPlaceholder(renderer, x, y, cw, weatherBottom - y);
-    }
-
-    if (hasEvent) {
-      char line[96];
-      const int eventTop = panelBottom - eventH;
-      renderer.drawLine(x, eventTop, x + cw, eventTop);
-      int ey = sectionHeader(x, eventTop + 5, cw, tr(STR_POCKET_NEXT_EVENT), nullptr);
-      if (AgentDeck::GlanceFormat::formatEventLine(line, sizeof(line), renderGlanceSnapshot.events[0]) > 0) {
-        const int eventFont = fontForText(UI_10_FONT_ID, line);
-        renderer.drawText(eventFont, x, ey, renderer.truncatedText(eventFont, line, cw, EpdFontFamily::BOLD).c_str(),
-                          true, EpdFontFamily::BOLD);
-      }
-    }
-  };
-
-  const int primaryGap = 8;
-  const int availableH = hintTop - contentTop;
-  int primaryX = pad;
-  int primaryY = contentTop;
-  int primaryW = w - pad * 2;
-  int primaryH = availableH;
-  auto drawPrimary = [&](int x, int y, int cw, int ch) {
-    if (n > 0 && rows[selectedIndex].reading)
-      drawReading(x, y, cw, ch);
-    else if (n > 0 && rows[selectedIndex].monitor)
-      drawMonitor(x, y, cw, ch);
-    else
-      drawStudy(x, y, cw, ch);
-  };
-  // Weather/forecast panel placement from the profile; Off gives its space to
-  // the primary item.
-  const auto weatherPanel = PocketDaily::DailyProfile::current().weather;
-  if (weatherPanel == PocketDaily::DailyProfile::WeatherPanel::Off) {
-    drawPrimary(primaryX, primaryY, primaryW, primaryH);
-  } else if (portrait) {
-    // Recovered chrome space belongs to the hero. This still fits the full
-    // five-day graph, then returns the remainder to cover and progress.
-    const int utilityH = std::max(250, std::min(272, availableH * 40 / 100));
-    primaryH = availableH - utilityH - primaryGap;
-    if (weatherPanel == PocketDaily::DailyProfile::WeatherPanel::Top) {
-      drawUtilities(pad, primaryY, w - pad * 2, utilityH);
-      drawPrimary(primaryX, primaryY + utilityH + primaryGap, primaryW, primaryH);
-    } else {
-      drawPrimary(primaryX, primaryY, primaryW, primaryH);
-      drawUtilities(pad, primaryY + primaryH + primaryGap, w - pad * 2, utilityH);
-    }
-  } else {
-    const int colGap = 10;
-    primaryW = (w - pad * 2 - colGap) * 54 / 100;
-    drawPrimary(primaryX, primaryY, primaryW, primaryH);
-    drawUtilities(primaryX + primaryW + colGap, primaryY, w - pad - (primaryX + primaryW + colGap), primaryH);
-  }
-
-  if (sidePaging) drawPocketSideChevrons(renderer);
-
-  // Confirm selects the current carousel item. Right opens Pocket's account-free
-  // nearby transport; optional AgentDeck refresh continues automatically.
-  drawPocketActionStrip(renderer, tr(STR_POCKET_LIBRARY), tr(STR_SELECT), tr(STR_POCKET_SYNC));
+  // E-ink activity signal cells advance only when the phase/progress changes.
+  int activeCells = savedWifiScanActive ? 1 : (manualSyncQueued || manualSyncActive ? 2 : 1);
+  if (pullOtaTotalBytes && pullOtaDownloadedBytes < pullOtaTotalBytes)
+    activeCells = std::max(
+        1, std::min(4, (int)(((uint64_t)pullOtaDownloadedBytes * 4 + pullOtaTotalBytes - 1) / pullOtaTotalBytes)));
+  else if (manualAssetSyncActive && manualAssetTotalBytes)
+    activeCells = std::max(1, std::min(4, (int)(((uint64_t)manualAssetDownloadedBytes * 4 + manualAssetTotalBytes - 1) /
+                                                manualAssetTotalBytes)));
+  PocketDaily::Home::Row homeRows[kOverviewCap];
+  for (int i = 0; i < n && i < kOverviewCap; ++i)
+    homeRows[i] = {rows[i].reading, rows[i].pocket, rows[i].monitor, rows[i].project, rows[i].activity};
+  PocketDaily::Home::HomeView view;
+  view.isX3 = gpio.deviceIsX3();
+  view.rows = homeRows;
+  view.count = std::min(n, kOverviewCap);
+  view.selected = overviewCursor;
+  view.reading = {renderReadingSnapshot.valid, renderReadingSnapshot.title, renderReadingSnapshot.author,
+                  renderReadingSnapshot.percent};
+  view.glance = &renderGlanceSnapshot;
+  view.syncedHm = renderSyncedHm;
+  view.snapshotStale = PocketDaily::HomeDraw::snapshotIsStale(renderSavedEpoch, time(nullptr));
+  view.statusLine = statusLine;
+  view.syncInk = syncInk;
+  view.activeCells = activeCells;
+  view.profile = PocketDaily::DailyProfile::current();
+  view.strings = homeStrings();
+  PocketDaily::Home::renderHome(renderer, view, homeEnv());
   renderer.displayBuffer();
 }
 
@@ -4182,23 +3418,15 @@ void PocketDailyActivity::renderCard() {
 
 void PocketDailyActivity::renderGlance(GlanceReason reason) {
   const bool isSleep = reason != GlanceReason::Ambient;
-  const auto& m = UITheme::getInstance().getMetrics();
-  const int w = renderer.getScreenWidth();
-  const int pageH = renderer.getScreenHeight();
-  const int pad = m.contentSidePadding;
-  const int line12 = renderer.getLineHeight(UI_12_FONT_ID);
-  const int line10 = renderer.getLineHeight(UI_10_FONT_ID);
-  const int lineS = renderer.getLineHeight(SMALL_FONT_ID);
 
   // One bounded snapshot feeds the whole retained frame. This includes the
   // first carried Pocket item so a useful daily study prompt survives offline
   // and remains visible while the panel is asleep.
   preparePersonalSnapshot();
-  PocketDaily::Glance& g = renderGlanceSnapshot;
+  const PocketDaily::Glance& g = renderGlanceSnapshot;
   char syncedHm[6] = {0};
   snprintf(syncedHm, sizeof(syncedHm), "%s", renderSyncedHm);
 
-  renderer.clearScreen();
   // Sleep has no interactive connection state; its immutable sync time stays
   // in the bottom line. Ambient uses the snapshot's date/time instead of a
   // clock that would become false on a retained e-ink frame.
@@ -4213,235 +3441,9 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
       metaChars = snprintf(glanceHeaderMeta, sizeof(glanceHeaderMeta), "%s", snapshotDate);
     if (syncedHm[0] && metaChars < (int)sizeof(glanceHeaderMeta))
       snprintf(glanceHeaderMeta + metaChars, sizeof(glanceHeaderMeta) - metaChars, "%s%s %s",
-               metaChars ? " \xC2\xB7 " : "", snapshotIsStale(renderSavedEpoch) ? "SAVED" : "SYNC", syncedHm);
+               metaChars ? " \xC2\xB7 " : "",
+               PocketDaily::HomeDraw::snapshotIsStale(renderSavedEpoch, time(nullptr)) ? "SAVED" : "SYNC", syncedHm);
   }
-  drawBrandedHeader(tr(STR_POCKET_DAILY), glanceHeaderMeta[0] ? glanceHeaderMeta : nullptr);
-
-  char buf[96];
-
-  // ── Layout ──
-  // The face is a set of independent sections that simply drop out when their
-  // data is absent (no calendar → no TODAY, no daemon → no AI BUDGET, …).
-  // Landscape panels (X4, 800×480) split into two columns — left: the personal
-  // plane (READING / weather / TODAY), right: the work plane (AI BUDGET /
-  // WORK) — so the wide screen reads as a dashboard, not a list. Portrait
-  // (X3) keeps the single-column flow in the same section order. Every
-  // section leads with a small labeled overline rule, so whatever subset of
-  // data exists still composes into a designed page.
-  const int topY = m.topPadding + m.headerHeight + m.verticalSpacing;
-  const int statusY = pageH - lineS - 12;
-
-  // "LABEL ────" overline. CJK-capable: the weather section uses the
-  // user-supplied place name as its label. Returns the content start y.
-  auto sectionHeader = [&](int x, int y, int cw, const char* label) -> int {
-    const int f = fontForText(SMALL_FONT_ID, label);
-    renderer.drawText(f, x, y, label, true, EpdFontFamily::BOLD);
-    const int lw = renderer.getTextWidth(f, label, EpdFontFamily::BOLD);
-    const int ly = y + lineS / 2 + 2;
-    if (lw + 10 < cw) renderer.drawLine(x + lw + 10, ly, x + cw, ly);
-    return y + lineS + 6;
-  };
-
-  // ── READING (local plane: the open book). Device-owned data — valid with
-  // no daemon, no network, and no cached deck, which is what makes the glance
-  // meaningful on a fully offline device. ──
-  auto drawReading = [&](int x, int y, int cw, int maxY) -> int {
-    if (!renderReadingSnapshot.valid) return y;
-    y = sectionHeader(x, y, cw, tr(STR_POCKET_CONTINUE_READING));
-
-    // The retained face gives the current book a real visual identity. The
-    // setting is intentionally cover-only: turning it off keeps resume/title
-    // information useful while avoiding artwork on a desk or bedside panel.
-    // A profile may place reading below other sections: the cover shrinks to
-    // the room left, and a panel too small for a readable cover uses the
-    // compact text form below instead of overlapping the status line.
-    const bool portraitFace = pageH > w;
-    int coverW =
-        portraitFace ? std::min(286, std::max(184, cw * 56 / 100)) : std::min(160, std::max(108, cw * 43 / 100));
-    if (y + coverW * 3 / 2 + 17 > maxY) coverW = std::max(0, (maxY - y - 17) * 2 / 3);
-    if (isSleep && SETTINGS.pocketDailySleepCover && coverW >= 108) {
-      const int coverH = coverW * 3 / 2;
-      drawReadingCover(x, y, coverW, coverH);
-
-      const int metaX = x + coverW;
-      renderer.drawLine(metaX, y, metaX, y + coverH, 2, true);
-      renderer.drawLine(metaX, y, x + cw, y);
-      renderer.drawLine(metaX, y + coverH, x + cw, y + coverH);
-      const int textX = metaX + 14;
-      const int textW = x + cw - textX - 13;
-      const int titleFont = fontForText(UI_12_FONT_ID, renderReadingSnapshot.title);
-      const int titleAdvance = renderer.getLineHeight(titleFont) + 3;
-      int ty = y + 15;
-      ty += drawWrappedFixed(renderer, titleFont, textX, ty, renderReadingSnapshot.title, textW, 3, titleAdvance,
-                             EpdFontFamily::BOLD) *
-            titleAdvance;
-      if (renderReadingSnapshot.author[0]) {
-        ty += 5;
-        const int authorFont = fontForText(SMALL_FONT_ID, renderReadingSnapshot.author);
-        renderer.drawText(authorFont, textX, ty,
-                          renderer.truncatedText(authorFont, renderReadingSnapshot.author, textW).c_str(), true);
-      }
-
-      if (renderReadingSnapshot.percent >= 0) {
-        char pct[8];
-        snprintf(pct, sizeof(pct), "%d%%", renderReadingSnapshot.percent);
-        const int progressY = y + coverH - line12 - 23;
-        renderer.drawText(UI_12_FONT_ID, textX, progressY, pct, true, EpdFontFamily::BOLD);
-        const int barY = y + coverH - 10;
-        renderer.drawLine(textX, barY, textX + textW, barY);
-        const int fillW = textW * renderReadingSnapshot.percent / 100;
-        if (fillW > 0) renderer.drawLine(textX, barY - 2, textX + fillW, barY - 2, 4, true);
-      }
-      return y + coverH + 17;
-    }
-
-    const int tf = fontForText(UI_12_FONT_ID, renderReadingSnapshot.title);
-    int titleW = cw;
-    if (renderReadingSnapshot.percent >= 0) {
-      char pct[8];
-      snprintf(pct, sizeof(pct), "%d%%", renderReadingSnapshot.percent);
-      const int pw = renderer.getTextWidth(UI_12_FONT_ID, pct);
-      renderer.drawText(UI_12_FONT_ID, x + cw - pw, y, pct, true);
-      titleW = cw - pw - 8;
-    }
-    renderer.drawText(tf, x, y, renderer.truncatedText(tf, renderReadingSnapshot.title, titleW).c_str(), true,
-                      EpdFontFamily::BOLD);
-    y += line12 + 4;
-    char sub[96];
-    sub[0] = '\0';
-    if (renderReadingSnapshot.author[0]) snprintf(sub, sizeof(sub), "%s", renderReadingSnapshot.author);
-    if (sub[0]) {
-      const int sf = fontForText(SMALL_FONT_ID, sub);
-      renderer.drawText(sf, x, y, renderer.truncatedText(sf, sub, cw).c_str(), true);
-      y += lineS + 4;
-    }
-    if (renderReadingSnapshot.percent >= 0) {
-      renderer.drawRect(x, y + 2, cw, 7);
-      const int fillW = (cw - 4) * renderReadingSnapshot.percent / 100;
-      if (fillW > 0) renderer.fillRect(x + 2, y + 4, fillW, 3);
-      y += 13;
-    }
-    return y + 12;
-  };
-
-  // One carried learning/action item is useful even on a frozen panel. It is
-  // deliberately read-only here: wake/open enters the normal Pocket card where
-  // choices are durably queued before the item disappears.
-  auto drawStudy = [&](int x, int y, int cw, int maxY) -> int {
-    if (!renderPocketSnapshot.cardId[0] || y >= maxY) return y;
-    y = sectionHeader(x, y, cw, tr(STR_POCKET_STUDY));
-    const int titleFont = fontForText(UI_12_FONT_ID, renderPocketSnapshot.title);
-    renderer.drawText(
-        titleFont, x, y,
-        renderer
-            .truncatedText(titleFont, renderPocketSnapshot.title[0] ? renderPocketSnapshot.title : tr(STR_POCKET_STUDY),
-                           cw, EpdFontFamily::BOLD)
-            .c_str(),
-        true, EpdFontFamily::BOLD);
-    y += renderer.getLineHeight(titleFont) + 5;
-    const int bodyFont = fontForText(UI_10_FONT_ID, renderPocketSnapshot.question);
-    const int advance = renderer.getLineHeight(bodyFont) + 2;
-    int maxLines = (maxY - y) / advance;
-    if (maxLines > 3) maxLines = 3;
-    if (maxLines > 0)
-      y += drawWrappedFixed(renderer, bodyFont, x, y, renderPocketSnapshot.question, cw, maxLines, advance) * advance;
-    return y + 12;
-  };
-
-  // ── Weather (the walking-out-the-door read; label = place name) ──
-  auto drawWeather = [&](int x, int y, int cw, int maxY) -> int {
-    if (!g.weather.valid) return y;
-    char weatherLabel[56] = {0};
-    snprintf(weatherLabel, sizeof(weatherLabel), "%s", g.weather.place[0] ? g.weather.place : tr(STR_POCKET_WEATHER));
-    char snapshotDate[8] = {0};
-    if (formatWeatherSnapshotDate(snapshotDate, sizeof(snapshotDate), g.weather))
-      snprintf(weatherLabel + strlen(weatherLabel), sizeof(weatherLabel) - strlen(weatherLabel), " \xC2\xB7 %s%s",
-               snapshotDate, snapshotIsStale(renderSavedEpoch) ? " SAVED" : "");
-    y = sectionHeader(x, y, cw, weatherLabel);
-    // The retained frame uses the same poster + grid so a woken device and a
-    // powered-off one do not look like two different products.
-    const int gridRoom = maxY - y - 58;
-    const int gridH = g.weather.dayCount >= 2 && gridRoom >= 74 ? std::min(116, gridRoom) : 0;
-    const int gridY = maxY - gridH;
-    if (y + line12 < maxY) drawWeatherPoster(renderer, g.weather, x, y, cw, std::max(52, gridY - y - 6));
-    if (gridH > 0 && gridY >= y + 48) {
-      const int gridDrawn = drawForecastGrid(renderer, g.weather, x, gridY, cw, gridH);
-      if (gridDrawn > 0) return std::min(maxY, gridY + gridDrawn + 10);
-    }
-    return std::min(maxY, y + 74);
-  };
-
-  // ── TODAY (daemon-authored schedule, absolute HH:MM only). Absent when no
-  // calendar is configured — the layout simply flows past it. ──
-  auto drawToday = [&](int x, int y, int cw, int maxY) -> int {
-    if (g.eventCount == 0) return y;
-    y = sectionHeader(x, y, cw, tr(STR_POCKET_TODAY));
-    for (uint8_t i = 0; i < g.eventCount; i++) {
-      if (y + line10 >= maxY) break;
-      if (AgentDeck::GlanceFormat::formatEventLine(buf, sizeof(buf), g.events[i]) <= 0) continue;
-      const int f = fontForText(UI_10_FONT_ID, buf);
-      renderer.drawText(f, x, y, renderer.truncatedText(f, buf, cw).c_str(), true);
-      y += line10 + 4;
-    }
-    return y + 12;
-  };
-
-  // Pocket Glance is deliberately personal and locally meaningful: current
-  // book, one carried study item, weather and today's schedule. Provider
-  // quotas and live work/session summaries belong on AgentDeck dashboards.
-  // Sleep sections and their order come from the profile (defaults: reading,
-  // study, weather, today). Study stays a fallback while a book is shown.
-  using PocketDaily::DailyProfile::SleepSection;
-  const auto& profile = PocketDaily::DailyProfile::current();
-  const bool studyShown = !renderReadingSnapshot.valid || !profile.sleeps(SleepSection::Reading);
-  if (isSleep && pageH > w) {
-    // The retained portrait is a glance, not a dashboard; sections that no
-    // longer fit are skipped by each drawer's own bounds.
-    int y = topY;
-    for (uint8_t k = 0; k < profile.sleepCount; ++k) {
-      switch (profile.sleepSections[k]) {
-        case SleepSection::Reading:
-          y = drawReading(pad, y, w - pad * 2, statusY - 8);
-          break;
-        case SleepSection::Study:
-          if (studyShown) y = drawStudy(pad, y, w - pad * 2, statusY - 8);
-          break;
-        case SleepSection::Weather: {
-          // Weather fills to its bottom bound; when sections follow, give it the
-          // same fixed panel height Home uses so they keep their room.
-          const bool last = k + 1 == profile.sleepCount;
-          const int bound = last ? statusY - 8 : std::min(statusY - 8, y + 272);
-          y = drawWeather(pad, y, w - pad * 2, bound);
-          break;
-        }
-        case SleepSection::Today:
-          y = drawToday(pad, y, w - pad * 2, statusY - 8);
-          break;
-      }
-    }
-  } else if (isSleep) {
-    // Wide retained panels keep two calm columns; visibility follows the profile.
-    const int gap = 20;
-    const int colW = (w - pad * 2 - gap) / 2;
-    int leftY = profile.sleeps(SleepSection::Reading) ? drawReading(pad, topY, colW, statusY - 8) : topY;
-    if (profile.sleeps(SleepSection::Study) && studyShown) drawStudy(pad, leftY, colW, statusY - 8);
-    int rightY = profile.sleeps(SleepSection::Weather) ? drawWeather(pad + colW + gap, topY, colW, statusY - 8) : topY;
-    if (profile.sleeps(SleepSection::Today)) drawToday(pad + colW + gap, rightY, colW, statusY - 8);
-  } else if (pageH > w) {
-    int y = topY;
-    y = drawReading(pad, y, w - pad * 2, statusY - 8);
-    y = drawStudy(pad, y, w - pad * 2, statusY - 8);
-    y = drawWeather(pad, y, w - pad * 2, statusY - 8);
-    drawToday(pad, y, w - pad * 2, statusY - 8);
-  } else {
-    const int gap = 20;
-    const int colW = (w - pad * 2 - gap) / 2;
-    int leftY = drawReading(pad, topY, colW, statusY - 8);
-    drawStudy(pad, leftY, colW, statusY - 8);
-    int rightY = drawWeather(pad + colW + gap, topY, colW, statusY - 8);
-    drawToday(pad + colW + gap, rightY, colW, statusY - 8);
-  }
-
   // ── Bottom status: absolute times only — a retained frame must stay true
   // without a repaint, so never a relative age here. ──
   char status[112];
@@ -4484,9 +3486,20 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
         break;
       }
     }
-  renderer.drawText(SMALL_FONT_ID, pad, statusY,
-                    renderer.truncatedText(SMALL_FONT_ID, status, w - pad * 2, EpdFontFamily::BOLD).c_str(), true,
-                    EpdFontFamily::BOLD);
+  // Drawing is shared with the host preview (pocket_daily/home/HomeRenderer).
+  PocketDaily::Home::BriefView view;
+  view.isSleep = isSleep;
+  view.headerMeta = glanceHeaderMeta[0] ? glanceHeaderMeta : nullptr;
+  view.glance = &g;
+  view.reading = {renderReadingSnapshot.valid, renderReadingSnapshot.title, renderReadingSnapshot.author,
+                  renderReadingSnapshot.percent};
+  view.sleepCover = SETTINGS.pocketDailySleepCover;
+  view.pocketCard = &renderPocketSnapshot;
+  view.snapshotStale = PocketDaily::HomeDraw::snapshotIsStale(renderSavedEpoch, time(nullptr));
+  view.status = status;
+  view.profile = PocketDaily::DailyProfile::current();
+  view.strings = homeStrings();
+  PocketDaily::Home::renderBrief(renderer, view, homeEnv());
   if (isSleep) {
     PowerWakeCue::draw(renderer);
     // Ghost management: fast refreshes accumulate residue on a frame the panel

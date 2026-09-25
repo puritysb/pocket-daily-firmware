@@ -147,8 +147,17 @@ every reader, which is why previews use the resolved display state.
 | --- | --- | --- |
 | P1-1 | `display` endpoint; app renders card previews from it (Lyra default when unavailable, labelled) | **Met 2026-09-25** on X3 wbfc03fa5: gen7 card with image, classic theme, 0 of 418,176 pixels differ; replacing "« Back" with "Back" alone yields 600 (control) |
 | P1-2 | Profile store, endpoints, Home/sleep application, monitoring card | Host tests (11) and source checks pass; device w15cb1e54: GET defaults at generation 0, invalid 400, stale generation 409, identity 409, valid save generation 1 read back and kept across reboots. User confirmed on X3: Home order and weather-top layout; sleep frame after the w1e22398f fix (weather capped at 272px when sections follow, reading cover shrinks to the room left) |
-| P1-3 | Extract a pure Home/sleep renderer shared by device and host; host ABI for Home preview | Host golden hashes; device capture comparison with pinned clock/battery |
+| P1-3 | Extract a pure Home/sleep renderer shared by device and host; host ABI for Home preview | **Pipeline done 2026-09-25, tuning pending**: `src/pocket_daily/home/` (HomeRenderer, HomeDrawing) draws Home and the Daily Brief on both targets; `pdui_render_home`/`pdui_render_brief` (ABI 1, additive) with a `pdui_profile` and `PDUI_SAMPLE_*` sample mask; 14 host tests (determinism, placement, order, selection, empty samples, invalid profiles on 792×528 and 800×480). Remaining: device capture comparison with pinned clock/battery, then golden hashes |
 | P2 | App studio edits the profile on the Home canvas and sends it | UI tests; physical acceptance |
+
+P1-3 host stand-ins and known tuning items (compare against a reader capture):
+the host header is a plain title and rule, not the device theme header; the
+book cover is a hatched stand-in; host fonts are the built-in UI fonts plus
+the cpfont for CJK only; some layouts leave the bottom weather panel's current
+temperature area empty (same code on the device); the host `buildRows` in
+`host/HostHome.cpp` duplicates the profile loop in `collectOverview`. Moving
+the renderer also made the Daily Brief skip Today when it would reach the
+status line, which changes the device frame too.
 
 Memory rule for every phase: no new resident heap on Home, Sync or the sleep
 path; request-time buffers stay bounded and behind the existing heap gates.

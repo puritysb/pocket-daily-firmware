@@ -7,6 +7,7 @@
 #include <mutex>
 #include <new>
 
+#include "HostHome.h"
 #include "pocket_daily/ContentCard.h"
 #include "pocket_daily/ContentImageRenderer.h"
 #include "pocket_daily/ContentPageRenderer.h"
@@ -100,6 +101,7 @@ int32_t pdui_create(uint32_t width, uint32_t height, uint32_t orientation, const
     context->renderer.setOrientation(static_cast<GfxRenderer::Orientation>(orientation));
     context->renderer.insertFont(1, EpdFontFamily(context->font.getEpdFont(0), context->font.getEpdFont(1)));
     context->renderer.registerSdCardFont(1, &context->font);
+    PocketUIHost::registerUiFonts(context->renderer);
     *output = context.release();
     return PDUI_OK;
   } catch (const std::bad_alloc&) {
@@ -171,6 +173,88 @@ int32_t pdui_render_content(pdui_context* context, const uint8_t* cardBytes, siz
         }};
     if (!renderContentPage(context->renderer, cardBytes ? &card : nullptr, page, painter))
       return imageContext.failed ? PDUI_INVALID_IMAGE : PDUI_RENDER_FAILED;
+    if (context->font.boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
+    context->frameValid = true;
+    return PDUI_OK;
+  } catch (const std::bad_alloc&) {
+    return PDUI_OUT_OF_MEMORY;
+  } catch (...) {
+    return PDUI_INTERNAL_ERROR;
+  }
+}
+
+namespace {
+bool toProfile(const pdui_profile& in, PocketDaily::DailyProfile::Profile& out) {
+  using namespace PocketDaily::DailyProfile;
+  if (in.home_count > HOME_ITEM_CAP || in.sleep_count > SLEEP_SECTION_CAP || in.daily_word > 1 || in.next_event > 1 ||
+      in.weather > 2 || in.sleep_mode > 1)
+    return false;
+  Profile p;
+  p.homeCount = in.home_count;
+  for (uint8_t i = 0; i < in.home_count; ++i) p.homeItems[i] = static_cast<HomeItem>(in.home_items[i]);
+  p.dailyWord = in.daily_word != 0;
+  p.weather = static_cast<WeatherPanel>(in.weather);
+  p.nextEvent = in.next_event != 0;
+  p.sleepMode = static_cast<SleepMode>(in.sleep_mode);
+  p.sleepCount = in.sleep_count;
+  for (uint8_t i = 0; i < in.sleep_count; ++i) p.sleepSections[i] = static_cast<SleepSection>(in.sleep_sections[i]);
+  if (!valid(p)) return false;
+  out = p;
+  return true;
+}
+
+bool isX3Panel(const HalDisplay& panel) { return std::max(panel.getDisplayWidth(), panel.getDisplayHeight()) == 792; }
+}  // namespace
+
+int32_t pdui_render_home(pdui_context* context, const pdui_profile* profile, uint32_t samples,
+                         uint32_t selected) noexcept {
+  if (!context) return PDUI_INVALID_ARGUMENT;
+  context->frameValid = false;
+  PocketDaily::DailyProfile::Profile parsed;
+  if (!profile || samples > PDUI_SAMPLE_ALL || !toProfile(*profile, parsed)) return PDUI_INVALID_ARGUMENT;
+  try {
+    const std::lock_guard<std::mutex> renderLock(renderMutex);
+    const PocketUIHost::AssetScope scope({&context->fontAsset, 1});
+    const auto sample = PocketUIHost::buildSample(samples);
+    PocketDaily::Home::Row rows[PocketDaily::DailyProfile::HOME_ITEM_CAP];
+    PocketDaily::Home::HomeView view;
+    view.isX3 = isX3Panel(context->panel);
+    view.rows = rows;
+    view.count = PocketUIHost::buildRows(parsed, sample, samples, rows, PocketDaily::DailyProfile::HOME_ITEM_CAP);
+    view.selected = view.count ? static_cast<int>(std::min<uint32_t>(selected, view.count - 1)) : 0;
+    view.reading = sample.reading;
+    view.glance = &sample.glance;
+    view.syncedHm = (samples & (PDUI_SAMPLE_WEATHER | PDUI_SAMPLE_USAGE)) ? "07:40" : "";
+    view.statusLine = "WI-FI OFF / SYNC";
+    view.profile = parsed;
+    PocketDaily::Home::renderHome(context->renderer, view, PocketUIHost::hostEnv(context->renderer));
+    if (context->font.boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
+    context->frameValid = true;
+    return PDUI_OK;
+  } catch (const std::bad_alloc&) {
+    return PDUI_OUT_OF_MEMORY;
+  } catch (...) {
+    return PDUI_INTERNAL_ERROR;
+  }
+}
+
+int32_t pdui_render_brief(pdui_context* context, const pdui_profile* profile, uint32_t samples) noexcept {
+  if (!context) return PDUI_INVALID_ARGUMENT;
+  context->frameValid = false;
+  PocketDaily::DailyProfile::Profile parsed;
+  if (!profile || samples > PDUI_SAMPLE_ALL || !toProfile(*profile, parsed)) return PDUI_INVALID_ARGUMENT;
+  try {
+    const std::lock_guard<std::mutex> renderLock(renderMutex);
+    const PocketUIHost::AssetScope scope({&context->fontAsset, 1});
+    const auto sample = PocketUIHost::buildSample(samples);
+    PocketDaily::Home::BriefView view;
+    view.isSleep = true;
+    view.glance = &sample.glance;
+    view.reading = sample.reading;
+    view.pocketCard = &sample.card;
+    view.status = "Powered off";
+    view.profile = parsed;
+    PocketDaily::Home::renderBrief(context->renderer, view, PocketUIHost::hostEnv(context->renderer));
     if (context->font.boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
     context->frameValid = true;
     return PDUI_OK;

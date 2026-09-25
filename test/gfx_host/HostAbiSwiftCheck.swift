@@ -41,4 +41,14 @@ let copied = pixels.withUnsafeMutableBufferPointer { output in
 precondition(copied == PDUI_OK && pixels.contains(where: { $0 != 0xFF }))
 precondition(pdui_render_content(context, nil, 0, nil, 0, nil) == PDUI_INVALID_ARGUMENT)
 precondition(pdui_get_frame_info(context, &info) == PDUI_NO_FRAME && info.byte_count == 0)
-print("Swift imported C ABI, rendered Korean empty state, copied 52272 bytes and rejected a stale frame.")
+// Home and Daily Brief previews (additive v1 functions) link and render.
+var profile = pdui_profile()
+profile.home_items = (1, 2, 3, 0)
+profile.home_count = 3
+profile.daily_word = 1
+profile.next_event = 1
+profile.sleep_sections = (1, 2, 3, 4)
+profile.sleep_count = 4
+precondition(pdui_render_home(context, &profile, UInt32(PDUI_SAMPLE_ALL), 0) == PDUI_OK)
+precondition(pdui_render_brief(context, &profile, UInt32(PDUI_SAMPLE_ALL)) == PDUI_OK)
+print("Swift imported C ABI, rendered Korean empty state, Home and Daily Brief, copied 52272 bytes and rejected a stale frame.")

@@ -22,6 +22,7 @@
 #include "agentdeck/ota_ws_receiver.h"
 #include "pocket_daily/ContentViewState.h"
 #include "pocket_daily/font_pack_sync.h"
+#include "pocket_daily/home/HomeRenderer.h"
 #include "pocket_daily/models.h"
 
 class PocketDailyActivity final : public Activity {
@@ -167,6 +168,9 @@ class PocketDailyActivity final : public Activity {
   static bool cardUsesSoftkeys(AgentDeck::AttentionMode mode, uint8_t optionCount);
   // Fill out[] with all alive sessions (overview order); returns the count.
   int collectOverview(OverviewRow* out, int cap) const;
+  // Shared Home painter inputs (pocket_daily/home/HomeRenderer).
+  static PocketDaily::Home::Strings homeStrings();
+  PocketDaily::Home::Env homeEnv() const;
   bool hasMonitorData() const;
   void handleButtons();
   bool applyDecision(const AwaitingItem& it, int optionCursor);

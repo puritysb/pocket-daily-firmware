@@ -19,6 +19,7 @@ import tempfile
 SOURCE_ROOTS = (
     "host", "src/pocket_daily", "src/models.h", "lib/GfxRenderer", "lib/EpdFont",
     "lib/Memory", "lib/MiniBidi", "lib/Utf8", "lib/InflateReader", "lib/uzlib",
+    "src/fontIds.h", "src/agentdeck/glance_format.h", "src/agentdeck/glance_state.h",
     "test/gfx_host/HostAbiSwiftCheck.swift",
 )
 SOURCE_SUFFIXES = {".c", ".cpp", ".h", ".hpp", ".cmake", ".py", ".modulemap", ".t", ".swift"}

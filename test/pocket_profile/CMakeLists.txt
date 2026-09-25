@@ -1,6 +1,7 @@
 add_executable(pocket_profile_test
   PocketProfileTest.cpp
   ${REPO_ROOT}/src/pocket_daily/PocketProfile.cpp
+  ${REPO_ROOT}/src/pocket_daily/PocketProfileJson.cpp
   ${REPO_ROOT}/src/pocket_daily/PocketProfileStore.cpp
 )
 
