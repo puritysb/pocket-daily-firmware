@@ -1021,6 +1021,15 @@ TEST(ContentPublishedFilePath, ResolvesOnlyManifestShapedLeavesOfARevision) {
     EXPECT_FALSE(publishedFilePath(revision.c_str(), name, out, sizeof(out))) << name;
     EXPECT_STREQ(out, "") << name;
   }
+  // The companion's real names (card-00-<32-hex id>.card) and the longest leaf
+  // the manifest allows must fit the endpoint's buffer.
+  char endpoint[PUBLISHED_PATH_BYTES];
+  EXPECT_TRUE(
+      publishedFilePath(revision.c_str(), "card-00-9d7b3c1c480a4c7cac3a39e56edee2a1.card", endpoint, sizeof(endpoint)));
+  const std::string longest = std::string(58, 'a') + ".card";
+  ASSERT_EQ(longest.size(), 63u);
+  EXPECT_TRUE(publishedFilePath(revision.c_str(), longest.c_str(), endpoint, sizeof(endpoint)));
+  EXPECT_EQ(std::string(endpoint), std::string(CONTENT_ROOT) + "/" + revision + "/" + longest);
   const std::string longName = std::string(64, 'a') + ".card";
   EXPECT_FALSE(publishedFilePath(revision.c_str(), longName.c_str(), out, sizeof(out)));
   EXPECT_FALSE(publishedFilePath(std::string(64, 'A').c_str(), "sun.pbm", out, sizeof(out)));

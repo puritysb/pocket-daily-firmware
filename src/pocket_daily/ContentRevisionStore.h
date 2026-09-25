@@ -58,6 +58,8 @@ bool validRevision(const char* revision);
 // or a manifest-shaped card/image leaf name, never anything outside
 // <CONTENT_ROOT>/<revision>/. On failure `out` is empty.
 bool publishedFilePath(const char* revision, const char* name, char* out, size_t outSize);
+// Room for the longest published path: root, 64-hex revision, 63-byte leaf name.
+inline constexpr size_t PUBLISHED_PATH_BYTES = sizeof(CONTENT_ROOT) + 1 + 64 + 1 + 63 + 1;
 // Read-only verification of <CONTENT_ROOT>/<64hex>/manifest.pdcm and all files.
 // Caller must prevent writes to that directory for the entire verification and
 // subsequent commit. No activation, deletion, network or success receipt here.

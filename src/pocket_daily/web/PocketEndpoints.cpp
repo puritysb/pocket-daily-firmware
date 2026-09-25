@@ -634,7 +634,7 @@ void handleContentFile(WebServer& server, const RouteDeps& d) {
   }
   const String revision = server.arg("revision");
   if (!contentRevisionArgument(server, revision)) return;
-  char path[128];
+  char path[Content::PUBLISHED_PATH_BYTES];
   if (!Content::publishedFilePath(revision.c_str(), server.arg("name").c_str(), path, sizeof(path))) {
     server.send(400, "text/plain", "Invalid content file name");
     return;
