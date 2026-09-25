@@ -1,0 +1,14 @@
+add_executable(pocket_profile_test
+  PocketProfileTest.cpp
+  ${REPO_ROOT}/src/pocket_daily/PocketProfile.cpp
+  ${REPO_ROOT}/src/pocket_daily/PocketProfileStore.cpp
+)
+
+target_include_directories(pocket_profile_test BEFORE PRIVATE ../deck_store/stubs)
+target_link_libraries(pocket_profile_test PRIVATE
+  crosspoint_test_common
+  ArduinoJson
+  GTest::gtest_main
+)
+
+gtest_discover_tests(pocket_profile_test)

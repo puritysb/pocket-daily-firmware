@@ -10,6 +10,8 @@
 
 #include "SilentRestart.h"
 #include "components/UITheme.h"
+#include "fontIds.h"
+#include "pocket_daily/PocketProfileStore.h"
 #include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/live_studio/UiPackStore.h"
@@ -48,6 +50,45 @@ void applyStartupUiPack() {
   // Live Studio LS-3: layer the persisted UI pack over the selected theme
   // before any surface renders.
   PocketDaily::LiveStudio::applyStartupPack();
+  // Persisted Pocket Daily profile, loaded once into RAM with the other
+  // persisted presentation state so Home and sleep never parse SD.
+  PocketDaily::DailyProfile::loadAtBoot();
+}
+
+void paintWakeCue(const GfxRenderer& renderer) {
+  const int w = renderer.getScreenWidth();
+  const int h = renderer.getScreenHeight();
+  const int lineS = renderer.getLineHeight(SMALL_FONT_ID);
+  // Covers the Daily Brief status line (pageH - lineS - 12) with margin.
+  const int bandH = lineS + 22;
+  const int top = h - bandH;
+  renderer.fillRect(0, top, w, bandH, true);
+  renderer.drawLine(0, top, w, top, 2, false);
+
+  // Same power glyph as the sleep cue, in knockout white.
+  const int cx = 26;
+  const int cy = top + bandH / 2 + 1;
+  renderer.drawLine(cx, cy - 9, cx, cy + 1, 2, false);
+  renderer.drawLine(cx - 5, cy - 6, cx - 9, cy - 2, 2, false);
+  renderer.drawLine(cx - 9, cy - 2, cx - 9, cy + 4, 2, false);
+  renderer.drawLine(cx - 9, cy + 4, cx - 5, cy + 8, 2, false);
+  renderer.drawLine(cx - 5, cy + 8, cx + 5, cy + 8, 2, false);
+  renderer.drawLine(cx + 5, cy + 8, cx + 9, cy + 4, 2, false);
+  renderer.drawLine(cx + 9, cy + 4, cx + 9, cy - 2, 2, false);
+  renderer.drawLine(cx + 9, cy - 2, cx + 5, cy - 6, 2, false);
+
+  // Built-in fonts cover ASCII only and no SD font may load on this path, so a
+  // non-ASCII translation falls back to English rather than drawing blanks.
+  const char* label = tr(STR_POCKET_WAKING);
+  for (const char* p = label; *p; ++p)
+    if (static_cast<unsigned char>(*p) >= 0x80) {
+      label = "Waking up";
+      break;
+    }
+  const int textX = cx + 22;
+  renderer.drawText(SMALL_FONT_ID, textX, top + (bandH - lineS) / 2, label, false, EpdFontFamily::BOLD);
+  const int dotsX = textX + renderer.getTextWidth(SMALL_FONT_ID, label, EpdFontFamily::BOLD) + 8;
+  for (int i = 0; i < 3; ++i) renderer.fillRect(dotsX + i * 9, cy + 2, 4, 4, false);
 }
 
 DevBootReturn consumeDevBootReturn() {

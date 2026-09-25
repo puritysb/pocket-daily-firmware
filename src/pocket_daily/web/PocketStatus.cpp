@@ -31,6 +31,8 @@ String buildStatusJson(const StatusInputs& in) {
   doc["deviceID"] = deviceId;
   doc["sessionEnd"] = in.profile == Profile::POCKET_SYNC && in.apMode;
   doc["contentPresentation"] = in.contentPresentation;
+  // Pocket Daily profile endpoints (docs/pocket-profile-v1.md) exist on Sync.
+  if (isSyncProfile(in.profile)) doc["pocketProfile"] = 1;
   doc["version"] = CROSSPOINT_VERSION;
   doc["ip"] = ipAddr;
   doc["mode"] = in.apMode ? "AP" : "STA";

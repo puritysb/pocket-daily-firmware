@@ -30,6 +30,11 @@ void installJapaneseFont();
 void beginNetHealth();
 void applyStartupUiPack();
 
+// Quick-resume wake: over the restored sleep frame, replace the bottom status
+// line with one full-width band (power glyph, progress dots, "Waking up") so
+// the user sees the reader starting and no half-covered text remains.
+void paintWakeCue(const GfxRenderer& renderer);
+
 // Dev builds only: read and remove the one-shot mode marker before any radio
 // attempt. Invalid/unremovable markers never trigger automatic connection.
 DevBootReturn consumeDevBootReturn();

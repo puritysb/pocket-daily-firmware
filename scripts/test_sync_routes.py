@@ -88,6 +88,25 @@ class SyncRoutesTest(unittest.TestCase):
         census = (root / "src/pocket_daily/web/TcpCensus.cpp").read_text()
         self.assertTrue(census.startswith('#include "TcpCensus.h"\n\n#ifdef ENABLE_DEV_REMOTE_FLASH'))
 
+    def test_pocket_profile_drives_home_sleep_and_is_loaded_before_use(self):
+        root = Path(__file__).resolve().parents[1]
+        activity = (root / "src/activities/pocket_daily/PocketDailyActivity.cpp").read_text()
+        collect = activity[activity.index("int PocketDailyActivity::collectOverview("):
+                           activity.index("bool PocketDailyActivity::hasMonitorData()")]
+        # Order and visibility come only from the profile loop.
+        self.assertIn("for (uint8_t k = 0; k < profile.homeCount && n < cap; ++k)", collect)
+        for item in ("Reading", "Study", "Provider", "Monitor"):
+            self.assertIn(f"HomeItem::{item}:", collect)
+        self.assertIn("if (!PocketDaily::DailyProfile::current().dailyWord) return;", collect)
+        sleep = activity[activity.index("bool PocketDailyActivity::paintSleepFrame() {"):]
+        self.assertLess(sleep.index("SleepMode::Reader) return false;"), sleep.index("requestUpdateAndWait();"))
+        boot = (root / "src/pocket_daily/boot/ProductBoot.cpp").read_text()
+        self.assertIn("PocketDaily::DailyProfile::loadAtBoot();", boot)
+        endpoints = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
+        body = endpoints[endpoints.index("void configurePocketRoutes("):endpoints.index("void registerPocketRoutes(")]
+        self.assertIn('routes.on("/api/pocket/v1/profile", HTTP_GET', body)
+        self.assertIn('routes.on("/api/pocket/v1/profile", HTTP_POST', body)
+
     def test_theme_routes_are_unconditional_in_production_registration(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()

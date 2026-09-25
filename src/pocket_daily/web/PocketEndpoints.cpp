@@ -21,6 +21,7 @@
 #include "pocket_daily/ContentPathPolicy.h"
 #include "pocket_daily/ContentRevisionStore.h"
 #include "pocket_daily/ContentSealStore.h"
+#include "pocket_daily/PocketProfileStore.h"
 #include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/boot/DevBootReturn.h"
 #include "pocket_daily/live_studio/DevTrace.h"
@@ -225,6 +226,62 @@ void handleDisplay(WebServer& server, const RouteDeps& d) {
     return;
   }
   server.send(200, "application/json", json.get());
+}
+
+// Pocket Daily profile (docs/pocket-profile-v1.md). Identity/heap gated like
+// content operations; POST validates the whole document before persisting.
+bool sendProfile(WebServer& server, const char* deviceId) {
+  static constexpr size_t kCap = 1024;
+  auto json = makeUniqueNoThrow<char[]>(kCap);
+  if (!json) {
+    server.send(503, "text/plain", "Reader memory is too low for the profile");
+    return false;
+  }
+  if (!DailyProfile::writeJson(DailyProfile::current(), DailyProfile::generation(), deviceId, json.get(), kCap)) {
+    server.send(500, "text/plain", "Profile could not be encoded");
+    return false;
+  }
+  server.send(200, "application/json", json.get());
+  return true;
+}
+
+void handleGetProfile(WebServer& server, const RouteDeps& d) {
+  char deviceId[9];
+  if (!admitContentOperation(server, d, deviceId)) return;
+  sendProfile(server, deviceId);
+}
+
+void handlePostProfile(WebServer& server, const RouteDeps& d) {
+  char deviceId[9];
+  if (!admitContentOperation(server, d, deviceId)) return;
+  const String expected = server.arg("generation");
+  char* end = nullptr;
+  const unsigned long generation = strtoul(expected.c_str(), &end, 10);
+  if (expected.isEmpty() || expected.length() > 10 || !end || *end || generation > UINT32_MAX) {
+    server.send(400, "text/plain", "Missing or invalid profile generation");
+    return;
+  }
+  const String& body = server.arg("plain");
+  DailyProfile::Profile profile;
+  const char* error = nullptr;
+  if (!DailyProfile::parseJson(body.c_str(), body.length(), profile, error)) {
+    server.send(400, "text/plain", error ? error : "Invalid profile");
+    return;
+  }
+  switch (DailyProfile::save(profile, static_cast<uint32_t>(generation))) {
+    case DailyProfile::SaveResult::Ok:
+      sendProfile(server, deviceId);
+      return;
+    case DailyProfile::SaveResult::Conflict:
+      server.send(409, "text/plain", "The reader's profile changed; reload it before saving");
+      return;
+    case DailyProfile::SaveResult::Invalid:
+      server.send(400, "text/plain", "Invalid profile");
+      return;
+    case DailyProfile::SaveResult::StorageError:
+      break;
+  }
+  server.send(500, "text/plain", "Profile could not be stored; the previous profile is still in use");
 }
 
 void retireContent(const Content::RetiredRevision& retired, const RouteDeps& d) {
@@ -874,6 +931,16 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     routes.on("/api/pocket/v1/screen-preview", HTTP_GET, [server = &server, deps = &d] {
       note(*deps);
       handleScreenPreview(*server);
+    });
+  }
+  if (isSyncProfile(d.profile)) {
+    routes.on("/api/pocket/v1/profile", HTTP_GET, [server = &server, deps = &d] {
+      note(*deps);
+      handleGetProfile(*server, *deps);
+    });
+    routes.on("/api/pocket/v1/profile", HTTP_POST, [server = &server, deps = &d] {
+      note(*deps);
+      handlePostProfile(*server, *deps);
     });
   }
   if (d.profile == Profile::POCKET_SYNC || d.profile == Profile::COMPANION) {

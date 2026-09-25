@@ -80,7 +80,19 @@ theme is Lyra (spacing 16), so the "exact" canvas differed on default readers.
 - `sleep.mode`: `brief` (Daily Brief) or `reader` (the upstream sleep screen
   chosen in the reader's own Sleep Screen setting).
 - `sleep.sections`: ordered distinct subset of `reading`, `study`, `weather`,
-  `today`; `study` keeps today's rule of appearing only without an open book.
+  `today`; `study` keeps today's rule of appearing only without an open book
+  while `reading` is also selected (it always appears when `reading` is not).
+- Sleep frame: weather fills to its bottom bound only when it is the last
+  section; otherwise it gets Home's fixed 272px panel. Reading's cover shrinks
+  to the space left and falls back to the compact text form below 108px.
+- Quick-resume wake draws a full-width band (power glyph, "Waking up", dots)
+  over the restored frame instead of the corner loading icon that covered the
+  Daily Brief status line. Built-in fonts are ASCII only, so a non-ASCII
+  translation falls back to English on this path.
+- Home shows at most `maxHomeItems` (4, the existing `kOverviewCap`) items;
+  when the ordered sources produce more, later ones are dropped. `monitor`
+  appears only when carried usage or wrap-up data exists; OK does nothing on
+  it (read-only) and it shows the snapshot's absolute sync time.
 - The defaults above reproduce today's behaviour exactly; a reader with no
   stored profile behaves as before.
 - Unknown keys, unknown IDs, duplicates, wrong types or an empty item list
@@ -109,6 +121,11 @@ theme is Lyra (spacing 16), so the "exact" canvas differed on default readers.
 - `GET /api/pocket/v1/display?deviceID=` → resolved render inputs: theme,
   orientation, active UI pack, content-page padding/spacing from the effective
   metrics, and the localized, button-remapped strings the reader would draw.
+- Implementation: `PocketProfile.{h,cpp}` (model, strict ArduinoJson parser,
+  response writer, 32-byte record), `PocketProfileStore.{h,cpp}` (slots,
+  boot load in `ProductBoot::applyStartupUiPack`), `GET/POST
+  /api/pocket/v1/profile` on both Sync profiles, `/api/status`
+  `pocketProfile: 1`. Host tests fetch ArduinoJson 7.4.2 like the firmware.
 - `display` is registered with content presentation; the app reads it once
   per connection and after a UI pack apply/revert, inside its sequential reader
   lane. A 404 (older firmware) means the labelled reference preview. The
@@ -128,7 +145,7 @@ every reader, which is why previews use the resolved display state.
 | Phase | Scope | Acceptance |
 | --- | --- | --- |
 | P1-1 | `display` endpoint; app renders card previews from it (Lyra default when unavailable, labelled) | **Met 2026-09-25** on X3 wbfc03fa5: gen7 card with image, classic theme, 0 of 418,176 pixels differ; replacing "« Back" with "Back" alone yields 600 (control) |
-| P1-2 | Profile store, endpoints, Home/sleep application, monitoring card | Host tests for parse/validate/storage/order; device: each knob visibly changes Home/sleep; defaults unchanged |
+| P1-2 | Profile store, endpoints, Home/sleep application, monitoring card | Host tests (11) and source checks pass; device w15cb1e54: GET defaults at generation 0, invalid 400, stale generation 409, identity 409, valid save generation 1 read back and kept across reboots. User confirmed on X3: Home order and weather-top layout; sleep frame after the w1e22398f fix (weather capped at 272px when sections follow, reading cover shrinks to the room left) |
 | P1-3 | Extract a pure Home/sleep renderer shared by device and host; host ABI for Home preview | Host golden hashes; device capture comparison with pinned clock/battery |
 | P2 | App studio edits the profile on the Home canvas and sends it | UI tests; physical acceptance |
 

@@ -114,7 +114,9 @@ block-ACK window, using no heap. Diagnostic buffers are separately gated by
 - `#include "pocket_daily/boot/ProductBoot.h"`.
 - Boot hooks after SD init: `PocketDaily::Boot::begin(renderer,
   deepSleepInProgress)` + `installJapaneseFont()`; `beginNetHealth()`;
-  `applyStartupUiPack()`.
+  `applyStartupUiPack()` (also loads the Pocket Daily profile).
+- Quick-resume wake: `paintWakeCue(renderer)` replaces upstream's corner
+  `LoadingIcon` draw (and its include) with a full-width wake band.
 - Routing: `consumeDevBootReturn()` else-if; silent-reboot else-ifs keyed on
   `kRebootTargetPocketDaily` / `kRebootTargetPocketNearbySync`; the
   read-and-clear bound uses `kRebootTargetMax`.

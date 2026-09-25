@@ -84,11 +84,13 @@ class PocketDailyActivity final : public Activity {
     bool awaiting;
     bool pocket;
     bool reading;
+    bool monitor;  // read-only provider usage/wrap-up item (profile opt-in)
   };
 
   // Local reading + three portable slots. Active app cards take priority over
   // the built-in study row; provider cards fill remaining slots. Keep both
   // cross-task scratch arrays bounded on the no-PSRAM X3.
+  // The profile orders these sources; a later source is dropped when full.
   static constexpr int kOverviewCap = 1 + PocketDaily::CARD_CAP;
   // Scratch lives in the heap-allocated Activity object, not either task stack.
   // Each buffer is 4 bounded rows (~1.5 KB), allocated once with the activity
@@ -165,6 +167,7 @@ class PocketDailyActivity final : public Activity {
   static bool cardUsesSoftkeys(AgentDeck::AttentionMode mode, uint8_t optionCount);
   // Fill out[] with all alive sessions (overview order); returns the count.
   int collectOverview(OverviewRow* out, int cap) const;
+  bool hasMonitorData() const;
   void handleButtons();
   bool applyDecision(const AwaitingItem& it, int optionCursor);
   bool applyPocketChoice(const PocketDaily::Card& card, int optionCursor);

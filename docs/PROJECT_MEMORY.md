@@ -5,6 +5,22 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-25 P1-2 (docs/pocket-profile-v1.md): Pocket Daily profile model,
+  strict ArduinoJson parser, 32-byte two-slot record store loaded at boot in
+  ProductBoot, GET/POST /api/pocket/v1/profile (identity/heap gated, CAS on
+  generation), status `pocketProfile: 1`. collectOverview, the Home layout
+  (weather bottom/top/off, next event), a read-only monitoring item and the
+  sleep frame follow it; sleep mode `reader` delegates to SleepActivity.
+  Defaults reproduce the previous behaviour. On X3: w15cb1e54 endpoint checks
+  (defaults gen0, 400/409/409, save gen1 persisted across reboots), then
+  w1e22398f fixed a weather-first sleep frame that filled the screen, and
+  w6a915992 replaced the corner wake icon (it clipped "Powered off") with a
+  full-width wake band. User confirmed Home, sleep and wake. The X3's
+  startupApp was 0 (library); set to 1 via the preferences endpoint on user
+  request. Installs: two transfers dropped once each and resumed once from the
+  retained staging (CRC verified). Test profile left active: home study,
+  reading, monitor; weather top; next event off; sleep weather, reading, study.
+
 - 2026-09-25 P1-1 (docs/pocket-profile-v1.md): `GET /api/pocket/v1/display`
   reports the reader's resolved content-page inputs from the same helpers the
   device draws with (`currentContentPageStyle`, `ContentPresentation::pageLabels`,

@@ -22,6 +22,14 @@ set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
+# Same header-only JSON library and version the firmware links (platformio.ini).
+FetchContent_Declare(
+  ArduinoJson
+  GIT_REPOSITORY https://github.com/bblanchon/ArduinoJson.git
+  GIT_TAG v7.4.2
+)
+FetchContent_MakeAvailable(ArduinoJson)
+
 set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 add_library(crosspoint_test_common INTERFACE)
@@ -58,5 +66,6 @@ add_subdirectory(pocket_daily_identity)
 add_subdirectory(pocket_daily_learning_pack)
 add_subdirectory(pocket_daily_upload_stream)
 add_subdirectory(live_studio)
+add_subdirectory(pocket_profile)
 
 add_subdirectory(opds_parser)

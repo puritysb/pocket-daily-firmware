@@ -50,6 +50,7 @@
 #include "fontIds.h"
 #include "pocket_daily/CardSignature.h"
 #include "pocket_daily/ContentActiveStore.h"
+#include "pocket_daily/PocketProfileStore.h"
 #include "pocket_daily/font_pack_sync.h"
 #include "pocket_daily/learning_pack.h"
 #include "pocket_daily/learning_pack_sync.h"
@@ -2405,9 +2406,10 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
     o.pocket = true;
   };
 
-  // The first row is always the local book, when one exists. This data lives
-  // entirely on SD and remains useful on a device that has never met a daemon.
-  if (!APP_STATE.openEpubPath.empty() && n < cap) {
+  // The local book, when one exists. This data lives entirely on SD and
+  // remains useful on a device that has never met a daemon.
+  auto appendReading = [&]() {
+    if (APP_STATE.openEpubPath.empty() || n >= cap) return;
     OverviewRow& o = out[n++];
     memset(&o, 0, sizeof(o));
     cp(o.sid, sizeof(o.sid), "local:reading");
@@ -2431,30 +2433,74 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
     snprintf(o.activity, sizeof(o.activity), "%s%s%s", title, author && author[0] ? " - " : "",
              author && author[0] ? author : "");
     o.reading = true;
-  }
+  };
 
-  // Study is never an empty network placeholder. Put the firmware-authored
-  // daily word first, then append any richer daemon cards; side buttons page
-  // through the combined portable deck.
-  AgentDeck::lockState();
-  const PocketDaily::Card local = localStudyCard;
-  AgentDeck::unlockState();
-  if (const auto* appCards = appContent.cards(); appCards && appCards->count) {
-    for (uint8_t i = 0; i < appCards->count && n < cap; ++i) appendPocket(appCards->cards[i].card);
-  } else {
+  // Study: active app cards, otherwise the firmware-authored daily word when
+  // the profile keeps it.
+  auto appendStudy = [&]() {
+    if (const auto* appCards = appContent.cards(); appCards && appCards->count) {
+      for (uint8_t i = 0; i < appCards->count && n < cap; ++i) appendPocket(appCards->cards[i].card);
+      return;
+    }
+    if (!PocketDaily::DailyProfile::current().dailyWord) return;
+    AgentDeck::lockState();
+    const PocketDaily::Card local = localStudyCard;
+    AgentDeck::unlockState();
     appendPocket(local);
-  }
+  };
 
-  AgentDeck::lockState();
-  const auto& s = AgentDeck::g_state;
-  // Daemon-authored Pocket items follow the local book. Live sessions never
-  // become top-level rows; they are merely signals the daemon may distil into
-  // a portable card.
-  for (uint8_t i = 0; i < s.pocketCount && n < cap; i++) {
-    appendPocket(s.pocketCards[i]);
+  // Daemon-authored Pocket items. Live sessions never become top-level rows;
+  // they are merely signals the daemon may distil into a portable card.
+  auto appendProvider = [&]() {
+    AgentDeck::lockState();
+    const auto& s = AgentDeck::g_state;
+    for (uint8_t i = 0; i < s.pocketCount && n < cap; i++) appendPocket(s.pocketCards[i]);
+    AgentDeck::unlockState();
+  };
+
+  // Read-only monitoring (decision-card relaxation): only when carried usage or
+  // wrap-up data exists; it has no actions and opens nothing.
+  auto appendMonitor = [&]() {
+    if (n >= cap || !hasMonitorData()) return;
+    OverviewRow& o = out[n++];
+    memset(&o, 0, sizeof(o));
+    cp(o.sid, sizeof(o.sid), "local:monitor");
+    cp(o.project, sizeof(o.project), tr(STR_POCKET_MONITOR));
+    cp(o.agentType, sizeof(o.agentType), "monitor");
+    cp(o.state, sizeof(o.state), "MONITOR");
+    o.monitor = true;
+  };
+
+  // Pocket Daily profile (docs/pocket-profile-v1.md); defaults keep the
+  // original order: reading, study, provider.
+  const auto& profile = PocketDaily::DailyProfile::current();
+  for (uint8_t k = 0; k < profile.homeCount && n < cap; ++k) {
+    switch (profile.homeItems[k]) {
+      case PocketDaily::DailyProfile::HomeItem::Reading:
+        appendReading();
+        break;
+      case PocketDaily::DailyProfile::HomeItem::Study:
+        appendStudy();
+        break;
+      case PocketDaily::DailyProfile::HomeItem::Provider:
+        appendProvider();
+        break;
+      case PocketDaily::DailyProfile::HomeItem::Monitor:
+        appendMonitor();
+        break;
+    }
   }
-  AgentDeck::unlockState();
   return n;
+}
+
+bool PocketDailyActivity::hasMonitorData() const {
+  AgentDeck::lockState();
+  const auto& live = AgentDeck::g_state.glance;
+  const bool present = live.valid
+                           ? (live.usageCount > 0 || live.wrapupCount > 0)
+                           : (cachedDeck && (cachedDeck->glance.usageCount > 0 || cachedDeck->glance.wrapupCount > 0));
+  AgentDeck::unlockState();
+  return present;
 }
 
 uint32_t PocketDailyActivity::bestEpochNow() {
@@ -3407,6 +3453,58 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
     drawWrappedFixed(renderer, bodyFont, x + 12, y, row.activity, cw - 24, maxLines, advance);
   };
 
+  // Read-only monitoring item: carried provider usage rows and wrap-up lines
+  // with the snapshot's sync time. No actions and no live session content.
+  auto drawMonitor = [&](int x, int y, int cw, int ch) {
+    if (cw <= 16 || ch <= 16) return;
+    const int panelBottom = y + ch - 8;
+    renderer.drawRect(x, y, cw, ch, 2, true);
+    const auto& g = renderGlanceSnapshot;
+    y = sectionHeader(x + 12, y + 10, cw - 24, tr(STR_POCKET_MONITOR), carouselPosition);
+    const int inner = cw - 24;
+    char text[48];
+    for (uint8_t i = 0; i < g.usageCount && y + line10 + 10 <= panelBottom; ++i) {
+      const auto& u = g.usage[i];
+      snprintf(text, sizeof(text), "%s %s", u.provider, u.label);
+      const int nameFont = fontForText(UI_10_FONT_ID, text);
+      renderer.drawText(nameFont, x + 12, y, renderer.truncatedText(nameFont, text, inner * 3 / 5).c_str(), true,
+                        EpdFontFamily::BOLD);
+      if (u.primaryPercent >= 0)
+        snprintf(text, sizeof(text), "%d%%%s%s%s%s", u.primaryPercent, u.primaryResetHm[0] ? " (" : "",
+                 u.primaryResetHm, u.primaryResetHm[0] ? ")" : "", u.stale ? " *" : "");
+      else
+        snprintf(text, sizeof(text), "--%s", u.stale ? " *" : "");
+      const int valueW = renderer.getTextWidth(UI_10_FONT_ID, text, EpdFontFamily::BOLD);
+      renderer.drawText(UI_10_FONT_ID, x + 12 + inner - valueW, y, text, true, EpdFontFamily::BOLD);
+      y += line10 + 3;
+      if (u.primaryPercent >= 0) {
+        renderer.drawRect(x + 12, y, inner, 6, 1, true);
+        const int fill = inner * std::min<int>(100, u.primaryPercent) / 100;
+        if (fill > 0) renderer.fillRect(x + 12, y, fill, 6, true);
+      }
+      y += 12;
+    }
+    for (uint8_t i = 0; i < g.wrapupCount && y + line10 <= panelBottom; ++i) {
+      const int f = fontForText(UI_10_FONT_ID, g.wrapup[i]);
+      const int advance = renderer.getLineHeight(f) + 3;
+      const int lines = std::min(2, (panelBottom - y) / advance);
+      if (lines < 1) break;
+      drawWrappedFixed(renderer, f, x + 12, y, g.wrapup[i], inner, lines, advance);
+      y += advance * lines + 4;
+    }
+    if (g.usageCount == 0 && g.wrapupCount == 0) {
+      const int f = fontForText(UI_10_FONT_ID, tr(STR_POCKET_MONITOR_EMPTY));
+      drawWrappedFixed(renderer, f, x + 12, y, tr(STR_POCKET_MONITOR_EMPTY), inner, 2, renderer.getLineHeight(f) + 3);
+    }
+    if (renderSyncedHm[0]) {
+      // Absolute sync time only: a retained frame must stay truthful.
+      snprintf(text, sizeof(text), "%s%s", renderSyncedHm, snapshotIsStale(renderSavedEpoch) ? " SAVED" : "");
+      const int stampW = renderer.getTextWidth(SMALL_FONT_ID, text);
+      renderer.drawText(SMALL_FONT_ID, x + cw - 12 - stampW, panelBottom - renderer.getLineHeight(SMALL_FONT_ID), text,
+                        true);
+    }
+  };
+
   auto drawUtilities = [&](int x, int y, int cw, int ch) {
     const int panelBottom = y + ch;
     renderer.drawRect(x, y, cw, ch, 2, true);
@@ -3414,7 +3512,7 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
     x += inset;
     y += 10;
     cw -= inset * 2;
-    const bool hasEvent = renderGlanceSnapshot.eventCount > 0;
+    const bool hasEvent = PocketDaily::DailyProfile::current().nextEvent && renderGlanceSnapshot.eventCount > 0;
     const int eventH = hasEvent ? line10 + line12 + 18 : 0;
     const int weatherBottom = panelBottom - 9 - eventH;
     if (renderGlanceSnapshot.weather.valid) {
@@ -3463,23 +3561,35 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n, int awa
   int primaryY = contentTop;
   int primaryW = w - pad * 2;
   int primaryH = availableH;
-  if (portrait) {
+  auto drawPrimary = [&](int x, int y, int cw, int ch) {
+    if (n > 0 && rows[selectedIndex].reading)
+      drawReading(x, y, cw, ch);
+    else if (n > 0 && rows[selectedIndex].monitor)
+      drawMonitor(x, y, cw, ch);
+    else
+      drawStudy(x, y, cw, ch);
+  };
+  // Weather/forecast panel placement from the profile; Off gives its space to
+  // the primary item.
+  const auto weatherPanel = PocketDaily::DailyProfile::current().weather;
+  if (weatherPanel == PocketDaily::DailyProfile::WeatherPanel::Off) {
+    drawPrimary(primaryX, primaryY, primaryW, primaryH);
+  } else if (portrait) {
     // Recovered chrome space belongs to the hero. This still fits the full
     // five-day graph, then returns the remainder to cover and progress.
     const int utilityH = std::max(250, std::min(272, availableH * 40 / 100));
     primaryH = availableH - utilityH - primaryGap;
-    if (n > 0 && rows[selectedIndex].reading)
-      drawReading(primaryX, primaryY, primaryW, primaryH);
-    else
-      drawStudy(primaryX, primaryY, primaryW, primaryH);
-    drawUtilities(pad, primaryY + primaryH + primaryGap, w - pad * 2, utilityH);
+    if (weatherPanel == PocketDaily::DailyProfile::WeatherPanel::Top) {
+      drawUtilities(pad, primaryY, w - pad * 2, utilityH);
+      drawPrimary(primaryX, primaryY + utilityH + primaryGap, primaryW, primaryH);
+    } else {
+      drawPrimary(primaryX, primaryY, primaryW, primaryH);
+      drawUtilities(pad, primaryY + primaryH + primaryGap, w - pad * 2, utilityH);
+    }
   } else {
     const int colGap = 10;
     primaryW = (w - pad * 2 - colGap) * 54 / 100;
-    if (n > 0 && rows[selectedIndex].reading)
-      drawReading(primaryX, primaryY, primaryW, primaryH);
-    else
-      drawStudy(primaryX, primaryY, primaryW, primaryH);
+    drawPrimary(primaryX, primaryY, primaryW, primaryH);
     drawUtilities(primaryX + primaryW + colGap, primaryY, w - pad - (primaryX + primaryW + colGap), primaryH);
   }
 
@@ -4135,17 +4245,21 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
   // ── READING (local plane: the open book). Device-owned data — valid with
   // no daemon, no network, and no cached deck, which is what makes the glance
   // meaningful on a fully offline device. ──
-  auto drawReading = [&](int x, int y, int cw) -> int {
+  auto drawReading = [&](int x, int y, int cw, int maxY) -> int {
     if (!renderReadingSnapshot.valid) return y;
     y = sectionHeader(x, y, cw, tr(STR_POCKET_CONTINUE_READING));
 
     // The retained face gives the current book a real visual identity. The
     // setting is intentionally cover-only: turning it off keeps resume/title
     // information useful while avoiding artwork on a desk or bedside panel.
-    if (isSleep && SETTINGS.pocketDailySleepCover) {
-      const bool portrait = pageH > w;
-      const int coverW =
-          portrait ? std::min(286, std::max(184, cw * 56 / 100)) : std::min(160, std::max(108, cw * 43 / 100));
+    // A profile may place reading below other sections: the cover shrinks to
+    // the room left, and a panel too small for a readable cover uses the
+    // compact text form below instead of overlapping the status line.
+    const bool portraitFace = pageH > w;
+    int coverW =
+        portraitFace ? std::min(286, std::max(184, cw * 56 / 100)) : std::min(160, std::max(108, cw * 43 / 100));
+    if (y + coverW * 3 / 2 + 17 > maxY) coverW = std::max(0, (maxY - y - 17) * 2 / 3);
+    if (isSleep && SETTINGS.pocketDailySleepCover && coverW >= 108) {
       const int coverH = coverW * 3 / 2;
       drawReadingCover(x, y, coverW, coverH);
 
@@ -4275,33 +4389,54 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
   // Pocket Glance is deliberately personal and locally meaningful: current
   // book, one carried study item, weather and today's schedule. Provider
   // quotas and live work/session summaries belong on AgentDeck dashboards.
+  // Sleep sections and their order come from the profile (defaults: reading,
+  // study, weather, today). Study stays a fallback while a book is shown.
+  using PocketDaily::DailyProfile::SleepSection;
+  const auto& profile = PocketDaily::DailyProfile::current();
+  const bool studyShown = !renderReadingSnapshot.valid || !profile.sleeps(SleepSection::Reading);
   if (isSleep && pageH > w) {
-    // The retained portrait is a glance, not a dashboard: the book and the
-    // walking-out-the-door weather get first claim on space. Study appears as
-    // a fallback when no book is open; calendar follows only if it still fits.
+    // The retained portrait is a glance, not a dashboard; sections that no
+    // longer fit are skipped by each drawer's own bounds.
     int y = topY;
-    y = drawReading(pad, y, w - pad * 2);
-    if (!renderReadingSnapshot.valid) y = drawStudy(pad, y, w - pad * 2, statusY - 8);
-    y = drawWeather(pad, y, w - pad * 2, statusY - 8);
-    drawToday(pad, y, w - pad * 2, statusY - 8);
+    for (uint8_t k = 0; k < profile.sleepCount; ++k) {
+      switch (profile.sleepSections[k]) {
+        case SleepSection::Reading:
+          y = drawReading(pad, y, w - pad * 2, statusY - 8);
+          break;
+        case SleepSection::Study:
+          if (studyShown) y = drawStudy(pad, y, w - pad * 2, statusY - 8);
+          break;
+        case SleepSection::Weather: {
+          // Weather fills to its bottom bound; when sections follow, give it the
+          // same fixed panel height Home uses so they keep their room.
+          const bool last = k + 1 == profile.sleepCount;
+          const int bound = last ? statusY - 8 : std::min(statusY - 8, y + 272);
+          y = drawWeather(pad, y, w - pad * 2, bound);
+          break;
+        }
+        case SleepSection::Today:
+          y = drawToday(pad, y, w - pad * 2, statusY - 8);
+          break;
+      }
+    }
   } else if (isSleep) {
-    // Wide retained panels keep the same priority as two calm columns.
+    // Wide retained panels keep two calm columns; visibility follows the profile.
     const int gap = 20;
     const int colW = (w - pad * 2 - gap) / 2;
-    int leftY = drawReading(pad, topY, colW);
-    if (!renderReadingSnapshot.valid) drawStudy(pad, leftY, colW, statusY - 8);
-    int rightY = drawWeather(pad + colW + gap, topY, colW, statusY - 8);
-    drawToday(pad + colW + gap, rightY, colW, statusY - 8);
+    int leftY = profile.sleeps(SleepSection::Reading) ? drawReading(pad, topY, colW, statusY - 8) : topY;
+    if (profile.sleeps(SleepSection::Study) && studyShown) drawStudy(pad, leftY, colW, statusY - 8);
+    int rightY = profile.sleeps(SleepSection::Weather) ? drawWeather(pad + colW + gap, topY, colW, statusY - 8) : topY;
+    if (profile.sleeps(SleepSection::Today)) drawToday(pad + colW + gap, rightY, colW, statusY - 8);
   } else if (pageH > w) {
     int y = topY;
-    y = drawReading(pad, y, w - pad * 2);
+    y = drawReading(pad, y, w - pad * 2, statusY - 8);
     y = drawStudy(pad, y, w - pad * 2, statusY - 8);
     y = drawWeather(pad, y, w - pad * 2, statusY - 8);
     drawToday(pad, y, w - pad * 2, statusY - 8);
   } else {
     const int gap = 20;
     const int colW = (w - pad * 2 - gap) / 2;
-    int leftY = drawReading(pad, topY, colW);
+    int leftY = drawReading(pad, topY, colW, statusY - 8);
     drawStudy(pad, leftY, colW, statusY - 8);
     int rightY = drawWeather(pad + colW + gap, topY, colW, statusY - 8);
     drawToday(pad + colW + gap, rightY, colW, statusY - 8);
@@ -4368,6 +4503,9 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
 }
 
 bool PocketDailyActivity::paintSleepFrame() {
+  // Profile sleep mode "reader": hand the power-off frame to the reader's own
+  // Sleep Screen setting (SleepActivity) instead of the Daily Brief.
+  if (PocketDaily::DailyProfile::current().sleepMode == PocketDaily::DailyProfile::SleepMode::Reader) return false;
   // Pocket Daily owns its retained e-ink frame. Delegating to SleepActivity
   // redraws the last book cover over the dashboard just before the panel powers
   // down, which looks like Pocket Daily disappeared. Paint the already-designed
