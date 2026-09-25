@@ -54,6 +54,10 @@ RevisionResult inspectStagedRevision(const char* revision, uint16_t capabilities
 RevisionResult prepareStagedRevision(const char* revision, const char* reuseRevision, uint16_t capabilities,
                                      PreparedRevision& info, void (*progress)() = nullptr);
 bool validRevision(const char* revision);
+// Path of one file of a published revision for read-only access: `manifest.pdcm`
+// or a manifest-shaped card/image leaf name, never anything outside
+// <CONTENT_ROOT>/<revision>/. On failure `out` is empty.
+bool publishedFilePath(const char* revision, const char* name, char* out, size_t outSize);
 // Read-only verification of <CONTENT_ROOT>/<64hex>/manifest.pdcm and all files.
 // Caller must prevent writes to that directory for the entire verification and
 // subsequent commit. No activation, deletion, network or success receipt here.

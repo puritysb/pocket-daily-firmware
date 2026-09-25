@@ -5,6 +5,13 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-25 content read (docs/content-read-v1.md): GET
+  /api/pocket/v1/content/file serves 4 KiB chunks of a published revision's
+  manifest/card/image leaves read-only (content admission, no active stream
+  transfer, publishedFilePath confinement); status `contentRead: 1`. The app
+  verifies every hash and reviews before replacing its draft. Host tests 401;
+  not exercised on a reader.
+
 - 2026-09-25 Home rows: PocketDaily::Home::homeRowSources resolves the profile
   to row sources (order, app cards else daily word, items without content
   skipped) for both collectOverview and the host preview; HomeRowSources host

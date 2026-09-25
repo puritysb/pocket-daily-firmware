@@ -1004,3 +1004,29 @@ TEST_F(ContentStore, GenerationExhaustionNeverWraps) {
   EXPECT_EQ(FakeSD::files, before);
 }
 }  // namespace
+
+// Read-only companion access (GET /api/pocket/v1/content/file) resolves only
+// leaf files of one published revision.
+TEST(ContentPublishedFilePath, ResolvesOnlyManifestShapedLeavesOfARevision) {
+  const std::string revision(64, 'a');
+  char out[128];
+  ASSERT_TRUE(publishedFilePath(revision.c_str(), "manifest.pdcm", out, sizeof(out)));
+  EXPECT_EQ(std::string(out), std::string(CONTENT_ROOT) + "/" + revision + "/manifest.pdcm");
+  EXPECT_TRUE(publishedFilePath(revision.c_str(), "card-00-morning-1.card", out, sizeof(out)));
+  EXPECT_TRUE(publishedFilePath(revision.c_str(), "sun.pbm", out, sizeof(out)));
+
+  const char* rejected[] = {"",           "../content-active.0", "a/b.card", "Sun.pbm",  "sun.png",
+                            "-lead.card", "manifest.pdcm.bak",   ".card",    "sun..pbm", "sun.pbm/"};
+  for (const char* name : rejected) {
+    EXPECT_FALSE(publishedFilePath(revision.c_str(), name, out, sizeof(out))) << name;
+    EXPECT_STREQ(out, "") << name;
+  }
+  const std::string longName = std::string(64, 'a') + ".card";
+  EXPECT_FALSE(publishedFilePath(revision.c_str(), longName.c_str(), out, sizeof(out)));
+  EXPECT_FALSE(publishedFilePath(std::string(64, 'A').c_str(), "sun.pbm", out, sizeof(out)));
+  EXPECT_FALSE(publishedFilePath("abc", "sun.pbm", out, sizeof(out)));
+  EXPECT_FALSE(publishedFilePath(revision.c_str(), nullptr, out, sizeof(out)));
+  char tiny[16];
+  EXPECT_FALSE(publishedFilePath(revision.c_str(), "sun.pbm", tiny, sizeof(tiny)));
+  EXPECT_STREQ(tiny, "");
+}

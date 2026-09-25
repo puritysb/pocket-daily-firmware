@@ -186,6 +186,27 @@ bool validRevision(const char* revision) {
   return true;
 }
 
+bool publishedFilePath(const char* revision, const char* name, char* out, size_t outSize) {
+  if (!out || outSize == 0) return false;
+  out[0] = '\0';
+  if (!name || !validRevision(revision)) return false;
+  bool allowed = strcmp(name, "manifest.pdcm") == 0;
+  if (!allowed) {
+    const size_t length = strnlen(name, 64);
+    if (length == 0 || length == 64) return false;
+    char field[64]{};
+    memcpy(field, name, length);
+    allowed = validContentFileName(field, FileKind::Card) || validContentFileName(field, FileKind::MonoImage);
+  }
+  if (!allowed) return false;
+  const int count = snprintf(out, outSize, "%s/%s/%s", CONTENT_ROOT, revision, name);
+  if (count < 0 || static_cast<size_t>(count) >= outSize) {
+    out[0] = '\0';
+    return false;
+  }
+  return true;
+}
+
 static RevisionResult verifyAtRoot(const char* root, const char* revision, uint16_t supportedCapabilities,
                                    RevisionInfo& info, void (*progress)(), RevisionCards* output = nullptr) {
   info = {};

@@ -617,6 +617,70 @@ void handleScreenPreview(WebServer& server) {
           static_cast<unsigned>(count), static_cast<unsigned>(previewSize));
 }
 
+// One chunk of one file of a published revision, so the companion can load
+// the reader's cards back into its editor. Published revisions are immutable
+// and content-addressed; this reads only <content>/<revision>/<leaf> and never
+// writes. The companion verifies every file against the manifest and the
+// manifest against the revision, so nothing here is an integrity claim.
+constexpr size_t CONTENT_FILE_CHUNK_BYTES = firmware_flash::STAGING_BUFFER_BYTES;
+
+void handleContentFile(WebServer& server, const RouteDeps& d) {
+  char deviceId[9];
+  if (!admitContentOperation(server, d, deviceId)) return;
+  // The shared staging buffer below also batches stream uploads.
+  if (d.stream && d.stream->transferActive()) {
+    server.send(409, "text/plain", "Another file transfer is active");
+    return;
+  }
+  const String revision = server.arg("revision");
+  if (!contentRevisionArgument(server, revision)) return;
+  char path[128];
+  if (!Content::publishedFilePath(revision.c_str(), server.arg("name").c_str(), path, sizeof(path))) {
+    server.send(400, "text/plain", "Invalid content file name");
+    return;
+  }
+  const String offsetText = server.arg("offset");
+  if (offsetText.isEmpty() || offsetText.length() > 7) {
+    server.send(400, "text/plain", "Invalid content file offset");
+    return;
+  }
+  for (size_t i = 0; i < offsetText.length(); i++) {
+    if (offsetText[i] < '0' || offsetText[i] > '9') {
+      server.send(400, "text/plain", "Invalid content file offset");
+      return;
+    }
+  }
+  HalFile file = Storage.open(path);
+  if (!file || file.isDirectory()) {
+    if (file) file.close();
+    server.send(404, "text/plain", "Content file not found");
+    return;
+  }
+  const size_t size = file.size();
+  const size_t offset = static_cast<size_t>(offsetText.toInt());
+  if (offset >= size || !file.seek(offset)) {
+    file.close();
+    server.send(416, "text/plain", "Content file offset out of range");
+    return;
+  }
+  uint8_t* body = firmware_flash::sharedStagingBuffer();
+  const int count = file.read(body, std::min(size - offset, CONTENT_FILE_CHUNK_BYTES));
+  file.close();
+  if (count <= 0) {
+    server.send(500, "text/plain", "Could not read content file");
+    return;
+  }
+  // Same bounded send as the screen preview: the socket timeout, not a
+  // watchdog suspension, keeps a vanished peer from stalling the loop.
+  server.client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
+  feedLoopWDT();
+  server.setContentLength(static_cast<size_t>(count));
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/octet-stream", "");
+  server.sendContent(reinterpret_cast<const char*>(body), static_cast<size_t>(count));
+  feedLoopWDT();
+}
+
 // Pocket only needs four preferences. Avoid constructing and streaming the
 // full localized settings registry on the no-PSRAM private-AP path: that
 // response can consume the last contiguous heap immediately after Wi-Fi
@@ -877,6 +941,10 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
   routes.on("/api/pocket/v1/content/state", HTTP_GET, [server = &server, deps = &d] {
     note(*deps);
     handleContentState(*server, *deps);
+  });
+  routes.on("/api/pocket/v1/content/file", HTTP_GET, [server = &server, deps = &d] {
+    note(*deps);
+    handleContentFile(*server, *deps);
   });
   routes.on("/api/pocket/v1/content/activate", HTTP_POST, [server = &server, deps = &d] {
     note(*deps);

@@ -128,6 +128,20 @@ class SyncRoutesTest(unittest.TestCase):
                                 "", prefix, flags=re.S)
                 self.assertEqual(prefix.count("{") - prefix.count("}"), 1)
 
+    def test_content_file_reads_only_published_leaves_and_never_writes(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
+        body = source[source.index("void configurePocketRoutes("):source.index("void registerPocketRoutes(")]
+        self.assertEqual(body.count('routes.on("/api/pocket/v1/content/file", HTTP_GET'), 1)
+        handler = source[source.index("void handleContentFile("):source.index("void handleGetPreferences(")]
+        self.assertIn("admitContentOperation(server, d, deviceId)", handler)
+        self.assertIn("d.stream->transferActive()", handler)
+        self.assertIn("Content::publishedFilePath(", handler)
+        for write in ("FILE_WRITE", "O_WRITE", ".remove(", ".rename(", "Storage.mkdir"):
+            self.assertNotIn(write, handler)
+        status = (root / "src/pocket_daily/web/PocketStatus.cpp").read_text()
+        self.assertIn('doc["contentRead"] = 1;', status)
+
 
 if __name__ == "__main__":
     unittest.main()
