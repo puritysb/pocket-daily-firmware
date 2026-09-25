@@ -93,11 +93,17 @@ class SyncRoutesTest(unittest.TestCase):
         activity = (root / "src/activities/pocket_daily/PocketDailyActivity.cpp").read_text()
         collect = activity[activity.index("int PocketDailyActivity::collectOverview("):
                            activity.index("bool PocketDailyActivity::hasMonitorData()")]
-        # Order and visibility come only from the profile loop.
-        self.assertIn("for (uint8_t k = 0; k < profile.homeCount && n < cap; ++k)", collect)
-        for item in ("Reading", "Study", "Provider", "Monitor"):
-            self.assertIn(f"HomeItem::{item}:", collect)
-        self.assertIn("if (!PocketDaily::DailyProfile::current().dailyWord) return;", collect)
+        # Order, visibility and the daily-word fallback come only from the
+        # shared homeRowSources, which the host preview uses too (HomeRowSources
+        # host test); the activity only appends rows for the resolved sources.
+        self.assertIn("PocketDaily::Home::homeRowSources(PocketDaily::DailyProfile::current(), available, sources)",
+                      collect)
+        for source in ("Reading", "AppCards", "DailyWord", "Provider", "Monitor"):
+            self.assertIn(f"RowSource::{source}:", collect)
+        self.assertNotIn("homeItems", collect)
+        shared = (root / "src/pocket_daily/home/HomeRenderer.cpp").read_text()
+        self.assertIn("for (uint8_t k = 0; k < profile.homeCount && k < DailyProfile::HOME_ITEM_CAP; ++k)", shared)
+        self.assertIn("else if (profile.dailyWord)", shared)
         sleep = activity[activity.index("bool PocketDailyActivity::paintSleepFrame() {"):]
         self.assertLess(sleep.index("SleepMode::Reader) return false;"), sleep.index("requestUpdateAndWait();"))
         boot = (root / "src/pocket_daily/boot/ProductBoot.cpp").read_text()

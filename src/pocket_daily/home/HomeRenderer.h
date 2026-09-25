@@ -13,6 +13,24 @@ class GfxRenderer;
 // view model; state, radio, SD and theme access stay with the caller, which
 // supplies them through Env. Neither function presents the framebuffer.
 namespace PocketDaily::Home {
+// Where Home pages come from. Study resolves to the active app cards, or to
+// the firmware daily word when there are none and the profile keeps it.
+enum class RowSource : uint8_t { Reading, AppCards, DailyWord, Provider, Monitor };
+
+// What content exists right now; a source without content adds no page.
+struct RowAvailability {
+  bool book = false;      // an open book to continue
+  bool appCards = false;  // at least one active app-authored card
+  bool provider = false;  // provider cards may exist (the caller appends none when empty)
+  bool monitor = false;   // carried usage or wrap-up data
+};
+
+// The profile's Home items resolved to sources, in page order. The device
+// overview and the host preview both build their rows from this, so the order
+// and fallback rules cannot drift between them. Returns the source count.
+int homeRowSources(const DailyProfile::Profile& profile, const RowAvailability& available,
+                   RowSource (&out)[DailyProfile::HOME_ITEM_CAP]);
+
 struct Row {
   bool reading = false;
   bool pocket = false;

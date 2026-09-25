@@ -7,6 +7,8 @@
 #include <memory>
 #include <vector>
 
+#include "pocket_daily/home/HomeRenderer.h"
+
 // Shared Home / Daily Brief painters through the host ABI (P1-3). These pin
 // structure and determinism; pixel parity with the device is a hardware check.
 namespace {
@@ -175,4 +177,31 @@ TEST_P(HomePreview, InvalidProfilesAreRejectedAndLeaveNoFrame) {
 }
 
 // X3 (528x792 portrait) and X4 (480x800 portrait) physical landscape panels.
+// The order and fallback rules shared by the device overview and the preview.
+TEST(HomeRowSources, FollowProfileOrderAndSkipItemsWithoutContent) {
+  using PocketDaily::Home::RowSource;
+  auto profile = PocketDaily::DailyProfile::defaults();  // reading, study, provider
+  PocketDaily::Home::RowAvailability all;
+  all.book = all.appCards = all.provider = all.monitor = true;
+  RowSource out[PocketDaily::DailyProfile::HOME_ITEM_CAP];
+  ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, all, out), 3);
+  EXPECT_EQ(out[0], RowSource::Reading);
+  EXPECT_EQ(out[1], RowSource::AppCards);
+  EXPECT_EQ(out[2], RowSource::Provider);
+
+  profile.homeItems[0] = PocketDaily::DailyProfile::HomeItem::Monitor;
+  profile.homeItems[1] = PocketDaily::DailyProfile::HomeItem::Study;
+  profile.homeCount = 2;
+  PocketDaily::Home::RowAvailability none;
+  // No cards: the daily word stands in while the profile keeps it...
+  ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, none, out), 1);
+  EXPECT_EQ(out[0], RowSource::DailyWord);
+  // ...and Study adds nothing when it does not; monitoring needs carried data.
+  profile.dailyWord = false;
+  EXPECT_EQ(PocketDaily::Home::homeRowSources(profile, none, out), 0);
+  ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, all, out), 2);
+  EXPECT_EQ(out[0], RowSource::Monitor);
+  EXPECT_EQ(out[1], RowSource::AppCards);
+}
+
 INSTANTIATE_TEST_SUITE_P(Panels, HomePreview, testing::Values(std::make_pair(792u, 528u), std::make_pair(800u, 480u)));

@@ -15,6 +15,32 @@ using OverviewRow = Row;
 
 // Body moved from PocketDailyActivity::renderOverview (P1-3); the activity now
 // builds a HomeView and calls this. Keep device and host behaviour identical.
+int homeRowSources(const DailyProfile::Profile& profile, const RowAvailability& available,
+                   RowSource (&out)[DailyProfile::HOME_ITEM_CAP]) {
+  using DailyProfile::HomeItem;
+  int n = 0;
+  for (uint8_t k = 0; k < profile.homeCount && k < DailyProfile::HOME_ITEM_CAP; ++k) {
+    switch (profile.homeItems[k]) {
+      case HomeItem::Reading:
+        if (available.book) out[n++] = RowSource::Reading;
+        break;
+      case HomeItem::Study:
+        if (available.appCards)
+          out[n++] = RowSource::AppCards;
+        else if (profile.dailyWord)
+          out[n++] = RowSource::DailyWord;
+        break;
+      case HomeItem::Provider:
+        if (available.provider) out[n++] = RowSource::Provider;
+        break;
+      case HomeItem::Monitor:
+        if (available.monitor) out[n++] = RowSource::Monitor;
+        break;
+    }
+  }
+  return n;
+}
+
 void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   const auto& m = env.metrics;
   const auto& s = view.strings;

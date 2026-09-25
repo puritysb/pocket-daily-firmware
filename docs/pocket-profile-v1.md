@@ -154,8 +154,10 @@ P1-3 host stand-ins and known tuning items (compare against a reader capture):
 the host header is a plain title and rule, not the device theme header; the
 book cover is a hatched stand-in; host fonts are the built-in UI fonts plus
 the cpfont for CJK only; some layouts leave the bottom weather panel's current
-temperature area empty (same code on the device); the host `buildRows` in
-`host/HostHome.cpp` duplicates the profile loop in `collectOverview`. Moving
+temperature area empty (same code on the device). The device overview and
+the host preview resolve Home items to row sources with the shared
+`homeRowSources` (order, daily-word fallback, items without content skipped),
+so only the row contents differ. Moving
 the renderer also made the Daily Brief skip Today when it would reach the
 status line, which changes the device frame too.
 

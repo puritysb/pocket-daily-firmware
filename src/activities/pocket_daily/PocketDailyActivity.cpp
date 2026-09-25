@@ -1909,14 +1909,13 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
     o.reading = true;
   };
 
-  // Study: active app cards, otherwise the firmware-authored daily word when
-  // the profile keeps it.
-  auto appendStudy = [&]() {
-    if (const auto* appCards = appContent.cards(); appCards && appCards->count) {
-      for (uint8_t i = 0; i < appCards->count && n < cap; ++i) appendPocket(appCards->cards[i].card);
-      return;
-    }
-    if (!PocketDaily::DailyProfile::current().dailyWord) return;
+  // Study: active app cards, otherwise the firmware-authored daily word
+  // (homeRowSources decides which, from the profile).
+  const auto* appCards = appContent.cards();
+  auto appendAppCards = [&]() {
+    for (uint8_t i = 0; appCards && i < appCards->count && n < cap; ++i) appendPocket(appCards->cards[i].card);
+  };
+  auto appendDailyWord = [&]() {
     AgentDeck::lockState();
     const PocketDaily::Card local = localStudyCard;
     AgentDeck::unlockState();
@@ -1947,19 +1946,28 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
 
   // Pocket Daily profile (docs/pocket-profile-v1.md); defaults keep the
   // original order: reading, study, provider.
-  const auto& profile = PocketDaily::DailyProfile::current();
-  for (uint8_t k = 0; k < profile.homeCount && n < cap; ++k) {
-    switch (profile.homeItems[k]) {
-      case PocketDaily::DailyProfile::HomeItem::Reading:
+  PocketDaily::Home::RowAvailability available;
+  available.book = !APP_STATE.openEpubPath.empty();
+  available.appCards = appCards && appCards->count;
+  available.provider = true;  // appendProvider adds nothing when no card was carried
+  available.monitor = hasMonitorData();
+  PocketDaily::Home::RowSource sources[PocketDaily::DailyProfile::HOME_ITEM_CAP];
+  const int count = PocketDaily::Home::homeRowSources(PocketDaily::DailyProfile::current(), available, sources);
+  for (int k = 0; k < count && n < cap; ++k) {
+    switch (sources[k]) {
+      case PocketDaily::Home::RowSource::Reading:
         appendReading();
         break;
-      case PocketDaily::DailyProfile::HomeItem::Study:
-        appendStudy();
+      case PocketDaily::Home::RowSource::AppCards:
+        appendAppCards();
         break;
-      case PocketDaily::DailyProfile::HomeItem::Provider:
+      case PocketDaily::Home::RowSource::DailyWord:
+        appendDailyWord();
+        break;
+      case PocketDaily::Home::RowSource::Provider:
         appendProvider();
         break;
-      case PocketDaily::DailyProfile::HomeItem::Monitor:
+      case PocketDaily::Home::RowSource::Monitor:
         appendMonitor();
         break;
     }

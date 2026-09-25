@@ -166,24 +166,31 @@ Sample buildSample(uint32_t samples) {
 // Mirrors PocketDailyActivity::collectOverview's profile loop over sources.
 int buildRows(const PocketDaily::DailyProfile::Profile& profile, const Sample& sample, uint32_t samples,
               PocketDaily::Home::Row* rows, int cap) {
-  using PocketDaily::DailyProfile::HomeItem;
+  using PocketDaily::Home::RowSource;
+  PocketDaily::Home::RowAvailability available;
+  available.book = samples & SampleBook;
+  available.appCards = samples & SampleStudy;
+  available.provider = samples & SampleProvider;
+  available.monitor = samples & SampleUsage;
+  RowSource sources[PocketDaily::DailyProfile::HOME_ITEM_CAP];
+  const int count = PocketDaily::Home::homeRowSources(profile, available, sources);
   int n = 0;
-  for (uint8_t k = 0; k < profile.homeCount && n < cap; ++k) {
-    switch (profile.homeItems[k]) {
-      case HomeItem::Reading:
-        if (samples & SampleBook) rows[n++] = {true, false, false, "Continue Reading", "Pride and Prejudice"};
+  for (int k = 0; k < count && n < cap; ++k) {
+    switch (sources[k]) {
+      case RowSource::Reading:
+        rows[n++] = {true, false, false, "Continue Reading", "Pride and Prejudice"};
         break;
-      case HomeItem::Study:
-        if (samples & SampleStudy)
-          rows[n++] = {false, true, false, sample.card.title, sample.card.question};
-        else if (profile.dailyWord)
-          rows[n++] = {false, true, false, "Daily word", "An offline word from the reader"};
+      case RowSource::AppCards:
+        rows[n++] = {false, true, false, sample.card.title, sample.card.question};
         break;
-      case HomeItem::Provider:
-        if (samples & SampleProvider) rows[n++] = {false, true, false, "Pocket item", "A carried provider card"};
+      case RowSource::DailyWord:
+        rows[n++] = {false, true, false, "Daily word", "An offline word from the reader"};
         break;
-      case HomeItem::Monitor:
-        if (samples & SampleUsage) rows[n++] = {false, false, true, "Monitoring", ""};
+      case RowSource::Provider:
+        rows[n++] = {false, true, false, "Pocket item", "A carried provider card"};
+        break;
+      case RowSource::Monitor:
+        rows[n++] = {false, false, true, "Monitoring", ""};
         break;
     }
   }

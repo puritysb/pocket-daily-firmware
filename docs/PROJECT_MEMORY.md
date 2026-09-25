@@ -5,6 +5,11 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-25 Home rows: PocketDaily::Home::homeRowSources resolves the profile
+  to row sources (order, app cards else daily word, items without content
+  skipped) for both collectOverview and the host preview; HomeRowSources host
+  test and the SyncRouteBoundaries source check cover it. 400 host tests.
+
 - 2026-09-25 P1-3 (reader battery empty; host only): Home and Daily Brief
   drawing moved out of PocketDailyActivity into src/pocket_daily/home
   (HomeRenderer: renderHome/renderBrief with Env callbacks for header, cover and
