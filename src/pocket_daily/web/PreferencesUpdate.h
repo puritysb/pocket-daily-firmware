@@ -11,6 +11,7 @@ struct PreferenceLimits {
   uint8_t minSleepMinutes;
   uint8_t maxSleepMinutes;
   uint8_t fontSizeCount;
+  uint8_t sideButtonLayoutCount;
 };
 
 struct PreferencesUpdate {
@@ -22,11 +23,15 @@ struct PreferencesUpdate {
   uint8_t sleepTimeoutMinutes = 0;
   bool hasFontSize = false;
   uint8_t fontSize = 0;
+  bool hasSideButtonLayout = false;
+  uint8_t sideButtonLayout = 0;
+  bool hasFrontButtonFollowOrientation = false;
+  uint8_t frontButtonFollowOrientation = 0;
 };
 
-// Integers must be JSON integers (a string is not 0). pocketDailySleepCover
-// accepts a boolean or an integer (non-zero means on), as before. Unknown keys
-// stay ignored for older/newer clients. `error` is a short static reason.
+// Integers must be JSON integers (a string is not 0). pocketDailySleepCover and
+// frontButtonFollowOrientation accept a boolean or an integer (non-zero means
+// on). Unknown keys stay ignored for older/newer clients. `error` is a short static reason.
 bool parsePreferences(const char* json, size_t length, const PreferenceLimits& limits, PreferencesUpdate& out,
                       const char*& error);
 }  // namespace PocketDaily::Web

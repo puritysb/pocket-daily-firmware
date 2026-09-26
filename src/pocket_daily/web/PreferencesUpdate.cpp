@@ -14,6 +14,20 @@ bool readRange(JsonVariantConst value, const int low, const int high, bool& has,
   out = static_cast<uint8_t>(v);
   return true;
 }
+
+// Present (non-null) boolean, or integer where non-zero means on; absent is fine.
+bool readToggle(JsonVariantConst value, bool& has, uint8_t& out) {
+  if (value.isNull()) return true;
+  if (value.is<bool>()) {
+    out = value.as<bool>() ? 1 : 0;
+  } else if (value.is<int>()) {
+    out = value.as<int>() ? 1 : 0;
+  } else {
+    return false;
+  }
+  has = true;
+  return true;
+}
 }  // namespace
 
 bool parsePreferences(const char* json, const size_t length, const PreferenceLimits& limits, PreferencesUpdate& out,
@@ -33,17 +47,9 @@ bool parsePreferences(const char* json, const size_t length, const PreferenceLim
     error = "Invalid startupApp";
     return false;
   }
-  const auto cover = doc["pocketDailySleepCover"];
-  if (!cover.isNull()) {
-    if (cover.is<bool>()) {
-      parsed.sleepCover = cover.as<bool>() ? 1 : 0;
-    } else if (cover.is<int>()) {
-      parsed.sleepCover = cover.as<int>() ? 1 : 0;
-    } else {
-      error = "Invalid pocketDailySleepCover";
-      return false;
-    }
-    parsed.hasSleepCover = true;
+  if (!readToggle(doc["pocketDailySleepCover"], parsed.hasSleepCover, parsed.sleepCover)) {
+    error = "Invalid pocketDailySleepCover";
+    return false;
   }
   if (!readRange(doc["sleepTimeoutMinutes"], limits.minSleepMinutes, limits.maxSleepMinutes, parsed.hasSleepTimeout,
                  parsed.sleepTimeoutMinutes)) {
@@ -52,6 +58,16 @@ bool parsePreferences(const char* json, const size_t length, const PreferenceLim
   }
   if (!readRange(doc["fontSize"], 0, limits.fontSizeCount - 1, parsed.hasFontSize, parsed.fontSize)) {
     error = "Invalid fontSize";
+    return false;
+  }
+  if (!readRange(doc["sideButtonLayout"], 0, limits.sideButtonLayoutCount - 1, parsed.hasSideButtonLayout,
+                 parsed.sideButtonLayout)) {
+    error = "Invalid sideButtonLayout";
+    return false;
+  }
+  if (!readToggle(doc["frontButtonFollowOrientation"], parsed.hasFrontButtonFollowOrientation,
+                  parsed.frontButtonFollowOrientation)) {
+    error = "Invalid frontButtonFollowOrientation";
     return false;
   }
   out = parsed;

@@ -145,8 +145,8 @@ Nearby Sync uses a versioned, interruption-safe bulk API:
   length, and CRC32. The reader checks all four against the completed upload,
   then publishes it. A disconnect cannot overwrite the previous final file.
 - The private Pocket AP uses a minimal server profile: status, a compact
-  `/api/pocket/v1/preferences` resource for the companion's four settings,
-  upload, and verified commit only. It never constructs the full localized
+  `/api/pocket/v1/preferences` resource for the companion's settings (see
+  "Companion preferences" below), upload, and verified commit only. It never constructs the full localized
   `/api/settings` registry at the X3's lowest-heap point and does not start captive DNS, mDNS,
   discovery UDP, WebDAV, or the legacy WebSocket listener. The generic File
   Transfer screen retains the complete browser/WebSocket/WebDAV profile.
@@ -308,3 +308,39 @@ Hardware sign-off still required: iPhone + X3 with no router/internet, AP pairin
 large firmware staging, content batch, lock/background interruption and retry,
 explicit/end-of-batch shutdown, user Wi-Fi change, reader reboot and installation
 version verification. Measure free heap/largest block and watchdog behavior.
+
+## Companion preferences (updated 2026-09-26)
+
+`GET`/`POST /api/pocket/v1/preferences` is registered only in the POCKET_SYNC
+(private AP) and COMPANION (Pocket Sync → Join a Network) server profiles. GET
+returns one fixed, stack-encoded object; `SETTINGS` values are sent as
+integers:
+
+```json
+{"startupApp":0,"pocketDailySleepCover":1,"sleepTimeoutMinutes":10,"fontSize":1,
+ "sideButtonLayout":0,"frontButtonFollowOrientation":0}
+```
+
+| Key | POST accepts | Meaning |
+| --- | --- | --- |
+| `startupApp` | integer 0..1 | 0 Home, 1 Pocket Daily |
+| `pocketDailySleepCover` | boolean, or integer (non-zero = on) | Pocket Daily sleep cover |
+| `sleepTimeoutMinutes` | integer 1..31 | 31 means never |
+| `fontSize` | integer 0..3 | small, medium, large, extra large |
+| `sideButtonLayout` | integer 0..2 | 0 side Up = previous page, Down = next; 1 swapped; 2 side buttons do not turn pages |
+| `frontButtonFollowOrientation` | boolean, or integer (non-zero = on) | when on, the front navigation axis flips while the screen renders inverted portrait or landscape counter-clockwise, so it matches the rotated hint labels |
+
+POST takes any subset of these keys. The whole body is validated before any
+setting changes: one invalid value (out of range, wrong JSON type, or a string)
+returns `400 text/plain` with a short reason such as `Invalid sideButtonLayout`
+and applies nothing. Unknown keys are ignored. Success saves `settings.json`
+and returns `200 {"saved":true}`, then emits the Live Studio `prefs` event; a
+failed save restores all six previous values and returns 500.
+
+`sideButtonLayout` and `frontButtonFollowOrientation` were added on
+2026-09-26. Their presence in the GET response is the capability signal:
+older firmware omits them, and the companion must not send either key to a
+reader whose GET lacks it (an older reader would silently ignore it and report
+success). Both take effect immediately — `MappedInputManager` reads `SETTINGS`
+on every button query — so the reader does not need to leave Sync or restart.
+They are the same values as Settings → Controls on the reader.

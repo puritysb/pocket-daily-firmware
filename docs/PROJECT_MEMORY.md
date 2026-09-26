@@ -5,6 +5,13 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-26 Companion button settings: `/api/pocket/v1/preferences` GET/POST
+  add `sideButtonLayout` (0 prev/next, 1 swapped, 2 off) and
+  `frontButtonFollowOrientation` (bool or int), whole-body validation and
+  six-field rollback (docs/nearby-sync-v1.md). Absent keys mean unsupported;
+  the app sends them only when GET reported them. 406 host tests, default
+  build OK; not exercised on a reader. Also proposed, not implemented:
+  docs/pocket-screen-present-v1.md (draw the saved Home/Daily Brief inside Sync).
 - 2026-09-25 AgentDeck daemon removed; app-provided glance (docs/
   pocket-glance-v1.md). Deleted src/agentdeck/**, the Pocket Daily daemon path
   (Wi-Fi join, discovery, pairing, feed/outbox, pull + WS OTA, asset sync,

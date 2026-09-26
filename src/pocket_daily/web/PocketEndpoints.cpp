@@ -736,16 +736,21 @@ void handleContentFile(WebServer& server, const RouteDeps& d) {
   feedLoopWDT();
 }
 
-// Pocket only needs four preferences. Avoid constructing and streaming the
-// full localized settings registry on the no-PSRAM private-AP path: that
+// Pocket only needs a handful of preferences. Avoid constructing and streaming
+// the full localized settings registry on the no-PSRAM private-AP path: that
 // response can consume the last contiguous heap immediately after Wi-Fi
-// starts and strand the X3 on its retained Hotspot Mode frame.
+// starts and strand the X3 on its retained Hotspot Mode frame. The button keys
+// (added 2026-09-26) tell the companion this reader accepts them on POST.
+// Worst case with every uint8_t at 255 is 145 bytes, so 192 still fits.
 void handleGetPreferences(WebServer& server) {
   char json[192];
   const int written = snprintf(
-      json, sizeof(json), "{\"startupApp\":%u,\"pocketDailySleepCover\":%u,\"sleepTimeoutMinutes\":%u,\"fontSize\":%u}",
+      json, sizeof(json),
+      "{\"startupApp\":%u,\"pocketDailySleepCover\":%u,\"sleepTimeoutMinutes\":%u,\"fontSize\":%u,"
+      "\"sideButtonLayout\":%u,\"frontButtonFollowOrientation\":%u}",
       static_cast<unsigned>(SETTINGS.startupApp), static_cast<unsigned>(SETTINGS.pocketDailySleepCover),
-      static_cast<unsigned>(SETTINGS.sleepTimeoutMinutes), static_cast<unsigned>(SETTINGS.fontSize));
+      static_cast<unsigned>(SETTINGS.sleepTimeoutMinutes), static_cast<unsigned>(SETTINGS.fontSize),
+      static_cast<unsigned>(SETTINGS.sideButtonLayout), static_cast<unsigned>(SETTINGS.frontButtonFollowOrientation));
   if (written <= 0 || static_cast<size_t>(written) >= sizeof(json)) {
     server.send(500, "text/plain", "Could not encode Pocket preferences");
     return;
@@ -763,25 +768,33 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
   // valid, and a failed save restores the previous values (PreferencesUpdate.h).
   const String& body = server.arg("plain");
   const PreferenceLimits limits{CrossPointSettings::STARTUP_APP_COUNT, CrossPointSettings::MIN_SLEEP_TIMEOUT_MINUTES,
-                                CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES, CrossPointSettings::FONT_SIZE_COUNT};
+                                CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES, CrossPointSettings::FONT_SIZE_COUNT,
+                                CrossPointSettings::SIDE_BUTTON_LAYOUT_COUNT};
   PreferencesUpdate update;
   const char* error = nullptr;
   if (!parsePreferences(body.c_str(), body.length(), limits, update, error)) {
     server.send(400, "text/plain", error ? error : "Invalid preferences");
     return;
   }
-  const uint8_t previous[4] = {SETTINGS.startupApp, SETTINGS.pocketDailySleepCover, SETTINGS.sleepTimeoutMinutes,
-                               SETTINGS.fontSize};
+  const uint8_t previous[6] = {SETTINGS.startupApp,          SETTINGS.pocketDailySleepCover,
+                               SETTINGS.sleepTimeoutMinutes, SETTINGS.fontSize,
+                               SETTINGS.sideButtonLayout,    SETTINGS.frontButtonFollowOrientation};
   if (update.hasStartupApp) SETTINGS.startupApp = update.startupApp;
   if (update.hasSleepCover) SETTINGS.pocketDailySleepCover = update.sleepCover;
   if (update.hasSleepTimeout) SETTINGS.sleepTimeoutMinutes = update.sleepTimeoutMinutes;
   if (update.hasFontSize) SETTINGS.fontSize = update.fontSize;
+  if (update.hasSideButtonLayout) SETTINGS.sideButtonLayout = update.sideButtonLayout;
+  if (update.hasFrontButtonFollowOrientation) {
+    SETTINGS.frontButtonFollowOrientation = update.frontButtonFollowOrientation;
+  }
 
   if (!SETTINGS.saveToFile()) {
     SETTINGS.startupApp = previous[0];
     SETTINGS.pocketDailySleepCover = previous[1];
     SETTINGS.sleepTimeoutMinutes = previous[2];
     SETTINGS.fontSize = previous[3];
+    SETTINGS.sideButtonLayout = previous[4];
+    SETTINGS.frontButtonFollowOrientation = previous[5];
     server.send(500, "text/plain", "Could not save Pocket preferences");
     return;
   }

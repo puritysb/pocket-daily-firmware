@@ -131,6 +131,8 @@ theme is Lyra (spacing 16), so the "exact" canvas differed on default readers.
 - Pocket Daily reads the RAM profile in `collectOverview`, the Home layout and
   the sleep frame. A changed profile takes effect the next time Pocket Daily
   paints (entering it, or on return from a Sync session).
+  Drawing the saved Home or Daily Brief inside a Sync session is proposed in
+  [pocket-screen-present-v1.md](pocket-screen-present-v1.md) (2026-09-26).
 
 ## Endpoints (Sync profiles, identity bound)
 
