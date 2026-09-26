@@ -120,6 +120,9 @@ block-ACK window, using no heap. Diagnostic buffers are separately gated by
 - Routing: `consumeDevBootReturn()` else-if; silent-reboot else-ifs keyed on
   `kRebootTargetPocketDaily` / `kRebootTargetPocketNearbySync`; the
   read-and-clear bound uses `kRebootTargetMax`.
+- Staged firmware: a `landsOnShell` flag set by the Pocket Daily and silent
+  Home branches, then `PocketDaily::StagedFirmware::consumeOffer(...)` (every
+  boot) pushes a staged-mode `SdFirmwareUpdateActivity` for `/update.bin`.
 - Consumed developer-update return calls `goToFileTransfer(true)`; its one-shot
   flag skips only network mode selection and reuses saved-network association
   with the existing interactive failure path. Normal launches keep the chooser.
@@ -128,7 +131,11 @@ block-ACK window, using no heap. Diagnostic buffers are separately gated by
 
 - `POCKET_NEARBY_SYNC` branches in `onEnter` / `onExit` /
   `returnToLaunchOrigin()` (≤3 lines each; the plan's E-exception shrank to
-  these).
+  these). `startUpdateCheck()` replaces the idle Sync menu with
+  `OtaUpdateActivity(Origin::PocketDaily)`; `updateCheckHandoff` is the one
+  `onExit` exception to the Nearby restart (no radio has started).
+- `NetworkModeSelectionActivity`: the Pocket variant's third item
+  (`NetworkMode::CHECK_FOR_UPDATES`), guarded by `scripts/test_sync_routes.py`.
 - Private-AP start path policy calls: `nearbyStartAllowed()`,
   `nearbyReadyAllowed()`, `webStartAllowed()`, `selectProfile()`,
   `armPrivateApWatchdog()`, `generatePrivateApCredentials()`,
@@ -203,8 +210,14 @@ Fork-resident product patches (no upstream intent):
   tiny rectangles never produce a zero page-count divisor. Keep the source
   boundary test `ThemeMetricBindings` when reconciling upstream theme changes.
 - `src/network/FirmwareFlasher.{h,cpp}` — shared staging buffer + image
-  validation used by Pocket transfer/diagnostics. (The AgentDeck OTA decode
-  and pulled-image hashing that also borrowed it were removed 2026-09-25.)
+  validation used by Pocket transfer/diagnostics; `validateImageFile` takes an
+  optional chunk observer (the staged prompt reads the image version in the
+  validation pass). (The AgentDeck OTA decode and pulled-image hashing that
+  also borrowed the buffer were removed 2026-09-25.)
+- `src/activities/settings/{SdFirmwareUpdateActivity,OtaUpdateActivity}` —
+  staged mode (preset `/update.bin`, no picker, same-version skip) and
+  `OtaUpdateActivity::Origin::PocketDaily` (exits silent-restart into Pocket
+  Daily with Wi-Fi off).
 - `src/network/OtaUpdater.cpp`, `src/network/WebDAVHandler.cpp` — OTA channel,
   WebDAV guards.
 - `src/CrossPointSettings.h` — Pocket preference fields.

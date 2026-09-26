@@ -16,6 +16,11 @@
  *
  * Used both from Settings -> System -> "SD Card Firmware Update", and as the only
  * activity launched in boot recovery mode (left side button + power on X3).
+ *
+ * Staged mode (presetPath) skips step 1 for a file the companion published in
+ * the transfer session that just ended: it validates the preset path, skips
+ * silently when the image carries the running firmware's version, and
+ * otherwise shows the same confirmation. Cancel keeps the file and returns.
  */
 class SdFirmwareUpdateActivity : public Activity {
  public:
@@ -30,6 +35,9 @@ class SdFirmwareUpdateActivity : public Activity {
 
   explicit SdFirmwareUpdateActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool recoveryMode = false)
       : Activity("SdFirmwareUpdate", renderer, mappedInput), recoveryMode(recoveryMode) {}
+  // Staged mode: confirm this exact file instead of opening the picker.
+  SdFirmwareUpdateActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const char* presetPath)
+      : Activity("SdFirmwareUpdate", renderer, mappedInput), presetPath(presetPath) {}
 
   void onEnter() override;
   void loop() override;
@@ -40,15 +48,22 @@ class SdFirmwareUpdateActivity : public Activity {
  private:
   State state = State::PICKING;
   bool recoveryMode = false;
+  // Non-null in staged mode; points at a string literal (static storage).
+  const char* presetPath = nullptr;
+  // Staged mode runs validation from loop(), after the first paint.
+  bool presetValidationPending = false;
 
   std::string firmwarePath;
   size_t firmwareSize = 0;
   size_t writtenBytes = 0;
   unsigned int lastRenderedPercent = 101;
   std::string errorMessage;
+  // Version string read from the image during validation (empty if absent).
+  std::string stagedVersion;
 
   void launchPicker();
   void onPickerResult(const ActivityResult& result);
+  void validateAndConfirm();
   bool validateFirmware();
   void promptConfirmation();
   void onConfirmationResult(const ActivityResult& result);

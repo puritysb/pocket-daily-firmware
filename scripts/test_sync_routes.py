@@ -26,7 +26,14 @@ class SyncRoutesTest(unittest.TestCase):
         chooser = (root / "src/activities/network/NetworkModeSelectionActivity.cpp").read_text()
         for key in ("STR_POCKET_WIFI", "STR_POCKET_DIRECT", "STR_POCKET_WIFI_DESC", "STR_POCKET_DIRECT_DESC"):
             self.assertIn(key, chooser)
-        self.assertIn("pocketSync ? NetworkMode::CREATE_HOTSPOT : NetworkMode::CONNECT_CALIBRE", chooser)
+        # Pocket's second item is the direct (private AP) path, never Calibre;
+        # its third is the release update check, absent from File Transfer.
+        compact = re.sub(r"\s+", " ", chooser)
+        self.assertIn("POCKET_MODES[MENU_ITEM_COUNT] = {NetworkMode::JOIN_NETWORK, NetworkMode::CREATE_HOTSPOT, "
+                      "NetworkMode::CHECK_FOR_UPDATES}", compact)
+        self.assertIn("TRANSFER_MODES[MENU_ITEM_COUNT] = {NetworkMode::JOIN_NETWORK, NetworkMode::CONNECT_CALIBRE, "
+                      "NetworkMode::CREATE_HOTSPOT}", compact)
+        self.assertIn("pocketSync ? POCKET_MODES[index] : TRANSFER_MODES[index]", chooser)
         activity = (root / "src/activities/network/CrossPointWebServerActivity.cpp").read_text()
         view = activity[activity.index("void CrossPointWebServerActivity::renderServerRunning()"):
                         activity.index("void CrossPointWebServerActivity::renderNearbySync()")]

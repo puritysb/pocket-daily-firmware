@@ -4,6 +4,14 @@
 #include "network/OtaUpdater.h"
 
 class OtaUpdateActivity : public Activity {
+ public:
+  // Settings: a sub-activity; leaving pops back (Wi-Fi exits via silentRestart).
+  // PocketDaily: launched from the Pocket Sync menu; every non-install exit
+  // turns Wi-Fi off and silent-restarts into Pocket Daily, which never holds
+  // the radio itself.
+  enum class Origin : uint8_t { Settings, PocketDaily };
+
+ private:
   enum State {
     WIFI_SELECTION,
     CHECKING_FOR_UPDATE,
@@ -22,11 +30,24 @@ class OtaUpdateActivity : public Activity {
   unsigned int lastUpdaterPercentage = UNINITIALIZED_PERCENTAGE;
   OtaUpdater updater;
 
+  Origin origin = Origin::Settings;
+
+  // Heap when the check starts and a one-line reason under "Update failed"
+  // (stage, error codes, heap in KB); users have no serial log to read.
+  uint32_t startFreeHeap = 0;
+  uint32_t startLargestBlock = 0;
+  char failureDetail[96] = {};
+  // OtaFailure::Kind of the last failure; drives the plain-language reason.
+  uint8_t failureKind = 0;
+
   void onWifiSelectionComplete(bool success);
+  void noteFailure(int updaterError, bool installing);
+  // Cancel, failure and "no update" exits, per Origin.
+  void leave();
 
  public:
-  explicit OtaUpdateActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("OtaUpdate", renderer, mappedInput), updater() {}
+  explicit OtaUpdateActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, Origin origin = Origin::Settings)
+      : Activity("OtaUpdate", renderer, mappedInput), updater(), origin(origin) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;

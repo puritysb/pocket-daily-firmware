@@ -109,6 +109,26 @@ See the [web server docs](./docs/webserver.md) for more information on how to co
 
 The web interface also supports **WebDAV**, allowing you to mount the device as a network drive and manage files directly from your computer's file manager.
 
+### Firmware updates from Pocket Daily
+
+The easiest way to update is the Pocket Daily app: press **Sync** → **Same
+Wi-Fi** on the reader and tap **Update reader** in the app. The app downloads
+the latest release and sends it (see below for the install prompt).
+
+On the Pocket Daily screen, **Sync** → **Check for updates** looks for a newer
+release over Wi-Fi from the reader itself. The reader shows the current and new
+versions and installs only after you press **Update**; **Back** returns to
+Pocket Daily with Wi-Fi off. If the check fails, the screen says why. On an X3
+the HTTPS download needs more memory than the reader has, so it says so and
+points to the app.
+
+When the Pocket Daily app sends a firmware file, it is saved as `/update.bin`
+and never installed during the transfer. Leaving the transfer screen then shows
+**Update firmware?** for that file once. Confirm installs it; Back keeps the
+file and returns. An image of the version already running is not offered. You
+can install a saved `/update.bin` later from **Settings → System → SD Card
+Firmware Update**.
+
 ### Offline Japanese learning pack
 
 Pocket Daily can load its Japanese course from the SD card without an account

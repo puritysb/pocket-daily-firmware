@@ -111,6 +111,13 @@ std::string resolveRedirectUrl(const std::string& currentUrl, const char* locati
   return currentUrl.substr(0, baseEnd) + location;
 }
 
+HttpDownloader::Failure lastFailureState;
+
+void noteFailure(const char* stage, const int code = 0, const int tlsCode = 0) {
+  lastFailureState = {stage, code, tlsCode, static_cast<uint32_t>(ESP.getFreeHeap()),
+                      static_cast<uint32_t>(ESP.getMaxAllocHeap())};
+}
+
 void logHeap(const char* stage) {
   LOG_DBG("HTTP", "%s heap free=%u largest=%u min=%u", stage, (unsigned)ESP.getFreeHeap(),
           (unsigned)ESP.getMaxAllocHeap(), (unsigned)ESP.getMinFreeHeap());
@@ -126,6 +133,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
                                      const HttpDownloader::RequestHeaders* requestHeaders = nullptr,
                                      HttpDownloader::EffectiveUrlCapture* effectiveUrl = nullptr) {
   std::string currentUrl = url;
+  lastFailureState = {};
 
   for (int hop = 0; hop <= 5; ++hop) {
     // GitHub release asset redirects carry long signed Azure URLs. Capture the
@@ -154,6 +162,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
       LOG_ERR("HTTP", "client init failed");
+      noteFailure("init");
       return HttpDownloader::HTTP_ERROR;
     }
 
@@ -174,7 +183,12 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
-      LOG_ERR("HTTP", "open failed: %s", esp_err_to_name(err));
+      int tlsCode = 0;
+      int tlsFlags = 0;
+      esp_http_client_get_and_clear_last_tls_error(client, &tlsCode, &tlsFlags);
+      LOG_ERR("HTTP", "open failed: %s tls=-0x%x flags=0x%x", esp_err_to_name(err), (unsigned)-tlsCode,
+              (unsigned)tlsFlags);
+      noteFailure("open", err, tlsCode);
       esp_http_client_cleanup(client);
       return HttpDownloader::HTTP_ERROR;
     }
@@ -183,6 +197,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     int64_t contentLength = esp_http_client_fetch_headers(client);
     if (contentLength < 0) {
       LOG_ERR("HTTP", "fetch headers failed");
+      noteFailure("headers", static_cast<int>(contentLength));
       esp_http_client_cleanup(client);
       return HttpDownloader::HTTP_ERROR;
     }
@@ -192,15 +207,18 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     if (isRedirect(status)) {
       if (hop == 5) {
         LOG_ERR("HTTP", "too many redirects");
+        noteFailure("redirects");
         esp_http_client_cleanup(client);
         return HttpDownloader::HTTP_ERROR;
       }
       if (redirect.oom) {
+        noteFailure("redirect oom");
         esp_http_client_cleanup(client);
         return HttpDownloader::HTTP_ERROR;
       }
       if (redirect.truncated || !redirect.location || redirect.location[0] == '\0') {
         LOG_ERR("HTTP", "redirect without usable Location");
+        noteFailure("redirect");
         esp_http_client_cleanup(client);
         return HttpDownloader::HTTP_ERROR;
       }
@@ -214,6 +232,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
       std::string nextUrl = resolveRedirectUrl(currentUrl, redirect.location);
       if (nextUrl.empty()) {
         LOG_ERR("HTTP", "invalid redirect Location");
+        noteFailure("redirect");
         return HttpDownloader::HTTP_ERROR;
       }
       LOG_DBG("HTTP", "redirect %d -> %s", status, nextUrl.c_str());
@@ -233,6 +252,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     // response is a successful body transfer, not an HTTP failure.
     if (status != 200 && status != 206) {
       LOG_ERR("HTTP", "unexpected status: %d", status);
+      noteFailure("status", status);
       esp_http_client_cleanup(client);
       return HttpDownloader::HTTP_ERROR;
     }
@@ -242,6 +262,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     sink.total = contentLength > 0 ? static_cast<size_t>(contentLength) : 0;
     if (sink.prepare && sink.total > 0 && !sink.prepare(sink.total)) {
       LOG_ERR("HTTP", "sink prepare failed for %zu bytes", sink.total);
+      noteFailure("reserve", static_cast<int>(sink.total));
       esp_http_client_cleanup(client);
       return HttpDownloader::HTTP_ERROR;
     }
@@ -250,6 +271,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     auto buf = makeUniqueNoThrow<char[]>(readChunk);
     if (!buf) {
       LOG_ERR("HTTP", "OOM: %u byte read buffer", (unsigned)readChunk);
+      noteFailure("buffer", static_cast<int>(readChunk));
       esp_http_client_cleanup(client);
       return HttpDownloader::HTTP_ERROR;
     }
@@ -262,11 +284,13 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
       const int read = esp_http_client_read(client, buf.get(), readChunk);
       if (read < 0) {
         LOG_ERR("HTTP", "read error after %zu bytes", sink.downloaded);
+        noteFailure("read", static_cast<int>(sink.downloaded));
         esp_http_client_cleanup(client);
         return HttpDownloader::HTTP_ERROR;
       }
       if (read == 0) break;  // all data received
       if (!sink.write(reinterpret_cast<const uint8_t*>(buf.get()), read)) {
+        noteFailure("write", static_cast<int>(sink.downloaded));
         esp_http_client_cleanup(client);
         return HttpDownloader::FILE_ERROR;
       }
@@ -282,6 +306,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     esp_http_client_cleanup(client);
     if (!complete) {
       LOG_ERR("HTTP", "incomplete: got %zu of %zu bytes", sink.downloaded, sink.total);
+      noteFailure("incomplete", static_cast<int>(sink.downloaded));
       return HttpDownloader::HTTP_ERROR;
     }
     return HttpDownloader::OK;
@@ -290,6 +315,8 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
   return HttpDownloader::HTTP_ERROR;
 }
 }  // namespace
+
+HttpDownloader::Failure HttpDownloader::lastFailure() { return lastFailureState; }
 
 bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const std::string& username,
                               const std::string& password, const RequestHeaders* requestHeaders) {

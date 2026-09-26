@@ -13,11 +13,21 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/FirmwareFlasher.h"
+#include "pocket_daily/staged_firmware.h"
 
 void SdFirmwareUpdateActivity::onEnter() {
   Activity::onEnter();
   // Build-identity marker — confirms which firmware build owns the SD update flow.
-  LOG_INF("FW", "SdFirmwareUpdateActivity build=%s %s recovery=%d", __DATE__, __TIME__, recoveryMode ? 1 : 0);
+  LOG_INF("FW", "SdFirmwareUpdateActivity build=%s %s recovery=%d staged=%d", __DATE__, __TIME__, recoveryMode ? 1 : 0,
+          presetPath ? 1 : 0);
+  if (presetPath) {
+    // Staged mode: no picker. Validation runs from loop() so this activity's
+    // own "Validating" frame is on the panel first.
+    firmwarePath = presetPath;
+    state = State::VALIDATING;
+    presetValidationPending = true;
+    return;
+  }
   state = State::PICKING;
   launchPicker();
 }
@@ -48,7 +58,10 @@ void SdFirmwareUpdateActivity::onPickerResult(const ActivityResult& result) {
   }
   firmwarePath = path->path;
   LOG_DBG("FW", "Selected: %s", firmwarePath.c_str());
+  validateAndConfirm();
+}
 
+void SdFirmwareUpdateActivity::validateAndConfirm() {
   {
     RenderLock lock(*this);
     state = State::VALIDATING;
@@ -59,6 +72,15 @@ void SdFirmwareUpdateActivity::onPickerResult(const ActivityResult& result) {
     RenderLock lock(*this);
     state = State::FAILED;
     requestUpdate();
+    return;
+  }
+
+  // Staged mode only: the image the companion published is the build already
+  // running (for example after a developer flash of the same file). Nothing
+  // to confirm; leave the file in place and return without a prompt.
+  if (presetPath && PocketDaily::StagedFirmware::sameVersion(stagedVersion.c_str(), CROSSPOINT_VERSION)) {
+    LOG_INF("FW", "Staged %s is the running version (%s); not prompting", firmwarePath.c_str(), stagedVersion.c_str());
+    finish();
     return;
   }
 
@@ -96,7 +118,16 @@ bool SdFirmwareUpdateActivity::validateFirmware() {
   // trailer) that the shared firmware-flasher applies right before raw-writing otadata. This
   // catches truncated or corrupted .bin files at confirmation time, before the user ever sees
   // the "Updating…" progress bar.
-  const auto vr = firmware_flash::validateImageFile(firmwarePath.c_str(), partitionLimit);
+  // The same pass reads the image's "CrossPoint version:" marker, so the
+  // confirmation can name the version without rereading the file.
+  PocketDaily::StagedFirmware::VersionScanner versionScanner;
+  const auto vr = firmware_flash::validateImageFile(
+      firmwarePath.c_str(), partitionLimit,
+      [](const uint8_t* bytes, size_t count, void* ctx) {
+        static_cast<PocketDaily::StagedFirmware::VersionScanner*>(ctx)->feed(bytes, count);
+      },
+      &versionScanner);
+  stagedVersion = versionScanner.version();
   if (vr != firmware_flash::Result::OK) {
     LOG_ERR("FW", "image validation failed: %s", firmware_flash::resultName(vr));
     if (vr == firmware_flash::Result::TOO_LARGE) {
@@ -122,6 +153,7 @@ void SdFirmwareUpdateActivity::promptConfirmation() {
   std::string body = firmwarePath;
   const auto pos = body.find_last_of('/');
   if (pos != std::string::npos) body = body.substr(pos + 1);
+  if (!stagedVersion.empty()) body += " \xC2\xB7 " + stagedVersion;
 
   startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, heading, body),
                          [this](const ActivityResult& result) { onConfirmationResult(result); });
@@ -185,6 +217,11 @@ void SdFirmwareUpdateActivity::performUpdate() {
 }
 
 void SdFirmwareUpdateActivity::loop() {
+  if (presetValidationPending) {
+    presetValidationPending = false;
+    validateAndConfirm();
+    return;
+  }
   if (state == State::FAILED) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back) ||
         mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
@@ -206,7 +243,8 @@ void SdFirmwareUpdateActivity::render(RenderLock&&) {
 
   renderer.clearScreen();
 
-  const char* headerText = recoveryMode ? tr(STR_RECOVERY_MODE) : tr(STR_SD_FIRMWARE_UPDATE);
+  const char* headerText =
+      recoveryMode ? tr(STR_RECOVERY_MODE) : (presetPath ? tr(STR_POCKET_FIRMWARE) : tr(STR_SD_FIRMWARE_UPDATE));
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, headerText);
 
   const auto lineHeight = renderer.getLineHeight(UI_10_FONT_ID);

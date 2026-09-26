@@ -55,6 +55,8 @@ class CrossPointWebServerActivity final : public Activity {
   unsigned long nearbyHandoffAt = 0;
   unsigned long privateApLastActivityAt = 0;
   bool lastNearbyAuthenticated = false;
+  // Set only when the idle Pocket Sync menu hands off to the update check.
+  bool updateCheckHandoff = false;
 
   Pocket::NearbySync::Service nearbySync;
   enum class NearbyStartResult : uint8_t { IDLE, RUNNING, SUCCEEDED, FAILED };
@@ -92,6 +94,7 @@ class CrossPointWebServerActivity final : public Activity {
   void startAccessPoint();
   void startWebServer();
   void startNearbySync();
+  void startUpdateCheck();
   void handleNearbyStartup();
   static void nearbyStartTaskTrampoline(void* context);
   void handleNearbySync();

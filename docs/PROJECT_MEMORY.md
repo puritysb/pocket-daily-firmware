@@ -19,6 +19,35 @@ transcript. Current source and release records override dated observations.
   defaults are reading, study. Static RAM 129,944 → 113,272 B (default), flash
   6,111,695 → 5,980,237 B. 389 host tests. Not yet exercised on a reader.
 
+- 2026-09-26 Firmware update from Pocket Daily. Sync menu (Home → Right)
+  gained a third item, Check for updates: the idle Nearby menu (entered via a
+  clean-heap restart) is replaced by OtaUpdateActivity(Origin::PocketDaily);
+  every non-install exit turns Wi-Fi off and silent-restarts into Pocket Daily.
+  Staged prompt: the verified commit of /update.bin arms a one-shot RTC_NOINIT
+  marker (size, CRC, check word); each boot consumes it and only a session
+  teardown restart onto Pocket Daily/Library with the file at that size pushes
+  SdFirmwareUpdateActivity in staged mode (validate, read `CrossPoint
+  version:`, skip if equal to the running build, else Confirm). Never flashes
+  without Confirm. Strings STR_POCKET_UPDATE_DESC (en, ko) and ko
+  STR_CHECK_UPDATES. X3 verified 2026-09-26: the staged prompt appeared after
+  a Same Wi-Fi publish and Confirm installed release 1.7.0 (Cancel/no-repeat
+  not yet seen).
+- 2026-09-26 X3 cannot run the reader's own HTTPS update check: open fails
+  with ESP_ERR_HTTP_CONNECT, esp-tls code 0x7F00 (MBEDTLS_ERR_SSL_ALLOC_FAILED)
+  at ~31 KiB free / 25 KiB largest block with Wi-Fi up. The prebuilt Arduino
+  libs use symmetric 16 KiB TLS records (no asymmetric/dynamic buffers), so a
+  session needs ~45 KiB. Fixing it needs custom_sdkconfig (framework rebuild);
+  deferred. The companion app's Update reader (download latest release →
+  validate → send over the local path → staged prompt) is the primary update
+  route. The update screen now names the reason (OtaFailure::classify; host
+  tests in test/ota_failure) plus a small stage/code/heap line
+  (HttpDownloader::lastFailure), and points to the app on memory failures.
+  X3 verified 2026-09-26 (w5637ecce): staged prompt → Confirm installed it;
+  Check for updates shows the memory reason and the app hint.
+- 2026-09-26 Release prep: version 1.7.0; CI cppcheck installs PlatformIO
+  packages first (platform 55.03.311 left the restored cache without the
+  toolchain, so `pio check` exited 127 on every run since 2026-09-20).
+
 - 2026-09-25 My cards (docs/pocket-profile-v1.md): profile IDs `word` (Home
   item 5, the daily word as its own page; Study then shows only app cards) and
   `card` (sleep section 5, first app card with its image, shown even while a

@@ -56,7 +56,13 @@ Result flashFromSdPath(const char* sdPath, ProgressCb onProgress, void* ctx, boo
 // skip the size-fits-partition check (e.g. when validating ahead of partition
 // lookup). Streams the file in CHUNK-sized reads; the file is rewound on
 // success so the caller can immediately reread it for flashing.
-Result validateImageFile(const char* sdPath, size_t partitionSize);
+//
+// `observer` (optional) sees every segment-data chunk as it is hashed, so a
+// caller can inspect the image (e.g. read its embedded version string) in the
+// same pass instead of rereading a multi-megabyte file.
+using ChunkObserver = void (*)(const uint8_t* bytes, size_t count, void* ctx);
+Result validateImageFile(const char* sdPath, size_t partitionSize, ChunkObserver observer = nullptr,
+                         void* observerCtx = nullptr);
 
 // The flasher's 4 KiB static staging buffer, lent to the Pocket upload stream
 // and the diagnostic HTTP handlers. Also borrowed for synchronous provider OTA

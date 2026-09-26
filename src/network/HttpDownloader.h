@@ -26,6 +26,19 @@ class HttpDownloader {
     NOT_MODIFIED,
   };
 
+  // Why the most recent GET on this task failed, for a user-visible reason on
+  // screens like the update check (serial logs are not available to users).
+  // `stage` is a static string; `code` is the esp_err_t, HTTP status or byte
+  // count for that stage; `tlsCode` is the mbedTLS error from a failed open.
+  struct Failure {
+    const char* stage = nullptr;
+    int code = 0;
+    int tlsCode = 0;
+    uint32_t freeHeap = 0;
+    uint32_t largestBlock = 0;
+  };
+  static Failure lastFailure();
+
   // Optional single response-header capture (e.g. X-Frame-Sig). The value is
   // snprintf-truncated to the fixed buffer; empty when the header never came.
   struct HeaderCapture {

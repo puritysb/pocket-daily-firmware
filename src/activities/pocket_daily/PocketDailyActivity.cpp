@@ -41,6 +41,9 @@ using PocketDaily::HomeDraw::formatWeatherSnapshotDate;
 // The device picks an installed SD CJK font for text the built-in fonts lack.
 PocketDaily::HomeDraw::FontResolver deviceFonts(const GfxRenderer& renderer) {
   return {const_cast<GfxRenderer*>(&renderer),
+          // FontResolver::pick is a fixed `void*` callback type shared with the
+          // host preview; a `const void*` parameter would not convert to it.
+          // cppcheck-suppress constParameterPointer
           [](void* context, const char* text, int fallback, EpdFontFamily::Style style) {
             return UiCjkFont::fontForText(*static_cast<const GfxRenderer*>(context), text, fallback, style);
           }};

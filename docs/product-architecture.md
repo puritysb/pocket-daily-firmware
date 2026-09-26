@@ -76,7 +76,11 @@ Older board-only staging is therefore ignored by this firmware; SD recovery
 remains available while a Companion runtime upgrades to tuple-aware staging.
 Pocket app updates do not use this pull path: the reader verifies byte length
 and CRC before publishing `/update.bin`, then the existing on-device updater
-validates the image and requires explicit confirmation before flashing.
+validates the image and requires explicit confirmation before flashing. The
+restart that ends the publishing session opens that confirmation directly,
+once (docs/nearby-sync-v1.md). Independently, Pocket Daily's Sync menu offers
+**Check for updates**, the GitHub release OTA check, which also asks before
+installing.
 
 Provider discovery is service-based, not a fixed `localhost` or `.local`
 hostname. Pocket browses `_agentdeck._tcp.local`, retains up to four IPv4 A

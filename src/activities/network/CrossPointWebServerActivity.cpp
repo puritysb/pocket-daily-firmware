@@ -20,6 +20,7 @@
 #include "WifiCredentialStore.h"
 #include "WifiSelectionActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
+#include "activities/settings/OtaUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "pocket_daily/live_studio/LiveFrameCapture.h"
@@ -86,6 +87,7 @@ void CrossPointWebServerActivity::onEnter() {
   nearbyHandoffAt = 0;
   privateApLastActivityAt = 0;
   lastNearbyAuthenticated = false;
+  updateCheckHandoff = false;
   nearbyStartResult.store(NearbyStartResult::IDLE, std::memory_order_release);
   nearbyCancelRequested.store(false, std::memory_order_release);
   nearbyStartTask = nullptr;
@@ -148,6 +150,28 @@ void CrossPointWebServerActivity::returnToLaunchOrigin() {
   onGoHome();
 }
 
+void CrossPointWebServerActivity::startUpdateCheck() {
+  // Only the Pocket Sync menu offers this, before either radio has started.
+  // This activity was entered through a clean-heap restart, so replacing it
+  // (instead of stacking the OTA check on top) hands the TLS client the most
+  // contiguous heap the reader can offer. OtaUpdateActivity raises STA itself
+  // and returns to Pocket Daily through the same silent restart.
+  if (launchMode != WebServerLaunchMode::POCKET_NEARBY_SYNC || WiFi.getMode() != WIFI_MODE_NULL) {
+    LOG_ERR("WEBACT", "Update check requested outside the idle Pocket Sync menu");
+    returnToLaunchOrigin();
+    return;
+  }
+  auto updateCheck =
+      makeUniqueNoThrow<OtaUpdateActivity>(renderer, mappedInput, OtaUpdateActivity::Origin::PocketDaily);
+  if (!updateCheck) {
+    LOG_ERR("WEBACT", "OOM: OtaUpdateActivity");
+    returnToLaunchOrigin();
+    return;
+  }
+  updateCheckHandoff = true;
+  activityManager.replaceActivity(std::move(updateCheck));
+}
+
 void CrossPointWebServerActivity::onExit() {
   Activity::onExit();
   contentPresentation.hide(renderer);  // ActivityManager owns RenderLock here
@@ -162,7 +186,10 @@ void CrossPointWebServerActivity::onExit() {
   // retained Hotspot Mode frame on screen and every button unresponsive.
   // ESP.restart() tears all radio tasks down as part of reset, and doing it
   // before any driver shutdown keeps this user action bounded.
-  if (launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC) {
+  // Exception: the hand-off to the update check happens from the idle menu,
+  // before BLE, Wi-Fi or the server started, so the ordinary teardown below
+  // is a no-op and the OTA activity owns the next restart.
+  if (launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC && !updateCheckHandoff) {
     HalSystem::setCrashBreadcrumb("nearby:exit-restart");
     silentRestartToPocketDaily();
     return;  // ESP.restart() does not return.
@@ -204,6 +231,10 @@ void CrossPointWebServerActivity::onExit() {
 void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) {
   if (launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC && mode == NetworkMode::CREATE_HOTSPOT) {
     startNearbySync();
+    return;
+  }
+  if (mode == NetworkMode::CHECK_FOR_UPDATES) {
+    startUpdateCheck();
     return;
   }
   const char* modeName = "Join Network";

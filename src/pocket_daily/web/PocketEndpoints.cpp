@@ -26,6 +26,7 @@
 #include "pocket_daily/PocketGlanceStore.h"
 #include "pocket_daily/PocketProfileStore.h"
 #include "pocket_daily/PocketScreenPreview.h"
+#include "pocket_daily/StagedFirmwareStore.h"
 #include "pocket_daily/boot/DevBootReturn.h"
 #include "pocket_daily/live_studio/DevTrace.h"
 #include "pocket_daily/live_studio/HeapMap.h"
@@ -33,6 +34,7 @@
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/live_studio/StackReport.h"
 #include "pocket_daily/live_studio/UiPackStore.h"
+#include "pocket_daily/staged_firmware.h"
 #include "pocket_daily/web/DisplayState.h"
 #include "pocket_daily/web/ExactRouteDispatch.h"
 #include "pocket_daily/web/PocketStatus.h"
@@ -587,6 +589,10 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
     return;
   }
   if (hadTarget) Storage.remove(backup.c_str());
+  // Transport never flashes. Record the publication so the restart that ends
+  // this session offers the on-device confirmation once (staged_firmware.h).
+  if (StagedFirmware::isPublishTarget(target.c_str()))
+    StagedFirmware::notePublished(static_cast<uint32_t>(expectedSize), uploadedCrc);
 
   clearBookCache(target.c_str());
   char response[80];

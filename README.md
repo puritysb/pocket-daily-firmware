@@ -101,31 +101,46 @@ USB port or browser before assuming the device is locked. Only reach for the unl
 
 ## Install firmware
 
-### Pocket Daily development build
+Pocket Daily releases are published at
+[github.com/puritysb/pocket-daily-firmware/releases](https://github.com/puritysb/pocket-daily-firmware/releases).
+One `firmware.bin` serves both X3 and X4.
 
-Every successful local build stages `firmware/update.bin`. Copy it to the SD
-card root, boot while holding **UP + POWER**, select `update.bin`, and confirm.
-Pocket Daily also accepts a product-compatible Companion OTA advert after the
-device has paired and completed a sync.
+### Update a reader that already runs Pocket Daily
 
-The CrossPoint web installer below installs upstream CrossPoint, not Pocket
-Daily. Keep it as the recovery path when you intentionally want to return to
-the foundation firmware.
+- **From the Pocket Daily app (recommended):** on the reader press **Sync** →
+  **Same Wi-Fi**, then tap **Update reader** in the app. The app downloads the
+  latest release, validates it and sends it. When you leave the transfer
+  screen, the reader shows **Update firmware?** and flashes only after you
+  confirm. You can also send a `firmware.bin` you downloaded yourself under
+  Files, over the same Wi-Fi or a direct connection.
+- **On the reader:** press **Sync** and choose **Check for updates** (also under
+  Settings). The reader joins a saved Wi-Fi network and installs only after you
+  confirm. It needs memory for an HTTPS session that an X3 does not have with
+  the stock TLS buffers; there the screen says so and points to the app.
 
-### Web installer (recommended)
+Nothing installs automatically after a transfer.
 
-1. Connect your device to your computer via USB-C and wake/unlock the device
-2. Go to https://crosspointreader.com/#flash-tools, select device (X3 or X4), and choose an official CrossPoint release.
+### Move from CrossPoint Reader
 
-### Web installer (specific version)
+A recent CrossPoint Reader can receive `firmware.bin` from the Pocket Daily app
+over the same Wi-Fi (or copy it to the SD card root) and install it with
+Settings → System → SD Card Firmware Update. No USB flashing is needed.
 
-1. Connect your device to your computer via USB-C and wake/unlock the device
-2. Download a `firmware.bin` from [Releases](https://github.com/crosspoint-reader/crosspoint-reader/releases), local build, or continuous integration artifact.
-3. Go to https://crosspointreader.com/#flash-tools, select device (X3 or X4), click "Custom .bin" and upload a `firmware.bin`.
+### First install from factory firmware
 
-### Revert to Official Firmware
+The app cannot talk to factory firmware, so the first install is over USB:
 
-To revert to the official firmware, you can also flash the latest official firmware using https://crosspointreader.com/#flash-tools.
+1. Connect the reader via USB-C and wake/unlock it.
+2. Download `firmware.bin` from the Pocket Daily releases page.
+3. Go to https://crosspointreader.com/#flash-tools, select the device (X3 or
+   X4), click "Custom .bin" and upload that `firmware.bin`.
+
+Check the USB-lock warning above first. Later updates use the reader or the app.
+
+### Revert to CrossPoint or official firmware
+
+Flash upstream CrossPoint or the official firmware with
+https://crosspointreader.com/#flash-tools.
 
 ### Command line
 
@@ -135,7 +150,7 @@ To revert to the official firmware, you can also flash the latest official firmw
 pip install esptool
 ```
 
-2. Download `firmware.bin` from the [releases page](https://github.com/crosspoint-reader/crosspoint-reader/releases).
+2. Download `firmware.bin` from the [Pocket Daily releases page](https://github.com/puritysb/pocket-daily-firmware/releases).
 3. Connect your device via USB-C.
 4. Find the device port. On Linux, run `dmesg` after connecting. On macOS:
 
@@ -151,9 +166,17 @@ esptool.py --chip esp32c3 --port /dev/ttyACM0 --baud 921600 write_flash 0x10000 
 
 Adjust `/dev/ttyACM0` to match your system.
 
-### Manual
+### Development builds
 
-See [Development quick start](#development-quick-start) below.
+Every successful local build stages `firmware/update.bin`. Send it with the
+app or `scripts/pocket_put.py`, or copy it to the SD card root and install it
+from Settings. See [Development quick start](#development-quick-start) below.
+
+### Releasing
+
+Bump `version` in `platformio.ini`, then push a `vX.Y.Z` tag. The release
+workflow builds `gh_release` and publishes the GitHub release that readers
+check for updates.
 
 ---
 

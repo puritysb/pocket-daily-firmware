@@ -62,6 +62,8 @@ add_subdirectory(pocket_glance)
 add_subdirectory(pocket_daily_identity)
 add_subdirectory(pocket_daily_learning_pack)
 add_subdirectory(pocket_daily_upload_stream)
+add_subdirectory(pocket_daily_staged_firmware)
+add_subdirectory(ota_failure)
 add_subdirectory(live_studio)
 add_subdirectory(pocket_profile)
 

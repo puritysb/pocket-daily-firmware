@@ -12,6 +12,7 @@
 #include <HalTiltSensor.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <SPI.h>
 #include <WiFi.h>
 #include <builtinFonts/all.h>
@@ -32,7 +33,9 @@
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "pocket_daily/StagedFirmwareStore.h"
 #include "pocket_daily/boot/ProductBoot.h"
+#include "pocket_daily/staged_firmware.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 
@@ -482,6 +485,9 @@ void setup() {
   // Consume even on recovery/crash boots: those routes take precedence, but
   // must not leave a stale automatic radio request for a later normal boot.
   const auto devBootReturn = PocketDaily::Boot::consumeDevBootReturn();
+  // Pocket seam: true when this boot is a transfer session's teardown restart
+  // landing on the Pocket Daily or Library shell (staged-firmware offer).
+  bool landsOnShell = false;
   if (recoveryFirmwareMode) {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
     activityManager.replaceActivity(
@@ -503,6 +509,7 @@ void setup() {
     activityManager.goToReader(APP_STATE.openEpubPath);
   } else if (resume == BootResume::Silent && snapshotTarget == PocketDaily::Boot::kRebootTargetPocketDaily) {
     activityManager.goToPocketDaily();
+    landsOnShell = true;
   } else if (resume == BootResume::Silent && snapshotTarget == PocketDaily::Boot::kRebootTargetPocketNearbySync) {
     activityManager.goToPocketNearbySync();
   } else if (resume == BootResume::Silent) {
@@ -510,6 +517,7 @@ void setup() {
     // through to the sleep-wake "resume reader" logic, which fires on stale
     // openEpubPath + lastSleepFromReader from a prior session.
     activityManager.goHome();
+    landsOnShell = true;
   } else if (mappedInputManager.isPressed(MappedInputManager::Button::Back)) {
     // The library is always one deliberate held button away, but is no longer
     // the product's default boot identity.
@@ -526,6 +534,19 @@ void setup() {
       activityManager.goHome();
     else
       activityManager.goToPocketDaily();
+  }
+
+  // Consumed on every boot (one-shot). A firmware image the companion
+  // published in the session that just restarted gets the SD updater's
+  // confirmation on top of the shell; validation runs with the radio off.
+  // Nothing is flashed without the reader's explicit Confirm.
+  if (PocketDaily::StagedFirmware::consumeOffer(resume == BootResume::Silent, landsOnShell)) {
+    auto offer = makeUniqueNoThrow<SdFirmwareUpdateActivity>(renderer, mappedInputManager,
+                                                             PocketDaily::StagedFirmware::kPublishPath);
+    if (offer)
+      activityManager.pushActivity(std::move(offer));
+    else
+      LOG_ERR("MAIN", "OOM: staged firmware offer");
   }
 
   if (resume == BootResume::Silent) {

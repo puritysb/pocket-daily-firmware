@@ -3,18 +3,24 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <WiFi.h>
+#include <esp_err.h>
+
+#include <cstdlib>
+#include <cstring>
 
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/HttpDownloader.h"
+#include "network/OtaFailure.h"
 #include "network/OtaUpdater.h"
 
 void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
   if (!success) {
     LOG_ERR("OTA", "WiFi connection failed, exiting");
-    finish();
+    leave();
     return;
   }
 
@@ -26,11 +32,14 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
   }
   requestUpdateAndWait();
 
+  startFreeHeap = ESP.getFreeHeap();
+  startLargestBlock = ESP.getMaxAllocHeap();
   const auto res = updater.checkForUpdate();
   if (res != OtaUpdater::OK) {
     LOG_DBG("OTA", "Update check failed: %d", res);
     {
       RenderLock lock(*this);
+      noteFailure(res, false);
       state = FAILED;
     }
     return;
@@ -49,6 +58,48 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
     RenderLock lock(*this);
     state = WAITING_CONFIRMATION;
   }
+}
+
+static_assert(OtaFailure::kUpdaterHttpError == OtaUpdater::HTTP_ERROR, "OtaFailure mirrors OtaUpdater");
+static_assert(OtaFailure::kUpdaterJsonParseError == OtaUpdater::JSON_PARSE_ERROR, "OtaFailure mirrors OtaUpdater");
+static_assert(OtaFailure::kUpdaterOomError == OtaUpdater::OOM_ERROR, "OtaFailure mirrors OtaUpdater");
+static_assert(OtaFailure::kEspErrNoMem == ESP_ERR_NO_MEM, "OtaFailure mirrors ESP-IDF");
+
+void OtaUpdateActivity::noteFailure(const int updaterError, const bool installing) {
+  const auto kb = [](uint32_t bytes) { return static_cast<unsigned>(bytes / 1024); };
+  const HttpDownloader::Failure http = HttpDownloader::lastFailure();
+  failureKind =
+      static_cast<uint8_t>(OtaFailure::classify(updaterError, http.stage, http.code, http.tlsCode, installing));
+  if (updaterError == OtaUpdater::HTTP_ERROR && http.stage) {
+    int used = 0;
+    if (http.tlsCode != 0)
+      used = snprintf(failureDetail, sizeof(failureDetail), "%s %s tls -0x%X", http.stage, esp_err_to_name(http.code),
+                      static_cast<unsigned>(std::abs(http.tlsCode)));
+    else if (strcmp(http.stage, "open") == 0)
+      used = snprintf(failureDetail, sizeof(failureDetail), "%s %s", http.stage, esp_err_to_name(http.code));
+    else
+      used = snprintf(failureDetail, sizeof(failureDetail), "%s %d", http.stage, http.code);
+    if (used > 0 && static_cast<size_t>(used) < sizeof(failureDetail))
+      snprintf(failureDetail + used, sizeof(failureDetail) - used, " | %u/%uK of %u/%uK", kb(http.freeHeap),
+               kb(http.largestBlock), kb(startFreeHeap), kb(startLargestBlock));
+    return;
+  }
+  snprintf(failureDetail, sizeof(failureDetail), "error %d | heap %u/%uK", updaterError, kb(ESP.getFreeHeap()),
+           kb(ESP.getMaxAllocHeap()));
+}
+
+void OtaUpdateActivity::leave() {
+  if (origin == Origin::PocketDaily) {
+    // Mirror the Pocket Sync exit: never construct Pocket Daily while the STA
+    // stack still fragments the heap; restart straight into it instead.
+    if (WiFi.getMode() != WIFI_MODE_NULL) {
+      WiFi.disconnect(false);
+      delay(30);
+    }
+    silentRestartToPocketDaily();
+    return;  // Returns only when a committed deep sleep supersedes the restart.
+  }
+  finish();
 }
 
 void OtaUpdateActivity::onEnter() {
@@ -132,7 +183,48 @@ void OtaUpdateActivity::render(RenderLock&&) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state == FAILED) {
-    renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATE_FAILED), true, EpdFontFamily::BOLD);
+    // Plain reason first, then what to do; the technical line stays last and
+    // small for support. A reader that cannot hold a TLS session is pointed
+    // to the companion app, which downloads the release and sends it locally.
+    const auto kind = static_cast<OtaFailure::Kind>(failureKind);
+    StrId reason = StrId::STR_UPDATE_FAIL_NETWORK;
+    switch (kind) {
+      case OtaFailure::Kind::Memory:
+        reason = StrId::STR_UPDATE_FAIL_MEMORY;
+        break;
+      case OtaFailure::Kind::Server:
+        reason = StrId::STR_UPDATE_FAIL_SERVER;
+        break;
+      case OtaFailure::Kind::Release:
+        reason = StrId::STR_UPDATE_FAIL_RELEASE;
+        break;
+      case OtaFailure::Kind::Install:
+        reason = StrId::STR_UPDATE_FAIL_INSTALL;
+        break;
+      case OtaFailure::Kind::Network:
+        break;
+    }
+    const int textW = pageWidth - metrics.contentSidePadding * 2;
+    int y = top - height * 2;
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_UPDATE_FAILED), true, EpdFontFamily::BOLD);
+    y += height + metrics.verticalSpacing;
+    renderer.drawCenteredText(UI_10_FONT_ID, y, renderer.truncatedText(UI_10_FONT_ID, I18N.get(reason), textW).c_str());
+    y += height + metrics.verticalSpacing * 2;
+    if (kind == OtaFailure::Kind::Memory) {
+      renderer.drawCenteredText(UI_10_FONT_ID, y,
+                                renderer.truncatedText(UI_10_FONT_ID, tr(STR_UPDATE_USE_APP), textW).c_str());
+      y += height + 2;
+      renderer.drawCenteredText(UI_10_FONT_ID, y,
+                                renderer.truncatedText(UI_10_FONT_ID, tr(STR_UPDATE_USE_APP_STEPS), textW).c_str(),
+                                true, EpdFontFamily::BOLD);
+      y += height + metrics.verticalSpacing * 2;
+    } else if (kind != OtaFailure::Kind::Install) {
+      renderer.drawCenteredText(UI_10_FONT_ID, y,
+                                renderer.truncatedText(UI_10_FONT_ID, tr(STR_UPDATE_TRY_AGAIN), textW).c_str());
+      y += height + metrics.verticalSpacing * 2;
+    }
+    if (failureDetail[0])
+      renderer.drawCenteredText(SMALL_FONT_ID, y, renderer.truncatedText(SMALL_FONT_ID, failureDetail, textW).c_str());
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state == FINISHED) {
@@ -165,6 +257,7 @@ void OtaUpdateActivity::loop() {
         LOG_DBG("OTA", "Update failed: %d", res);
         {
           RenderLock lock(*this);
+          noteFailure(res, true);
           state = FAILED;
         }
         requestUpdate();
@@ -185,7 +278,7 @@ void OtaUpdateActivity::loop() {
     }
 
     if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-      finish();
+      leave();
     }
 
     return;
@@ -193,14 +286,14 @@ void OtaUpdateActivity::loop() {
 
   if (state == FAILED) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-      finish();
+      leave();
     }
     return;
   }
 
   if (state == NO_UPDATE) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-      finish();
+      leave();
     }
     return;
   }

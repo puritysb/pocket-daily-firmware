@@ -74,6 +74,13 @@ jobs:
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-${{ runner.os }}-
 
+      # check_skip_packages keeps packages out of the analysis, but pio check
+      # still runs the toolchain compiler to read its defines. Install the
+      # platform's toolchain first: a platform bump otherwise leaves only the
+      # previous toolchain in the restored cache and the check exits with 127.
+      - name: Install PlatformIO packages
+        run: pio pkg install -e default
+
       - name: Run cppcheck
         run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
 

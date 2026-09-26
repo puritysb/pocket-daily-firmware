@@ -186,6 +186,21 @@ Nearby Sync uses a versioned, interruption-safe bulk API:
   both the `CrossPoint version:` and `PocketNearbySync` product markers. Release
   builds must retain those stable markers. The existing on-device validator and
   explicit user confirmation remain the installation boundary.
+- A verified commit of `/update.bin` arms a one-shot 16-byte marker in
+  RTC_NOINIT memory (size + CRC-32, magic and check word;
+  `src/pocket_daily/staged_firmware.h`, `StagedFirmwareStore`). Every boot
+  consumes it. When the boot is the session's own teardown restart (Nearby
+  Sync returns to Pocket Daily, File Transfer to the Library) and the file is
+  still present at the committed size, the reader pushes the SD updater's
+  confirmation for `/update.bin` on top of that shell: no file picker, the same
+  full image validation (header, segments, checksum, SHA-256) with the radio
+  already off, then "Update firmware?" naming the image's `CrossPoint version:`.
+  Cancel keeps the file and returns to the shell; flashing re-validates and
+  still requires Confirm. The prompt is skipped silently when the staged
+  version equals the running build (for example after a developer flash of the
+  same file). A power-off, crash, recovery or developer-return boot discards
+  the marker, and an `/update.bin` left from an earlier session never prompts;
+  Settings → System → SD Card Firmware Update remains the manual path.
 
 The product hotspot is WPA2 protected and permits one client. Its advertised
 lease is an idle lease: each recognized companion HTTP request and each

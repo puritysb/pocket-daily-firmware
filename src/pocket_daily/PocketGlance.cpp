@@ -251,6 +251,9 @@ bool decodeRecord(const uint8_t* bytes, const size_t size, Snapshot& s) {
     return false;
   }
   for (uint8_t i = 0; i < Glance::EVENT_CAP; ++i) {
+    // Written through the non-const text() overload below; cppcheck resolves
+    // the const overload and misreports this reference as read-only.
+    // cppcheck-suppress constVariableReference
     Event& event = s.glance.events[i];
     if (i >= s.glance.eventCount) {
       if (!payload.zeros(EVENT_BYTES)) {

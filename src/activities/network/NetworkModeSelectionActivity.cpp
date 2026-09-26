@@ -9,6 +9,16 @@
 
 namespace {
 constexpr int MENU_ITEM_COUNT = 3;
+// Pocket Daily Sync menu: the two companion transports, then the release
+// update check (the only Pocket Daily route to it outside Settings).
+constexpr StrId POCKET_ITEMS[MENU_ITEM_COUNT] = {StrId::STR_POCKET_WIFI, StrId::STR_POCKET_DIRECT,
+                                                 StrId::STR_CHECK_UPDATES};
+constexpr StrId POCKET_DESCS[MENU_ITEM_COUNT] = {StrId::STR_POCKET_WIFI_DESC, StrId::STR_POCKET_DIRECT_DESC,
+                                                 StrId::STR_POCKET_UPDATE_DESC};
+constexpr NetworkMode POCKET_MODES[MENU_ITEM_COUNT] = {NetworkMode::JOIN_NETWORK, NetworkMode::CREATE_HOTSPOT,
+                                                       NetworkMode::CHECK_FOR_UPDATES};
+constexpr NetworkMode TRANSFER_MODES[MENU_ITEM_COUNT] = {NetworkMode::JOIN_NETWORK, NetworkMode::CONNECT_CALIBRE,
+                                                         NetworkMode::CREATE_HOTSPOT};
 }  // namespace
 
 void NetworkModeSelectionActivity::onEnter() {
@@ -32,13 +42,8 @@ void NetworkModeSelectionActivity::loop() {
 
   // Handle confirm button - select current option
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    NetworkMode mode = NetworkMode::JOIN_NETWORK;
-    if (selectedIndex == 1) {
-      mode = pocketSync ? NetworkMode::CREATE_HOTSPOT : NetworkMode::CONNECT_CALIBRE;
-    } else if (selectedIndex == 2) {
-      mode = NetworkMode::CREATE_HOTSPOT;
-    }
-    onModeSelected(mode);
+    const int index = selectedIndex >= 0 && selectedIndex < MENU_ITEM_COUNT ? selectedIndex : 0;
+    onModeSelected(pocketSync ? POCKET_MODES[index] : TRANSFER_MODES[index]);
     return;
   }
 
@@ -72,19 +77,13 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
   static constexpr StrId menuDescs[MENU_ITEM_COUNT] = {StrId::STR_JOIN_DESC, StrId::STR_CALIBRE_DESC,
                                                        StrId::STR_HOTSPOT_DESC};
   static constexpr UIIcon menuIcons[MENU_ITEM_COUNT] = {UIIcon::Wifi, UIIcon::Library, UIIcon::Hotspot};
+  static constexpr UIIcon pocketIcons[MENU_ITEM_COUNT] = {UIIcon::Wifi, UIIcon::Hotspot, UIIcon::Settings};
 
   GUI.drawList(
       renderer, Rect{0, contentTop, pageWidth, contentHeight}, itemCount(), selectedIndex,
-      [this](int index) {
-        return std::string(
-            I18N.get(pocketSync ? (index == 0 ? StrId::STR_POCKET_WIFI : StrId::STR_POCKET_DIRECT) : menuItems[index]));
-      },
-      [this](int index) {
-        return std::string(I18N.get(pocketSync
-                                        ? (index == 0 ? StrId::STR_POCKET_WIFI_DESC : StrId::STR_POCKET_DIRECT_DESC)
-                                        : menuDescs[index]));
-      },
-      [this](int index) { return menuIcons[pocketSync && index == 1 ? 2 : index]; });
+      [this](int index) { return std::string(I18N.get(pocketSync ? POCKET_ITEMS[index] : menuItems[index])); },
+      [this](int index) { return std::string(I18N.get(pocketSync ? POCKET_DESCS[index] : menuDescs[index])); },
+      [this](int index) { return pocketSync ? pocketIcons[index] : menuIcons[index]; });
 
   // Draw help text at bottom
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
