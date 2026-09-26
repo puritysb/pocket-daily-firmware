@@ -35,19 +35,43 @@ jobs:
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-${{ runner.os }}-
 
+      # v<version> is the stable release; v<version>-beta.<n> a pre-release for
+      # the companion's beta channel. Anything else, or a version that is not
+      # platformio.ini's, fails before building.
+      - name: Resolve release kind
+        run: |
+          VERSION=$(sed -n 's/^version = //p' platformio.ini | head -1)
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" == "v${VERSION}" ]]; then
+            echo "PIO_ENV=gh_release" >> "$GITHUB_ENV"
+            echo "RELEASE_FLAGS=--latest" >> "$GITHUB_ENV"
+          elif [[ "$TAG" =~ ^v${VERSION//./\\.}-beta\.([0-9]+)$ ]]; then
+            echo "PIO_ENV=gh_release_beta" >> "$GITHUB_ENV"
+            echo "CROSSPOINT_BETA=${BASH_REMATCH[1]}" >> "$GITHUB_ENV"
+            echo "RELEASE_FLAGS=--prerelease --latest=false" >> "$GITHUB_ENV"
+          else
+            echo "Tag $TAG is neither v${VERSION} nor v${VERSION}-beta.<n>" >&2
+            exit 1
+          fi
+
       - name: Build Pocket Daily Firmware
-        run: pio run -e gh_release
+        run: pio run -e "$PIO_ENV"
+
+      - name: Check embedded version matches the tag
+        run: |
+          strings ".pio/build/$PIO_ENV/firmware.bin" | grep -qx "CrossPoint version: ${GITHUB_REF_NAME#v}" \
+            || { echo "firmware.bin does not report ${GITHUB_REF_NAME#v}" >&2; exit 1; }
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v6
         with:
           name: Pocket-Daily-Firmware-${{ github.ref_name }}
           path: |
-            .pio/build/gh_release/bootloader.bin
-            .pio/build/gh_release/firmware.bin
-            .pio/build/gh_release/firmware.elf
-            .pio/build/gh_release/firmware.map
-            .pio/build/gh_release/partitions.bin
+            .pio/build/${{ env.PIO_ENV }}/bootloader.bin
+            .pio/build/${{ env.PIO_ENV }}/firmware.bin
+            .pio/build/${{ env.PIO_ENV }}/firmware.elf
+            .pio/build/${{ env.PIO_ENV }}/firmware.map
+            .pio/build/${{ env.PIO_ENV }}/partitions.bin
             LICENSE
             licenses/NimBLE-Arduino-LICENSE.txt
             licenses/NimBLE-Arduino-NOTICE.txt
@@ -56,16 +80,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # RELEASE_FLAGS holds separate words on purpose.
+          # shellcheck disable=SC2086
           gh release create "${GITHUB_REF_NAME}" \
-            .pio/build/gh_release/bootloader.bin \
-            .pio/build/gh_release/firmware.bin \
-            .pio/build/gh_release/firmware.elf \
-            .pio/build/gh_release/firmware.map \
-            .pio/build/gh_release/partitions.bin \
+            ".pio/build/$PIO_ENV/bootloader.bin" \
+            ".pio/build/$PIO_ENV/firmware.bin" \
+            ".pio/build/$PIO_ENV/firmware.elf" \
+            ".pio/build/$PIO_ENV/firmware.map" \
+            ".pio/build/$PIO_ENV/partitions.bin" \
             LICENSE \
             licenses/NimBLE-Arduino-LICENSE.txt \
             licenses/NimBLE-Arduino-NOTICE.txt \
             --verify-tag \
-            --latest \
+            $RELEASE_FLAGS \
             --generate-notes \
             --title "Pocket Daily Firmware ${GITHUB_REF_NAME}"

@@ -5,6 +5,11 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-26 Beta pre-releases: tag `v<version>-beta.<n>` builds
+  `gh_release_beta` (image reports `<version>-beta.<n>`, checked in the
+  workflow) and publishes a GitHub pre-release, never latest. Debug builds of
+  the app offer it through Update reader (docs/release-checklist.md). Local
+  build of `1.7.0-beta.1` verified by the app's image validator.
 - 2026-09-26 Companion button settings: `/api/pocket/v1/preferences` GET/POST
   add `sideButtonLayout` (0 prev/next, 1 swapped, 2 off) and
   `frontButtonFollowOrientation` (bool or int), whole-body validation and

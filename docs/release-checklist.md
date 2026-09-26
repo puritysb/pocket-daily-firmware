@@ -56,3 +56,16 @@ Evidence/log reference:
 - [ ] GitHub release contains `firmware.bin`, `firmware.elf`, `firmware.map`,
       `bootloader.bin`, `partitions.bin`, and license notices.
 - [ ] `/releases/latest` resolves and the on-device updater parses the release.
+
+## Beta pre-releases (companion beta channel)
+
+Tag `v<version>-beta.<n>` (for example `v1.7.0-beta.1`, where `<version>` is
+`platformio.ini`'s) to publish a GitHub **pre-release**. The release workflow
+builds `gh_release_beta`, checks that `firmware.bin` reports exactly
+`<version>-beta.<n>`, and publishes with `--prerelease --latest=false`, so
+`/releases/latest` (store builds of the app, the reader's own updater) never
+sees it. Development builds of the app list recent releases, pre-releases
+included, and offer the newest one through Update reader. A beta is for
+hardware testing: this checklist still gates the stable tag. Any other tag
+shape fails the workflow before building.
+
