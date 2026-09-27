@@ -33,6 +33,9 @@ int drawForecastGrid(const GfxRenderer& renderer, const PocketDaily::Weather& we
 void drawWeatherPlaceholder(const GfxRenderer& renderer, int x, int y, int width, int height, const char* noWeather,
                             const char* hint);
 void drawPocketSideChevrons(GfxRenderer& renderer, bool isX3);
+// The device's no-art book cover (spine, horizon, hills and trees) inside a
+// frame the caller draws. Pure line drawing: no SD access, no allocation.
+void drawCoverPlaceholder(const GfxRenderer& renderer, int x, int y, int width, int height);
 void drawPocketActionStrip(GfxRenderer& renderer, bool isX3, const FontResolver& fonts, const char* first,
                            const char* second, const char* fourth);
 bool formatWeatherSnapshotDate(char* out, size_t cap, const PocketDaily::Weather& weather);

@@ -3,7 +3,6 @@
 #include <HalStorage.h>
 #include <mbedtls/sha256.h>
 
-#include <cstddef>
 #include <cstdio>
 #include <cstring>
 
@@ -12,53 +11,6 @@
 namespace PocketDaily {
 namespace LearningPack {
 namespace {
-
-constexpr char kMagic[] = {'P', 'D', 'L', 'P'};
-
-uint32_t fnv32(const uint8_t* bytes, size_t length) {
-  uint32_t hash = 2166136261U;
-  for (size_t i = 0; i < length; ++i) {
-    hash ^= bytes[i];
-    hash *= 16777619U;
-  }
-  return hash;
-}
-
-template <size_t N>
-bool terminated(const char (&value)[N]) {
-  return memchr(value, '\0', N) != nullptr;
-}
-
-template <size_t N>
-void terminate(char (&value)[N]) {
-  value[N - 1] = '\0';
-}
-
-bool headerShapeValid(const Header& header, size_t fileSize) {
-  if (memcmp(header.magic, kMagic, sizeof(kMagic)) != 0 || header.formatVersion != FORMAT_VERSION ||
-      header.headerSize != sizeof(Header) || header.recordSize != sizeof(Record) || header.recordCount == 0 ||
-      header.totalBytes != fileSize || header.totalBytes > MAX_PACK_BYTES) {
-    return false;
-  }
-  const uint64_t expected = static_cast<uint64_t>(sizeof(Header)) +
-                            static_cast<uint64_t>(header.recordCount) * static_cast<uint64_t>(sizeof(Record));
-  if (expected != header.totalBytes) return false;
-  if (!terminated(header.packageId) || !terminated(header.locale) || !terminated(header.title) ||
-      !terminated(header.licenseSpdx) || !terminated(header.sourceRevision) || !terminated(header.attribution)) {
-    return false;
-  }
-  // A pack without an explicit licence and attribution must never become
-  // active, even if every byte is otherwise valid.
-  const bool acceptedLicense = strcmp(header.licenseSpdx, "CC0-1.0") == 0 ||
-                               strcmp(header.licenseSpdx, "CC-BY-4.0") == 0 ||
-                               strcmp(header.licenseSpdx, "CC-BY-SA-4.0") == 0;
-  if (strcmp(header.packageId, PACKAGE_ID) != 0 || strcmp(header.locale, "ko-KR") != 0 || !header.title[0] ||
-      !header.sourceRevision[0] || !acceptedLicense || !header.attribution[0]) {
-    return false;
-  }
-  return header.headerFnv32 ==
-         fnv32(reinterpret_cast<const uint8_t*>(&header), offsetof(Header, headerFnv32));
-}
 
 bool payloadHashValid(HalFile& file, const Header& header) {
   if (!file.seekSet(sizeof(Header))) return false;
@@ -111,8 +63,8 @@ bool validate(const char* path, Metadata* metadata) {
   HalFile file = Storage.open(path, O_RDONLY);
   if (!file || file.size() < sizeof(Header) || file.size() > MAX_PACK_BYTES) return false;
   Header header{};
-  if (file.read(&header, sizeof(header)) != static_cast<int>(sizeof(header)) ||
-      !headerShapeValid(header, file.size()) || !payloadHashValid(file, header)) {
+  if (file.read(&header, sizeof(header)) != static_cast<int>(sizeof(header)) || !headerValid(header, file.size()) ||
+      !payloadHashValid(file, header)) {
     AgentLog::line("LEARN", "pack rejected: %s", path);
     return false;
   }
@@ -153,30 +105,6 @@ bool install(const char* candidatePath, Metadata* metadata) {
   AgentLog::line("LEARN", "pack installed: %s v%lu records=%lu", installed.packageId,
                  (unsigned long)installed.contentVersion, (unsigned long)installed.recordCount);
   return true;
-}
-
-bool readRecord(uint32_t index, Record& record) {
-  memset(&record, 0, sizeof(record));
-  HalFile file = Storage.open(PACK_PATH, O_RDONLY);
-  if (!file) return false;
-  Header header{};
-  if (file.read(&header, sizeof(header)) != static_cast<int>(sizeof(header)) ||
-      !headerShapeValid(header, file.size()) || index >= header.recordCount) {
-    return false;
-  }
-  const uint32_t offset = sizeof(Header) + index * sizeof(Record);
-  if (!file.seekSet(offset) || file.read(&record, sizeof(record)) != static_cast<int>(sizeof(record))) return false;
-  terminate(record.glyph);
-  terminate(record.onReading);
-  terminate(record.kunReading);
-  terminate(record.meaningKo);
-  terminate(record.meaningEn);
-  terminate(record.primaryWord);
-  terminate(record.wordReading);
-  terminate(record.wordMeaningKo);
-  terminate(record.example);
-  terminate(record.exampleMeaningKo);
-  return record.itemId != 0 && record.glyph[0] != '\0';
 }
 
 }  // namespace LearningPack

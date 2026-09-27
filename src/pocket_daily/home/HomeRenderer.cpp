@@ -44,6 +44,36 @@ int homeRowSources(const DailyProfile::Profile& profile, const RowAvailability& 
   return n;
 }
 
+const char* cardRowTitle(const PocketDaily::Card& card) { return card.title[0] ? card.title : "POCKET"; }
+
+// Moved from PocketDailyActivity::collectOverview so the Sync screen presenter
+// composes the same Home row text.
+void cardRowActivity(const PocketDaily::Card& card, char* activity, const size_t activityCap) {
+  if (!activity || activityCap == 0) return;
+  strncpy(activity, card.question, activityCap - 1);
+  activity[activityCap - 1] = '\0';
+  // The local SD lesson is a recall prompt on Home: show only the target
+  // glyph there. Opening it reveals the word, reading, meaning and example.
+  // The companion's cards keep their text + context overview summary.
+  if (strcmp(card.module, "local") != 0 && card.context[0] && strcmp(activity, card.context) != 0) {
+    const size_t used = strlen(activity);
+    const size_t extra = (used ? 3 : 0) + strlen(card.context);
+    // Keep UTF-8 intact; the detail view still carries the complete context
+    // if the compact home row cannot fit it.
+    if (used + extra < activityCap)
+      snprintf(activity + used, activityCap - used, "%s%s", used ? " - " : "", card.context);
+  }
+}
+
+void briefWeatherLabel(char* out, const size_t cap, const PocketDaily::Weather& weather, const char* fallback,
+                       const bool stale) {
+  if (!out || cap == 0) return;
+  snprintf(out, cap, "%s", weather.place[0] ? weather.place : fallback);
+  char snapshotDate[8] = {0};
+  if (HomeDraw::formatWeatherSnapshotDate(snapshotDate, sizeof(snapshotDate), weather))
+    snprintf(out + strlen(out), cap - strlen(out), " \xC2\xB7 %s%s", snapshotDate, stale ? " SAVED" : "");
+}
+
 void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   const auto& m = env.metrics;
   const auto& s = view.strings;
@@ -470,12 +500,8 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
     // A section that cannot fit its header and the temperature poster is
     // skipped rather than drawn over the status line.
     if (!g.weather.valid || y + line12 + 58 >= maxY) return y;
-    char weatherLabel[56] = {0};
-    snprintf(weatherLabel, sizeof(weatherLabel), "%s", g.weather.place[0] ? g.weather.place : s.weather);
-    char snapshotDate[8] = {0};
-    if (formatWeatherSnapshotDate(snapshotDate, sizeof(snapshotDate), g.weather))
-      snprintf(weatherLabel + strlen(weatherLabel), sizeof(weatherLabel) - strlen(weatherLabel), " \xC2\xB7 %s%s",
-               snapshotDate, view.snapshotStale ? " SAVED" : "");
+    char weatherLabel[BRIEF_WEATHER_LABEL_BYTES] = {0};
+    briefWeatherLabel(weatherLabel, sizeof(weatherLabel), g.weather, s.weather, view.snapshotStale);
     y = sectionHeader(x, y, cw, weatherLabel);
     // The retained frame uses the same poster + grid so a woken device and a
     // powered-off one do not look like two different products.

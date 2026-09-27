@@ -2,7 +2,6 @@
 
 #include <Bitmap.h>
 #include <EpdFontFamily.h>
-#include <FsHelpers.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <I18n.h>
@@ -23,11 +22,11 @@
 #include "components/UITheme.h"  // GUI (theme) + ThemeMetrics + Rect
 #include "fontIds.h"
 #include "pocket_daily/ContentActiveStore.h"
-#include "pocket_daily/ContentImageRenderer.h"
 #include "pocket_daily/PocketGlanceStore.h"
 #include "pocket_daily/PocketProfileStore.h"
-#include "pocket_daily/home/GlanceFormat.h"
+#include "pocket_daily/home/DailyWord.h"
 #include "pocket_daily/home/HomeDrawing.h"
+#include "pocket_daily/home/HomeInputs.h"
 #include "pocket_daily/home/HomeRenderer.h"
 #include "pocket_daily/learning_pack.h"
 #include "util/PowerWakeCue.h"
@@ -87,38 +86,6 @@ bool hasCJK(const char* s) {
   return false;
 }
 
-struct JapaneseDailyWord {
-  const char* word;
-  const char* reading;
-  const char* meaning;
-  const char* example;
-};
-
-// Compact, device-owned starter deck. These are intentionally common words
-// with short examples: one 12px NotoSansJP line can carry each entry on X3,
-// and no network, account or host process is required to make Study useful.
-constexpr JapaneseDailyWord kJapaneseDailyWords[] = {
-    {"習慣", "しゅうかん", "habit", "毎日、本を読む習慣をつける。"},
-    {"続ける", "つづける", "continue", "日本語の勉強を毎日続ける。"},
-    {"気づく", "きづく", "notice", "小さな変化に気づいた。"},
-    {"選ぶ", "えらぶ", "choose", "好きな本を一冊選ぶ。"},
-    {"確かめる", "たしかめる", "check", "答えをもう一度確かめる。"},
-    {"間に合う", "まにあう", "be in time", "電車に間に合った。"},
-    {"楽しみ", "たのしみ", "look forward to", "旅行を楽しみにしている。"},
-    {"振り返る", "ふりかえる", "reflect", "一日を静かに振り返る。"},
-    {"身につける", "みにつける", "acquire", "新しい表現を身につける。"},
-    {"試す", "ためす", "try", "別の方法を試してみる。"},
-    {"集中", "しゅうちゅう", "focus", "読書に集中する。"},
-    {"調べる", "しらべる", "look up", "知らない言葉を調べる。"},
-    {"伝える", "つたえる", "convey", "自分の考えを伝える。"},
-    {"比べる", "くらべる", "compare", "二つの表現を比べる。"},
-    {"慣れる", "なれる", "get used to", "新しい環境に慣れる。"},
-    {"工夫", "くふう", "devise", "時間の使い方を工夫する。"},
-};
-
-constexpr size_t kJapaneseDailyWordCount = sizeof(kJapaneseDailyWords) / sizeof(kJapaneseDailyWords[0]);
-
-bool clockIsSet(const time_t now) { return now >= static_cast<time_t>(PocketDaily::AppGlance::MIN_EPOCH); }
 }  // namespace
 
 void PocketDailyActivity::onEnter() {
@@ -235,20 +202,9 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
     OverviewRow& o = out[n++];
     memset(&o, 0, sizeof(o));
     cp(o.sid, sizeof(o.sid), card.cardId);
-    cp(o.project, sizeof(o.project), card.title[0] ? card.title : "POCKET");
-    cp(o.activity, sizeof(o.activity), card.question);
-    // The local SD lesson is a recall prompt on Home: show only the target
-    // glyph there. Opening it reveals the word, reading, meaning and example
-    // through renderPocketCard(). The companion's cards keep their text +
-    // context overview summary.
-    if (strcmp(card.module, "local") != 0 && card.context[0] && strcmp(o.activity, card.context) != 0) {
-      const size_t used = strlen(o.activity);
-      const size_t extra = (used ? 3 : 0) + strlen(card.context);
-      // Keep UTF-8 intact; the detail view still carries the complete context
-      // if the compact home row cannot fit it.
-      if (used + extra < sizeof(o.activity))
-        snprintf(o.activity + used, sizeof(o.activity) - used, "%s%s", used ? " - " : "", card.context);
-    }
+    // Shared with the Sync screen presenter (pocket_daily/home/HomeRenderer).
+    cp(o.project, sizeof(o.project), PocketDaily::Home::cardRowTitle(card));
+    PocketDaily::Home::cardRowActivity(card, o.activity, sizeof(o.activity));
     o.pocket = true;
   };
 
@@ -321,22 +277,15 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
 }
 
 uint32_t PocketDailyActivity::studyEpoch() const {
-  const time_t now = time(nullptr);
-  if (clockIsSet(now)) return static_cast<uint32_t>(now);
-  // The companion's compose time is a lower bound on the real date. The POST
-  // handler sets an unset clock from it; this covers a boot since then.
-  return glanceSnapshot.savedEpoch;
+  return PocketDaily::Home::dailyWordEpoch(time(nullptr), glanceSnapshot.savedEpoch);
 }
 
 void PocketDailyActivity::buildLocalStudyCard() {
   // The daily word turns over at the companion's local midnight when a glance
-  // carried its UTC offset, else at UTC midnight.
-  const uint32_t epoch = studyEpoch();
-  const int64_t localEpoch = epoch ? static_cast<int64_t>(epoch) + glanceSnapshot.utcOffsetMinutes * 60 : 0;
-  const uint32_t day = localEpoch > 0 ? static_cast<uint32_t>(localEpoch / 86400) : 0;
+  // carried its UTC offset, else at UTC midnight (shared with the Sync screen
+  // presenter: pocket_daily/home/DailyWord).
+  const uint32_t day = PocketDaily::Home::dailyWordDay(studyEpoch(), glanceSnapshot.utcOffsetMinutes);
   PocketDaily::Card card{};
-  snprintf(card.module, sizeof(card.module), "local");
-  snprintf(card.actionClass, sizeof(card.actionClass), "day");
   size_t index = 0;
   bool fromPack = false;
   PocketDaily::LearningPack::Record lesson{};
@@ -351,32 +300,11 @@ void PocketDailyActivity::buildLocalStudyCard() {
     index = (static_cast<size_t>(day) + localStudyOffset) % localStudyPackRecordCount;
     if (PocketDaily::LearningPack::readRecord(static_cast<uint32_t>(index), lesson)) {
       fromPack = true;
-      snprintf(card.cardId, sizeof(card.cardId), "local:jp:%lu:%08lx", (unsigned long)localStudyPackVersion,
-               (unsigned long)lesson.itemId);
-      snprintf(card.title, sizeof(card.title), "今日の漢字");
-      snprintf(card.question, sizeof(card.question), "%s", lesson.glyph);
-      // Use the compact English gloss on the shared card renderer. The pack
-      // retains the richer Korean fields for the dedicated study activity,
-      // whose combined JP/KR font is distributed beside the SD content.
-      snprintf(card.context, sizeof(card.context), "%s（%s） · %s · %s", lesson.primaryWord, lesson.wordReading,
-               lesson.meaningEn, lesson.example);
+      PocketDaily::Home::packDailyWord(lesson, localStudyPackVersion, card);
     }
   }
-  if (!fromPack) {
-    index = (static_cast<size_t>(day) + localStudyOffset) % kJapaneseDailyWordCount;
-    const auto& word = kJapaneseDailyWords[index];
-    snprintf(card.cardId, sizeof(card.cardId), "local:jp:%lu:%u", (unsigned long)day, (unsigned)localStudyOffset);
-    snprintf(card.title, sizeof(card.title), "今日の単語");
-    snprintf(card.question, sizeof(card.question), "%s（%s）", word.word, word.reading);
-    snprintf(card.context, sizeof(card.context), "%s · %s", word.meaning, word.example);
-  }
-  const char* ids[] = {"review", "next", "known"};
-  const char* labels[] = {"Again", "Next", "Known"};
-  card.choiceCount = 3;
-  for (uint8_t i = 0; i < card.choiceCount; i++) {
-    snprintf(card.choices[i].id, sizeof(card.choices[i].id), "%s", ids[i]);
-    snprintf(card.choices[i].label, sizeof(card.choices[i].label), "%s", labels[i]);
-  }
+  if (!fromPack) index = PocketDaily::Home::builtInDailyWord(day, localStudyOffset, card);
+  PocketDaily::Home::finishDailyWord(card);
 
   {
     RenderLock studyLock(*this);
@@ -503,17 +431,8 @@ int PocketDailyActivity::fontForText(int uiFontId, const char* text) const {
 
 void PocketDailyActivity::preparePersonalSnapshot() {
   // A glance saved on an earlier local day drops that day's schedule and past
-  // forecast days (docs/pocket-glance-v1.md). Needs a set clock; the app's UTC
-  // offset gives the local date without a timezone database.
-  const time_t now = time(nullptr);
-  if (glanceSnapshot.savedEpoch && clockIsSet(now)) {
-    char savedIso[11];
-    char todayIso[11];
-    if (PocketDaily::GlanceFormat::formatLocalIsoDate(savedIso, sizeof(savedIso), glanceSnapshot.savedEpoch,
-                                                      glanceSnapshot.utcOffsetMinutes) &&
-        PocketDaily::GlanceFormat::formatLocalIsoDate(todayIso, sizeof(todayIso), now, glanceSnapshot.utcOffsetMinutes))
-      PocketDaily::GlanceFormat::rollToLocalDay(glanceSnapshot.glance, savedIso, todayIso);
-  }
+  // forecast days (shared with the Sync screen presenter).
+  PocketDaily::Home::rollGlanceToToday(glanceSnapshot, time(nullptr));
 
   memset(&renderPocketSnapshot, 0, sizeof(renderPocketSnapshot));
   if (const auto* appCards = appContent.cards(); appCards && appCards->count)
@@ -521,47 +440,22 @@ void PocketDailyActivity::preparePersonalSnapshot() {
   else if (localStudyCard.cardId[0])
     renderPocketSnapshot = localStudyCard;
 
+  // Title, author and percent are shared with the Sync screen presenter
+  // (pocket_daily/home/HomeInputs); only the cover path is Pocket's own.
   renderReadingSnapshot.clear();
-  if (APP_STATE.openEpubPath.empty()) return;
-
-  renderReadingSnapshot.valid = true;
-  for (const auto& book : RECENT_BOOKS.getBooks()) {
-    if (book.path != APP_STATE.openEpubPath) continue;
-    snprintf(renderReadingSnapshot.title, sizeof(renderReadingSnapshot.title), "%s", book.title.c_str());
-    snprintf(renderReadingSnapshot.author, sizeof(renderReadingSnapshot.author), "%s", book.author.c_str());
-    if (!book.coverBmpPath.empty()) {
-      // Pocket's editorial hero needs the full retained cover. The previous
-      // code always selected Home's small thumbnail; drawBitmap deliberately
-      // does not upscale, so additional layout space could never enlarge it.
-      std::string fullPath = book.coverBmpPath;
-      const size_t thumb = fullPath.rfind("/thumb_");
-      if (thumb != std::string::npos) fullPath.replace(thumb, std::string::npos, "/cover.bmp");
-      const std::string thumbPath =
-          UITheme::getCoverThumbPath(book.coverBmpPath, UITheme::getInstance().getMetrics().homeCoverHeight);
-      const std::string& displayPath = Storage.exists(fullPath.c_str()) ? fullPath : thumbPath;
-      snprintf(renderReadingSnapshot.coverBmpPath, sizeof(renderReadingSnapshot.coverBmpPath), "%s",
-               displayPath.c_str());
-    }
-    break;
+  const RecentBook* book = PocketDaily::Home::readOpenBook(renderReadingSnapshot);
+  if (book && !book->coverBmpPath.empty()) {
+    // Pocket's editorial hero needs the full retained cover. The previous
+    // code always selected Home's small thumbnail; drawBitmap deliberately
+    // does not upscale, so additional layout space could never enlarge it.
+    std::string fullPath = book->coverBmpPath;
+    const size_t thumb = fullPath.rfind("/thumb_");
+    if (thumb != std::string::npos) fullPath.replace(thumb, std::string::npos, "/cover.bmp");
+    const std::string thumbPath =
+        UITheme::getCoverThumbPath(book->coverBmpPath, UITheme::getInstance().getMetrics().homeCoverHeight);
+    const std::string& displayPath = Storage.exists(fullPath.c_str()) ? fullPath : thumbPath;
+    snprintf(renderReadingSnapshot.coverBmpPath, sizeof(renderReadingSnapshot.coverBmpPath), "%s", displayPath.c_str());
   }
-  if (!renderReadingSnapshot.title[0]) {
-    const char* path = APP_STATE.openEpubPath.c_str();
-    const char* slash = strrchr(path, '/');
-    snprintf(renderReadingSnapshot.title, sizeof(renderReadingSnapshot.title), "%s", slash ? slash + 1 : path);
-  }
-
-  // The seventh progress byte is a backwards-compatible whole-book percent.
-  // Read it once per paint through HalStorage; older six-byte files simply keep
-  // percent=-1 and still resume at their exact local spine/page position.
-  if (!FsHelpers::hasEpubExtension(APP_STATE.openEpubPath)) return;
-  char progressPath[64];
-  snprintf(progressPath, sizeof(progressPath), "/.crosspoint/epub_%u/progress.bin",
-           (unsigned)std::hash<std::string>{}(APP_STATE.openEpubPath));
-  HalFile progressFile;
-  if (!Storage.openFileForRead("POCKET", progressPath, progressFile)) return;
-  uint8_t progressData[7];
-  if (progressFile.read(progressData, sizeof(progressData)) == (int)sizeof(progressData) && progressData[6] <= 100)
-    renderReadingSnapshot.percent = (int8_t)progressData[6];
 }
 
 bool PocketDailyActivity::drawReadingCover(int x, int y, int width, int height) const {
@@ -586,21 +480,7 @@ bool PocketDailyActivity::drawReadingCover(int x, int y, int width, int height) 
   }
 
   renderer.drawRect(x, y, width, height, 2, true);
-  if (!coverDrawn) {
-    // Private/no-art fallback: still reads as a book, but never invents a
-    // remote cover or leaks title text when sleep-cover privacy is disabled.
-    renderer.drawLine(x + 8, y, x + 8, y + height, true);
-    const int horizon = y + height * 61 / 100;
-    renderer.drawLine(x + 10, horizon, x + width - 2, horizon, true);
-    const int mountainX[] = {x + 10, x + width / 3, x + width / 2, x + width * 3 / 4, x + width - 2};
-    const int mountainY[] = {horizon, y + height * 41 / 100, horizon - 4, y + height * 31 / 100, horizon};
-    for (int i = 0; i < 4; i++) renderer.drawLine(mountainX[i], mountainY[i], mountainX[i + 1], mountainY[i + 1], true);
-    for (int i = 0; i < 4; i++) {
-      const int tx = x + 18 + i * std::max(8, (width - 32) / 4);
-      renderer.drawLine(tx, y + height - 8, tx + 5, horizon - 2, 2, true);
-      renderer.drawLine(tx + 10, y + height - 8, tx + 5, horizon - 2, 2, true);
-    }
-  }
+  if (!coverDrawn) PocketDaily::HomeDraw::drawCoverPlaceholder(renderer, x, y, width, height);
   return coverDrawn;
 }
 
@@ -612,31 +492,11 @@ void PocketDailyActivity::drawBrandedHeader(const char* title, const char* subti
   GUI.drawHeader(renderer, r, title, subtitle);
 }
 
-PocketDaily::Home::Strings PocketDailyActivity::homeStrings() {
-  PocketDaily::Home::Strings s;
-  s.pocketDaily = tr(STR_POCKET_DAILY);
-  s.continueReading = tr(STR_POCKET_CONTINUE_READING);
-  s.noOpenBook = tr(STR_NO_OPEN_BOOK);
-  s.startReading = tr(STR_START_READING);
-  s.study = tr(STR_POCKET_STUDY);
-  s.myCards = tr(STR_POCKET_MY_CARDS);
-  s.word = tr(STR_POCKET_DAILY_WORD);
-  s.empty = tr(STR_POCKET_EMPTY);
-  s.weather = tr(STR_POCKET_WEATHER);
-  s.noWeather = tr(STR_POCKET_NO_WEATHER);
-  s.weatherHint = tr(STR_POCKET_WEATHER_HINT);
-  s.nextEvent = tr(STR_POCKET_NEXT_EVENT);
-  s.today = tr(STR_POCKET_TODAY);
-  s.library = tr(STR_POCKET_LIBRARY);
-  s.select = tr(STR_SELECT);
-  s.sync = tr(STR_POCKET_SYNC);
-  return s;
-}
+PocketDaily::Home::Strings PocketDailyActivity::homeStrings() { return PocketDaily::Home::deviceStrings(); }
 
 PocketDaily::Home::Env PocketDailyActivity::homeEnv() const {
-  const auto& m = UITheme::getInstance().getMetrics();
   PocketDaily::Home::Env env;
-  env.metrics = {m.topPadding, m.headerHeight, m.verticalSpacing, m.contentSidePadding, m.sideButtonHintsWidth};
+  env.metrics = PocketDaily::Home::deviceMetrics();
   env.text = {const_cast<PocketDailyActivity*>(this),
               [](void* self, const char* text, int fallback, EpdFontFamily::Style) {
                 return static_cast<PocketDailyActivity*>(self)->fontForText(fallback, text);
@@ -681,28 +541,7 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n) {
 }
 
 int PocketDailyActivity::drawAppCardImage(const char* cardId, int x, int y, int width, int height) const {
-  const auto* appCards = appContent.cards();
-  if (!appCards || !appContent.revision()[0] || width <= 0 || height <= 0) return 0;
-  for (uint8_t i = 0; i < appCards->count; ++i) {
-    const auto& card = appCards->cards[i];
-    if (!card.imagePath[0] || strcmp(card.card.cardId, cardId) != 0) continue;
-    char path[160];
-    snprintf(path, sizeof(path), "%s/%s/%s", PocketDaily::Content::CONTENT_ROOT, appContent.revision(), card.imagePath);
-    HalFile file = Storage.open(path, O_RDONLY);
-    if (!file) {
-      LOG_ERR("CONTENT", "Card image unavailable");
-      return 0;
-    }
-    const PocketDaily::Content::ManifestSource source{
-        &file, file.size(), [](void* context, size_t offset, uint8_t* bytes, size_t count) {
-          HalSystem::feedWatchdogIfRegistered();
-          auto& file = *static_cast<HalFile*>(context);
-          return file.seek(offset) && file.read(bytes, count) == static_cast<int>(count);
-        }};
-    const int drawn = PocketDaily::Content::contentImageHeight(renderer, source, x, y, width, height);
-    return drawn > 0 && GUI.drawContentImage(renderer, source, x, y, width, height) ? drawn : 0;
-  }
-  return 0;
+  return PocketDaily::Home::drawContentCardImage(renderer, appContent, cardId, x, y, width, height);
 }
 
 void PocketDailyActivity::renderPocketCard(const PocketDaily::Card& card) {

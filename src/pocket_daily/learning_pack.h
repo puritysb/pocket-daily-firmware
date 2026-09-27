@@ -19,13 +19,13 @@ inline constexpr uint32_t MAX_PACK_BYTES = 16U * 1024U * 1024U;
 // direct-indexed array of fixed records, so the no-PSRAM C3 reads one lesson at
 // a time instead of parsing or retaining a multi-megabyte JSON document.
 struct Header {
-  char magic[4];              // "PDLP"
-  uint16_t formatVersion;     // FORMAT_VERSION
-  uint16_t headerSize;        // sizeof(Header)
-  uint16_t recordSize;        // sizeof(Record)
+  char magic[4];           // "PDLP"
+  uint16_t formatVersion;  // FORMAT_VERSION
+  uint16_t headerSize;     // sizeof(Header)
+  uint16_t recordSize;     // sizeof(Record)
   uint16_t flags;
   uint32_t recordCount;
-  uint32_t contentVersion;    // monotonically increasing pack revision
+  uint32_t contentVersion;  // monotonically increasing pack revision
   uint32_t totalBytes;
   char packageId[32];
   char locale[16];
@@ -34,7 +34,7 @@ struct Header {
   char sourceRevision[40];
   char attribution[160];
   uint8_t payloadSha256[32];
-  uint32_t headerFnv32;       // FNV-1a of all preceding header bytes
+  uint32_t headerFnv32;  // FNV-1a of all preceding header bytes
 };
 
 struct Record {
@@ -84,6 +84,16 @@ bool install(const char* candidatePath, Metadata* metadata = nullptr);
 
 // Random access to one lesson. The returned record is defensively terminated.
 bool readRecord(uint32_t index, Record& record);
+
+// Header shape, licensing metadata and header checksum for a file of
+// `fileSize` bytes. Does not check the payload SHA-256 (see validate()).
+bool headerValid(const Header& header, size_t fileSize);
+
+// Light read for a single paint: one open of PACK_PATH, headerValid (not the
+// whole-pack SHA-256), then the record at `ordinal % recordCount`. `header`
+// and `record` are caller scratch (1316 B; keep them off small task stacks).
+// False when the pack is missing, malformed or unreadable.
+bool readDayRecord(uint32_t ordinal, Header& header, Record& record);
 
 }  // namespace LearningPack
 }  // namespace PocketDaily

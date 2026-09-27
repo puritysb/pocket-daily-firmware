@@ -434,6 +434,22 @@ void drawPocketSideChevrons(GfxRenderer& renderer, const bool isX3) {
   renderer.setOrientation(original);
 }
 
+void drawCoverPlaceholder(const GfxRenderer& renderer, const int x, const int y, const int width, const int height) {
+  // Private/no-art fallback: still reads as a book, but never invents a
+  // remote cover or leaks title text when sleep-cover privacy is disabled.
+  renderer.drawLine(x + 8, y, x + 8, y + height, true);
+  const int horizon = y + height * 61 / 100;
+  renderer.drawLine(x + 10, horizon, x + width - 2, horizon, true);
+  const int mountainX[] = {x + 10, x + width / 3, x + width / 2, x + width * 3 / 4, x + width - 2};
+  const int mountainY[] = {horizon, y + height * 41 / 100, horizon - 4, y + height * 31 / 100, horizon};
+  for (int i = 0; i < 4; i++) renderer.drawLine(mountainX[i], mountainY[i], mountainX[i + 1], mountainY[i + 1], true);
+  for (int i = 0; i < 4; i++) {
+    const int tx = x + 18 + i * std::max(8, (width - 32) / 4);
+    renderer.drawLine(tx, y + height - 8, tx + 5, horizon - 2, 2, true);
+    renderer.drawLine(tx + 10, y + height - 8, tx + 5, horizon - 2, 2, true);
+  }
+}
+
 bool formatWeatherSnapshotDate(char* out, size_t cap, const PocketDaily::Weather& weather) {
   if (!out || cap == 0) return false;
   out[0] = '\0';

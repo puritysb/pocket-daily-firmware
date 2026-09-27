@@ -105,6 +105,7 @@ class HalFile {
     if (FakeSD::afterRead) FakeSD::afterRead(*bytes, offset, length);
     return static_cast<int>(length);
   }
+  bool seekSet(size_t offset) { return seek(offset); }
   bool seekCur(size_t count) {
     if (!bytes || count > bytes->size() - position) return false;
     return seek(position + count);

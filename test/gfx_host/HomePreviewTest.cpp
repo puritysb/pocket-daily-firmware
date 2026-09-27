@@ -248,6 +248,52 @@ TEST(HomeRowSources, FollowProfileOrderAndSkipItemsWithoutContent) {
   EXPECT_EQ(out[1], RowSource::AppCards);
 }
 
+// Home row text and the Brief weather label, shared by PocketDailyActivity and
+// the Sync screen presenter (docs/pocket-screen-present-v1.md).
+TEST(HomeRowText, CardSummaryFollowsTheReaderRules) {
+  PocketDaily::Card card{};
+  std::strcpy(card.question, "Chapter three");
+  std::strcpy(card.context, "before dinner");
+  char activity[192];
+  PocketDaily::Home::cardRowActivity(card, activity, sizeof(activity));
+  EXPECT_STREQ(activity, "Chapter three - before dinner");
+  EXPECT_STREQ(PocketDaily::Home::cardRowTitle(card), "POCKET");
+  std::strcpy(card.title, "Goal");
+  EXPECT_STREQ(PocketDaily::Home::cardRowTitle(card), "Goal");
+  // The daily word shows only its prompt; a context equal to the question or
+  // one that does not fit is left for the detail view.
+  std::strcpy(card.module, "local");
+  PocketDaily::Home::cardRowActivity(card, activity, sizeof(activity));
+  EXPECT_STREQ(activity, "Chapter three");
+  std::strcpy(card.module, "app");
+  std::strcpy(card.context, "Chapter three");
+  PocketDaily::Home::cardRowActivity(card, activity, sizeof(activity));
+  EXPECT_STREQ(activity, "Chapter three");
+  std::strcpy(card.context, "abcdefghijklmnop");
+  char small[30];
+  PocketDaily::Home::cardRowActivity(card, small, sizeof(small));
+  EXPECT_STREQ(small, "Chapter three");
+  card.question[0] = '\0';
+  PocketDaily::Home::cardRowActivity(card, small, sizeof(small));
+  EXPECT_STREQ(small, "abcdefghijklmnop");
+}
+
+TEST(HomeRowText, BriefWeatherLabelCarriesPlaceDateAndSavedMark) {
+  PocketDaily::Weather weather{};
+  std::strcpy(weather.days[0].date, "2026-09-26");
+  weather.dayCount = 1;
+  char label[PocketDaily::Home::BRIEF_WEATHER_LABEL_BYTES];
+  PocketDaily::Home::briefWeatherLabel(label, sizeof(label), weather, "Weather", false);
+  EXPECT_STREQ(label, "Weather \xC2\xB7 09.26");
+  std::strcpy(weather.place, "서울");
+  PocketDaily::Home::briefWeatherLabel(label, sizeof(label), weather, "Weather", true);
+  EXPECT_STREQ(label, "서울 \xC2\xB7 09.26 SAVED");
+  weather.dayCount = 0;
+  weather.tomorrow.date[0] = '\0';
+  PocketDaily::Home::briefWeatherLabel(label, sizeof(label), weather, "Weather", true);
+  EXPECT_STREQ(label, "서울");
+}
+
 TEST_P(HomePreview, MyCardsReplaceTheSampleAndShowTheirImage) {
   auto p = defaults();
   p.home_items[0] = 2;  // My cards first, so the first page is the card

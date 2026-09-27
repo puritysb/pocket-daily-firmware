@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "pocket_daily/PocketProfile.h"
@@ -30,6 +31,19 @@ struct RowAvailability {
 // and fallback rules cannot drift between them. Returns the source count.
 int homeRowSources(const DailyProfile::Profile& profile, const RowAvailability& available,
                    RowSource (&out)[DailyProfile::HOME_ITEM_CAP]);
+
+// Home row text for one card, as the device composes it: the card title (or
+// "POCKET"), and its question followed by " - " and its context when the card
+// is not the firmware daily word (module "local"), the context differs from the
+// question and the whole fits `activityCap` bytes (UTF-8 is never cut).
+const char* cardRowTitle(const PocketDaily::Card& card);
+void cardRowActivity(const PocketDaily::Card& card, char* activity, size_t activityCap);
+
+// The Daily Brief's weather section label: the place (else `fallback`), then
+// " · MM.DD" and " SAVED" when the snapshot is stale. Shared with the Sync
+// screen presenter, which checks the label's font coverage before drawing.
+inline constexpr size_t BRIEF_WEATHER_LABEL_BYTES = 56;
+void briefWeatherLabel(char* out, size_t cap, const PocketDaily::Weather& weather, const char* fallback, bool stale);
 
 struct Row {
   bool reading = false;

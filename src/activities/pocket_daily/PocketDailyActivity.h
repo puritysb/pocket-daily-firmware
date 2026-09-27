@@ -15,6 +15,7 @@
 #include "activities/Activity.h"
 #include "pocket_daily/ContentViewState.h"
 #include "pocket_daily/PocketGlance.h"
+#include "pocket_daily/home/HomeInputs.h"
 #include "pocket_daily/home/HomeRenderer.h"
 #include "pocket_daily/models.h"
 
@@ -47,7 +48,7 @@ class PocketDailyActivity final : public Activity {
 
   // Local reading + three card slots. The profile orders these sources; a
   // later source is dropped when full.
-  static constexpr int kOverviewCap = 1 + PocketDaily::CARD_CAP;
+  static constexpr int kOverviewCap = PocketDaily::Home::ROW_CAP;
   // Scratch lives in the heap-allocated Activity object, not either task stack.
   // Separate render/loop copies prevent cross-task races.
   OverviewRow renderRows[kOverviewCap] = {};
@@ -72,18 +73,15 @@ class PocketDailyActivity final : public Activity {
   uint16_t localStudyOffset = 0;
   uint32_t localStudyPackVersion = 0;
   uint32_t localStudyPackRecordCount = 0;
-  struct ReadingSummary {
-    char title[96];
-    char author[80];
+  // Title, author and percent (shared with the Sync screen presenter).
+  struct ReadingSummary : PocketDaily::Home::OpenBook {
     // Resolved SD thumbnail path for the currently-open book. Keeping it in
     // the render snapshot lets Pocket paint the real cached cover without
     // loading/parsing the EPUB or allocating a second RecentBook vector.
     char coverBmpPath[160];
-    int8_t percent;
-    bool valid;
     void clear() {
-      memset(this, 0, sizeof(*this));
-      percent = -1;
+      OpenBook::clear();
+      coverBmpPath[0] = '\0';
     }
   } renderReadingSnapshot{};
 
