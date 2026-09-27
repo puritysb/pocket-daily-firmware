@@ -26,7 +26,10 @@ transcript. Current source and release records override dated observations.
   chapters 7.8-9.6 s. Then: line-break gaps measured once, 2 KB write-behind
   buffer for section files (59k -> 83 write calls per 100 KB), layout behind
   on a chapter's first pages, cancellable backward-turn landing. Host layout
-  5.95 -> 3.39 ms per 100 KB, section files identical. Not yet on X3.
+  5.95 -> 3.39 ms per 100 KB, section files identical. bc158e02 on X3
+  (2026-09-28): a backward turn into the previous large chapter adopted the
+  layout-behind section (flag 85, section 3 ms), turns ~1.3 s with AA, min
+  free 41 KB / largest 34 KB, no lastBuildError; user reports much faster.
 
 - 2026-09-28 Page-turn telemetry and speed-ups (docs/reader-perf.md). The reader
   records each turn's stages (input, section, page, prewarm, BW render, status,
