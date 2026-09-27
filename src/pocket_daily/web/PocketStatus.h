@@ -28,6 +28,8 @@ struct StatusInputs {
   Profile profile = Profile::FULL;
   const UploadStreamServer* stream = nullptr;  // null: listener not begun
   bool contentPresentation = false;
+  // Home / Daily Brief presentation routes are registered (Sync profiles only).
+  bool screenPresentation = false;
   LiveInputs live;
 };
 

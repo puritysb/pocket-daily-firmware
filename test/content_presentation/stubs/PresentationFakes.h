@@ -31,6 +31,7 @@ class GfxRenderer {
  public:
   enum Orientation { Portrait, LandscapeClockwise, PortraitInverted, LandscapeCounterClockwise };
   Orientation getOrientation() const { return static_cast<Orientation>(PresentationFake::orientation); }
+  void setOrientation(Orientation o) { PresentationFake::orientation = static_cast<uint8_t>(o); }
   int ensureSdCardFontReady(int, const char* text, uint8_t) {
     PresentationFake::checkedText.emplace_back(text);
     return PresentationFake::missingGlyphs;

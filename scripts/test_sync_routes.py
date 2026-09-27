@@ -73,11 +73,13 @@ class SyncRoutesTest(unittest.TestCase):
     def test_presentation_preparation_is_outside_http_and_waits_for_upload_release(self):
         root = Path(__file__).resolve().parents[1]
         activity = (root / "src/activities/network/CrossPointWebServerActivity.cpp").read_text()
-        self.assertIn("contentPresentation.enqueue(revision, generation)", activity)
-        self.assertNotIn("contentPresentation.prepare(", activity)
+        # Card pages and Home / Daily Brief share one slot; HTTP only queues.
+        self.assertIn("presentation.enqueueContent(revision, generation, activity.renderer)", activity)
+        self.assertIn("presentation.enqueueScreen(surface, generation, activity.renderer)", activity)
+        self.assertNotIn(".prepare(", activity)
         self.assertLess(activity.index("webServer->handleClient();"),
-                        activity.index("contentPresentation.service("))
-        self.assertIn("contentPresentation.preparationPending() && webServer->presentationTransportIdle()", activity)
+                        activity.index("presentation.service("))
+        self.assertIn("presentation.preparationPending() && webServer->presentationTransportIdle()", activity)
 
     def test_sync_releases_own_time_wait_before_presentation_admission(self):
         root = Path(__file__).resolve().parents[1]
@@ -87,7 +89,12 @@ class SyncRoutesTest(unittest.TestCase):
         # Sync only, and ahead of the presentation-busy early return so the
         # activity's admission sample (right after handleClient) follows a purge.
         self.assertLess(loop.index("if (PocketDaily::Web::isSyncProfile(profile)) {"), purge)
-        self.assertLess(purge, loop.index("if (pocketRoutes.presentation.busy && pocketRoutes.presentation.busy("))
+        self.assertLess(purge, loop.index("if (presentationBusy()) {"))
+        # The busy signal covers card pages and Home / Daily Brief presentation.
+        busy = host[host.index("bool CrossPointWebServer::presentationBusy() const {"):]
+        busy = busy[:busy.index("\n}\n")]
+        self.assertIn("pocketRoutes.presentation.busy(pocketRoutes.presentation.self)", busy)
+        self.assertIn("pocketRoutes.screen.busy(pocketRoutes.screen.self)", busy)
         walker = (root / "src/pocket_daily/web/ServerTimeWait.cpp").read_text()
         self.assertIn("LOCK_TCPIP_CORE();", walker)
         self.assertIn("purgeTimeWaitList(tcp_tw_pcbs, httpPort, streamPort", walker)
@@ -170,6 +177,33 @@ class SyncRoutesTest(unittest.TestCase):
                 prefix = re.sub(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"',
                                 "", prefix, flags=re.S)
                 self.assertEqual(prefix.count("{") - prefix.count("}"), 1)
+
+    def test_screen_presentation_is_sync_only_identity_first_and_advertised(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
+        body = source[source.index("void configurePocketRoutes("):source.index("void registerPocketRoutes(")]
+        block = body[body.index("if (isSyncProfile(d.profile) && d.screen.enqueue && d.screen.state"):]
+        block = block[:block.index("\n  }\n")]
+        self.assertIn('routes.on("/api/pocket/v1/screen/present", HTTP_POST', block)
+        self.assertIn('routes.on("/api/pocket/v1/screen/presentation", HTTP_GET', block)
+        handler = source[source.index("void handleScreenPresentation("):source.index("void handleCrashReport(")]
+        identity = handler.index('server.arg("deviceID") != deviceId')
+        self.assertLess(identity, handler.index('server.arg("surface")'))
+        self.assertLess(handler.index('server.arg("surface")'), handler.index('server.arg("generation")'))
+        paint = handler[handler.index("if (requestPaint) {"):]
+        self.assertLess(paint.index("admitContentOperation(server, d, deviceId)"),
+                        paint.index("d.screen.enqueue("))
+        self.assertLess(paint.index("DailyProfile::generation() != generation"), paint.index("d.screen.enqueue("))
+        self.assertIn("SleepMode::Reader", paint[:paint.index("d.screen.enqueue(")])
+        # The receipt read never touches SD or the render lock.
+        read = handler[handler.index("const auto receipt = d.screen.state(d.screen.self);"):]
+        for heavy in ("Storage.", "RenderLock", "recoverActiveRevision"):
+            self.assertNotIn(heavy, read)
+        status = (root / "src/pocket_daily/web/PocketStatus.cpp").read_text()
+        self.assertIn('if (in.screenPresentation) doc["screenPresentation"] = 1;', status)
+        host = (root / "src/network/CrossPointWebServer.cpp").read_text()
+        self.assertIn("in.screenPresentation = PocketDaily::Web::isSyncProfile(profile) && pocketRoutes.screen.enqueue",
+                      host)
 
     def test_content_file_reads_only_published_leaves_and_never_writes(self):
         root = Path(__file__).resolve().parents[1]

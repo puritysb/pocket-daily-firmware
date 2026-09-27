@@ -37,6 +37,7 @@
 #include "pocket_daily/staged_firmware.h"
 #include "pocket_daily/web/DisplayState.h"
 #include "pocket_daily/web/ExactRouteDispatch.h"
+#include "pocket_daily/web/GenerationArgument.h"
 #include "pocket_daily/web/PocketStatus.h"
 #include "pocket_daily/web/PreferencesUpdate.h"
 #include "pocket_daily/web/TcpCensus.h"
@@ -261,9 +262,8 @@ void handlePostProfile(WebServer& server, const RouteDeps& d) {
   char deviceId[9];
   if (!admitContentOperation(server, d, deviceId)) return;
   const String expected = server.arg("generation");
-  char* end = nullptr;
-  const unsigned long generation = strtoul(expected.c_str(), &end, 10);
-  if (expected.isEmpty() || expected.length() > 10 || !end || *end || generation > UINT32_MAX) {
+  uint32_t generation = 0;
+  if (!parseGeneration({expected.c_str(), expected.length()}, generation)) {
     server.send(400, "text/plain", "Missing or invalid profile generation");
     return;
   }
@@ -369,36 +369,39 @@ void handleActivateContent(WebServer& server, const RouteDeps& d) {
   sendContentState(server, deviceId, active);
 }
 
-void sendPresentation(WebServer& server, const char* deviceId, const Content::PresentationReceipt& receipt) {
-  const char* phase = "idle";
-  switch (receipt.phase) {
+// Receipt vocabulary shared by content and screen presentation.
+const char* phaseName(const Content::PresentationPhase phase) {
+  switch (phase) {
     case Content::PresentationPhase::Idle:
-      break;
+      return "idle";
     case Content::PresentationPhase::Queued:
-      phase = "queued";
-      break;
+      return "queued";
     case Content::PresentationPhase::Rendered:
-      phase = "rendered";
-      break;
+      return "rendered";
     case Content::PresentationPhase::Failed:
-      phase = "failed";
-      break;
+      return "failed";
   }
-  char body[224];
-  const char* failure = "none";
-  switch (receipt.failure) {
+  return "idle";
+}
+
+const char* failureName(const Content::PresentationFailure failure) {
+  switch (failure) {
     case Content::PresentationFailure::None:
-      break;
+      return "none";
     case Content::PresentationFailure::Memory:
-      failure = "memory";
-      break;
+      return "memory";
     case Content::PresentationFailure::Preparation:
-      failure = "preparation";
-      break;
+      return "preparation";
     case Content::PresentationFailure::Display:
-      failure = "display";
-      break;
+      return "display";
   }
+  return "none";
+}
+
+void sendPresentation(WebServer& server, const char* deviceId, const Content::PresentationReceipt& receipt) {
+  const char* phase = phaseName(receipt.phase);
+  const char* failure = failureName(receipt.failure);
+  char body[224];
   const int written =
       snprintf(body, sizeof(body),
                "{\"schema\":1,\"deviceID\":\"%s\",\"revision\":\"%s\",\"generation\":%lu,\"phase\":\"%s\",\"failure\":"
@@ -445,6 +448,87 @@ void handlePresentation(WebServer& server, const RouteDeps& d, bool requestPaint
     return;
   }
   sendPresentation(server, deviceId, receipt);
+}
+
+// Home / Daily Brief presentation (docs/pocket-screen-present-v1.md).
+const char* surfaceName(const Screen::Surface surface) {
+  switch (surface) {
+    case Screen::Surface::Home:
+      return "home";
+    case Screen::Surface::Brief:
+      return "brief";
+    case Screen::Surface::None:
+      break;
+  }
+  return "";
+}
+
+void sendScreenPresentation(WebServer& server, const char* deviceId, const Screen::Receipt& receipt) {
+  char body[192];
+  const int written =
+      snprintf(body, sizeof(body),
+               "{\"schema\":1,\"deviceID\":\"%s\",\"surface\":\"%s\",\"generation\":%lu,\"phase\":\"%s\",\"failure\":"
+               "\"%s\",\"heap\":%lu,\"block\":%lu}",
+               deviceId, surfaceName(receipt.surface), static_cast<unsigned long>(receipt.generation),
+               phaseName(receipt.phase), failureName(receipt.failure), static_cast<unsigned long>(receipt.heap),
+               static_cast<unsigned long>(receipt.block));
+  if (written <= 0 || static_cast<size_t>(written) >= sizeof(body)) {
+    server.send(500, "text/plain", "Presentation response overflow");
+    return;
+  }
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", body);
+}
+
+void handleScreenPresentation(WebServer& server, const RouteDeps& d, bool requestPaint) {
+  char deviceId[9];
+  snprintf(deviceId, sizeof(deviceId), "%08lX", static_cast<unsigned long>(ESP.getEfuseMac() & 0xFFFFFFFFUL));
+  if (server.arg("deviceID") != deviceId) {
+    server.send(409, "text/plain", "Reader identity mismatch");
+    return;
+  }
+  const String surfaceArg = server.arg("surface");
+  Screen::Surface surface = Screen::Surface::None;
+  if (surfaceArg == "home") {
+    surface = Screen::Surface::Home;
+  } else if (surfaceArg == "brief") {
+    surface = Screen::Surface::Brief;
+  } else {
+    server.send(400, "text/plain", "Invalid screen surface");
+    return;
+  }
+  const String generationArg = server.arg("generation");
+  uint32_t generation = 0;
+  if (!parseGeneration({generationArg.c_str(), generationArg.length()}, generation)) {
+    server.send(400, "text/plain", "Missing or invalid profile generation");
+    return;
+  }
+  if (requestPaint) {
+    // Admission as for content: 409 while an upload owns the reader, 503 when
+    // memory is below the request floor.
+    if (!admitContentOperation(server, d, deviceId)) return;
+    if (DailyProfile::generation() != generation) {
+      server.send(409, "text/plain", "The reader's profile changed; reload it before presenting");
+      return;
+    }
+    if (surface == Screen::Surface::Brief && DailyProfile::current().sleepMode == DailyProfile::SleepMode::Reader) {
+      server.send(409, "text/plain", "Sleep mode is the reader's own screen; there is no Daily Brief to draw");
+      return;
+    }
+    // Queue surface and generation only. Inputs, fonts and the cold rendering
+    // admission run after WebServer releases this request's client buffers.
+    if (!d.screen.enqueue(d.screen.self, surface, static_cast<uint32_t>(generation))) {
+      server.send(503, "text/plain", "Screen could not be queued; another presentation is in progress");
+      return;
+    }
+  }
+  // Metadata only: never read SD or wait for the rendering lock on GET.
+  const auto receipt = d.screen.state(d.screen.self);
+  if (receipt.surface != surface || receipt.generation != generation) {
+    server.send(409, "text/plain", "This screen is not being presented");
+    return;
+  }
+  sendScreenPresentation(server, deviceId, receipt);
 }
 
 void handleCrashReport(WebServer& server) {
@@ -1030,6 +1114,17 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     routes.on("/api/pocket/v1/display", HTTP_GET, [server = &server, deps = &d] {
       note(*deps);
       handleDisplay(*server, *deps);
+    });
+  }
+  // Home / Daily Brief share the content slot; Sync profiles only.
+  if (isSyncProfile(d.profile) && d.screen.enqueue && d.screen.state && d.screen.busy) {
+    routes.on("/api/pocket/v1/screen/present", HTTP_POST, [server = &server, deps = &d] {
+      note(*deps);
+      handleScreenPresentation(*server, *deps, true);
+    });
+    routes.on("/api/pocket/v1/screen/presentation", HTTP_GET, [server = &server, deps = &d] {
+      note(*deps);
+      handleScreenPresentation(*server, *deps, false);
     });
   }
   if (d.profile == Profile::POCKET_SYNC && d.apMode) {

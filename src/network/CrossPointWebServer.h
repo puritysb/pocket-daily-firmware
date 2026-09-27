@@ -90,6 +90,7 @@ class CrossPointWebServer {
 
   bool shouldEndSession() const;
   void setContentPresentation(const PocketDaily::Content::PresentationHost& host) { pocketRoutes.presentation = host; }
+  void setScreenPresentation(const PocketDaily::Screen::ScreenPresentationHost& host) { pocketRoutes.screen = host; }
   bool contentPresentationAllowed() const { return !fileMutationBusy() && !pocketStream.transferActive(); }
 
   WsUploadStatus getWsUploadStatus() const;
@@ -99,6 +100,9 @@ class CrossPointWebServer {
 
  private:
   bool fileMutationBusy() const;
+  // A card page or a Home / Daily Brief frame is queued or drawing: it owns
+  // the transient font budget until the display call returns.
+  bool presentationBusy() const;
   std::unique_ptr<WebServer> server = nullptr;
   std::unique_ptr<WebSocketsServer> wsServer = nullptr;
   bool sessionEndRequested = false;

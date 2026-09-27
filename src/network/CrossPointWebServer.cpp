@@ -372,15 +372,14 @@ void CrossPointWebServer::handleClient() {
   // Pocket seam (SEAM.md): Sync drops this server's own TIME_WAIT PCBs, on
   // every pass while a presentation awaits admission (sync-route-memory.md).
   if (PocketDaily::Web::isSyncProfile(profile)) {
-    const bool admission =
-        pocketRoutes.presentation.busy && pocketRoutes.presentation.busy(pocketRoutes.presentation.self);
+    const bool admission = presentationBusy();
     pocketTimeWait.service(millis(), port, pocketStream.port(), admission);
   }
 
   // The existing render task owns the transient font budget until display
   // completion. Do not overlap another request/upload allocation with it.
   // Pending preparation is serviced by the activity after this call returns.
-  if (pocketRoutes.presentation.busy && pocketRoutes.presentation.busy(pocketRoutes.presentation.self)) {
+  if (presentationBusy()) {
     // A completed upload may still own its reply-grace socket. Drain only
     // that existing lifecycle, never accept a new stream during preparation.
     if (pocketStream.transferActive()) pocketStream.service();
@@ -392,7 +391,7 @@ void CrossPointWebServer::handleClient() {
   // The REPLIED phase still services HTTP so the client can commit promptly.
   if (pocketStream.receiving()) return;
   server->handleClient();
-  if (pocketRoutes.presentation.busy && pocketRoutes.presentation.busy(pocketRoutes.presentation.self)) return;
+  if (presentationBusy()) return;
 
   // Handle WebSocket events
   if (wsServer) {
@@ -425,8 +424,13 @@ void CrossPointWebServer::handleClient() {
 
 void CrossPointWebServer::noteClientActivity() const { clientActivityAt = millis(); }
 
+bool CrossPointWebServer::presentationBusy() const {
+  return (pocketRoutes.presentation.busy && pocketRoutes.presentation.busy(pocketRoutes.presentation.self)) ||
+         (pocketRoutes.screen.busy && pocketRoutes.screen.busy(pocketRoutes.screen.self));
+}
+
 bool CrossPointWebServer::fileMutationBusy() const {
-  if (pocketRoutes.presentation.busy && pocketRoutes.presentation.busy(pocketRoutes.presentation.self)) return true;
+  if (presentationBusy()) return true;
   return PocketDaily::Web::TransferWriters{static_cast<bool>(upload.file), wsUploadInProgress, pocketStream.receiving()}
       .any();
 }
@@ -445,9 +449,7 @@ void CrossPointWebServer::wirePocketHost() {
   pocketHost.noteClientActivity = [](void* self) { static_cast<CrossPointWebServer*>(self)->noteClientActivity(); };
   pocketHost.httpUploadBusy = [](void* self) {
     auto* host = static_cast<CrossPointWebServer*>(self);
-    return static_cast<bool>(host->upload.file) || wsUploadInProgress ||
-           (host->pocketRoutes.presentation.busy &&
-            host->pocketRoutes.presentation.busy(host->pocketRoutes.presentation.self));
+    return static_cast<bool>(host->upload.file) || wsUploadInProgress || host->presentationBusy();
   };
   pocketHost.releaseHttpUploadBuffer = [](void* self) {
     static_cast<CrossPointWebServer*>(self)->upload.buffer.reset();
@@ -556,6 +558,8 @@ PocketDaily::Web::StatusInputs CrossPointWebServer::statusInputs() const {
   in.profile = profile;
   in.stream = &pocketStream;
   in.contentPresentation = pocketRoutes.presentation.prepare && pocketRoutes.presentation.state;
+  in.screenPresentation = PocketDaily::Web::isSyncProfile(profile) && pocketRoutes.screen.enqueue &&
+                          pocketRoutes.screen.state && pocketRoutes.screen.busy;
   in.live.push = liveStudio.pushActive();
   in.live.suspended = liveStudio.listenerSuspended();
   in.live.wsPort = wsPort;

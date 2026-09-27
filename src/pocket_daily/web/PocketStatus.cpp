@@ -31,6 +31,9 @@ String buildStatusJson(const StatusInputs& in) {
   doc["deviceID"] = deviceId;
   doc["sessionEnd"] = in.profile == Profile::POCKET_SYNC && in.apMode;
   doc["contentPresentation"] = in.contentPresentation;
+  // Home / Daily Brief in Sync (docs/pocket-screen-present-v1.md); older
+  // firmware omits the key and the companion must not call the routes.
+  if (in.screenPresentation) doc["screenPresentation"] = 1;
   // Pocket Daily profile endpoints (docs/pocket-profile-v1.md) exist on Sync.
   if (isSyncProfile(in.profile)) doc["pocketProfile"] = 1;
   // POST /api/pocket/v1/glance (docs/pocket-glance-v1.md) sits beside it.

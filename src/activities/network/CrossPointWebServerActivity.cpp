@@ -174,7 +174,7 @@ void CrossPointWebServerActivity::startUpdateCheck() {
 
 void CrossPointWebServerActivity::onExit() {
   Activity::onExit();
-  contentPresentation.hide(renderer);  // ActivityManager owns RenderLock here
+  presentation.hide(renderer);  // ActivityManager owns RenderLock here
 
   LOG_DBG("WEBACT", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
 
@@ -591,14 +591,14 @@ void CrossPointWebServerActivity::startWebServer() {
        [](void* self, const char* revision, uint32_t generation) {
          auto& activity = *static_cast<CrossPointWebServerActivity*>(self);
          RenderLock lock;
-         return activity.contentPresentation.enqueue(revision, generation);
+         return activity.presentation.enqueueContent(revision, generation, activity.renderer);
        },
        [](void* self) {
          // Metadata belongs to this same main-loop task; only phase is updated
          // by rendering, through an atomic. Never block HTTP on a slow panel.
-         return static_cast<CrossPointWebServerActivity*>(self)->contentPresentation.receipt();
+         return static_cast<CrossPointWebServerActivity*>(self)->presentation.content.receipt();
        },
-       [](void* self) { return static_cast<CrossPointWebServerActivity*>(self)->contentPresentation.busy(); },
+       [](void* self) { return static_cast<CrossPointWebServerActivity*>(self)->presentation.content.busy(); },
        [](void* self, PocketDaily::Content::PageDescription& page) {
          // Same helpers render() uses; configuration reads only, no RenderLock.
          auto& activity = *static_cast<CrossPointWebServerActivity*>(self);
@@ -606,14 +606,26 @@ void CrossPointWebServerActivity::startWebServer() {
          return true;
        },
        [](void* self) -> uint32_t {
-         // Only a frame the display driver completed for app content qualifies.
+         // Only a presented frame the display driver completed qualifies
+         // (a card page, or the saved Home / Daily Brief).
          auto& activity = *static_cast<CrossPointWebServerActivity*>(self);
          RenderLock lock;
-         if (!activity.contentPresentation.canCaptureFrame()) return 0;
+         if (!activity.presentation.visible() || !activity.presentation.canCaptureFrame()) return 0;
          return PocketDaily::LiveFrameCapture::captureNow(activity.renderer.getFrameBuffer(),
                                                           activity.renderer.getDisplayWidth(),
                                                           activity.renderer.getDisplayHeight());
        }});
+  // Home / Daily Brief in the same slot (docs/pocket-screen-present-v1.md).
+  // The server registers the routes and the status flag on Sync profiles only.
+  webServer->setScreenPresentation(
+      {this,
+       [](void* self, PocketDaily::Screen::Surface surface, uint32_t generation) {
+         auto& activity = *static_cast<CrossPointWebServerActivity*>(self);
+         RenderLock lock;
+         return activity.presentation.enqueueScreen(surface, generation, activity.renderer);
+       },
+       [](void* self) { return static_cast<CrossPointWebServerActivity*>(self)->presentation.screen.receipt(); },
+       [](void* self) { return static_cast<CrossPointWebServerActivity*>(self)->presentation.screen.busy(); }});
   webServer->begin();
 
   if (webServer->isRunning()) {
@@ -660,26 +672,27 @@ void CrossPointWebServerActivity::loop() {
     // Consume each GPIO edge once. Waiting to dismiss a drawing view must not
     // skip handleClient below or turn that same Back edge into session exit.
     using ContentAction = PocketDaily::Content::ContentSessionInput::Action;
-    const auto contentAction = contentInput.update(contentPresentation.visible(), contentPresentation.busy(),
-                                                   webServer && webServer->contentPresentationAllowed(),
-                                                   mappedInput.wasPressed(MappedInputManager::Button::Back),
-                                                   mappedInput.wasPressed(MappedInputManager::Button::Right) ||
-                                                       mappedInput.wasPressed(MappedInputManager::Button::PageForward),
-                                                   mappedInput.wasPressed(MappedInputManager::Button::Left) ||
-                                                       mappedInput.wasPressed(MappedInputManager::Button::PageBack));
+    const auto contentAction =
+        contentInput.update(presentation.visible(), presentation.busy(),
+                            presentation.navigationAvailable() && webServer && webServer->contentPresentationAllowed(),
+                            mappedInput.wasPressed(MappedInputManager::Button::Back),
+                            mappedInput.wasPressed(MappedInputManager::Button::Right) ||
+                                mappedInput.wasPressed(MappedInputManager::Button::PageForward),
+                            mappedInput.wasPressed(MappedInputManager::Button::Left) ||
+                                mappedInput.wasPressed(MappedInputManager::Button::PageBack));
     switch (contentAction) {
       case ContentAction::None:
         break;
       case ContentAction::DismissView: {
         RenderLock lock;
-        contentPresentation.hide(renderer);
+        presentation.hide(renderer);
         requestUpdate();
         break;
       }
       case ContentAction::Next:
       case ContentAction::Previous: {
         RenderLock lock;
-        if (contentPresentation.navigate(contentAction == ContentAction::Next, renderer)) requestUpdate();
+        if (presentation.content.navigate(contentAction == ContentAction::Next, renderer)) requestUpdate();
         break;
       }
       case ContentAction::ExitSession:
@@ -778,9 +791,9 @@ void CrossPointWebServerActivity::loop() {
         }
       }
       lastHandleClientTime = millis();
-      if (contentPresentation.preparationPending() && webServer->presentationTransportIdle()) {
+      if (presentation.preparationPending() && webServer->presentationTransportIdle()) {
         RenderLock lock;
-        if (contentPresentation.service(renderer, ESP.getFreeHeap(), ESP.getMaxAllocHeap())) requestUpdate();
+        if (presentation.service(renderer, ESP.getFreeHeap(), ESP.getMaxAllocHeap())) requestUpdate();
       }
       if (privateApMode) HalSystem::setCrashBreadcrumb("nearby:server-idle");
     }
@@ -789,8 +802,8 @@ void CrossPointWebServerActivity::loop() {
 
 void CrossPointWebServerActivity::render(RenderLock&&) {
   completedDisplayFrame = false;
-  if (state == WebServerActivityState::SERVER_RUNNING && contentPresentation.render(renderer, mappedInput)) {
-    completedDisplayFrame = contentPresentation.canCaptureFrame();
+  if (state == WebServerActivityState::SERVER_RUNNING && presentation.render(renderer, mappedInput)) {
+    completedDisplayFrame = presentation.canCaptureFrame();
     return;
   }
   if (state == WebServerActivityState::NEARBY_STARTING || state == WebServerActivityState::NEARBY_READY ||

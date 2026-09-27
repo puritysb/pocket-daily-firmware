@@ -12,6 +12,7 @@
 #include "activities/Activity.h"
 #include "network/CrossPointWebServer.h"
 #include "pocket_daily/ContentSessionInput.h"
+#include "pocket_daily/PresentationSlot.h"
 #include "pocket_daily/nearby_sync/NearbySyncService.h"
 #include "pocket_daily/web/PrivateApPolicy.h"
 #include "pocket_daily/web/StaRadioWatch.h"
@@ -67,7 +68,8 @@ class CrossPointWebServerActivity final : public Activity {
 
   // Web server - owned by this activity
   std::unique_ptr<CrossPointWebServer> webServer;
-  PocketDaily::Content::ContentPresentation contentPresentation;
+  // One presentation slot: a card page or the saved Home / Daily Brief.
+  PocketDaily::PresentationSlot presentation;
   PocketDaily::Content::ContentSessionInput contentInput;
   bool completedDisplayFrame = false;  // accessed only under RenderLock
 
@@ -114,7 +116,7 @@ class CrossPointWebServerActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool canCaptureFrame() const override {
-    return completedDisplayFrame && (!contentPresentation.visible() || contentPresentation.canCaptureFrame());
+    return completedDisplayFrame && (!presentation.visible() || presentation.canCaptureFrame());
   }
   bool skipLoopDelay() override { return webServer && webServer->isRunning(); }
   bool preventAutoSleep() override {

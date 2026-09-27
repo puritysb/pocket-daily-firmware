@@ -6,6 +6,7 @@
 #include <cstddef>
 
 #include "pocket_daily/ContentPresentation.h"
+#include "pocket_daily/ScreenPresentation.h"
 #include "pocket_daily/web/LiveStudioService.h"
 #include "pocket_daily/web/Profile.h"
 #include "pocket_daily/web/UploadStreamServer.h"
@@ -32,6 +33,8 @@ struct RouteDeps {
   LiveStudioService* liveStudio = nullptr;  // pack apply, prefs notify, active flag
   RouteHost host{};
   Content::PresentationHost presentation{};
+  // Home / Daily Brief presentation (docs/pocket-screen-present-v1.md).
+  Screen::ScreenPresentationHost screen{};
   // Developer evidence only (dev/tcp): Sync TIME_WAIT PCBs released so far.
   uint32_t (*timeWaitPurged)(void* self) = nullptr;
 };

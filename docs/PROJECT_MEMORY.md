@@ -5,6 +5,11 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-27 Sync Home/Daily Brief is implemented (docs/pocket-screen-present-v1.md):
+  one shared presentation slot, queued outside HTTP, bounded font preparation,
+  generation/identity checked receipts. X3 installation wa4be8509 returned
+  rendered three times and the user confirmed the screen. No X4 sign-off.
+  docs/SCREEN_PRESENTATION_HANDOFF.md retains timing and heap limitations.
 - 2026-09-27 Content snapshot loading reuses cards collected during active
   revision verification; pre/post hashes and semantic checks remain. Snapshot
   OOM does not select an older revision. Fixture SHA bytes drop 3,004→1,502,
@@ -20,8 +25,9 @@ transcript. Current source and release records override dated observations.
   `frontButtonFollowOrientation` (bool or int), whole-body validation and
   six-field rollback (docs/nearby-sync-v1.md). Absent keys mean unsupported;
   the app sends them only when GET reported them. 406 host tests, default
-  build OK; not exercised on a reader. Also proposed, not implemented:
-  docs/pocket-screen-present-v1.md (draw the saved Home/Daily Brief inside Sync).
+  build OK. Historical beta.1 hardware checks rejected malformed values
+  atomically (including invalid second fields); physical direction testing is
+  recorded separately from endpoint acceptance.
 - 2026-09-25 AgentDeck daemon removed; app-provided glance (docs/
   pocket-glance-v1.md). Deleted src/agentdeck/**, the Pocket Daily daemon path
   (Wi-Fi join, discovery, pairing, feed/outbox, pull + WS OTA, asset sync,
