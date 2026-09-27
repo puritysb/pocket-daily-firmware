@@ -20,18 +20,6 @@ class FontCacheManager {
   void attachRenderer(const GfxRenderer* renderer) { renderer_ = renderer; }
 
   void clearCache();
-
-  // Cross-page glyph reuse (SdCardFont::retainPageGlyphs). At the end of each page render
-  // the policy is asked whether the page's SD glyph set (`bytes`) may stay resident until
-  // the next page's prewarm, which then copies the shared glyphs instead of reading them
-  // again. No policy: the set is freed, as before. dropRetainedGlyphs() frees a retained
-  // set early (before anything that needs the heap, such as a section build).
-  using RetainPolicyFn = bool (*)(void* context, uint32_t bytes);
-  void setRetainPolicy(RetainPolicyFn policy, void* context) {
-    retainPolicy_ = policy;
-    retainContext_ = context;
-  }
-  void dropRetainedGlyphs();
   // `extraText` (optional) loads with the page's glyphs but stays out of the SD font's
   // per-page kerning classes, so it renders exactly as if loaded on demand.
   void prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask = 0x0F, const char* extraText = nullptr);
@@ -81,10 +69,6 @@ class FontCacheManager {
   enum class ScanMode : uint8_t { None, Scanning };
   ScanMode scanMode_ = ScanMode::None;
   bool pageGlyphSetPinned_ = false;
-  RetainPolicyFn retainPolicy_ = nullptr;
-  void* retainContext_ = nullptr;
-  // Keeps the page's SD glyph sets for the next prewarm when the policy allows.
-  void retainOrClear();
   struct ScanBucket {
     std::string text;
     std::string extraText;

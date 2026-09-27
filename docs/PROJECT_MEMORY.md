@@ -15,10 +15,13 @@ transcript. Current source and release records override dated observations.
   unchanged (gfx_host StatusBarTitle test, 4 orientations). Device readerPerf,
   17 turns: total 2,007 ms avg; input 280, section 252 (2,907 unbuilt chapter),
   prewarm 238, BW refresh 445 (HALF = full resync, 3,209), gray 124+227+61,
-  min free 20 KB / largest 12 KB. Second pass (docs/reader-perf.md): adaptive
-  cross-page glyph reuse (host sector loads 196 -> 116), AA cut when the next
-  turn is queued, 1-page landing build, pre-build after 150 ms, idle save
-  outside the render lock. Not yet re-measured on X3.
+  min free 20 KB / largest 12 KB. 41aea867 regressed on the X3 (aphorism book,
+  ~every turn a new spine): layout from loop() one page per tick never got ahead
+  (pre-build needed 32 KB contiguous; none adopted), so each turn built its
+  spine and waited on loop() ticks (input 598 ms). Now ReaderLayoutAhead lays
+  out ahead on the render task after each page, yielding to any button;
+  glyph-set retention removed (held heap, no proven SD saving on device).
+  test/reader_layout models the cadence. Not yet re-measured on X3.
 
 - 2026-09-28 Page-turn telemetry and speed-ups (docs/reader-perf.md). The reader
   records each turn's stages (input, section, page, prewarm, BW render, status,

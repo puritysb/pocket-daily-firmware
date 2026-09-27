@@ -9,6 +9,7 @@
 #include "BookmarkEntry.h"
 #include "EpubReaderMenuActivity.h"
 #include "ProgressMapper.h"
+#include "ReaderLayoutAhead.h"
 #include "activities/Activity.h"
 
 class EpubReaderActivity final : public Activity {
@@ -79,56 +80,17 @@ class EpubReaderActivity final : public Activity {
   int lastSavedPage = -1;
   int lastSavedPageCount = -1;
 
-  // Everything a section's layout depends on besides the book (the section file header).
-  struct LayoutParams {
-    int fontId = 0;
-    float lineCompression = 0;
-    bool extraParagraphSpacing = false;
-    uint8_t paragraphAlignment = 0;
-    uint16_t viewportWidth = 0;
-    uint16_t viewportHeight = 0;
-    bool hyphenationEnabled = false;
-    bool embeddedStyle = false;
-    uint8_t imageRendering = 0;
-    bool focusReadingEnabled = false;
-    uint8_t bilingualViewMode = 0;
-    bool operator==(const LayoutParams&) const = default;
-  };
-  LayoutParams layoutParams(uint16_t viewportWidth, uint16_t viewportHeight) const;
-  static bool loadSection(Section& target, const LayoutParams& params);
-  static bool startSectionBuild(Section& target, const LayoutParams& params);
+  SectionLayout layoutParams(uint16_t viewportWidth, uint16_t viewportHeight) const;
   // Params of the section on screen (valid once a section was opened).
-  LayoutParams shownLayout;
+  SectionLayout shownLayout;
   bool shownLayoutValid = false;
   unsigned long lastRenderDoneMs = 0UL;
 
-  // Idle pre-build of the next chapter. While the reader sits on a chapter's last page,
-  // loop() lays out the next spine a few pages per tick, so the forward turn into it adopts
-  // the section instead of inflating and laying out the chapter on the turn. Only one build
-  // runs at a time and it is dropped before any other render, so a page render never
-  // overlaps it; at the turn the adopted build has the same footprint as a normal chapter
-  // build. See docs/reader-perf.md.
-  std::unique_ptr<Section> prebuilt;
-  int prebuildSpine = -1;
-  LayoutParams prebuildLayout;
-  bool prebuildSettled = false;  // prebuildSpine needs no further idle work
-  // Start only after this much idle time on the last page, with this much contiguous heap.
-  // Short: fast readers leave the last page ~1 s after it appears (X3 telemetry), and a
-  // backward turn merely discards the work. One page per loop() tick keeps input responsive.
-  static constexpr unsigned long PREBUILD_IDLE_MS = 150;
-  static constexpr int PREBUILD_PAGES_PER_TICK = 1;
-  static constexpr size_t PREBUILD_MIN_FREE_BLOCK = 32 * 1024;
-  void prebuildNextChapter();
-  // Cross-page glyph reuse (FontCacheManager::setRetainPolicy): a page's SD glyph set stays
-  // resident until the next page only while the heap clearly has room for both sets plus
-  // the strip scratch (X3 telemetry: 27-54 KB free, 18-39 KB largest block at the render
-  // peak). It is dropped before any section build and when the reader exits.
-  static constexpr uint32_t RETAIN_MIN_LARGEST_BLOCK = 24 * 1024;
-  static constexpr uint32_t RETAIN_FREE_MARGIN = 32 * 1024;
-  static bool allowGlyphRetention(void* context, uint32_t bytes);
-  void dropRetainedGlyphs() const;
-  // Frees an in-progress pre-build (keeps a finished one: it only holds the page count).
-  void dropBuildingPrebuild();
+  // Layout ahead of the reader (ReaderLayoutAhead): after each page (AA included) the render
+  // task lays out the rest of the chapter, then the next one, yielding to any button.
+  std::unique_ptr<ReaderLayoutAhead> layoutAhead;
+  std::atomic<bool> inputQueued{false};
+  void layOutAhead();
 
   // Reading-position writes are deferred to idle time (loop()) instead of every render:
   // a turn no longer waits on the SD create/remove/rename, and rapid turns write once.

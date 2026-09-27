@@ -209,21 +209,13 @@ void EpubReaderActivity::onEnter() {
 
   loadCachedBookmarks();
 
+  layoutAhead = makeUniqueNoThrow<ReaderLayoutAhead>(epub, renderer);  // null: no layout ahead (OOM)
   PocketDaily::ReaderPerf::open();
   queuePerfTurn(PocketDaily::ReaderPerf::FLAG_OPEN, 0);
-  renderer.getFontCacheManager()->setRetainPolicy(&EpubReaderActivity::allowGlyphRetention, nullptr);
 
   // Trigger first update
   requestUpdate();
 }
-
-bool EpubReaderActivity::allowGlyphRetention(void* /*context*/, const uint32_t bytes) {
-  const uint32_t largest = ESP.getMaxAllocHeap();
-  return largest >= std::max<uint32_t>(RETAIN_MIN_LARGEST_BLOCK, bytes + 8 * 1024) &&
-         ESP.getFreeHeap() >= bytes + RETAIN_FREE_MARGIN;
-}
-
-void EpubReaderActivity::dropRetainedGlyphs() const { renderer.getFontCacheManager()->dropRetainedGlyphs(); }
 
 void EpubReaderActivity::queuePerfTurn(const uint8_t flags, const uint32_t inputMs) {
   perfTurnPending = true;
@@ -235,10 +227,7 @@ void EpubReaderActivity::onExit() {
   Activity::onExit();
 
   flushPendingProgress(/*fromLoop=*/false);
-  renderer.getFontCacheManager()->setRetainPolicy(nullptr, nullptr);
-  dropRetainedGlyphs();
-  dropBuildingPrebuild();
-  prebuilt.reset();
+  layoutAhead.reset();
   // Page-turn timings survive the session in one small file (docs/reader-perf.md).
   PocketDaily::ReaderPerf::close();
 
@@ -283,6 +272,9 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  // Any button makes layout running on the render task after a page (layOutAhead) yield.
+  if (mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased()) inputQueued.store(true);
+
   // Drive any in-progress incremental section build forward, off the page-turn critical path,
   // but only within a small window ahead of the reader: an unbounded build monopolized the
   // RenderLock and locked out page turns. The build follows the reader instead, and instant
@@ -294,7 +286,7 @@ void EpubReaderActivity::loop() {
   // within BUILD_WINDOW_AHEAD of the watermark and would then have to lay out the whole prefix
   // synchronously on the next turn (several seconds of no response on a 60-page prefix). Keep
   // ticking until the rebuild has passed the watermark, then fall back to the window.
-  if (section && section->isBuilding() && !RenderLock::peek() &&
+  if (section && section->isBuilding() && !RenderLock::peek() && !turnQueued.load() &&
       (section->isCatchingUp() || static_cast<int>(section->pageCount) < section->currentPage + BUILD_WINDOW_AHEAD)) {
     RenderLock lock;
     // Re-check under the lock: render() (which also holds the RenderLock) may have finalized the
@@ -303,7 +295,6 @@ void EpubReaderActivity::loop() {
     // mutation, so it flags this as always true.
     // cppcheck-suppress knownConditionTrueFalse
     if (section->isBuilding()) {
-      dropRetainedGlyphs();  // a build step gets the heap the next page's glyphs would share
       if (!section->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK)) {
         LOG_ERR("ERS", "Background section build failed");
         recordBuildFailure();
@@ -332,7 +323,6 @@ void EpubReaderActivity::loop() {
     if (progressSavePending && millis() - lastRenderDoneMs >= PROGRESS_SAVE_IDLE_MS && !RenderLock::peek()) {
       flushPendingProgress(/*fromLoop=*/true);
     }
-    prebuildNextChapter();
     // Page-turn timings now and then, not on every turn (onExit saves the rest).
     if (PocketDaily::ReaderPerf::unsavedTurns() >= PocketDaily::ReaderPerf::SAVE_EVERY_TURNS &&
         millis() - lastRenderDoneMs >= PROGRESS_SAVE_IDLE_MS && !RenderLock::peek()) {
@@ -1079,6 +1069,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
   namespace Perf = PocketDaily::ReaderPerf;
   turnQueued.store(false);  // this render serves every turn queued so far
+  inputQueued.store(false);
   if (perfTurnPending) {
     perfTurnPending = false;
     Perf::beginTurn(perfInputMs, perfTurnFlags);
@@ -1095,13 +1086,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   activeReaderFontId = sdFontSystem.ensureAutomaticReaderFontLoaded(renderer);
   // A page of the current chapter never renders next to a running pre-build (only the
   // forward turn into the pre-built chapter adopts it, below).
-  if (section) dropBuildingPrebuild();
-  // A retained glyph set never sits beside a chapter build either: drop it when this render
-  // may lay out pages (a new section, or a page past a building/partial section's watermark).
-  if (!section || ((section->isBuilding() || section->isPartial()) &&
-                   section->currentPage >= static_cast<int>(section->pageCount))) {
-    dropRetainedGlyphs();
-  }
+  if (section && layoutAhead) layoutAhead->dropBuilding();
 
   const auto showPendingSyncSaveError = [this]() {
     if (!pendingSyncSaveError) return;
@@ -1168,33 +1153,31 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     LOG_DBG("ERS", "Loading file: %s, index: %d", filepath.c_str(), currentSpineIndex);
     Perf::addFlags(Perf::FLAG_CHAPTER);
 
-    const LayoutParams layout = layoutParams(viewportWidth, viewportHeight);
+    const SectionLayout layout = layoutParams(viewportWidth, viewportHeight);
     shownLayout = layout;
     shownLayoutValid = true;
     // Adopt the idle pre-build of this chapter (finished or still laying out) when it was
     // made with the current layout. Jumps that need the whole chapter or an anchor map
     // (percent, footnote/TOC anchors) take the normal path.
-    const bool adoptPrebuild = prebuilt && prebuildSpine == currentSpineIndex && prebuildLayout == layout &&
-                               !pendingPercentJump && pendingAnchor.empty();
-    if (adoptPrebuild) {
-      section = std::move(prebuilt);
-      prebuildSpine = -1;
+    std::unique_ptr<Section> adopted;
+    if (layoutAhead && !pendingPercentJump && pendingAnchor.empty()) {
+      adopted = layoutAhead->adopt(currentSpineIndex, layout);
+    } else if (layoutAhead) {
+      layoutAhead->clear();
+    }
+    if (adopted) {
+      section = std::move(adopted);
       Perf::addFlags(Perf::FLAG_PREBUILT);
       if (!section->isBuilding() && !section->isPartial()) cachedChapterTotalPageCount = 0;
       LOG_DBG("ERS", "Adopted pre-built section %d (%u pages%s)", currentSpineIndex, section->pageCount,
               section->isBuilding() ? ", still building" : "");
     } else {
-      dropBuildingPrebuild();
-      if (prebuilt && (prebuildSpine != currentSpineIndex + 1 || !(prebuildLayout == layout))) {
-        prebuilt.reset();  // a finished pre-build no turn from here can use
-        prebuildSpine = -1;
-      }
       section = std::unique_ptr<Section>(new Section(epub, currentSpineIndex, renderer));
       // A finalized cache serves every page as-is. A partial cache (suspended build from a
       // previous session) serves its pages instantly too, but a build must still run to lay
       // out the rest -- it re-parses from the top in the background (HTML already cached,
       // pages are deterministic) and finalizes, so the partial machinery retires itself.
-      const bool cacheLoaded = loadSection(*section, layout);
+      const bool cacheLoaded = layout.load(*section);
       if (cacheLoaded) {
         // Matching render params means identical pagination, so the saved page number is valid
         // as-is: consume any pending settings-change reposition. Without this, a chapter total
@@ -1273,7 +1256,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
             // HALF-clear the popup when the page replaces it, else "INDEXING" ghosts under the page.
             pagesUntilFullRefresh = 1;
           }
-          if (!startSectionBuild(*section, layout)) {
+          if (!layout.startBuild(*section)) {
             LOG_ERR("ERS", "Failed to start section build");
             showBuildError();
             return;
@@ -1334,7 +1317,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   while (section->isPartial() && section->currentPage >= static_cast<int>(section->pageCount)) {
     Perf::addFlags(Perf::FLAG_BUILT);
     // Start a build to extend a partial toward the requested page.
-    if (!section->isBuilding() && !startSectionBuild(*section, layoutParams(viewportWidth, viewportHeight))) {
+    if (!section->isBuilding() && !layoutParams(viewportWidth, viewportHeight).startBuild(*section)) {
       LOG_ERR("ERS", "Failed to start partial extension build");
       showBuildError();
       return;
@@ -1482,6 +1465,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     const uint8_t mode = SETTINGS.bilingualViewMode;
     GUI.drawPopup(renderer, I18N.get(bilingualModeLabels[mode]));
   }
+
+  layOutAhead();
 }
 
 bool EpubReaderActivity::applyDeferredReposition() {
@@ -1552,9 +1537,8 @@ void EpubReaderActivity::flushPendingProgress(const bool fromLoop) {
   PocketDaily::ReaderPerf::addToLastTurn(PocketDaily::ReaderPerf::STAGE_SAVE, elapsed);
 }
 
-EpubReaderActivity::LayoutParams EpubReaderActivity::layoutParams(const uint16_t viewportWidth,
-                                                                  const uint16_t viewportHeight) const {
-  LayoutParams params;
+SectionLayout EpubReaderActivity::layoutParams(const uint16_t viewportWidth, const uint16_t viewportHeight) const {
+  SectionLayout params;
   params.fontId = activeReaderFontId;
   params.lineCompression = SETTINGS.getReaderLineCompression();
   params.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
@@ -1569,83 +1553,28 @@ EpubReaderActivity::LayoutParams EpubReaderActivity::layoutParams(const uint16_t
   return params;
 }
 
-bool EpubReaderActivity::loadSection(Section& target, const LayoutParams& p) {
-  return target.loadSectionFile(p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment,
-                                p.viewportWidth, p.viewportHeight, p.hyphenationEnabled, p.embeddedStyle,
-                                p.imageRendering, p.focusReadingEnabled, p.bilingualViewMode);
-}
-
-bool EpubReaderActivity::startSectionBuild(Section& target, const LayoutParams& p) {
-  return target.startBuild(p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment, p.viewportWidth,
-                           p.viewportHeight, p.hyphenationEnabled, p.embeddedStyle, p.imageRendering,
-                           p.focusReadingEnabled, p.bilingualViewMode);
-}
-
-void EpubReaderActivity::dropBuildingPrebuild() {
-  if (!prebuilt || !prebuilt->isBuilding()) return;
-  // Discard rather than suspend: no partial-file write on the way to a page render.
-  prebuilt->abandonBuild();
-  prebuilt.reset();
-  prebuildSpine = -1;
-  prebuildSettled = false;
-}
-
-void EpubReaderActivity::prebuildNextChapter() {
-  // Only from a fully laid-out chapter's last page, after the page has been on screen a while.
-  if (!section || !shownLayoutValid || section->isBuilding() || section->isPartial() || section->pageCount == 0 ||
-      section->currentPage < static_cast<int>(section->pageCount) - 1 || automaticPageTurnActive) {
-    return;
+void EpubReaderActivity::layOutAhead() {
+  if (!layoutAhead || !section || !shownLayoutValid || automaticPageTurnActive) return;
+  // Runs on the render task after a complete page, holding the render lock; any button seen
+  // by loop() (inputQueued) or a queued turn makes it stop after the page in progress.
+  const auto yield = [](void* context) {
+    const auto* self = static_cast<EpubReaderActivity*>(context);
+    return self->inputQueued.load() || self->turnQueued.load();
+  };
+  const auto largestBlock = [](void*) { return static_cast<uint32_t>(ESP.getMaxAllocHeap()); };
+  switch (layoutAhead->afterPage(section.get(), currentSpineIndex, shownLayout, yield, largestBlock, this)) {
+    case ReaderLayoutAhead::Result::ShownFailed:
+      recordBuildFailure();
+      nextPageNumber = section->currentPage;
+      section.reset();
+      requestUpdate();
+      break;
+    case ReaderLayoutAhead::Result::ShownComplete:
+      if (applyDeferredReposition()) requestUpdate();  // re-paginated since the saved position
+      break;
+    case ReaderLayoutAhead::Result::Done:
+      break;
   }
-  const int next = currentSpineIndex + 1;
-  if (next >= epub->getSpineItemsCount() || millis() - lastRenderDoneMs < PREBUILD_IDLE_MS || RenderLock::peek()) {
-    return;
-  }
-  if (prebuildSpine == next && prebuildLayout == shownLayout && (prebuildSettled || prebuilt)) {
-    if (prebuildSettled || !prebuilt->isBuilding()) return;
-    // Continue laying out, a few pages per tick like the current chapter's background build.
-    RenderLock lock;
-    dropRetainedGlyphs();
-    if (!prebuilt->buildSomeMore(PREBUILD_PAGES_PER_TICK)) {
-      LOG_ERR("ERS", "Pre-build of section %d failed; it will build on the turn", next);
-      prebuilt.reset();
-      prebuildSettled = true;
-    } else if (prebuilt->isBuildComplete()) {
-      LOG_DBG("ERS", "Pre-built section %d: %u pages", next, prebuilt->pageCount);
-      prebuildSettled = true;
-    } else if (ESP.getMaxAllocHeap() < BUILD_MIN_FREE_BLOCK) {
-      LOG_INF("ERS", "Suspending pre-build: largest free block %u B", (unsigned)ESP.getMaxAllocHeap());
-      prebuilt.reset();  // the destructor persists the laid-out pages as a partial
-      prebuildSettled = true;
-    }
-    return;
-  }
-
-  // Start (or restart after a layout change) for the next spine.
-  RenderLock lock;
-  dropRetainedGlyphs();
-  if (ESP.getMaxAllocHeap() < PREBUILD_MIN_FREE_BLOCK) return;
-  dropBuildingPrebuild();
-  prebuilt.reset();
-  prebuildSpine = next;
-  prebuildLayout = shownLayout;
-  prebuildSettled = true;  // unless a build starts below
-  auto candidate = makeUniqueNoThrow<Section>(epub, next, renderer);
-  if (!candidate) return;
-  if (loadSection(*candidate, shownLayout) && !candidate->isPartial()) {
-    prebuilt = std::move(candidate);  // already laid out: the turn skips reopening it
-    return;
-  }
-  // A spine whose whole HTML must still be inflated is a multi-second job: leave it to the
-  // turn (with its indexing popup) rather than blocking input from loop().
-  const size_t spineBytes =
-      epub->getCumulativeSpineItemSize(next) - epub->getCumulativeSpineItemSize(currentSpineIndex);
-  if (spineBytes > BUILD_POPUP_BYTE_THRESHOLD && !candidate->hasHtmlCache()) return;
-  if (!startSectionBuild(*candidate, shownLayout)) {
-    LOG_ERR("ERS", "Pre-build of section %d could not start; it will build on the turn", next);
-    return;
-  }
-  prebuilt = std::move(candidate);
-  prebuildSettled = false;
 }
 
 float EpubReaderActivity::SpineInfo::bookProgress(const float spineRead) const {

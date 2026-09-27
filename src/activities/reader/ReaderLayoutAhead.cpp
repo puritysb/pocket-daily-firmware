@@ -1,0 +1,121 @@
+#include "ReaderLayoutAhead.h"
+
+#include <Epub.h>
+#include <Logging.h>
+#include <Memory.h>
+
+bool SectionLayout::load(Section& section) const {
+  return section.loadSectionFile(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
+                                 viewportHeight, hyphenationEnabled, embeddedStyle, imageRendering, focusReadingEnabled,
+                                 bilingualViewMode);
+}
+
+bool SectionLayout::startBuild(Section& section) const {
+  return section.startBuild(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
+                            viewportHeight, hyphenationEnabled, embeddedStyle, imageRendering, focusReadingEnabled,
+                            bilingualViewMode);
+}
+
+bool ReaderLayoutAhead::step(Section& section) {
+  const uint16_t before = section.pageCount;
+  const bool ok = section.buildSomeMore(1);
+  if (section.pageCount > before) pagesLaidOut_ += section.pageCount - before;
+  return ok;
+}
+
+ReaderLayoutAhead::Result ReaderLayoutAhead::afterPage(Section* shown, const int shownSpine,
+                                                       const SectionLayout& layout, const YieldFn shouldYield,
+                                                       const HeapFn largestBlock, void* context) {
+  const auto yield = [&]() { return shouldYield && shouldYield(context); };
+  const auto heap = [&]() { return largestBlock ? largestBlock(context) : UINT32_MAX; };
+
+  // 1) The rest of the chapter on screen, in one run.
+  bool shownCompleted = false;
+  while (shown && shown->isBuilding() && !yield()) {
+    if (shown->pageCount > 0 && heap() < MIN_FREE_BLOCK) {
+      LOG_INF("RLA", "Suspending section build: largest free block %u B", static_cast<unsigned>(heap()));
+      shown->suspendBuild();
+      return Result::Done;
+    }
+    if (!step(*shown)) {
+      LOG_ERR("RLA", "Section %d build after its page failed", shownSpine);
+      return Result::ShownFailed;
+    }
+    shownCompleted = shown->isBuildComplete();
+  }
+  const Result shownResult = shownCompleted ? Result::ShownComplete : Result::Done;
+
+  // 2) The next chapter, from a fully laid-out chapter's last page.
+  if (!shown || shown->isBuilding() || shown->isPartial() || shown->pageCount == 0 ||
+      shown->currentPage < static_cast<int>(shown->pageCount) - 1 || yield()) {
+    return shownResult;
+  }
+  const int next = shownSpine + 1;
+  if (next >= epub_->getSpineItemsCount()) return shownResult;
+  if (!(prebuildSpine_ == next && prebuildLayout_ == layout && (prebuildSettled_ || prebuilt_))) {
+    if (heap() < PREBUILD_MIN_FREE_BLOCK) return shownResult;
+    dropBuilding();
+    prebuilt_.reset();
+    prebuildSpine_ = next;
+    prebuildLayout_ = layout;
+    prebuildSettled_ = true;  // unless a build starts below
+    auto candidate = makeUniqueNoThrow<Section>(epub_, next, renderer_);
+    if (!candidate) return shownResult;
+    if (layout.load(*candidate) && !candidate->isPartial()) {
+      prebuilt_ = std::move(candidate);  // already laid out: the turn skips reopening it
+      return shownResult;
+    }
+    const size_t spineBytes = epub_->getCumulativeSpineItemSize(next) - epub_->getCumulativeSpineItemSize(shownSpine);
+    if (spineBytes > PREBUILD_MAX_UNINFLATED_BYTES && !candidate->hasHtmlCache()) return shownResult;
+    if (!layout.startBuild(*candidate)) {
+      LOG_ERR("RLA", "Pre-build of section %d could not start; it will build on the turn", next);
+      return shownResult;
+    }
+    prebuilt_ = std::move(candidate);
+    prebuildSettled_ = false;
+  }
+  while (prebuilt_ && prebuilt_->isBuilding() && !yield()) {
+    if (heap() < MIN_FREE_BLOCK) {
+      LOG_INF("RLA", "Suspending pre-build: largest free block %u B", static_cast<unsigned>(heap()));
+      prebuilt_.reset();  // the destructor persists the laid-out pages as a partial
+      prebuildSettled_ = true;
+      return shownResult;
+    }
+    if (!step(*prebuilt_)) {
+      LOG_ERR("RLA", "Pre-build of section %d failed; it will build on the turn", next);
+      prebuilt_.reset();
+      prebuildSettled_ = true;
+      return shownResult;
+    }
+    if (prebuilt_->isBuildComplete()) prebuildSettled_ = true;
+  }
+  return shownResult;
+}
+
+std::unique_ptr<Section> ReaderLayoutAhead::adopt(const int spine, const SectionLayout& layout) {
+  if (prebuilt_ && prebuildSpine_ == spine && prebuildLayout_ == layout) {
+    prebuildSpine_ = -1;
+    return std::move(prebuilt_);
+  }
+  dropBuilding();
+  if (prebuilt_ && (prebuildSpine_ != spine + 1 || !(prebuildLayout_ == layout))) {
+    prebuilt_.reset();  // a finished pre-build no turn from here can use
+    prebuildSpine_ = -1;
+  }
+  return nullptr;
+}
+
+void ReaderLayoutAhead::dropBuilding() {
+  if (!prebuilt_ || !prebuilt_->isBuilding()) return;
+  prebuilt_->abandonBuild();
+  prebuilt_.reset();
+  prebuildSpine_ = -1;
+  prebuildSettled_ = false;
+}
+
+void ReaderLayoutAhead::clear() {
+  dropBuilding();
+  prebuilt_.reset();
+  prebuildSpine_ = -1;
+  prebuildSettled_ = false;
+}

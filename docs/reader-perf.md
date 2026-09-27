@@ -173,27 +173,37 @@ calls, mostly cached-sector copies while a page decodes; the host model puts
 physical sector loads at ~190 per turn, nearly all in the prewarm (~1.2 ms per
 single-block SD read on the X3).
 
-Changes:
+Second pass (41aea867) and what the X3 then showed (25 turns, a German+Korean
+aphorism book where nearly every turn enters a new spine): median ~2.4 s per
+turn, input 598 ms, section 440-720 ms on consecutive turns (flags 3 and 2), AA
+shown on 2 of 16 recent turns. Causes:
 
-- **Cross-page glyph reuse, adaptive.** At the end of a page render the SD
-  glyph set stays resident when the heap has room (largest block at least
-  24 KB and the set + 8 KB; free heap at least the set + 32 KB); the next
-  prewarm copies the shared glyphs (records and bitmaps) and frees the rest.
-  It is dropped before any section build, pre-build step and on exit, and an
-  allocation failure retries without it. Host: sector loads per turn
-  196 -> 116, KiB read 15.5 -> 9.3, frames identical. A retained turn cannot
-  take free heap below ~27 KB (the 32 KB margin minus the prewarm's
-  temporaries); the gray-stage peak is unchanged.
-- **Anti-aliasing yields to a queued turn.** If the next turn is already
-  queued when the gray pass starts (or between strips), the pass is skipped or
-  cut and, when strips reached the controller, followed by the RAM re-sync.
-  A page the reader stays on is drawn exactly as before.
-- **One page before the first page.** The render path laid out 8 pages before
-  showing page 0 of an unbuilt chapter; it now lays out 1 and `loop()` the rest
-  (host: allocations on that turn 1,967 -> 523, opens 27 -> 9).
-- **The idle position save no longer holds the render lock** while it writes;
-  the position and percent are taken under a brief lock, so a turn waits at
-  most for one SD operation in flight rather than the whole write.
+- Layout lost the race against the reader. Chapter layout ran from `loop()`
+  one page per tick and the next-chapter pre-build waited for 150 ms idle and a
+  32 KB contiguous block (largest block 13-35 KB on that run): no turn was
+  ever pre-built, every turn into a spine inflated and laid it out on its own
+  path, and `loop()` ticks holding the render lock delayed the next render
+  (`input`).
+- The adaptive cross-page glyph reuse held a second glyph set across turns
+  (lower largest free block, more fragmentation) and could not be shown to
+  reduce SD reads on the device's heap: removed.
+- AA only yields to a real queued turn (`pageTurn()`), and every queued turn is
+  followed by a render, so a page the reader stays on always gets its gray
+  pass; the missing AA was the user pressing again during those slow renders.
+
+Now (`ReaderLayoutAhead`): after each complete page (AA included) the render
+task lays out the rest of the shown chapter and, from its last page, the next
+chapter, one page per step, stopping as soon as `loop()` sees any button. The
+forward turn adopts the section. The turn path lays out only up to the page it
+shows. Pre-builds start with 16 KB contiguous (chapter builds allocate 8 KB
+blocks). `test/reader_layout` reads `test/epubs/short-spines.epub` with two
+pages of layout between turns, none, and idle pauses: every page is laid out
+exactly once, every chapter turn with room is pre-built, a turn takes at most
+one build step, and AA completes unless a turn is queued (and a cut pass
+re-syncs the controller).
+
+The 1-page landing layout and the idle position save outside the render lock
+(41aea867) stay.
 
 ## Physics-bound cost (X3)
 
