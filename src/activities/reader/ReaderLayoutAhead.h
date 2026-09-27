@@ -31,8 +31,9 @@ struct SectionLayout {
 // Layout ahead of the reader (EpubReaderActivity).
 //
 // After a page is complete the render task calls afterPage(): it lays out the rest of the
-// shown chapter and then, from that chapter's last page, the next chapter, one page per
-// step, until done or until `shouldYield` reports input. The forward turn into the next
+// shown chapter and then, from that chapter's last page, the next chapter (from its first
+// pages, the previous one), one page per step, until done or until `shouldYield` reports
+// input. The forward turn into the next
 // chapter takes the section with adopt(). So each page of a chapter is laid out once, the
 // turn path only lays out the page it shows when nothing ran ahead, and a turn waits for
 // at most one page of layout. X3 telemetry on 41aea867 (laying out from loop() one page
@@ -47,8 +48,12 @@ class ReaderLayoutAhead {
   // Chapter builds need 8 KB blocks (segmented inflate window, ZIP buffers): a pre-build
   // starts only with twice that contiguous.
   static constexpr uint32_t PREBUILD_MIN_FREE_BLOCK = 16 * 1024;
-  // An uninflated spine this large is a multi-second job: left to its own turn (popup).
-  static constexpr size_t PREBUILD_MAX_UNINFLATED_BYTES = 96 * 1024;
+  // Inflating a spine is one uninterruptible step (~0.1-0.3 s per 100 KB on the X3); larger
+  // uninflated spines are left to their own turn (popup).
+  static constexpr size_t PREBUILD_MAX_UNINFLATED_BYTES = 512 * 1024;
+  // Layout behind: on the first pages of a chapter the previous one is laid out too, so a
+  // backward turn into it (which must lay it out to its last page) does not wait.
+  static constexpr int BEHIND_WITHIN_PAGES = 3;
 
   enum class Result : uint8_t {
     Done,          // nothing (more) to do, or yielded
@@ -63,7 +68,7 @@ class ReaderLayoutAhead {
                    HeapFn largestBlock, void* context);
 
   // The pre-built section for `spine` when it was made with `layout`, else nullptr (and a
-  // pre-build no turn from `spine` can use is released).
+  // pre-build no turn from `spine` can use, i.e. not a neighbour of it, is released).
   std::unique_ptr<Section> adopt(int spine, const SectionLayout& layout);
 
   // Discards a pre-build still laying out (no partial-file write): call before rendering a
@@ -76,6 +81,8 @@ class ReaderLayoutAhead {
 
  private:
   bool step(Section& section);  // one page; counts it
+  // Lays out `spine` into the pre-build slot until it is done or `shouldYield` reports input.
+  void prebuild(int spine, const SectionLayout& layout, YieldFn shouldYield, HeapFn largestBlock, void* context);
 
   std::shared_ptr<Epub> epub_;
   GfxRenderer& renderer_;

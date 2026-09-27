@@ -175,6 +175,23 @@ struct Reading {
     bookPages += section->pageCount;
   }
   uint32_t totalLaidOut() const { return turnPages + ahead.pagesLaidOut(); }
+
+  // Backward turn from a chapter's first page: lands on the previous chapter's last page,
+  // which the render path must lay out to the end unless it was laid out behind.
+  bool backIntoPreviousChapter() {
+    section.reset();
+    --spine;
+    const uint32_t stepsBefore = turnSteps;
+    show(UINT16_MAX);
+    while (section->isBuilding() && !section->isBuildComplete()) {
+      const uint16_t before = section->pageCount;
+      if (!section->buildSomeMore(1)) return false;
+      turnPages += section->pageCount - before;
+      ++turnSteps;
+    }
+    section->currentPage = section->pageCount - 1;
+    return turnSteps == stepsBefore;  // true: nothing laid out on the turn
+  }
 };
 }  // namespace
 
@@ -268,4 +285,39 @@ TEST_F(ReaderLayout, AntiAliasingCompletesUnlessATurnIsQueued) {
   EXPECT_EQ(cut.gray, 0U);
   EXPECT_EQ(cut.strips, 3U);
   EXPECT_EQ(cut.cleanups, 1U);
+}
+
+// Layout behind: idle on the first page of a chapter (one spanning several pages; on a
+// one-page chapter the next chapter comes first), the previous chapter is laid out too, so
+// the backward turn into it (to its last page) lays out nothing on the turn.
+TEST_F(ReaderLayout, IdleOnAFirstPageLaysOutThePreviousChapter) {
+  int chapter = -1;
+  for (int s = 2; s < epub->getSpineItemsCount() - 1 && chapter < 0; ++s) {
+    Section probe(epub, s, renderer);
+    ASSERT_TRUE(layout.startBuild(probe));
+    ASSERT_TRUE(probe.buildSomeMore(0));
+    if (probe.pageCount >= 2) chapter = s;
+  }
+  ASSERT_GE(chapter, 2) << "fixture needs a multi-page chapter";
+  // Probing built every chapter up to `chapter`: start from clean section caches.
+  for (int s = 0; s < epub->getSpineItemsCount(); ++s) Section(epub, s, renderer).clearCache();
+
+  Reading reading(epub, renderer, layout);
+  reading.spine = chapter;
+  reading.show(0);
+  reading.idle(-1);  // idle on its first page
+  EXPECT_TRUE(reading.backIntoPreviousChapter());
+  EXPECT_EQ(reading.adoptedTurns, 1U);
+  EXPECT_EQ(reading.spine, chapter - 1);
+  EXPECT_FALSE(reading.section->isBuilding());
+  EXPECT_EQ(reading.section->currentPage, static_cast<int>(reading.section->pageCount) - 1);
+
+  // Without the idle moment the turn lays the previous chapter out itself.
+  for (int s = 0; s < epub->getSpineItemsCount(); ++s) Section(epub, s, renderer).clearCache();
+  Reading busy(epub, renderer, layout);
+  busy.spine = chapter;
+  busy.show(0);
+  busy.idle(0);
+  EXPECT_FALSE(busy.backIntoPreviousChapter());
+  EXPECT_EQ(busy.adoptedTurns, 0U);
 }

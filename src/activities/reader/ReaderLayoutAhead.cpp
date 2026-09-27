@@ -45,31 +45,44 @@ ReaderLayoutAhead::Result ReaderLayoutAhead::afterPage(Section* shown, const int
   }
   const Result shownResult = shownCompleted ? Result::ShownComplete : Result::Done;
 
-  // 2) The next chapter, from a fully laid-out chapter's last page.
-  if (!shown || shown->isBuilding() || shown->isPartial() || shown->pageCount == 0 ||
-      shown->currentPage < static_cast<int>(shown->pageCount) - 1 || yield()) {
+  // 2) A neighbour: the next chapter from the last page, the previous one from the first pages.
+  if (!shown || shown->isBuilding() || shown->isPartial() || shown->pageCount == 0 || yield()) {
     return shownResult;
   }
-  const int next = shownSpine + 1;
-  if (next >= epub_->getSpineItemsCount()) return shownResult;
-  if (!(prebuildSpine_ == next && prebuildLayout_ == layout && (prebuildSettled_ || prebuilt_))) {
-    if (heap() < PREBUILD_MIN_FREE_BLOCK) return shownResult;
+  int neighbour = -1;
+  if (shown->currentPage >= static_cast<int>(shown->pageCount) - 1 && shownSpine + 1 < epub_->getSpineItemsCount()) {
+    neighbour = shownSpine + 1;
+  } else if (shown->currentPage < BEHIND_WITHIN_PAGES && shownSpine > 0) {
+    neighbour = shownSpine - 1;
+  }
+  if (neighbour < 0) return shownResult;
+  prebuild(neighbour, layout, shouldYield, largestBlock, context);
+  return shownResult;
+}
+
+void ReaderLayoutAhead::prebuild(const int spine, const SectionLayout& layout, const YieldFn shouldYield,
+                                 const HeapFn largestBlock, void* context) {
+  const auto yield = [&]() { return shouldYield && shouldYield(context); };
+  const auto heap = [&]() { return largestBlock ? largestBlock(context) : UINT32_MAX; };
+  if (!(prebuildSpine_ == spine && prebuildLayout_ == layout && (prebuildSettled_ || prebuilt_))) {
+    if (heap() < PREBUILD_MIN_FREE_BLOCK) return;
     dropBuilding();
     prebuilt_.reset();
-    prebuildSpine_ = next;
+    prebuildSpine_ = spine;
     prebuildLayout_ = layout;
     prebuildSettled_ = true;  // unless a build starts below
-    auto candidate = makeUniqueNoThrow<Section>(epub_, next, renderer_);
-    if (!candidate) return shownResult;
+    auto candidate = makeUniqueNoThrow<Section>(epub_, spine, renderer_);
+    if (!candidate) return;
     if (layout.load(*candidate) && !candidate->isPartial()) {
       prebuilt_ = std::move(candidate);  // already laid out: the turn skips reopening it
-      return shownResult;
+      return;
     }
-    const size_t spineBytes = epub_->getCumulativeSpineItemSize(next) - epub_->getCumulativeSpineItemSize(shownSpine);
-    if (spineBytes > PREBUILD_MAX_UNINFLATED_BYTES && !candidate->hasHtmlCache()) return shownResult;
+    const size_t spineBytes =
+        epub_->getCumulativeSpineItemSize(spine) - (spine > 0 ? epub_->getCumulativeSpineItemSize(spine - 1) : 0);
+    if (spineBytes > PREBUILD_MAX_UNINFLATED_BYTES && !candidate->hasHtmlCache()) return;
     if (!layout.startBuild(*candidate)) {
-      LOG_ERR("RLA", "Pre-build of section %d could not start; it will build on the turn", next);
-      return shownResult;
+      LOG_ERR("RLA", "Pre-build of section %d could not start; it will build on the turn", spine);
+      return;
     }
     prebuilt_ = std::move(candidate);
     prebuildSettled_ = false;
@@ -79,17 +92,16 @@ ReaderLayoutAhead::Result ReaderLayoutAhead::afterPage(Section* shown, const int
       LOG_INF("RLA", "Suspending pre-build: largest free block %u B", static_cast<unsigned>(heap()));
       prebuilt_.reset();  // the destructor persists the laid-out pages as a partial
       prebuildSettled_ = true;
-      return shownResult;
+      return;
     }
     if (!step(*prebuilt_)) {
-      LOG_ERR("RLA", "Pre-build of section %d failed; it will build on the turn", next);
+      LOG_ERR("RLA", "Pre-build of section %d failed; it will build on the turn", spine);
       prebuilt_.reset();
       prebuildSettled_ = true;
-      return shownResult;
+      return;
     }
     if (prebuilt_->isBuildComplete()) prebuildSettled_ = true;
   }
-  return shownResult;
 }
 
 std::unique_ptr<Section> ReaderLayoutAhead::adopt(const int spine, const SectionLayout& layout) {
@@ -98,7 +110,7 @@ std::unique_ptr<Section> ReaderLayoutAhead::adopt(const int spine, const Section
     return std::move(prebuilt_);
   }
   dropBuilding();
-  if (prebuilt_ && (prebuildSpine_ != spine + 1 || !(prebuildLayout_ == layout))) {
+  if (prebuilt_ && ((prebuildSpine_ != spine + 1 && prebuildSpine_ != spine - 1) || !(prebuildLayout_ == layout))) {
     prebuilt_.reset();  // a finished pre-build no turn from here can use
     prebuildSpine_ = -1;
   }

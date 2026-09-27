@@ -205,6 +205,35 @@ re-syncs the controller).
 The 1-page landing layout and the idle position save outside the render lock
 (41aea867) stay.
 
+## Big chapters and backward turns (a38eca21 on the X3)
+
+Normal turns on the German+Korean aphorism book were 0.8-1.1 s (median 1.13 s,
+input 18-250 ms, section 0-1 ms). Two backward turns into a chapter not yet laid
+out took 7.8 and 9.6 s of layout (flags 15): landing on a chapter's last page
+means laying out the whole 150-250 KB spine, layout-ahead only ran forward, and
+a second press waited 12.9 s behind the first.
+
+- **Layout.** Line breaking measured the gap before every word once per line
+  start that reached it (about a line of words); each gap is now measured once.
+  Section files were written in 2-4 byte fields, ~59,000 `HalFile::write` calls
+  per 100 KB of chapter (each a storage lock and an SdFat call on the device);
+  the build file now has a 2 KB write-behind buffer (`HalFile::setWriteBuffer`,
+  four sectors per SD call): 83 calls per 100 KB. Host, the 13-chapter book
+  (1.6 MB): 5.95 -> 3.39 ms per 100 KB of layout, section files byte-identical.
+- **Layout behind.** On the first three pages of a chapter the render task lays
+  out the previous chapter the same way it lays out the next one from the last
+  page (interruptible, same heap gates). Pre-builds now accept spines up to
+  512 KB uninflated (was 96 KB, which excluded every chapter of that book).
+- **Backward-turn landing.** While a backward turn lays out the previous
+  chapter behind the "Indexing" popup, presses no longer queue behind it: a
+  forward press cancels it and returns to the page the reader came from (what
+  was laid out is kept as a partial), each further backward press lands one
+  page earlier.
+
+Building only part of a chapter cannot serve a backward turn: its last page
+depends on every page before it. Partial sections already resume where a build
+stopped when a later build extends them.
+
 ## Physics-bound cost (X3)
 
 From `open-x4-sdk` (unchanged): the X3 controller runs SPI at 16 MHz, so one

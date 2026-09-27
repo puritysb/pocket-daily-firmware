@@ -90,6 +90,15 @@ class EpubReaderActivity final : public Activity {
   // task lays out the rest of the chapter, then the next one, yielding to any button.
   std::unique_ptr<ReaderLayoutAhead> layoutAhead;
   std::atomic<bool> inputQueued{false};
+  // A backward turn into a chapter that is not laid out must lay it out to its last page
+  // (seconds for a 250 KB spine on the X3), behind the "Indexing" popup. Presses meanwhile
+  // do not queue behind it: forward cancels it (back to the page the reader came from, the
+  // pages already laid out are kept as a partial), each further back press lands one page
+  // earlier. Set by render() while that build runs.
+  static constexpr uint16_t LANDING_LAST_PAGE = UINT16_MAX;  // pendingPageJump: the chapter's last page
+  std::atomic<bool> landingInProgress{false};
+  std::atomic<bool> landingCancelled{false};
+  std::atomic<int> landingExtraBack{0};
   void layOutAhead();
 
   // Reading-position writes are deferred to idle time (loop()) instead of every render:

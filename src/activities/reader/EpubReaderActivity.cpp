@@ -556,7 +556,7 @@ void EpubReaderActivity::loop() {
     } else {
       currentSpineIndex = epub->getSpineItemsCount() - 1;
       nextPageNumber = 0;
-      pendingPageJump = std::numeric_limits<uint16_t>::max();
+      pendingPageJump = LANDING_LAST_PAGE;
       requestUpdate();
     }
     return;
@@ -1020,6 +1020,15 @@ void EpubReaderActivity::recordBuildFailure() const {
 }
 
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
+  if (landingInProgress.load()) {
+    // The render laying out the previous chapter acts on it (see landingInProgress).
+    if (isForwardTurn) {
+      landingCancelled.store(true);
+    } else {
+      landingExtraBack.fetch_add(1);
+    }
+    return;
+  }
   queuePerfTurn(isForwardTurn ? 0 : PocketDaily::ReaderPerf::FLAG_BACK, millis());
   turnQueued.store(true);
   if (isForwardTurn) {
@@ -1051,7 +1060,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
       {
         RenderLock lock(*this);
         nextPageNumber = 0;
-        pendingPageJump = std::numeric_limits<uint16_t>::max();
+        pendingPageJump = LANDING_LAST_PAGE;
         currentSpineIndex--;
         section.reset();
       }
@@ -1147,6 +1156,29 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
   const uint16_t viewportWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;
   const uint16_t viewportHeight = renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom;
+
+  // Landing on the last page of a previous chapter (backward turn): see landingInProgress.
+  const bool landing = !section && pendingPageJump.has_value() && *pendingPageJump == LANDING_LAST_PAGE;
+  struct LandingGuard {
+    std::atomic<bool>& flag;
+    ~LandingGuard() { flag.store(false); }
+  } landingGuard{landingInProgress};
+  if (landing) {
+    landingCancelled.store(false);
+    landingExtraBack.store(0);
+    landingInProgress.store(true);
+  }
+  // A forward press during that build: return to the first page of the chapter the reader
+  // came from, keeping what was laid out (the section's destructor persists it as a partial).
+  const auto cancelLanding = [&]() {
+    LOG_DBG("ERS", "Back-turn build of section %d cancelled", currentSpineIndex);
+    section.reset();
+    currentSpineIndex++;
+    nextPageNumber = 0;
+    pendingPageJump.reset();
+    landingCancelled.store(false);
+    requestUpdate();
+  };
 
   if (!section) {
     const auto filepath = epub->getSpineItem(currentSpineIndex).href;
@@ -1266,6 +1298,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
             // Anchor jump: build until the anchor's page is laid out (usually page 0), checking a
             // partial's on-disk anchor map too so an already-indexed anchor resolves immediately.
             // Otherwise: build until the target page exists. loop() builds the rest behind it.
+            if (landing && landingCancelled.load()) {
+              cancelLanding();
+              return;
+            }
             if (!section->buildSomeMore(BUILD_PAGES_PER_CHUNK)) {
               LOG_ERR("ERS", "Failed during incremental section build");
               showBuildError();
@@ -1335,6 +1371,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   if (section->isBuilding()) {
     while (!section->isBuildComplete() && section->currentPage >= static_cast<int>(section->pageCount)) {
       Perf::addFlags(Perf::FLAG_BUILT);
+      if (landing && landingCancelled.load()) {
+        cancelLanding();
+        return;
+      }
       if (!section->buildSomeMore(BUILD_PAGES_PER_CHUNK)) {
         LOG_ERR("ERS", "Failed during incremental section build");
         showBuildError();
@@ -1350,8 +1390,16 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   // watermark (not the final count) and has already been driven far enough by the loops above.
   if (!section->isBuilding() && section->pageCount > 0 &&
       section->currentPage >= static_cast<int>(section->pageCount)) {
-    section->currentPage = section->pageCount - 1;
+    // A landing lands one page earlier per back press made while it was laid out.
+    const int earlier = landing ? landingExtraBack.exchange(0) : 0;
+    section->currentPage = std::max(0, static_cast<int>(section->pageCount) - 1 - earlier);
   }
+  if (landing && landingCancelled.load()) {
+    // Forward pressed after the layout finished but before the page was drawn.
+    cancelLanding();
+    return;
+  }
+  landingInProgress.store(false);
 
   // Apply a deferred settings-change reposition now that the real page count is known (a no-op for
   // a plain resume / unchanged pagination). If still building, this defers to loop() on completion.

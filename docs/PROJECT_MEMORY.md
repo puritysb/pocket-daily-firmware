@@ -21,7 +21,12 @@ transcript. Current source and release records override dated observations.
   spine and waited on loop() ticks (input 598 ms). Now ReaderLayoutAhead lays
   out ahead on the render task after each page, yielding to any button;
   glyph-set retention removed (held heap, no proven SD saving on device).
-  test/reader_layout models the cadence. Not yet re-measured on X3.
+  test/reader_layout models the cadence. a38eca21 on X3: turns 0.8-1.1 s,
+  input 18-250 ms, min free 32 KB; backward turns into unbuilt 150-250 KB
+  chapters 7.8-9.6 s. Then: line-break gaps measured once, 2 KB write-behind
+  buffer for section files (59k -> 83 write calls per 100 KB), layout behind
+  on a chapter's first pages, cancellable backward-turn landing. Host layout
+  5.95 -> 3.39 ms per 100 KB, section files identical. Not yet on X3.
 
 - 2026-09-28 Page-turn telemetry and speed-ups (docs/reader-perf.md). The reader
   records each turn's stages (input, section, page, prewarm, BW render, status,
