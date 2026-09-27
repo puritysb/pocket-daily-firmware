@@ -15,7 +15,7 @@ transcript. Current source and release records override dated observations.
   numeric, HTML named; app check found `&apos;` counted as 6) and CRLF, parses
   element-only paths, and `findXPathForParagraph` counts `<p>` only (matches the
   LUT). Host: app XPointers 15/15 + 114/114 exact; firmware XPointers in
-  test/reading_progress/fixtures/firmware-xpointers.json (app had 255/258 before the `&apos;` fix; rerun pending). Host 483, scripts 67,
+  test/reading_progress/fixtures/firmware-xpointers.json (the app resolves all 258 to the same text after the `&apos;` fix, app MacTests testFirmwareXPointersResolveToTheSameText). Host 483, scripts 67,
   default build (+18.9 KB flash, +0 static RAM). Not on X3/X4: exit latency,
   heap, LAN/private-AP exchange with the app, prompt on both layouts.
 
