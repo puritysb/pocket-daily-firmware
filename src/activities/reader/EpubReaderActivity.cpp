@@ -33,9 +33,11 @@
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "articles/ArticleStorage.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "pocket_daily/ReadingProgressReader.h"
 #include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
 
@@ -198,6 +200,7 @@ void EpubReaderActivity::onEnter() {
   APP_STATE.openEpubPath = epub->getPath();
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
+  readingOfferPending = PocketDaily::ReadingProgress::hasPendingOffer(*epub);
 
   loadCachedBookmarks();
 
@@ -221,7 +224,16 @@ void EpubReaderActivity::onExit() {
     saveProgress(origin.spineIndex, origin.pageNumber, 0);
   }
 
+  // Pocket Daily reading-progress v1: capture the page's paragraph while the section is
+  // loaded, release it, then record the position (and XPointer) for the companion app.
+  const auto readingPosition =
+      footnoteDepth > 0 ? PocketDaily::ReadingProgress::capturePosition(nullptr, savedPositions[0].spineIndex,
+                                                                        savedPositions[0].pageNumber, 0)
+                        : PocketDaily::ReadingProgress::capturePosition(
+                              section.get(), currentSpineIndex, section ? section->currentPage : nextPageNumber,
+                              section ? section->estimatedTotalPages() : cachedChapterTotalPageCount);
   section.reset();
+  if (epub) PocketDaily::ReadingProgress::recordPosition(epub, readingPosition);
   if (pendingReadFolderMove && epub) {
     const std::string srcPath = epub->getPath();
     const std::string oldCachePath = epub->getCachePath();
@@ -355,6 +367,14 @@ void EpubReaderActivity::loop() {
   if (showBilingualMessage && (millis() - bilingualMessageTime) >= ReaderUtils::BOOKMARK_MESSAGE_DURATION_MS) {
     showBilingualMessage = false;
     requestUpdate();
+  }
+
+  // Pocket Daily reading-progress v1: once the page is laid out, ask about a further
+  // position another device offered for this book.
+  if (readingOfferPending && section && !RenderLock::peek()) {
+    readingOfferPending = false;
+    askReadingOffer();
+    return;
   }
 
   // Enter reader menu activity on short-press Confirm. A long-press that fired a bound
@@ -762,6 +782,37 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
   }
+}
+
+void EpubReaderActivity::askReadingOffer() {
+  const int totalPages = section->estimatedTotalPages();
+  const float pageStart =
+      totalPages > 0 ? static_cast<float>(section->currentPage) / static_cast<float>(totalPages) : 0;
+  std::string question;
+  std::string xpointer;
+  float percentage = 0.0f;
+  if (!PocketDaily::ReadingProgress::takeFurtherOffer(*epub, epub->calculateProgress(currentSpineIndex, pageStart),
+                                                      question, xpointer, percentage)) {
+    return;
+  }
+  auto confirm = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, question, "");
+  if (!confirm) return;  // The offer stays pending; the next open asks again.
+  startActivityForResult(
+      std::move(confirm), [this, xpointer = std::move(xpointer), percentage](const ActivityResult& r) {
+        PocketDaily::ReadingProgress::discardOffer(*epub);
+        if (r.isCancelled) return;
+        const int pages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
+        const CrossPointPosition target =
+            ProgressMapper::toCrossPoint(epub, {xpointer, percentage}, renderer, currentSpineIndex, pages);
+        RenderLock lock(*this);
+        if (!section || currentSpineIndex != target.spineIndex) {
+          currentSpineIndex = target.spineIndex;
+          nextPageNumber = target.pageNumber;
+          section.reset();
+        } else {
+          section->currentPage = std::max(0, target.pageNumber);
+        }
+      });
 }
 
 bool EpubReaderActivity::launchKOReaderSync() {

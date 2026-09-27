@@ -235,6 +235,16 @@ Fork-resident product patches (no upstream intent):
   (`agentDeckCompanionEnabled`, `agentPullSyncEnabled`) were removed
   2026-09-25. `settings.json` is keyed, so older files load unchanged and the
   keys drop out on the next save.
+- `src/activities/reader/EpubReaderActivity.{h,cpp}` — reading-progress v1
+  (docs/reading-progress-v1.md): `readingOfferPending` + `askReadingOffer()`
+  (one line in `onEnter()`, a 5-line check in `loop()`, the ~25-line
+  confirmation/jump method) and the `onExit()` capture → `section.reset()` →
+  record sequence (keep it before the read-folder move). Logic lives in
+  `src/pocket_daily/ReadingProgress{,Store,Reader}.*`. The generic parts —
+  `Epub::readSpineItemToStream`, `Section::getParagraphRunForPage`,
+  `ChapterXPathResolver::findXPathForParagraphProgress`,
+  `ProgressMapper::locateInSpine` and the KOReader text-node/entity fixes — are
+  upstream candidates.
 - `src/RecentBooksStore.*`, `src/SdCardFontSystem.*`, themes/icons,
   `platformio.ini`, CI workflows, `README.md`/`USER_GUIDE.md` — product
   identity, build, and release config.

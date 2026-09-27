@@ -5,6 +5,19 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-27 Reading-progress v1 (docs/reading-progress-v1.md; app side
+  docs/READING_PROGRESS.md): Sync advertises `readingProgress: 1`; GET/POST
+  `/api/pocket/v1/reading` read per-book records and queue offers only. The
+  reader computes the XPointer on book exit from the paragraph LUT (+ fraction
+  into long paragraphs), streaming the cached `html/<spine>.html`; asks
+  "<device>: N% · Go there?" on the next open. KOReader resolver now numbers
+  only non-whitespace direct text runs, decodes numeric entities/CRLF, parses
+  element-only paths, and `findXPathForParagraph` counts `<p>` only (matches the
+  LUT). Host: app XPointers 15/15 + 114/114 exact; firmware XPointers in
+  test/reading_progress/fixtures/firmware-xpointers.json. Host 482, scripts 67,
+  default build (+18.9 KB flash, +0 static RAM). Not on X3/X4: exit latency,
+  heap, LAN/private-AP exchange with the app, prompt on both layouts.
+
 - 2026-09-27 Missing glyphs and large-alphabet layout (host-verified, not on X3).
   Advance cache is a bounded LRU (768/style, 2,048 for one oversized request,
   batched 256-miss reads) plus uniform-advance runs for dense large intervals.

@@ -324,3 +324,10 @@ if (parsedSize != fileSize) {
     std::warning(std::format("Unparsed data detected: {} bytes remaining at offset 0x{:X}", fileSize - parsedSize, parsedSize));
 }
 ```
+
+## Reading-progress records (Pocket Daily)
+
+`pocket-reading.bin`, `pocket-reading-offer.bin` (per book, beside
+`progress.bin`) and `/.crosspoint/pocket-reading-seq.bin` carry their own magic,
+version and CRC; layouts are in `docs/reading-progress-v1.md`. They do not
+change `progress.bin`, `book.bin` or `section.bin`.

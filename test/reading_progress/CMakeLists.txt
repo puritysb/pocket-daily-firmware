@@ -25,3 +25,11 @@ target_link_libraries(reading_progress_xpointer_test PRIVATE crosspoint_test_com
   GTest::gtest_main)
 gtest_discover_tests(reading_progress_xpointer_test)
 
+# Records, offers, list JSON and SD storage of the product module.
+add_executable(reading_progress_format_test
+  ReadingProgressFormatTest.cpp
+  ${REPO_ROOT}/src/pocket_daily/ReadingProgress.cpp
+  ${REPO_ROOT}/src/pocket_daily/ReadingProgressStore.cpp)
+target_include_directories(reading_progress_format_test BEFORE PRIVATE ../stubs ${REPO_ROOT}/lib/Memory)
+target_link_libraries(reading_progress_format_test PRIVATE crosspoint_test_common ArduinoJson GTest::gtest_main)
+gtest_discover_tests(reading_progress_format_test)

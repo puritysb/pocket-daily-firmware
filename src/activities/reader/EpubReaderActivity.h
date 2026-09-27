@@ -58,6 +58,9 @@ class EpubReaderActivity final : public Activity {
   // Set when the reader is left at end-of-book and SETTINGS.moveFinishedToReadFolder is on.
   // Consumed in onExit() to relocate the finished book into /Read/.
   bool pendingReadFolderMove = false;
+  // Pocket Daily reading-progress v1: another device left a position to ask about.
+  bool readingOfferPending = false;
+  void askReadingOffer();
 
   // Footnote support
   std::vector<FootnoteEntry> currentPageFootnotes;

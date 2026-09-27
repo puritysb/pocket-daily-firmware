@@ -16,6 +16,9 @@
 #include <ctime>
 
 #include "CrossPointSettings.h"
+#include "Epub.h"
+#include "FsHelpers.h"
+#include "KOReaderDocumentId.h"
 #include "RecentBooksStore.h"
 #include "activities/RenderLock.h"
 #include "articles/ArticleStorage.h"
@@ -28,6 +31,8 @@
 #include "pocket_daily/PocketGlanceStore.h"
 #include "pocket_daily/PocketProfileStore.h"
 #include "pocket_daily/PocketScreenPreview.h"
+#include "pocket_daily/ReadingProgress.h"
+#include "pocket_daily/ReadingProgressStore.h"
 #include "pocket_daily/StagedFirmwareStore.h"
 #include "pocket_daily/boot/DevBootReturn.h"
 #include "pocket_daily/live_studio/DevTrace.h"
@@ -125,13 +130,14 @@ void sendPreparation(WebServer& server, const char* deviceId, const char* revisi
   server.send(200, "application/json", body);
 }
 
-bool admitContentOperation(WebServer& server, const RouteDeps& d, char (&deviceId)[9]) {
+// `claimedId` is the reader identity the request names (query or body).
+bool admitOperationFor(WebServer& server, const RouteDeps& d, char (&deviceId)[9], const char* claimedId) {
   if ((d.host.httpUploadBusy && d.host.httpUploadBusy(d.host.self)) || (d.stream && d.stream->receiving())) {
     server.send(409, "text/plain", "Another file transfer is active");
     return false;
   }
   snprintf(deviceId, sizeof(deviceId), "%08lX", static_cast<unsigned long>(ESP.getEfuseMac() & 0xFFFFFFFFUL));
-  if (server.arg("deviceID") != deviceId) {
+  if (!claimedId || strcmp(claimedId, deviceId) != 0) {
     server.send(409, "text/plain", "Reader identity mismatch");
     return false;
   }
@@ -142,6 +148,11 @@ bool admitContentOperation(WebServer& server, const RouteDeps& d, char (&deviceI
     return false;
   }
   return true;
+}
+
+bool admitContentOperation(WebServer& server, const RouteDeps& d, char (&deviceId)[9]) {
+  const String claimed = server.arg("deviceID");
+  return admitOperationFor(server, d, deviceId, claimed.c_str());
 }
 
 bool contentRevisionArgument(WebServer& server, const String& revision) {
@@ -703,6 +714,156 @@ void handleReaderFiles(WebServer& server, const RouteDeps& d, ReaderFileAction a
   serializeJson(doc, response);
   server.sendHeader("Cache-Control", "no-store");
   server.send(200, "application/json", response);
+}
+
+// Reading-progress v1 (docs/reading-progress-v1.md). Handlers only read and
+// write the small per-book records; XPointers are computed by the reader when a
+// book is left, never while serving a request.
+namespace Reading = PocketDaily::ReadingProgress;
+
+struct ReadingWork {
+  Reading::Record record;
+  Reading::Scratch scratch;
+  char entry[Reading::MAX_XPOINTER_BYTES + 512];  // one serialized list entry
+};
+
+struct ReadingBook {
+  std::string cachePath;
+  bool hasRecord = false;
+  bool current = false;  // the record describes the saved page
+  float percentage = 0.0f;
+  char document[Reading::DIGEST_HEX + 1] = {};
+  char filenameDocument[Reading::DIGEST_HEX + 1] = {};
+};
+
+bool copyDigest(const std::string& digest, char (&out)[Reading::DIGEST_HEX + 1]) {
+  if (digest.size() != Reading::DIGEST_HEX || !Reading::validDigest(digest.c_str())) return false;
+  memcpy(out, digest.c_str(), Reading::DIGEST_HEX + 1);
+  return true;
+}
+
+// Loads what the reader recorded for one recent EPUB and its digests. The
+// partial-MD5 digest comes from the record when the file size still matches;
+// otherwise it is recomputed (12 reads of 1 KB) without writing anything.
+bool loadReadingBook(const RecentBook& recent, ReadingWork& work, ReadingBook& book) {
+  if (!FsHelpers::hasEpubExtension(recent.path)) return false;
+  size_t size = 0;
+  {
+    HalFile file = Storage.open(recent.path.c_str(), O_RDONLY);
+    if (!file || file.isDirectory()) return false;
+    size = file.size();
+  }
+  book.cachePath = Epub(recent.path, "/.crosspoint").getCachePath();
+  book.hasRecord = Reading::loadRecord(book.cachePath.c_str(), work.record, work.scratch);
+  // progress.bin: spine u16, page u16, page count u16, book percent u8 (EpubReaderUtils::saveProgress).
+  uint8_t saved[7] = {};
+  int savedBytes = 0;
+  {
+    HalFile progress = Storage.open((book.cachePath + "/progress.bin").c_str(), O_RDONLY);
+    if (progress) savedBytes = progress.read(saved, sizeof(saved));
+  }
+  const bool hasSaved = savedBytes >= 4;
+  const uint16_t spine = static_cast<uint16_t>(saved[0] | (saved[1] << 8));
+  const uint16_t page = static_cast<uint16_t>(saved[2] | (saved[3] << 8));
+  book.current = book.hasRecord && (!hasSaved || (work.record.spine == spine && work.record.page == page));
+  if (book.current) {
+    book.percentage = work.record.percentage;
+  } else if (savedBytes >= 7 && saved[6] <= 100) {
+    book.percentage = static_cast<float>(saved[6]) / 100.0f;
+  }
+  if (!(book.hasRecord && work.record.document[0] && work.record.fileSize == size &&
+        copyDigest(work.record.document, book.document)) &&
+      !copyDigest(KOReaderDocumentId::calculate(recent.path), book.document)) {
+    return false;
+  }
+  if (!copyDigest(KOReaderDocumentId::calculateFromFilename(recent.path), book.filenameDocument)) {
+    book.filenameDocument[0] = '\0';
+  }
+  return true;
+}
+
+void handleReadingList(WebServer& server, const RouteDeps& d) {
+  char deviceId[9];
+  if (!admitContentOperation(server, d, deviceId)) return;
+  auto work = makeUniqueNoThrow<ReadingWork>();
+  if (!work || ESP.getFreeHeap() < 12288 || ESP.getMaxAllocHeap() < 4096) {
+    server.send(503, "text/plain", "Reader is busy; retry reading positions shortly");
+    return;
+  }
+  // Streamed in chunks from one ~1.7 KB request buffer; the whole reply stays
+  // within MAX_LIST_BYTES, dropping the oldest books first.
+  server.client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
+  server.sendHeader("Cache-Control", "no-store");
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "application/json", "");
+  size_t total = Reading::writeListHead(deviceId, work->entry, sizeof(work->entry));
+  server.sendContent(work->entry, total);
+  size_t listed = 0;
+  for (const auto& recent : RECENT_BOOKS.getBooks()) {
+    if (listed >= Reading::MAX_BOOKS) break;
+    HalSystem::feedWatchdogIfRegistered();
+    ReadingBook book;
+    if (!loadReadingBook(recent, *work, book)) continue;
+    Reading::ListEntry entry;
+    entry.path = recent.path.c_str();
+    entry.document = book.document;
+    entry.filenameDocument = book.filenameDocument;
+    entry.xpointer = book.current ? work->record.xpointer : "";
+    entry.percentage = book.percentage;
+    entry.updated = book.current ? work->record.updated : 0;
+    entry.seq = book.hasRecord ? work->record.seq : 0;
+    const size_t comma = listed ? 1 : 0;
+    work->entry[0] = ',';
+    const size_t length = Reading::writeListEntry(entry, work->entry + comma, sizeof(work->entry) - comma);
+    if (!length) continue;  // e.g. a path too long to report
+    if (total + comma + length + sizeof(Reading::LIST_TAIL) - 1 > Reading::MAX_LIST_BYTES) break;
+    server.sendContent(work->entry, comma + length);
+    total += comma + length;
+    listed++;
+  }
+  server.sendContent(Reading::LIST_TAIL, sizeof(Reading::LIST_TAIL) - 1);
+  server.sendContent("");
+  LOG_DBG("WEB", "Reading list: %u books, %u bytes", static_cast<unsigned>(listed), static_cast<unsigned>(total + 2));
+}
+
+void handleReadingOffer(WebServer& server, const RouteDeps& d) {
+  struct OfferWork {
+    Reading::OfferRequest request;
+    ReadingWork reading;
+  };
+  auto work = makeUniqueNoThrow<OfferWork>();
+  if (!work) {
+    server.send(503, "text/plain", "Reader memory is too low for the reading position");
+    return;
+  }
+  const String& body = server.arg("plain");
+  const char* error = nullptr;
+  bool outOfMemory = false;
+  if (!Reading::parseOfferJson(body.c_str(), body.length(), work->request, error, outOfMemory)) {
+    server.send(outOfMemory ? 503 : 400, "text/plain", error ? error : "Invalid reading position");
+    return;
+  }
+  char deviceId[9];
+  if (!admitOperationFor(server, d, deviceId, work->request.deviceID)) return;
+  for (const auto& recent : RECENT_BOOKS.getBooks()) {
+    HalSystem::feedWatchdogIfRegistered();
+    ReadingBook book;
+    if (!loadReadingBook(recent, work->reading, book) || (strcmp(book.document, work->request.document) != 0 &&
+                                                          strcmp(book.filenameDocument, work->request.document) != 0)) {
+      continue;
+    }
+    // Only a pending offer: the reader asks before moving when the book opens.
+    if (!Reading::saveOffer(book.cachePath.c_str(), work->request.offer, work->reading.scratch)) {
+      server.send(500, "text/plain", "Reading position could not be stored; retry");
+      return;
+    }
+    LOG_DBG("WEB", "Reading offer %.4f from %s stored for %s", static_cast<double>(work->request.offer.percentage),
+            work->request.offer.device, recent.path.c_str());
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", "{\"ok\":true,\"state\":\"pending\"}");
+    return;
+  }
+  server.send(404, "text/plain", "That book is not among the reader's recent books");
 }
 
 // Idempotent cleanup owns only the supplied hidden UUID file. A completed
@@ -1352,6 +1513,14 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     routes.on("/api/pocket/v1/glance", HTTP_POST, [server = &server, deps = &d] {
       note(*deps);
       handlePostGlance(*server, *deps);
+    });
+    routes.on("/api/pocket/v1/reading", HTTP_GET, [server = &server, deps = &d] {
+      note(*deps);
+      handleReadingList(*server, *deps);
+    });
+    routes.on("/api/pocket/v1/reading", HTTP_POST, [server = &server, deps = &d] {
+      note(*deps);
+      handleReadingOffer(*server, *deps);
     });
   }
   if (d.profile == Profile::POCKET_SYNC || d.profile == Profile::COMPANION) {

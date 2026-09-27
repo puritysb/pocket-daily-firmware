@@ -220,6 +220,37 @@ class SyncRoutesTest(unittest.TestCase):
         status = (root / "src/pocket_daily/web/PocketStatus.cpp").read_text()
         self.assertIn('doc["contentRead"] = 1;', status)
 
+    def test_reading_progress_routes_read_records_and_only_queue_offers(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
+        body = source[source.index("void configurePocketRoutes("):source.index("void registerPocketRoutes(")]
+        sync = body[body.index("if (isSyncProfile(d.profile)) {"):]
+        sync = sync[:sync.index("\n  }\n")]
+        self.assertIn('routes.on("/api/pocket/v1/reading", HTTP_GET', sync)
+        self.assertIn('routes.on("/api/pocket/v1/reading", HTTP_POST', sync)
+        status = (root / "src/pocket_daily/web/PocketStatus.cpp").read_text()
+        self.assertIn('if (isSyncProfile(in.profile)) doc["readingProgress"] = 1;', status)
+        handlers = source[source.index("struct ReadingWork {"):source.index("void handleTransferControl(")]
+        # No chapter streaming or position mapping while serving HTTP: the reader
+        # computes XPointers when a book is left (ReadingProgressReader).
+        for heavy in ("ChapterXPathResolver", "ProgressMapper", "readSpineItemToStream", "readItemContentsToStream",
+                      ".load(", "O_WRITE", "saveProgress("):
+            self.assertNotIn(heavy, handlers)
+        listing = handlers[handlers.index("void handleReadingList("):handlers.index("void handleReadingOffer(")]
+        self.assertIn("admitContentOperation(server, d, deviceId)", listing)
+        self.assertIn("Reading::MAX_LIST_BYTES", listing)
+        self.assertNotIn("saveOffer", listing)
+        offer = handlers[handlers.index("void handleReadingOffer("):]
+        # Parsed and identity-checked before anything is stored; never touches progress.bin.
+        self.assertLess(offer.index("Reading::parseOfferJson("), offer.index("admitOperationFor("))
+        self.assertLess(offer.index("admitOperationFor("), offer.index("Reading::saveOffer("))
+        self.assertNotIn("saveProgress(", offer)
+        reader = (root / "src/activities/reader/EpubReaderActivity.cpp").read_text()
+        exit_hook = reader[reader.index("void EpubReaderActivity::onExit()"):reader.index("void EpubReaderActivity::loop()")]
+        self.assertLess(exit_hook.index("capturePosition("), exit_hook.index("section.reset();"))
+        self.assertLess(exit_hook.index("section.reset();"), exit_hook.index("recordPosition("))
+        self.assertLess(exit_hook.index("recordPosition("), exit_hook.index("moveFinishedBookToReadFolder("))
+
 
 if __name__ == "__main__":
     unittest.main()
