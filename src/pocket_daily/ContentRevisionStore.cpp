@@ -137,7 +137,8 @@ RevisionResult checkManifest(HalFile& manifest, const char* revision, uint16_t c
 }
 
 RevisionResult verify(const char* root, const char* revision, uint16_t capabilities, RevisionInfo& info,
-                      Workspace& work, void (*progress)(), RevisionCards* output) {
+                      Workspace& work, void (*progress)(), RevisionCards* output,
+                      std::unique_ptr<RevisionCards>* ownedOutput) {
   filePath(work, root, revision, "manifest.pdcm");
   HalFile manifest = Storage.open(work.path, O_RDONLY);
   if (!manifest) return RevisionResult::MissingManifest;
@@ -155,6 +156,18 @@ RevisionResult verify(const char* root, const char* revision, uint16_t capabilit
     const auto result = verifyFile(work, root, revision, info.cardCount, progress);
     if (result != RevisionResult::Ok) return result;
     if (work.entry.kind == FileKind::Card && work.card.layout != CardLayout::TextFirst) hasLayout = true;
+    if (ownedOutput && work.entry.kind == FileKind::Card) {
+      // The same <=2400B display snapshot formerly allocated by ContentViewState
+      // after recovery. Allocate only on the first card, alongside the existing
+      // verifier workspace; no extra snapshot, stack object or permanent pool.
+      static_assert(sizeof(RevisionCards) <= 2400, "Bound content view snapshot");
+      if (!*ownedOutput) *ownedOutput = makeUniqueNoThrow<RevisionCards>();
+      if (!*ownedOutput) {
+        LOG_ERR("CONTENT", "OOM allocating content view snapshot");
+        return RevisionResult::OutOfMemory;
+      }
+      output = ownedOutput->get();
+    }
     if (output && work.entry.kind == FileKind::Card) output->cards[info.cardCount - 1] = work.card;
   }
   if (hasLayout != bool(info.manifest.requiredCapabilities & CAP_CARD_LAYOUT)) return RevisionResult::InvalidManifest;
@@ -208,7 +221,8 @@ bool publishedFilePath(const char* revision, const char* name, char* out, size_t
 }
 
 static RevisionResult verifyAtRoot(const char* root, const char* revision, uint16_t supportedCapabilities,
-                                   RevisionInfo& info, void (*progress)(), RevisionCards* output = nullptr) {
+                                   RevisionInfo& info, void (*progress)(), RevisionCards* output = nullptr,
+                                   std::unique_ptr<RevisionCards>* ownedOutput = nullptr) {
   info = {};
   if (!validRevision(revision)) return RevisionResult::InvalidRevision;
   if (!Storage.ready()) return RevisionResult::Unavailable;
@@ -219,7 +233,7 @@ static RevisionResult verifyAtRoot(const char* root, const char* revision, uint1
     LOG_ERR("CONTENT", "OOM allocating %uB revision workspace", static_cast<unsigned>(sizeof(Workspace)));
     return RevisionResult::OutOfMemory;
   }
-  const auto result = verify(root, revision, supportedCapabilities, info, *work, progress, output);
+  const auto result = verify(root, revision, supportedCapabilities, info, *work, progress, output, ownedOutput);
   if (result != RevisionResult::Ok) {
     info = {};
     LOG_ERR("CONTENT", "Revision verification failed: %u", static_cast<unsigned>(result));
@@ -239,8 +253,17 @@ RevisionResult loadRevisionCards(const char* revision, uint16_t capabilities, Re
   return result;
 }
 RevisionResult verifyRevision(const char* revision, uint16_t supportedCapabilities, RevisionInfo& info,
-                              void (*progress)()) {
-  return verifyAtRoot(CONTENT_ROOT, revision, supportedCapabilities, info, progress);
+                              void (*progress)(), std::unique_ptr<RevisionCards>* cards) {
+  if (cards && *cards) memset(cards->get(), 0, sizeof(RevisionCards));
+  const auto result = verifyAtRoot(CONTENT_ROOT, revision, supportedCapabilities, info, progress, nullptr, cards);
+  if (cards) {
+    if (result == RevisionResult::Ok && info.cardCount) {
+      (*cards)->count = info.cardCount;
+    } else {
+      cards->reset();
+    }
+  }
+  return result;
 }
 RevisionResult verifyStagedRevision(const char* revision, uint16_t supportedCapabilities, RevisionInfo& info,
                                     void (*progress)()) {

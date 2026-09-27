@@ -1,4 +1,6 @@
 #pragma once
+#include <memory>
+
 #include "ContentCard.h"
 #include "ContentManifest.h"
 
@@ -63,8 +65,11 @@ inline constexpr size_t PUBLISHED_PATH_BYTES = sizeof(CONTENT_ROOT) + 1 + 64 + 1
 // Read-only verification of <CONTENT_ROOT>/<64hex>/manifest.pdcm and all files.
 // Caller must prevent writes to that directory for the entire verification and
 // subsequent commit. No activation, deletion, network or success receipt here.
+// Optional caller-owned snapshot collects the already-decoded cards in this
+// same verified pass. Allocated lazily only for a card, reused on success,
+// released on failure; no partial output escapes a failed verification.
 RevisionResult verifyRevision(const char* revision, uint16_t supportedCapabilities, RevisionInfo& info,
-                              void (*progress)() = nullptr);
+                              void (*progress)() = nullptr, std::unique_ptr<RevisionCards>* cards = nullptr);
 RevisionResult verifyStagedRevision(const char* revision, uint16_t supportedCapabilities, RevisionInfo& info,
                                     void (*progress)() = nullptr);
 // Internal deletion primitive: only call after ContentActiveStore's retirement

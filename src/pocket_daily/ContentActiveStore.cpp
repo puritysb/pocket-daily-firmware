@@ -48,21 +48,33 @@ int newest(const Record (&records)[2], const ReadResult (&results)[2]) {
              : 0;
 }
 
-int recover(const Record (&records)[2], const ReadResult (&results)[2], uint16_t capabilities, ActiveRevision& active,
-            void (*progress)()) {
+struct Recovery {
+  int slot = -1;
+  bool outOfMemory = false;
+};
+
+Recovery recover(const Record (&records)[2], const ReadResult (&results)[2], uint16_t capabilities,
+                 ActiveRevision& active, void (*progress)(), std::unique_ptr<RevisionCards>* cards = nullptr) {
   ReadResult candidates[] = {results[0], results[1]};
   for (unsigned attempt = 0; attempt < 2; ++attempt) {
     const int slot = newest(records, candidates);
     if (slot < 0) break;
-    if (verifyRevision(records[slot].revision, capabilities, active.content, progress) == RevisionResult::Ok) {
+    const auto result = verifyRevision(records[slot].revision, capabilities, active.content, progress, cards);
+    if (result == RevisionResult::Ok) {
       active.generation = records[slot].generation;
       memcpy(active.revision, records[slot].revision, sizeof(active.revision));
-      return slot;
+      return {slot, false};
+    }
+    // Snapshot allocation failure is not evidence that the newest revision is
+    // corrupt. Never silently select an older revision because it needs less RAM.
+    if (cards && result == RevisionResult::OutOfMemory) {
+      active = {};
+      return {-1, true};
     }
     candidates[slot] = ReadResult::Invalid;
   }
   active = {};
-  return -1;
+  return {};
 }
 
 ActiveResult writeRecord(int slot, uint32_t generation, const char* revision, bool createOnly) {
@@ -95,7 +107,7 @@ ActiveResult activate(const char* revision, uint16_t capabilities, ActiveRevisio
   const ReadResult results[] = {readRecord(0, records[0]), readRecord(1, records[1])};
   if (results[0] == ReadResult::Failed || results[1] == ReadResult::Failed) return ActiveResult::ReadFailed;
   const int latest = newest(records, results);
-  const int protectedSlot = recover(records, results, capabilities, active, progress);
+  const int protectedSlot = recover(records, results, capabilities, active, progress).slot;
   // Existing metadata without any verifiable content may mean transient SD
   // read failure; don't guess which copy is disposable.
   if (latest >= 0 && protectedSlot < 0) return ActiveResult::VerifyFailed;
@@ -117,12 +129,19 @@ ActiveResult activate(const char* revision, uint16_t capabilities, ActiveRevisio
 }
 }  // namespace
 
-ActiveResult recoverActiveRevision(uint16_t capabilities, ActiveRevision& active, void (*progress)()) {
+ActiveResult recoverActiveRevision(uint16_t capabilities, ActiveRevision& active, void (*progress)(),
+                                   std::unique_ptr<RevisionCards>* cards) {
   active = {};
-  if (!Storage.ready()) return ActiveResult::ReadFailed;
+  if (!Storage.ready()) {
+    if (cards) cards->reset();
+    return ActiveResult::ReadFailed;
+  }
   Record records[2];
   const ReadResult results[] = {readRecord(0, records[0]), readRecord(1, records[1])};
-  if (recover(records, results, capabilities, active, progress) >= 0) return ActiveResult::Ok;
+  const auto recovered = recover(records, results, capabilities, active, progress, cards);
+  if (recovered.slot >= 0) return ActiveResult::Ok;
+  if (cards) cards->reset();
+  if (recovered.outOfMemory) return ActiveResult::OutOfMemory;
   if (results[0] == ReadResult::Failed || results[1] == ReadResult::Failed) return ActiveResult::ReadFailed;
   return results[0] == ReadResult::Missing && results[1] == ReadResult::Missing ? ActiveResult::NoActive
                                                                                 : ActiveResult::VerifyFailed;

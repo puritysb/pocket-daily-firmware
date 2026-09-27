@@ -28,6 +28,8 @@ inline std::vector<std::string> falseMissing;
 inline bool directoryReadError = false, unknownFormat = false;
 inline bool extraAfterRename = false;
 inline unsigned deletedDirectorySlots = 0;
+inline size_t bytesRead = 0;
+inline void (*afterRead)(std::vector<uint8_t>&, size_t, size_t) = nullptr;
 inline void reset() {
   files.clear();
   writeBudget = readBudget = std::numeric_limits<size_t>::max();
@@ -40,6 +42,8 @@ inline void reset() {
   directoryReadError = unknownFormat = false;
   extraAfterRename = false;
   deletedDirectorySlots = 0;
+  bytesRead = 0;
+  afterRead = nullptr;
 }
 }  // namespace FakeSD
 
@@ -94,8 +98,11 @@ class HalFile {
     if (!bytes) return -1;
     const auto length = std::min({count, bytes->size() - position, FakeSD::readBudget});
     memcpy(output, bytes->data() + position, length);
+    const size_t offset = position;
     position += length;
     FakeSD::readBudget -= length;
+    FakeSD::bytesRead += length;
+    if (FakeSD::afterRead) FakeSD::afterRead(*bytes, offset, length);
     return static_cast<int>(length);
   }
   bool seekCur(size_t count) {

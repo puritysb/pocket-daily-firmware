@@ -1,4 +1,5 @@
 #include <HalStorage.h>
+#include <Memory.h>
 #include <gtest/gtest.h>
 #include <mbedtls/sha256.h>
 
@@ -50,6 +51,9 @@ class ContentStore : public testing::Test {
   std::string revision;
   void SetUp() override {
     FakeSD::reset();
+    FakeMemory::watchedSize = sizeof(RevisionCards);
+    FakeMemory::attempts = 0;
+    FakeMemory::refuse = false;
     files["card-00-morning-1.card"] = card();
     files["sun.pbm"] = {80, 52, 10, 57, 32, 50, 10, 0xAA, 0x80, 0x55, 0};
   }
@@ -931,10 +935,109 @@ TEST_F(ContentStore, ContentViewPinsVerifiedSelectionAndReusesSingleSnapshot) {
   const auto* allocation = view.cards();
   EXPECT_EQ(view.load(view.revision()), ContentViewState::LoadResult::Ready);
   EXPECT_EQ(view.cards(), allocation);
+  EXPECT_EQ(FakeMemory::attempts, 1U);
   EXPECT_EQ(FakeSD::files, before);
   view.reset();
   EXPECT_EQ(view.cards(), nullptr);
   EXPECT_EQ(view.generation(), 0u);
+  EXPECT_STREQ(view.revision(), "");
+}
+
+TEST_F(ContentStore, ContentViewCollectsSnapshotWithHalfTheHashBytesOfTheTwoPassPath) {
+  install();
+  ActiveRevision active;
+  ASSERT_EQ(activateRevision(revision.c_str(), 3, active), ActiveResult::Ok);
+  FakeSD::bytesRead = FakeSha256::bytesHashed = 0;
+  ASSERT_EQ(recoverActiveRevision(3, active), ActiveResult::Ok);
+  RevisionCards previous;
+  ASSERT_EQ(loadRevisionCards(active.revision, 3, previous), RevisionResult::Ok);
+  const auto previousReads = FakeSD::bytesRead;
+  const auto previousHashes = FakeSha256::bytesHashed;
+  const auto before = FakeSD::files;
+
+  FakeSD::bytesRead = FakeSha256::bytesHashed = 0;
+  ContentViewState view;
+  ASSERT_EQ(view.load(revision.c_str()), ContentViewState::LoadResult::Ready);
+  EXPECT_EQ(FakeSha256::bytesHashed * 2, previousHashes);
+  EXPECT_LT(FakeSD::bytesRead, previousReads);
+  // Two pre/post hashes of every manifest/file remain in the single pass.
+  size_t revisionBytes = FakeSD::files[path("manifest.pdcm")].size();
+  for (const auto& [name, data] : files) revisionBytes += data.size();
+  EXPECT_EQ(FakeSha256::bytesHashed, 2 * revisionBytes);
+  ASSERT_EQ(view.cards()->count, previous.count);
+  EXPECT_STREQ(view.cards()->cards[0].card.title, previous.cards[0].card.title);
+  EXPECT_STREQ(view.cards()->cards[0].imagePath, previous.cards[0].imagePath);
+  EXPECT_EQ(FakeSD::files, before);
+}
+
+TEST_F(ContentStore, ContentViewRejectsChangesAfterCardDecodeAndClearsPartialSnapshot) {
+  for (const bool changeManifest : {false, true}) {
+    install();
+    ActiveRevision active;
+    ASSERT_EQ(activateRevision(revision.c_str(), 3, active), ActiveResult::Ok);
+    static Bytes* decodedCard;
+    static Bytes* change;
+    static bool changed;
+    decodedCard = &FakeSD::files[path("card-00-morning-1.card")];
+    change = changeManifest ? &FakeSD::files[path("manifest.pdcm")] : decodedCard;
+    changed = false;
+    FakeSD::afterRead = [](Bytes& bytes, size_t offset, size_t length) {
+      // The semantic card decoder has just read its CRC. Alter the backing
+      // file after its bytes were copied, so only the post-read hash catches it.
+      if (&bytes == decodedCard && offset == 508 && length == 4 && !changed) {
+        change->back() ^= 1;
+        changed = true;
+      }
+    };
+    ContentViewState view;
+    EXPECT_EQ(view.load(), ContentViewState::LoadResult::Unavailable);
+    EXPECT_TRUE(changed);
+    EXPECT_EQ(view.cards(), nullptr);
+    EXPECT_EQ(view.generation(), 0U);
+    EXPECT_STREQ(view.revision(), "");
+    FakeSD::afterRead = nullptr;
+  }
+}
+
+TEST_F(ContentStore, ContentViewClearsPartiallyCollectedNewerCardsBeforeValidFallback) {
+  install();
+  const auto previous = revision;
+  ActiveRevision active;
+  ASSERT_EQ(activateRevision(revision.c_str(), 3, active), ActiveResult::Ok);
+  strcpy(reinterpret_cast<char*>(files["card-00-morning-1.card"].data() + 49), "Changed");
+  crc(files["card-00-morning-1.card"]);
+  install(false);
+  ASSERT_EQ(activateRevision(revision.c_str(), 3, active), ActiveResult::Ok);
+  FakeSD::files[path("sun.pbm")].back() ^= 1;
+  ContentViewState view;
+  ASSERT_EQ(view.load(), ContentViewState::LoadResult::Ready);
+  EXPECT_STREQ(view.revision(), previous.c_str());
+  EXPECT_STREQ(view.cards()->cards[0].card.title, "오늘");
+  EXPECT_EQ(view.cards()->count, 1);
+  EXPECT_EQ(view.load(revision.c_str()), ContentViewState::LoadResult::TargetChanged);
+  EXPECT_EQ(view.cards(), nullptr);
+}
+
+TEST_F(ContentStore, SnapshotOomDoesNotAllocateForNoActiveOrEmptyAndNeverFallsBack) {
+  FakeMemory::refuse = true;
+  ContentViewState view;
+  EXPECT_EQ(view.load(), ContentViewState::LoadResult::NoActive);
+  const auto populated = files;
+  files.clear();
+  install();
+  ActiveRevision active;
+  ASSERT_EQ(activateRevision(revision.c_str(), 3, active), ActiveResult::Ok);
+  EXPECT_EQ(view.load(), ContentViewState::LoadResult::Empty);
+  EXPECT_EQ(FakeMemory::attempts, 0U);
+  EXPECT_EQ(view.cards(), nullptr);
+
+  files = populated;
+  install(false);
+  ASSERT_EQ(activateRevision(revision.c_str(), 3, active), ActiveResult::Ok);
+  EXPECT_EQ(view.load(), ContentViewState::LoadResult::OutOfMemory);
+  EXPECT_EQ(FakeMemory::attempts, 1U);
+  EXPECT_EQ(view.cards(), nullptr);
+  EXPECT_EQ(view.generation(), 0U);
   EXPECT_STREQ(view.revision(), "");
 }
 

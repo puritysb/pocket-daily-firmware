@@ -1,8 +1,5 @@
 #include "ContentViewState.h"
 
-#include <Logging.h>
-#include <Memory.h>
-
 #include <cstring>
 
 namespace PocketDaily::Content {
@@ -22,25 +19,15 @@ ContentViewState::LoadResult ContentViewState::load(const char* expectedRevision
   };
   if (expectedRevision && !validRevision(expectedRevision)) return fail(LoadResult::InvalidTarget);
   ActiveRevision active;
-  const auto recovered = recoverActiveRevision(SUPPORTED_CAPABILITIES, active, progress);
+  const auto recovered = recoverActiveRevision(SUPPORTED_CAPABILITIES, active, progress, &cards_);
   if (recovered == ActiveResult::NoActive) return fail(LoadResult::NoActive);
+  if (recovered == ActiveResult::OutOfMemory) return fail(LoadResult::OutOfMemory);
   if (recovered != ActiveResult::Ok) return fail(LoadResult::Unavailable);
   if (expectedRevision && strcmp(active.revision, expectedRevision) != 0) return fail(LoadResult::TargetChanged);
 
-  if (active.content.cardCount) {
-    // <=2400B is too large for the stack. One on-demand snapshot, reused on
-    // reload; no permanent pool or overlapping old/new display allocation.
-    static_assert(sizeof(RevisionCards) <= 2400, "Bound content view snapshot");
-    if (!cards_) cards_ = makeUniqueNoThrow<RevisionCards>();
-    if (!cards_) {
-      LOG_ERR("CONTENT", "OOM allocating content view snapshot");
-      return fail(LoadResult::OutOfMemory);
-    }
-    if (loadRevisionCards(active.revision, SUPPORTED_CAPABILITIES, *cards_, progress) != RevisionResult::Ok)
-      return fail(LoadResult::Unavailable);
-  } else {
-    cards_.reset();
-  }
+  // Recovery already collected the cards under the same immutable-directory
+  // ownership. Reopening and verifying the whole revision again adds no new
+  // integrity guarantee; its pre/post hashes and semantic checks all ran above.
   memcpy(revision_, active.revision, sizeof(revision_));
   generation_ = active.generation;
   return cards_ ? LoadResult::Ready : LoadResult::Empty;

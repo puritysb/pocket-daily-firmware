@@ -1,11 +1,15 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+namespace FakeSha256 {
+inline size_t bytesHashed = 0;
+}
 #ifdef __APPLE__
 #include <CommonCrypto/CommonDigest.h>
 using mbedtls_sha256_context = CC_SHA256_CTX;
 inline int mbedtls_sha256_starts(mbedtls_sha256_context* ctx, int) { return CC_SHA256_Init(ctx) == 1 ? 0 : -1; }
 inline int mbedtls_sha256_update(mbedtls_sha256_context* ctx, const uint8_t* data, size_t size) {
+  FakeSha256::bytesHashed += size;
   return CC_SHA256_Update(ctx, data, static_cast<CC_LONG>(size)) == 1 ? 0 : -1;
 }
 inline int mbedtls_sha256_finish(mbedtls_sha256_context* ctx, uint8_t* out) {
@@ -16,6 +20,7 @@ inline int mbedtls_sha256_finish(mbedtls_sha256_context* ctx, uint8_t* out) {
 using mbedtls_sha256_context = SHA256_CTX;
 inline int mbedtls_sha256_starts(mbedtls_sha256_context* ctx, int) { return SHA256_Init(ctx) == 1 ? 0 : -1; }
 inline int mbedtls_sha256_update(mbedtls_sha256_context* ctx, const uint8_t* data, size_t size) {
+  FakeSha256::bytesHashed += size;
   return SHA256_Update(ctx, data, size) == 1 ? 0 : -1;
 }
 inline int mbedtls_sha256_finish(mbedtls_sha256_context* ctx, uint8_t* out) {

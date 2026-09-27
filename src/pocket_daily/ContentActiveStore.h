@@ -7,7 +7,16 @@ struct ActiveRevision {
   char revision[65]{};
   RevisionInfo content;
 };
-enum class ActiveResult { Ok, NoActive, ReadFailed, VerifyFailed, WriteFailed, ReadbackFailed, GenerationExhausted };
+enum class ActiveResult {
+  Ok,
+  NoActive,
+  ReadFailed,
+  VerifyFailed,
+  WriteFailed,
+  ReadbackFailed,
+  GenerationExhausted,
+  OutOfMemory
+};
 struct RetiredRevision {
   char revision[65]{};
 };
@@ -22,7 +31,11 @@ RetirementResult retireRevision(const char* revision, const char* displayedRevis
                                 void (*progress)() = nullptr);
 
 // Read-only boot recovery: newest record whose entire revision validates.
-ActiveResult recoverActiveRevision(uint16_t capabilities, ActiveRevision& active, void (*progress)() = nullptr);
+// With cards, collects the selected snapshot during that same verification.
+// Caller excludes writers/activation throughout recovery and snapshot use.
+// Empty/NoActive never allocate a snapshot; failure releases partial output.
+ActiveResult recoverActiveRevision(uint16_t capabilities, ActiveRevision& active, void (*progress)() = nullptr,
+                                   std::unique_ptr<RevisionCards>* cards = nullptr);
 // Caller must own immutable candidate/current directories and serialize all
 // activation operations. The content HTTP handler gates live writers before
 // calling this; generic mutations cannot write published content/active records.

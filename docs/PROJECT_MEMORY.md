@@ -5,6 +5,11 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-27 Content snapshot loading reuses cards collected during active
+  revision verification; pre/post hashes and semantic checks remain. Snapshot
+  OOM does not select an older revision. Fixture SHA bytes drop 3,004→1,502,
+  but X3 Apply completion remains about 14.2 seconds; no end-to-end speedup
+  is claimed. See docs/CONTENT_LOAD_HANDOFF.md.
 - 2026-09-26 Beta pre-releases: tag `v<version>-beta.<n>` builds
   `gh_release_beta` (image reports `<version>-beta.<n>`, checked in the
   workflow) and publishes a GitHub pre-release, never latest. Debug builds of
