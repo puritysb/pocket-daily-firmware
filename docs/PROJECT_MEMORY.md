@@ -56,9 +56,18 @@ transcript. Current source and release records override dated observations.
   (HttpDownloader::lastFailure), and points to the app on memory failures.
   X3 verified 2026-09-26 (w5637ecce): staged prompt → Confirm installed it;
   Check for updates shows the memory reason and the app hint.
-- 2026-09-26 Release prep: version 1.7.0; CI cppcheck installs PlatformIO
-  packages first (platform 55.03.311 left the restored cache without the
-  toolchain, so `pio check` exited 127 on every run since 2026-09-20).
+- 2026-09-27 CI repair (local validation; hosted CI still awaits a push):
+  run 36226499475 at bca376e7 built firmware successfully but failed native
+  tests (`std::floor` without `<cmath>`), host ABI source formatting, and
+  cppcheck execution (127). Installing platform packages alone did not fix
+  the check. `ci.yml` now builds native cppcheck 2.11 from upstream commit
+  f156b1ecb20af834d6d70a20b9485533e2b5bdaf; `scripts/check_firmware.py`
+  keeps the checked-in PlatformIO profile/strict defect thresholds and uses
+  that executable through a local package adapter. No broad suppressions.
+  `<cmath>` and the formatting defect are fixed. Local host suite: 441 pass;
+  default firmware build and native 2.11 strict check pass. The exact Linux
+  loader failure was not exposed by the old log, so missing cppcheck is not
+  established as the sole cause.
 
 - 2026-09-25 My cards (docs/pocket-profile-v1.md): profile IDs `word` (Home
   item 5, the daily word as its own page; Study then shows only app cards) and

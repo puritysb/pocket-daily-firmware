@@ -197,7 +197,8 @@ int32_t pdui_set_cards(pdui_context* context, const pdui_card_input* cards, uint
       if (decodeContentCard(input.source(), card) != CardResult::Ok) return PDUI_INVALID_CARD;
       if ((card.imagePath[0] != 0) != (in.image_size != 0)) return PDUI_INVALID_IMAGE;
       ImageInfo imageInfo;
-      if (in.image_size && validateContentImage(image.source(), imageInfo) != ImageResult::Ok) return PDUI_INVALID_IMAGE;
+      if (in.image_size && validateContentImage(image.source(), imageInfo) != ImageResult::Ok)
+        return PDUI_INVALID_IMAGE;
       PocketUIHost::UserCard user;
       user.card = card.card;
       // Same Home summary as the reader: text, then context when it fits.

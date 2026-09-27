@@ -81,8 +81,25 @@ jobs:
       - name: Install PlatformIO packages
         run: pio pkg install -e default
 
+      # Match PlatformIO's 2.11 baseline, but build a native executable instead
+      # of depending on the bundled binary's runtime loader on ubuntu-latest.
+      - name: Check out cppcheck 2.11
+        uses: actions/checkout@v6
+        with:
+          repository: cppcheck-opensource/cppcheck
+          ref: f156b1ecb20af834d6d70a20b9485533e2b5bdaf
+          path: build/cppcheck-source
+          persist-credentials: false
+
+      - name: Build native cppcheck
+        run: |
+          make -C build/cppcheck-source -j2 MATCHCOMPILER=yes
+          build/cppcheck-source/cppcheck --version
+
       - name: Run cppcheck
-        run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
+        run: |
+          python -m unittest discover -s scripts -p test_check_firmware.py
+          python scripts/check_firmware.py --cppcheck build/cppcheck-source/cppcheck
 
   build:
     runs-on: ubuntu-latest
