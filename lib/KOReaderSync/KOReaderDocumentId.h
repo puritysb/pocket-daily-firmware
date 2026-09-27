@@ -8,8 +8,10 @@
  * The algorithm reads 1024 bytes at specific offsets and computes the MD5 hash
  * of the concatenated data.
  *
- * Offsets are calculated as: 1024 << (2*i) for i = -1 to 10
- * Producing: 256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304,
+ * Offsets are calculated as: 1024 << (2*i) for i = -1 to 10. KOReader evaluates this
+ * with LuaJIT's bit.lshift, which masks the shift count to 5 bits, so i = -1 shifts
+ * by 30 and the 32-bit result is 0 — the first chunk is read from offset 0, not 256.
+ * Producing: 0, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304,
  *            16777216, 67108864, 268435456, 1073741824 bytes
  *
  * If an offset is beyond the file size, it is skipped.
@@ -40,6 +42,6 @@ class KOReaderDocumentId {
   // Number of offsets to try (i = -1 to 10, so 12 offsets)
   static constexpr int OFFSET_COUNT = 12;
 
-  // Calculate offset for index i: 1024 << (2*i)
+  // Calculate offset for index i: 1024 << (2*i), with 0 for i = -1 (see above)
   static size_t getOffset(int i);
 };
