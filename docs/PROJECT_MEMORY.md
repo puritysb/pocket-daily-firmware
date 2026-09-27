@@ -5,6 +5,16 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-27 X3 EPUB acceptance failed on installed
+  `1.7.0-dev-main-bca376e7-wa4be8509`: sample
+  `/Pocket-EPUB-check-c175a49c.epub` opened, but the user reported garbled emoji
+  after “함께 읽습니다.” and input stopped after the long-section title/body
+  appeared. Sample section 3 is one ~30,000-character paragraph including ZWJ
+  emoji; this is an investigation lead, not an established cause. User rebooted
+  into Sync; status reports no crash report. USB logging was unavailable.
+  Do not publish a reading-stability claim or erase caches before diagnosis.
+  App Apply persisted sideButtonLayout=1 (fontSize=3, rotation-follow=0), also
+  retained after reboot. Physical direction/resume acceptance remains separate.
 - 2026-09-27 Transfer control: capability `transferControl: 1`, UUID-only
   temporary-file prepare/discard, and on-reader content/firmware progress.
   Published books and staged installation are untouched by temporary cleanup.
@@ -179,9 +189,12 @@ transcript. Current source and release records override dated observations.
   purge count and PCB states. Evidence build/apply-memory/; design in
   docs/sync-route-memory.md. 364 host tests, default/gh_release builds and
   strict cppcheck pass.
-- This host's Homebrew Python/Swift are blocked by macOS Local Network
-  privacy while Apple curl/nc work; installs used a loopback relay to nc
-  with pocket_put.py unchanged. Not a firmware or protocol issue.
+- This host's Homebrew Python/Swift were blocked by macOS Local Network
+  privacy while Apple curl/nc worked; installs used a loopback relay to nc
+  with pocket_put.py unchanged. The other session also observed Errno 65 with
+  /usr/bin/python3 (3.9.6); this is not limited to Homebrew. /usr/bin/curl
+  status/preferences reads were confirmed again on 2026-09-27. An empty Python
+  LAN scan is not evidence that the reader is absent.
 
 - 2026-09-24 physical cleanup installation: wbcb431b1 installed in one
   uninterrupted wireless transfer (6,102,096B, reader CRC95643196); exact
