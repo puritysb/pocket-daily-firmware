@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <span>
 
 #include "HostHome.h"
 #include "pocket_daily/ContentCard.h"
@@ -18,6 +19,7 @@ namespace {
 constexpr size_t maxFontBytes = 64 * 1024 * 1024;
 constexpr size_t maxImageBytes = 32784;
 constexpr const char* fontPath = "/preview.cpfont";
+constexpr const char* fallbackPath = "/fallback.cpfont";
 // CrossPoint MiniBidi owns static line scratch. Keep its algorithm unchanged
 // and serialize host rasterization even across independent C ABI contexts.
 std::mutex renderMutex;
@@ -76,15 +78,35 @@ bool chromeText(const char* text, size_t capacity) {
 // before its font, and the font before its backing bytes.
 struct pdui_context {
   std::vector<uint8_t> fontBytes;
-  PocketUIHost::Asset fontAsset;
+  std::vector<uint8_t> fallbackBytes;
+  PocketUIHost::Asset assets[2];
+  // BoundedUI, as live network-mode views load UI fonts. With a glyph-fallback
+  // font the preview instead follows the reader's normal Home/Sleep screens:
+  // the same font in Cached mode, which the fallback requires.
   SdCardFont font;
+  std::unique_ptr<SdCardFont> cachedFont;
+  std::unique_ptr<SdCardFont> fallback;
   HalDisplay panel;
   GfxRenderer renderer;
   PocketUIHost::UserCards cards;
   bool frameValid = false;
   pdui_context(uint32_t width, uint32_t height, const uint8_t* bytes, size_t size)
-      : fontBytes(bytes, bytes + size), fontAsset{fontPath, fontBytes}, panel(width, height), renderer(panel) {}
+      : fontBytes(bytes, bytes + size),
+        assets{{fontPath, fontBytes}, {fallbackPath, {}}},
+        panel(width, height),
+        renderer(panel) {}
+  std::span<const PocketUIHost::Asset> assetSpan() const { return {assets, fallback ? 2u : 1u}; }
+  const SdCardFont& activeFont() const { return cachedFont ? *cachedFont : font; }
+  void registerFont(SdCardFont& chosen) {
+    renderer.removeFont(1);
+    renderer.insertFont(1, EpdFontFamily(chosen.getEpdFont(0), chosen.getEpdFont(1)));
+    renderer.registerSdCardFont(1, &chosen);
+  }
 };
+
+namespace {
+SdCardFont* provideFallback(void* context, bool) { return static_cast<pdui_context*>(context)->fallback.get(); }
+}  // namespace
 
 uint32_t pdui_abi_version() noexcept { return 1; }
 int32_t pdui_create(uint32_t width, uint32_t height, uint32_t orientation, const uint8_t* font, size_t size,
@@ -96,12 +118,11 @@ int32_t pdui_create(uint32_t width, uint32_t height, uint32_t orientation, const
     return PDUI_INVALID_ARGUMENT;
   try {
     auto context = std::make_unique<pdui_context>(width, height, font, size);
-    const PocketUIHost::AssetScope scope({&context->fontAsset, 1});
+    const PocketUIHost::AssetScope scope(context->assetSpan());
     if (!context->font.load(fontPath, SdCardFont::LoadMode::BoundedUI)) return PDUI_INVALID_FONT;
     context->renderer.begin();
     context->renderer.setOrientation(static_cast<GfxRenderer::Orientation>(orientation));
-    context->renderer.insertFont(1, EpdFontFamily(context->font.getEpdFont(0), context->font.getEpdFont(1)));
-    context->renderer.registerSdCardFont(1, &context->font);
+    context->registerFont(context->font);
     PocketUIHost::registerUiFonts(context->renderer);
     *output = context.release();
     return PDUI_OK;
@@ -112,6 +133,50 @@ int32_t pdui_create(uint32_t width, uint32_t height, uint32_t orientation, const
   }
 }
 void pdui_destroy(pdui_context* context) noexcept { delete context; }
+
+int32_t pdui_set_fallback_font(pdui_context* context, const uint8_t* font, size_t size) noexcept {
+  if (!context || (font == nullptr) != (size == 0) || size > maxFontBytes) return PDUI_INVALID_ARGUMENT;
+  try {
+    const std::lock_guard<std::mutex> renderLock(renderMutex);
+    context->frameValid = false;
+    if (!font) {
+      context->renderer.setFallbackFontProvider(nullptr, nullptr);
+      context->renderer.clearFallbackCache();
+      context->registerFont(context->font);
+      context->cachedFont.reset();
+      context->fallback.reset();
+      context->fallbackBytes.clear();
+      context->assets[1] = {fallbackPath, {}};
+      return PDUI_OK;
+    }
+    // Load both new fonts before touching the renderer, so a bad font keeps
+    // the previous state intact.
+    std::vector<uint8_t> bytes(font, font + size);
+    const PocketUIHost::Asset staged[2]{{fontPath, context->fontBytes}, {fallbackPath, bytes}};
+    const PocketUIHost::AssetScope scope({staged, 2});
+    auto fallback = std::make_unique<SdCardFont>();
+    if (!fallback->load(fallbackPath, SdCardFont::LoadMode::Cached)) return PDUI_INVALID_FONT;
+    auto cached = context->cachedFont ? std::unique_ptr<SdCardFont>() : std::make_unique<SdCardFont>();
+    if (cached && !cached->load(fontPath, SdCardFont::LoadMode::Cached)) return PDUI_INVALID_FONT;
+
+    context->renderer.setFallbackFontProvider(nullptr, nullptr);
+    context->renderer.clearFallbackCache();
+    if (cached) {
+      context->registerFont(*cached);
+      context->cachedFont = std::move(cached);
+    }
+    // Moving the vector keeps its buffer, so the staged span stays valid.
+    context->fallbackBytes = std::move(bytes);
+    context->assets[1] = {fallbackPath, context->fallbackBytes};
+    context->fallback = std::move(fallback);
+    context->renderer.setFallbackFontProvider(&provideFallback, context);
+    return PDUI_OK;
+  } catch (const std::bad_alloc&) {
+    return PDUI_OUT_OF_MEMORY;
+  } catch (...) {
+    return PDUI_INTERNAL_ERROR;
+  }
+}
 
 int32_t pdui_render_content(pdui_context* context, const uint8_t* cardBytes, size_t cardSize, const uint8_t* imageBytes,
                             size_t imageSize, const pdui_content_options* options) noexcept {
@@ -125,7 +190,7 @@ int32_t pdui_render_content(pdui_context* context, const uint8_t* cardBytes, siz
     if (!chromeText(label, sizeof(label))) return PDUI_INVALID_ARGUMENT;
   try {
     const std::lock_guard<std::mutex> renderLock(renderMutex);
-    const PocketUIHost::AssetScope scope({&context->fontAsset, 1});
+    const PocketUIHost::AssetScope scope(context->assetSpan());
     ContentCard card{};  // Host stack, not the device render-task stack.
     Bytes input{cardBytes, cardSize}, image{imageBytes, imageSize};
     if (cardBytes && decodeContentCard(input.source(), card) != CardResult::Ok) return PDUI_INVALID_CARD;
@@ -148,12 +213,17 @@ int32_t pdui_render_content(pdui_context* context, const uint8_t* cardBytes, siz
       } check{context->renderer, text.styles};
       if (!checkLayoutText(text.value, &check, [](void* value, const char* chunk) {
             auto& c = *static_cast<Check*>(value);
-            return c.renderer.ensureSdCardFontReady(1, chunk, c.styles) == 0 &&
-                   c.renderer.prewarmSdCardFont(1, chunk, c.styles) == 0;
+            // Coverage counts glyphs the fallback font supplies; without one,
+            // every glyph must come from the preview font as before.
+            if (c.renderer.ensureSdCardFontReady(1, chunk, c.styles) != 0) return false;
+            const int missed = c.renderer.prewarmSdCardFont(1, chunk, c.styles);
+            if (c.renderer.fallbackFont(false) == nullptr) return missed == 0;
+            c.renderer.prewarmFallbackFont(chunk);
+            return true;
           }))
         return PDUI_INVALID_FONT;
     }
-    if (context->font.boundedReadFailed()) return PDUI_INVALID_FONT;
+    if (context->activeFont().boundedReadFailed()) return PDUI_INVALID_FONT;
     const ContentPageOptions page{1,
                                   options->side_padding,
                                   options->top_padding,
@@ -174,7 +244,7 @@ int32_t pdui_render_content(pdui_context* context, const uint8_t* cardBytes, siz
         }};
     if (!renderContentPage(context->renderer, cardBytes ? &card : nullptr, page, painter))
       return imageContext.failed ? PDUI_INVALID_IMAGE : PDUI_RENDER_FAILED;
-    if (context->font.boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
+    if (context->activeFont().boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
     context->frameValid = true;
     return PDUI_OK;
   } catch (const std::bad_alloc&) {
@@ -247,7 +317,7 @@ int32_t pdui_render_home(pdui_context* context, const pdui_profile* profile, uin
   if (!profile || samples > PDUI_SAMPLE_ALL || !toProfile(*profile, parsed)) return PDUI_INVALID_ARGUMENT;
   try {
     const std::lock_guard<std::mutex> renderLock(renderMutex);
-    const PocketUIHost::AssetScope scope({&context->fontAsset, 1});
+    const PocketUIHost::AssetScope scope(context->assetSpan());
     const auto sample = PocketUIHost::buildSample(samples);
     PocketDaily::Home::Row rows[PocketDaily::DailyProfile::HOME_ITEM_CAP];
     PocketDaily::Home::HomeView view;
@@ -260,7 +330,7 @@ int32_t pdui_render_home(pdui_context* context, const pdui_profile* profile, uin
     view.glance = &sample.glance;
     view.profile = parsed;
     PocketDaily::Home::renderHome(context->renderer, view, PocketUIHost::hostEnv(context->renderer, context->cards));
-    if (context->font.boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
+    if (context->activeFont().boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
     context->frameValid = true;
     return PDUI_OK;
   } catch (const std::bad_alloc&) {
@@ -277,7 +347,7 @@ int32_t pdui_render_brief(pdui_context* context, const pdui_profile* profile, ui
   if (!profile || samples > PDUI_SAMPLE_ALL || !toProfile(*profile, parsed)) return PDUI_INVALID_ARGUMENT;
   try {
     const std::lock_guard<std::mutex> renderLock(renderMutex);
-    const PocketUIHost::AssetScope scope({&context->fontAsset, 1});
+    const PocketUIHost::AssetScope scope(context->assetSpan());
     const auto sample = PocketUIHost::buildSample(samples);
     PocketDaily::Home::BriefView view;
     view.isSleep = true;
@@ -292,7 +362,7 @@ int32_t pdui_render_brief(pdui_context* context, const pdui_profile* profile, ui
     view.status = "Powered off";
     view.profile = parsed;
     PocketDaily::Home::renderBrief(context->renderer, view, PocketUIHost::hostEnv(context->renderer, context->cards));
-    if (context->font.boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
+    if (context->activeFont().boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
     context->frameValid = true;
     return PDUI_OK;
   } catch (const std::bad_alloc&) {

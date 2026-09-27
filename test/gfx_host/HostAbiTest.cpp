@@ -11,8 +11,11 @@
 #include <vector>
 
 namespace {
-std::vector<uint8_t> asciiFont() {
-  constexpr unsigned count = 95, glyphStart = 76, bitmapStart = glyphStart + count * 16;
+std::vector<uint8_t> intervalFont(uint32_t first, uint32_t last);
+std::vector<uint8_t> asciiFont() { return intervalFont(32, 126); }
+// One interval of 2x2 glyphs; enough for coverage, advances and drawing.
+std::vector<uint8_t> intervalFont(const uint32_t first, const uint32_t last) {
+  const unsigned count = last - first + 1, glyphStart = 76, bitmapStart = glyphStart + count * 16;
   std::vector<uint8_t> bytes(bitmapStart + count, 0);
   const auto put = [&](size_t offset, uint32_t value) {
     for (unsigned i = 0; i < 4; ++i) bytes[offset + i] = value >> (i * 8);
@@ -25,8 +28,8 @@ std::vector<uint8_t> asciiFont() {
   bytes[44] = 12;
   bytes[45] = 10;
   put(56, 64);
-  put(64, 32);
-  put(68, 126);
+  put(64, first);
+  put(68, last);
   for (unsigned i = 0; i < count; ++i) {
     EpdGlyph glyph{};
     glyph.width = 2;
@@ -135,4 +138,43 @@ TEST(HostAbi, NullContextCannotExposePixels) {
   EXPECT_EQ(pdui_copy_frame(nullptr, &output, 1), PDUI_INVALID_ARGUMENT);
   EXPECT_EQ(output, 0xA5);
   EXPECT_EQ(pdui_render_content(nullptr, nullptr, 0, nullptr, 0, nullptr), PDUI_INVALID_ARGUMENT);
+}
+
+TEST_F(HostAbiValid, FallbackFontSuppliesGlyphsThePreviewFontLacks) {
+  std::strcpy(options.empty_title, "Done \xE2\x9C\x85");  // "Done ✅"
+  EXPECT_EQ(render(), PDUI_INVALID_FONT) << "Without a fallback the emoji cannot be drawn";
+
+  EXPECT_EQ(pdui_set_fallback_font(nullptr, nullptr, 0), PDUI_INVALID_ARGUMENT);
+  EXPECT_EQ(pdui_set_fallback_font(context.get(), nullptr, 4), PDUI_INVALID_ARGUMENT);
+  const uint8_t invalid[] = {1, 2, 3, 4};
+  EXPECT_EQ(pdui_set_fallback_font(context.get(), invalid, sizeof invalid), PDUI_INVALID_FONT);
+  EXPECT_EQ(render(), PDUI_INVALID_FONT) << "A rejected font installs nothing";
+
+  {
+    auto symbols = intervalFont(0x2705, 0x2705);
+    ASSERT_EQ(pdui_set_fallback_font(context.get(), symbols.data(), symbols.size()), PDUI_OK);
+    // The input goes away here: later reads use the owned copy.
+  }
+  ASSERT_EQ(render(), PDUI_OK);
+  pdui_frame_info info{};
+  ASSERT_EQ(pdui_get_frame_info(context.get(), &info), PDUI_OK);
+  std::vector<uint8_t> withEmoji(info.byte_count);
+  ASSERT_EQ(pdui_copy_frame(context.get(), withEmoji.data(), withEmoji.size()), PDUI_OK);
+
+  EXPECT_EQ(pdui_set_fallback_font(context.get(), invalid, sizeof invalid), PDUI_INVALID_FONT);
+  ASSERT_EQ(render(), PDUI_OK) << "A rejected replacement keeps the installed fallback";
+
+  std::strcpy(options.empty_title, "Done ");
+  ASSERT_EQ(render(), PDUI_OK);
+  std::vector<uint8_t> without(info.byte_count);
+  ASSERT_EQ(pdui_copy_frame(context.get(), without.data(), without.size()), PDUI_OK);
+  EXPECT_NE(withEmoji, without) << "The borrowed glyph was drawn";
+
+  ASSERT_EQ(pdui_set_fallback_font(context.get(), nullptr, 0), PDUI_OK);
+  ASSERT_EQ(render(), PDUI_OK);
+  std::vector<uint8_t> bounded(info.byte_count);
+  ASSERT_EQ(pdui_copy_frame(context.get(), bounded.data(), bounded.size()), PDUI_OK);
+  EXPECT_EQ(bounded, without) << "Removing the fallback restores the bounded preview exactly";
+  std::strcpy(options.empty_title, "Done \xE2\x9C\x85");
+  EXPECT_EQ(render(), PDUI_INVALID_FONT);
 }
