@@ -929,6 +929,52 @@ std::optional<uint16_t> Section::getParagraphIndexForPage(const uint16_t page) c
   return pIdx;
 }
 
+bool Section::getParagraphRunForPage(const uint16_t page, uint16_t& paragraph, uint16_t& first, uint16_t& last,
+                                     const uint16_t maxSpan) const {
+  constexpr uint16_t MAX_SPAN = 48;  // window of 97 entries (194 B) read in one call
+  const uint16_t span = std::min(maxSpan, MAX_SPAN);
+  HalFile f;
+  if (!Storage.openFileForRead("SCT", filePath, f)) {
+    return false;
+  }
+
+  const uint32_t fileSize = f.size();
+  f.seek(HEADER_SIZE - sizeof(uint32_t) * 2);
+  uint32_t paragraphLutOffset;
+  serialization::readPod(f, paragraphLutOffset);
+  if (paragraphLutOffset == 0 || paragraphLutOffset >= fileSize) {
+    return false;
+  }
+
+  f.seek(paragraphLutOffset);
+  uint16_t count;
+  serialization::readPod(f, count);
+  if (count == 0 || page >= count ||
+      paragraphLutOffset + sizeof(uint16_t) + static_cast<uint32_t>(count) * sizeof(uint16_t) > fileSize) {
+    return false;
+  }
+
+  const uint16_t windowStart = page >= span ? static_cast<uint16_t>(page - span) : 0;
+  const uint16_t windowEnd = static_cast<uint16_t>(std::min<uint32_t>(count - 1U, static_cast<uint32_t>(page) + span));
+  const size_t entries = static_cast<size_t>(windowEnd - windowStart) + 1;
+  uint8_t window[(2 * MAX_SPAN + 1) * sizeof(uint16_t)];
+  f.seek(paragraphLutOffset + sizeof(uint16_t) + windowStart * sizeof(uint16_t));
+  if (f.read(window, entries * sizeof(uint16_t)) != static_cast<int>(entries * sizeof(uint16_t))) {
+    return false;
+  }
+  // Little-endian entries, decoded bytewise (no unaligned loads).
+  const auto entry = [&window, windowStart](const uint16_t p) {
+    const size_t at = static_cast<size_t>(p - windowStart) * sizeof(uint16_t);
+    return static_cast<uint16_t>(window[at] | (window[at + 1] << 8));
+  };
+  paragraph = entry(page);
+  first = page;
+  while (first > windowStart && entry(first - 1) == paragraph) first--;
+  last = page;
+  while (last < windowEnd && entry(last + 1) == paragraph) last++;
+  return true;
+}
+
 std::optional<uint16_t> Section::getPageForListItemIndex(const uint16_t liIndex) const {
   HalFile f;
   if (!Storage.openFileForRead("SCT", filePath, f)) {

@@ -4,6 +4,7 @@
 #include <HalStorage.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <PngToBmpConverter.h>
 #include <Utf8.h>
 #include <ZipFile.h>
@@ -811,6 +812,27 @@ bool Epub::readItemContentsToStream(const std::string& itemHref, Print& out, con
 
   const std::string path = FsHelpers::normalisePath(itemHref);
   return ZipFile(filepath).readFileToStream(path.c_str(), out, chunkSize);
+}
+
+bool Epub::readSpineItemToStream(const int spineIndex, Print& out, const size_t chunkSize) const {
+  if (spineIndex < 0 || spineIndex >= getSpineItemsCount() || chunkSize == 0) return false;
+  // Same path Section::hasHtmlCache() checks; the file only exists once complete (atomic rename).
+  const std::string htmlPath = cachePath + "/html/" + std::to_string(spineIndex) + ".html";
+  HalFile file;
+  if (Storage.exists(htmlPath.c_str()) && Storage.openFileForRead("EBP", htmlPath, file)) {
+    auto buffer = makeUniqueNoThrow<uint8_t[]>(chunkSize);
+    if (!buffer) {
+      LOG_ERR("EBP", "No memory to stream cached spine %d", spineIndex);
+      return false;
+    }
+    while (true) {
+      const int count = file.read(buffer.get(), chunkSize);
+      if (count < 0) return false;
+      if (count == 0) return true;
+      if (out.write(buffer.get(), static_cast<size_t>(count)) != static_cast<size_t>(count)) return false;
+    }
+  }
+  return readItemContentsToStream(getSpineItem(spineIndex).href, out, chunkSize);
 }
 
 bool Epub::getItemSize(const std::string& itemHref, size_t* size) const {

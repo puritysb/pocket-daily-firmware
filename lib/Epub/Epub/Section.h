@@ -180,4 +180,10 @@ class Section {
 
   // Look up the synthetic paragraph index for the given rendered page.
   std::optional<uint16_t> getParagraphIndexForPage(uint16_t page) const;
+
+  // The pages around `page` whose paragraph LUT entry equals page's own (pages ending
+  // inside one long paragraph): [first, last], scanning at most `maxSpan` entries each
+  // way in a single file read. False when the LUT is missing (e.g. a partial build).
+  bool getParagraphRunForPage(uint16_t page, uint16_t& paragraph, uint16_t& first, uint16_t& last,
+                              uint16_t maxSpan = 64) const;
 };

@@ -60,6 +60,9 @@ class Epub {
   uint8_t* readItemContentsToBytes(const std::string& itemHref, size_t* size = nullptr,
                                    bool trailingNullByte = false) const;
   bool readItemContentsToStream(const std::string& itemHref, Print& out, size_t chunkSize) const;
+  // Streams one spine item's XHTML, preferring the reader's inflated copy
+  // (<cache>/html/<index>.html, written by Section) so no 32 KB inflate window is needed.
+  bool readSpineItemToStream(int spineIndex, Print& out, size_t chunkSize) const;
   bool getItemSize(const std::string& itemHref, size_t* size) const;
   BookMetadataCache::SpineEntry getSpineItem(int spineIndex) const;
   BookMetadataCache::TocEntry getTocItem(int tocIndex) const;
