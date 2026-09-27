@@ -17,6 +17,7 @@
 
 #include "CrossPointSettings.h"
 #include "activities/RenderLock.h"
+#include "articles/ArticleStorage.h"
 #include "components/UITheme.h"
 #include "network/FirmwareFlasher.h"
 #include "pocket_daily/ContentActiveStore.h"
@@ -679,6 +680,12 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
     StagedFirmware::notePublished(static_cast<uint32_t>(expectedSize), uploadedCrc);
 
   clearBookCache(target.c_str());
+  if (Articles::isPath(target.c_str())) {
+    const auto marker = Articles::donePath(target.c_str());
+    if (Storage.exists(marker.c_str()) && !Storage.remove(marker.c_str())) {
+      LOG_ERR("ARTICLE", "Could not reset read marker after replacement");
+    }
+  }
   char response[80];
   snprintf(response, sizeof(response), "{\"size\":%u,\"crc32\":\"%08lX\"}", static_cast<unsigned>(expectedSize),
            static_cast<unsigned long>(uploadedCrc));

@@ -10,6 +10,7 @@
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
+#include "home/ArticlesActivity.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
@@ -387,3 +388,13 @@ void RenderLock::unlock() {
  *
  */
 bool RenderLock::peek() { return xQueuePeek(activityManager.renderingMutex, NULL, 0) != pdTRUE; };
+
+void ActivityManager::goToArticles() {
+  // Screen-owned bounded index is released when entering the reader or network activities.
+  auto activity = makeUniqueNoThrow<ArticlesActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ARTICLE", "Cannot allocate activity");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}

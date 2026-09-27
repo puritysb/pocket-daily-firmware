@@ -37,6 +37,8 @@ class HomeActivity final : public Activity {
     ++i;
     if (item == HomeMenuItem::RECENTS) return i;
     ++i;
+    if (item == HomeMenuItem::ARTICLES) return i;
+    ++i;
     if (item == HomeMenuItem::OPDS_BROWSER) return hasOpdsUrl ? i : 0;
     if (hasOpdsUrl) ++i;
     if (item == HomeMenuItem::FILE_TRANSFER) return i;
@@ -52,6 +54,7 @@ class HomeActivity final : public Activity {
     int i = 0;
     if (idx == i++) return HomeMenuItem::FILE_BROWSER;
     if (idx == i++) return HomeMenuItem::RECENTS;
+    if (idx == i++) return HomeMenuItem::ARTICLES;
     if (hasOpdsUrl && idx == i++) return HomeMenuItem::OPDS_BROWSER;
     if (idx == i++) return HomeMenuItem::FILE_TRANSFER;
     if (idx == i++) return HomeMenuItem::POCKET_DAILY;

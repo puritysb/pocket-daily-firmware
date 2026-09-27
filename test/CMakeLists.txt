@@ -69,3 +69,5 @@ add_subdirectory(live_studio)
 add_subdirectory(pocket_profile)
 
 add_subdirectory(opds_parser)
+
+add_subdirectory(articles)

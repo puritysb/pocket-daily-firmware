@@ -31,6 +31,7 @@ String buildStatusJson(const StatusInputs& in) {
   doc["deviceID"] = deviceId;
   doc["sessionEnd"] = in.profile == Profile::POCKET_SYNC && in.apMode;
   doc["contentPresentation"] = in.contentPresentation;
+  doc["articleLibrary"] = 1;
   // Home / Daily Brief in Sync (docs/pocket-screen-present-v1.md); older
   // firmware omits the key and the companion must not call the routes.
   if (in.screenPresentation) doc["screenPresentation"] = 1;

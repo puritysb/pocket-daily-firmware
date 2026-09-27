@@ -22,7 +22,7 @@
 #include "fontIds.h"
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 5;  // File Browser, Recents, File transfer, Pocket Daily, Settings
+  int count = 6;  // File Browser, Recents, Articles, File transfer, Pocket Daily, Settings
   if (!recentBooks.empty()) {
     count += recentBooks.size();
   }
@@ -192,6 +192,9 @@ void HomeActivity::loop() {
         case HomeMenuItem::RECENTS:
           onRecentsOpen();
           break;
+        case HomeMenuItem::ARTICLES:
+          activityManager.goToArticles();
+          break;
         case HomeMenuItem::OPDS_BROWSER:
           onOpdsBrowserOpen();
           break;
@@ -234,10 +237,10 @@ void HomeActivity::render(RenderLock&&) {
                           recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
                           std::bind(&HomeActivity::storeCoverBuffer, this));
 
-  // Five base entries plus optional Continue Reading and OPDS. Pointer/icon
+  // Six base entries plus optional Continue Reading and OPDS. Pointer/icon
   // arrays are bounded stack data, not vectors allocated on every paint.
-  const char* menuItems[7]{};
-  UIIcon menuIcons[7]{};
+  const char* menuItems[8]{};
+  UIIcon menuIcons[8]{};
   int menuCount = 0;
   const auto append = [&](const char* title, UIIcon icon) {
     menuItems[menuCount] = title;
@@ -248,6 +251,7 @@ void HomeActivity::render(RenderLock&&) {
   }
   append(tr(STR_BROWSE_FILES), Folder);
   append(tr(STR_MENU_RECENT_BOOKS), Recent);
+  append(tr(STR_ARTICLES), Book);
   if (hasOpdsServers) append(tr(STR_OPDS_BROWSER), Library);
   append(tr(STR_FILE_TRANSFER), Transfer);
   append(tr(STR_POCKET_DAILY_APP), AgentMark);

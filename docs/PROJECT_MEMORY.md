@@ -5,6 +5,10 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-27 Articles: Home library lists up to 128 SD articles, tracks reading
+  state, resumes EPUBs and confirms individual/read-item deletion. Companion
+  originals remain local to the app. Contract: docs/articles-v1.md. Host tests
+  pass; article-library firmware is not yet installed or accepted on X3/X4.
 - 2026-09-27 Sync Home/Daily Brief is implemented (docs/pocket-screen-present-v1.md):
   one shared presentation slot, queued outside HTTP, bounded font preparation,
   generation/identity checked receipts. X3 installation wa4be8509 returned

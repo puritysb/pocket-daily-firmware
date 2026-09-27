@@ -1,0 +1,7 @@
+add_executable(article_format_test ArticleFormatTest.cpp)
+target_link_libraries(article_format_test PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(article_format_test)
+add_executable(article_storage_test ArticleStorageTest.cpp)
+target_include_directories(article_storage_test BEFORE PRIVATE stubs)
+target_link_libraries(article_storage_test PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(article_storage_test)

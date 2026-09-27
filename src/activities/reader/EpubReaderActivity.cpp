@@ -33,6 +33,7 @@
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
+#include "articles/ArticleStorage.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
@@ -287,6 +288,16 @@ void EpubReaderActivity::loop() {
   // Drop this book from the Recent Books list; if the reader then pages back into the book,
   // re-add it. So removal only sticks if the reader leaves while still on the End-of-Book
   // screen. Acts only on the transition (guarded by recentsEntryRemoved) — no per-frame writes.
+  if (!atEndOfBook) articleEndHandled = false;
+  if (atEndOfBook && !articleEndHandled && Articles::isPath(epub->getPath())) {
+    articleEndHandled = true;
+    articleReadSaveFailed = !Articles::markRead(epub->getPath());
+    if (articleReadSaveFailed) {
+      LOG_ERR("ARTICLE", "Read status was not saved");
+      requestUpdate();
+    }
+  }
+
   if (SETTINGS.removeReadBooksFromRecents) {
     if (atEndOfBook && !recentsEntryRemoved) {
       // Only treat the book as "removed by us" if it was actually in the list, so the
@@ -304,7 +315,8 @@ void EpubReaderActivity::loop() {
   // finished). If removeReadBooksFromRecents also fired, RecentBooksStore::updatePath in the
   // move path becomes a safe no-op since the entry was already removed.
   if (atEndOfBook) {
-    pendingReadFolderMove = SETTINGS.moveFinishedToReadFolder && !isInReadFolder(epub->getPath());
+    pendingReadFolderMove =
+        SETTINGS.moveFinishedToReadFolder && !Articles::isPath(epub->getPath()) && !isInReadFolder(epub->getPath());
   } else {
     pendingReadFolderMove = false;
   }
@@ -427,7 +439,10 @@ void EpubReaderActivity::loop() {
 
   // Long press BACK (1s+) goes to file selection
   if (mappedInput.isPressed(MappedInputManager::Button::Back) && mappedInput.getHeldTime() >= ReaderUtils::GO_HOME_MS) {
-    activityManager.goToFileBrowser(epub ? epub->getPath() : "");
+    if (epub && Articles::isPath(epub->getPath()))
+      activityManager.goToArticles();
+    else
+      activityManager.goToFileBrowser(epub ? epub->getPath() : "");
     return;
   }
 
@@ -438,7 +453,10 @@ void EpubReaderActivity::loop() {
       restoreSavedPosition();
       return;
     }
-    onGoHome();
+    if (epub && Articles::isPath(epub->getPath()))
+      activityManager.goToArticles();
+    else
+      onGoHome();
     return;
   }
 
@@ -952,6 +970,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   if (currentSpineIndex == epub->getSpineItemsCount()) {
     renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_END_OF_BOOK), true, EpdFontFamily::BOLD);
+    if (articleReadSaveFailed) GUI.drawPopup(renderer, tr(STR_SAVE_PROGRESS_FAILED));
     renderer.displayBuffer();
     automaticPageTurnActive = false;
     showPendingSyncSaveError();
