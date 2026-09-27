@@ -27,4 +27,13 @@ class ChapterXPathResolver {
    * An empty string means parsing failed or the location could not be resolved.
    */
   static std::string findXPathForProgress(const std::shared_ptr<Epub>& epub, int spineIndex, float intraSpineProgress);
+
+  /**
+   * Resolve a position inside the Nth <p> of a spine item (N as in Section's paragraph LUT)
+   * to a KOReader XPath with a text offset. `fraction` (0..1) is how far into that
+   * paragraph's text the position lies; 0 returns the paragraph element itself.
+   * Streams the item twice. An empty string means parsing failed.
+   */
+  static std::string findXPathForParagraphProgress(const std::shared_ptr<Epub>& epub, int spineIndex,
+                                                   uint16_t paragraphIndex, float fraction);
 };

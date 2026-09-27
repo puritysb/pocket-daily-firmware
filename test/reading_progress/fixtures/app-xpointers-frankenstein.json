@@ -1,0 +1,576 @@
+{
+ "epub": "frankenstein-se.epub",
+ "sha256": "0b5c070e2cde4d8bb36ef707f9d024465b00d0c49c078f0a148270f55b8c8780",
+ "positions": [
+  {
+   "sectionIndex": 0,
+   "xpointer": "/body/DocFragment[1]/body/section/h1/text().0",
+   "textAt": "Frankenstein"
+  },
+  {
+   "sectionIndex": 0,
+   "xpointer": "/body/DocFragment[1]/body/section/h1/text().6",
+   "textAt": "nstein"
+  },
+  {
+   "sectionIndex": 0,
+   "xpointer": "/body/DocFragment[1]/body/section/p/text()[2].1",
+   "textAt": ""
+  },
+  {
+   "sectionIndex": 1,
+   "xpointer": "/body/DocFragment[2]/body/section/header/h2/text().0",
+   "textAt": "Imprint"
+  },
+  {
+   "sectionIndex": 1,
+   "xpointer": "/body/DocFragment[2]/body/section/p[3]/text()[1].231",
+   "textAt": ", so users l"
+  },
+  {
+   "sectionIndex": 1,
+   "xpointer": "/body/DocFragment[2]/body/section/p[4]/text()[2].1",
+   "textAt": ""
+  },
+  {
+   "sectionIndex": 2,
+   "xpointer": "/body/DocFragment[3]/body/section/h2/text().0",
+   "textAt": "Introduction"
+  },
+  {
+   "sectionIndex": 2,
+   "xpointer": "/body/DocFragment[3]/body/section/p[11]/text().721",
+   "textAt": "deavour to m"
+  },
+  {
+   "sectionIndex": 2,
+   "xpointer": "/body/DocFragment[3]/body/section/footer/p[2]/text().1",
+   "textAt": "ondon, Octob"
+  },
+  {
+   "sectionIndex": 3,
+   "xpointer": "/body/DocFragment[4]/body/section/h2/text().0",
+   "textAt": "Preface"
+  },
+  {
+   "sectionIndex": 3,
+   "xpointer": "/body/DocFragment[4]/body/section/p[3]/text().463",
+   "textAt": "limited to t"
+  },
+  {
+   "sectionIndex": 3,
+   "xpointer": "/body/DocFragment[4]/body/section/footer/p/text().1",
+   "textAt": "arlow, Septe"
+  },
+  {
+   "sectionIndex": 4,
+   "xpointer": "/body/DocFragment[5]/body/section/p/text()[1].0",
+   "textAt": "To"
+  },
+  {
+   "sectionIndex": 4,
+   "xpointer": "/body/DocFragment[5]/body/section/p/text()[7].28",
+   "textAt": "lly inscribe"
+  },
+  {
+   "sectionIndex": 4,
+   "xpointer": "/body/DocFragment[5]/body/section/p/text()[7].1",
+   "textAt": "\t\t\tThis volu"
+  },
+  {
+   "sectionIndex": 5,
+   "xpointer": "/body/DocFragment[6]/body/section/blockquote/p/span[1]/text().0",
+   "textAt": "“Did I reque"
+  },
+  {
+   "sectionIndex": 5,
+   "xpointer": "/body/DocFragment[6]/body/section/blockquote/p/span[1]/text().20",
+   "textAt": " Maker, from"
+  },
+  {
+   "sectionIndex": 5,
+   "xpointer": "/body/DocFragment[6]/body/section/blockquote/cite/text()[2].1",
+   "textAt": " 743﻿–﻿45"
+  },
+  {
+   "sectionIndex": 6,
+   "xpointer": "/body/DocFragment[7]/body/section/hgroup/h2/text().0",
+   "textAt": "Frankenstein"
+  },
+  {
+   "sectionIndex": 6,
+   "xpointer": "/body/DocFragment[7]/body/section/hgroup/p/text().12",
+   "textAt": "rn Prometheu"
+  },
+  {
+   "sectionIndex": 6,
+   "xpointer": "/body/DocFragment[7]/body/section/hgroup/p/text().1",
+   "textAt": "r, The Moder"
+  },
+  {
+   "sectionIndex": 7,
+   "xpointer": "/body/DocFragment[8]/body/section/h2/span[1]/text().0",
+   "textAt": "Letter"
+  },
+  {
+   "sectionIndex": 7,
+   "xpointer": "/body/DocFragment[8]/body/section/blockquote/p[2]/text().1103",
+   "textAt": "olitudes. Wh"
+  },
+  {
+   "sectionIndex": 7,
+   "xpointer": "/body/DocFragment[8]/body/section/blockquote/footer/p[2]/text().1",
+   "textAt": ". Walton."
+  },
+  {
+   "sectionIndex": 8,
+   "xpointer": "/body/DocFragment[9]/body/section/h2/span[1]/text().0",
+   "textAt": "Letter"
+  },
+  {
+   "sectionIndex": 8,
+   "xpointer": "/body/DocFragment[9]/body/section/blockquote/p[4]/text().1130",
+   "textAt": "at his feet,"
+  },
+  {
+   "sectionIndex": 8,
+   "xpointer": "/body/DocFragment[9]/body/section/blockquote/footer/p[2]/text().1",
+   "textAt": "obert Walton"
+  },
+  {
+   "sectionIndex": 9,
+   "xpointer": "/body/DocFragment[10]/body/section/h2/span[1]/text().0",
+   "textAt": "Letter"
+  },
+  {
+   "sectionIndex": 9,
+   "xpointer": "/body/DocFragment[10]/body/section/blockquote/p[1]/text().394",
+   "textAt": "ntinually pa"
+  },
+  {
+   "sectionIndex": 9,
+   "xpointer": "/body/DocFragment[10]/body/section/blockquote/footer/p[2]/abbr/text().1",
+   "textAt": ". W."
+  },
+  {
+   "sectionIndex": 10,
+   "xpointer": "/body/DocFragment[11]/body/section/h2/span[1]/text().0",
+   "textAt": "Letter"
+  },
+  {
+   "sectionIndex": 10,
+   "xpointer": "/body/DocFragment[11]/body/section/blockquote[2]/p[2]/text().752",
+   "textAt": "e, my every "
+  },
+  {
+   "sectionIndex": 10,
+   "xpointer": "/body/DocFragment[11]/body/section/blockquote[3]/p[4]/text().1",
+   "textAt": "e then told "
+  },
+  {
+   "sectionIndex": 11,
+   "xpointer": "/body/DocFragment[12]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 11,
+   "xpointer": "/body/DocFragment[12]/body/section/p[8]/text().810",
+   "textAt": "f to Milan, "
+  },
+  {
+   "sectionIndex": 11,
+   "xpointer": "/body/DocFragment[12]/body/section/p[11]/text().1",
+   "textAt": "veryone love"
+  },
+  {
+   "sectionIndex": 12,
+   "xpointer": "/body/DocFragment[13]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 12,
+   "xpointer": "/body/DocFragment[13]/body/section/p[14]/text().610",
+   "textAt": "er be known."
+  },
+  {
+   "sectionIndex": 12,
+   "xpointer": "/body/DocFragment[13]/body/section/p[16]/text().1",
+   "textAt": "t was a stro"
+  },
+  {
+   "sectionIndex": 13,
+   "xpointer": "/body/DocFragment[14]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 13,
+   "xpointer": "/body/DocFragment[14]/body/section/p[2]/text().673",
+   "textAt": "ndants progn"
+  },
+  {
+   "sectionIndex": 13,
+   "xpointer": "/body/DocFragment[14]/body/section/p[21]/text().1",
+   "textAt": "hus ended a "
+  },
+  {
+   "sectionIndex": 14,
+   "xpointer": "/body/DocFragment[15]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 14,
+   "xpointer": "/body/DocFragment[15]/body/section/p[3]/text().1161",
+   "textAt": " the apparit"
+  },
+  {
+   "sectionIndex": 14,
+   "xpointer": "/body/DocFragment[15]/body/section/p[14]/text().1",
+   "textAt": "y father mad"
+  },
+  {
+   "sectionIndex": 15,
+   "xpointer": "/body/DocFragment[16]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 15,
+   "xpointer": "/body/DocFragment[16]/body/section/p[3]/text().1084",
+   "textAt": " I thought t"
+  },
+  {
+   "sectionIndex": 15,
+   "xpointer": "/body/DocFragment[16]/body/section/p[26]/text().1",
+   "textAt": "If this is y"
+  },
+  {
+   "sectionIndex": 16,
+   "xpointer": "/body/DocFragment[17]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 16,
+   "xpointer": "/body/DocFragment[17]/body/section/p[6]/text().716",
+   "textAt": "the fellow-p"
+  },
+  {
+   "sectionIndex": 16,
+   "xpointer": "/body/DocFragment[17]/body/section/p[11]/text().1",
+   "textAt": "e returned t"
+  },
+  {
+   "sectionIndex": 17,
+   "xpointer": "/body/DocFragment[18]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 17,
+   "xpointer": "/body/DocFragment[18]/body/section/p[21]/text().632",
+   "textAt": "iam; and my "
+  },
+  {
+   "sectionIndex": 17,
+   "xpointer": "/body/DocFragment[18]/body/section/p[38]/text().1",
+   "textAt": "Dearest niec"
+  },
+  {
+   "sectionIndex": 18,
+   "xpointer": "/body/DocFragment[19]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 18,
+   "xpointer": "/body/DocFragment[19]/body/section/p[10]/text().723",
+   "textAt": "t illness, w"
+  },
+  {
+   "sectionIndex": 18,
+   "xpointer": "/body/DocFragment[19]/body/section/p[33]/text().1",
+   "textAt": "hus spoke my"
+  },
+  {
+   "sectionIndex": 19,
+   "xpointer": "/body/DocFragment[20]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 19,
+   "xpointer": "/body/DocFragment[20]/body/section/p[8]/text().802",
+   "textAt": "d from its b"
+  },
+  {
+   "sectionIndex": 19,
+   "xpointer": "/body/DocFragment[20]/body/section/p[16]/text().1",
+   "textAt": "t length I a"
+  },
+  {
+   "sectionIndex": 20,
+   "xpointer": "/body/DocFragment[21]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 20,
+   "xpointer": "/body/DocFragment[21]/body/section/p[13]/text().853",
+   "textAt": "miserable, a"
+  },
+  {
+   "sectionIndex": 20,
+   "xpointer": "/body/DocFragment[21]/body/section/p[16]/text().1",
+   "textAt": "s he said th"
+  },
+  {
+   "sectionIndex": 21,
+   "xpointer": "/body/DocFragment[22]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 21,
+   "xpointer": "/body/DocFragment[22]/body/section/p[15]/text().775",
+   "textAt": "t, even to m"
+  },
+  {
+   "sectionIndex": 21,
+   "xpointer": "/body/DocFragment[22]/body/section/p[19]/text().1",
+   "textAt": "The family, "
+  },
+  {
+   "sectionIndex": 22,
+   "xpointer": "/body/DocFragment[23]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 22,
+   "xpointer": "/body/DocFragment[23]/body/section/p[9]/text().737",
+   "textAt": " during the "
+  },
+  {
+   "sectionIndex": 22,
+   "xpointer": "/body/DocFragment[23]/body/section/p[19]/text().1",
+   "textAt": "The pleasant"
+  },
+  {
+   "sectionIndex": 23,
+   "xpointer": "/body/DocFragment[24]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 23,
+   "xpointer": "/body/DocFragment[24]/body/section/p[6]/text().579",
+   "textAt": " me to mean "
+  },
+  {
+   "sectionIndex": 23,
+   "xpointer": "/body/DocFragment[24]/body/section/p[22]/text().1",
+   "textAt": "I will soon "
+  },
+  {
+   "sectionIndex": 24,
+   "xpointer": "/body/DocFragment[25]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 24,
+   "xpointer": "/body/DocFragment[25]/body/section/p[4]/text().510",
+   "textAt": "elix visited"
+  },
+  {
+   "sectionIndex": 24,
+   "xpointer": "/body/DocFragment[25]/body/section/p[20]/text().1",
+   "textAt": "She arrived "
+  },
+  {
+   "sectionIndex": 25,
+   "xpointer": "/body/DocFragment[26]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 25,
+   "xpointer": "/body/DocFragment[26]/body/section/p[6]/text()[3].646",
+   "textAt": "verning or m"
+  },
+  {
+   "sectionIndex": 25,
+   "xpointer": "/body/DocFragment[26]/body/section/p[38]/text().1",
+   "textAt": "At that inst"
+  },
+  {
+   "sectionIndex": 26,
+   "xpointer": "/body/DocFragment[27]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 26,
+   "xpointer": "/body/DocFragment[27]/body/section/p[19]/text().654",
+   "textAt": "hiding-place"
+  },
+  {
+   "sectionIndex": 26,
+   "xpointer": "/body/DocFragment[27]/body/section/p[37]/text().1",
+   "textAt": "For some day"
+  },
+  {
+   "sectionIndex": 27,
+   "xpointer": "/body/DocFragment[28]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 27,
+   "xpointer": "/body/DocFragment[28]/body/section/p[5]/text().544",
+   "textAt": "ss; and, ins"
+  },
+  {
+   "sectionIndex": 27,
+   "xpointer": "/body/DocFragment[28]/body/section/p[21]/text().1",
+   "textAt": "orning dawne"
+  },
+  {
+   "sectionIndex": 28,
+   "xpointer": "/body/DocFragment[29]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 28,
+   "xpointer": "/body/DocFragment[29]/body/section/p[18]/text().1002",
+   "textAt": "at the water"
+  },
+  {
+   "sectionIndex": 28,
+   "xpointer": "/body/DocFragment[29]/body/section/p[24]/text()[2].1",
+   "textAt": "Paul’s tower"
+  },
+  {
+   "sectionIndex": 29,
+   "xpointer": "/body/DocFragment[30]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 29,
+   "xpointer": "/body/DocFragment[30]/body/section/p[3]/text().639",
+   "textAt": "rrowful and "
+  },
+  {
+   "sectionIndex": 29,
+   "xpointer": "/body/DocFragment[30]/body/section/p[23]/text().1",
+   "textAt": "n the meanti"
+  },
+  {
+   "sectionIndex": 30,
+   "xpointer": "/body/DocFragment[31]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 30,
+   "xpointer": "/body/DocFragment[31]/body/section/p[25]/text().757",
+   "textAt": " feel all th"
+  },
+  {
+   "sectionIndex": 30,
+   "xpointer": "/body/DocFragment[31]/body/section/p[37]/text().1",
+   "textAt": " must pause "
+  },
+  {
+   "sectionIndex": 31,
+   "xpointer": "/body/DocFragment[32]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 31,
+   "xpointer": "/body/DocFragment[32]/body/section/p[2]/text().693",
+   "textAt": "came up to a"
+  },
+  {
+   "sectionIndex": 31,
+   "xpointer": "/body/DocFragment[32]/body/section/p[49]/text().1",
+   "textAt": "ver since my"
+  },
+  {
+   "sectionIndex": 32,
+   "xpointer": "/body/DocFragment[33]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 32,
+   "xpointer": "/body/DocFragment[33]/body/section/p[4]/text().534",
+   "textAt": "elf would fo"
+  },
+  {
+   "sectionIndex": 32,
+   "xpointer": "/body/DocFragment[33]/body/section/p[32]/text().1",
+   "textAt": "he wind, whi"
+  },
+  {
+   "sectionIndex": 33,
+   "xpointer": "/body/DocFragment[34]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 33,
+   "xpointer": "/body/DocFragment[34]/body/section/p[14]/text().634",
+   "textAt": "which I had "
+  },
+  {
+   "sectionIndex": 33,
+   "xpointer": "/body/DocFragment[34]/body/section/p[30]/text().1",
+   "textAt": " broke from "
+  },
+  {
+   "sectionIndex": 34,
+   "xpointer": "/body/DocFragment[35]/body/section/h2/span[1]/text().0",
+   "textAt": "Chapter"
+  },
+  {
+   "sectionIndex": 34,
+   "xpointer": "/body/DocFragment[35]/body/section/section/blockquote[5]/p[7]/text().834",
+   "textAt": "ty; but ther"
+  },
+  {
+   "sectionIndex": 34,
+   "xpointer": "/body/DocFragment[35]/body/section/section/blockquote[5]/p[27]/text().1",
+   "textAt": "e sprung fro"
+  },
+  {
+   "sectionIndex": 35,
+   "xpointer": "/body/DocFragment[36]/body/section/h2/text().0",
+   "textAt": "Endnotes"
+  },
+  {
+   "sectionIndex": 35,
+   "xpointer": "/body/DocFragment[36]/body/section/ol/li[1]/p/text().15",
+   "textAt": "cient Marine"
+  },
+  {
+   "sectionIndex": 35,
+   "xpointer": "/body/DocFragment[36]/body/section/ol/li[3]/p/a/text().1",
+   "textAt": "︎"
+  },
+  {
+   "sectionIndex": 36,
+   "xpointer": "/body/DocFragment[37]/body/section/header/h2/text().0",
+   "textAt": "Colophon"
+  },
+  {
+   "sectionIndex": 36,
+   "xpointer": "/body/DocFragment[37]/body/section/p[5]/text()[1].75",
+   "textAt": "submit typos"
+  },
+  {
+   "sectionIndex": 36,
+   "xpointer": "/body/DocFragment[37]/body/section/p[5]/text()[2].1",
+   "textAt": ""
+  },
+  {
+   "sectionIndex": 37,
+   "xpointer": "/body/DocFragment[38]/body/section/h2/text().0",
+   "textAt": "Uncopyright"
+  },
+  {
+   "sectionIndex": 37,
+   "xpointer": "/body/DocFragment[38]/body/section/p[3]/text()[2].280",
+   "textAt": " doesn’t cha"
+  },
+  {
+   "sectionIndex": 37,
+   "xpointer": "/body/DocFragment[38]/body/section/p[3]/text()[2].1",
+   "textAt": " thus dedica"
+  }
+ ]
+}

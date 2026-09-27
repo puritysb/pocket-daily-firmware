@@ -1,0 +1,81 @@
+{
+ "epub": "pocket-daily-epub-check.epub",
+ "sha256": "c175a49c25ccdd503059d8bad66619274eeb92bc343d749f753af0df1ac450cc",
+ "positions": [
+  {
+   "sectionIndex": 0,
+   "xpointer": "/body/DocFragment[1]/body/h1/text().0",
+   "textAt": "한글과 문장"
+  },
+  {
+   "sectionIndex": 0,
+   "xpointer": "/body/DocFragment[1]/body/p[1]/a/text().17",
+   "textAt": "rg/article?a"
+  },
+  {
+   "sectionIndex": 0,
+   "xpointer": "/body/DocFragment[1]/body/p[3]/text()[2].1",
+   "textAt": "음 줄입니다."
+  },
+  {
+   "sectionIndex": 1,
+   "xpointer": "/body/DocFragment[2]/body/h1/text().0",
+   "textAt": "두 번째 기사"
+  },
+  {
+   "sectionIndex": 1,
+   "xpointer": "/body/DocFragment[2]/body/p/text().14",
+   "textAt": "순서와 이동을 확인합니"
+  },
+  {
+   "sectionIndex": 1,
+   "xpointer": "/body/DocFragment[2]/body/p/text().1",
+   "textAt": "차에서 이 장을 선택해"
+  },
+  {
+   "sectionIndex": 2,
+   "xpointer": "/body/DocFragment[3]/body/h1/text().0",
+   "textAt": "긴 본문 분할"
+  },
+  {
+   "sectionIndex": 2,
+   "xpointer": "/body/DocFragment[3]/body/p/text().14986",
+   "textAt": "nglish & 기호 "
+  },
+  {
+   "sectionIndex": 2,
+   "xpointer": "/body/DocFragment[3]/body/p/text().1",
+   "textAt": "나다라 English "
+  },
+  {
+   "sectionIndex": 3,
+   "xpointer": "/body/DocFragment[4]/body/h1/text().0",
+   "textAt": "긴 본문 분할 (2)"
+  },
+  {
+   "sectionIndex": 3,
+   "xpointer": "/body/DocFragment[4]/body/p/text().14982",
+   "textAt": " 기호 < > 👩🏽‍💻"
+  },
+  {
+   "sectionIndex": 3,
+   "xpointer": "/body/DocFragment[4]/body/p/text().1",
+   "textAt": "& 기호 < > 👩🏽‍"
+  },
+  {
+   "sectionIndex": 4,
+   "xpointer": "/body/DocFragment[5]/body/h1/text().0",
+   "textAt": "긴 본문 분할 (3)"
+  },
+  {
+   "sectionIndex": 4,
+   "xpointer": "/body/DocFragment[5]/body/p/text().12032",
+   "textAt": "lish & 기호 < "
+  },
+  {
+   "sectionIndex": 4,
+   "xpointer": "/body/DocFragment[5]/body/p/text().1",
+   "textAt": " < > 👩🏽‍💻. 가"
+  }
+ ]
+}

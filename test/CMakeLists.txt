@@ -67,6 +67,7 @@ add_subdirectory(pocket_daily_staged_firmware)
 add_subdirectory(ota_failure)
 add_subdirectory(live_studio)
 add_subdirectory(pocket_profile)
+add_subdirectory(reading_progress)
 
 add_subdirectory(opds_parser)
 

@@ -130,7 +130,7 @@ static constexpr int MAX_XPATH_DEPTH = 16;
 // Parse the XPath segment between /body/DocFragment[N]/body/ and the terminal position
 // into an ordered sequence of steps. Returns step count, 0 on failure.
 // Example input: "/body/DocFragment[1]/body/div[1]/ul/li[4]/text()[1].51"
-// Fills steps with: {div,1}, {ul,1}, {li,4}
+// Fills steps with: {div,1}, {ul,1}, {li,4}. Element-only paths parse the same way.
 int parseXPathSteps(const std::string& xpath, XPathStep steps[MAX_XPATH_DEPTH]) {
   static const char kBodyFrag[] = "/body/DocFragment[";
   const size_t fragPos = xpath.find(kBodyFrag);
@@ -143,10 +143,16 @@ int parseXPathSteps(const std::string& xpath, XPathStep steps[MAX_XPATH_DEPTH]) 
 
   size_t stepsEnd = xpath.rfind("/text()");
   if (stepsEnd == std::string::npos) {
-    stepsEnd = xpath.rfind('.');
-    if (stepsEnd == std::string::npos || stepsEnd <= pos || stepsEnd + 1 >= xpath.size()) return 0;
-    for (size_t i = stepsEnd + 1; i < xpath.size(); i++) {
-      if (xpath[i] < '0' || xpath[i] > '9') return 0;
+    // Element pointer: ".../p[4].0" or element-only ".../div[2]/p[4]" (what
+    // ChapterXPathResolver::findXPathForParagraph produces).
+    stepsEnd = xpath.find('.', pos);
+    if (stepsEnd == std::string::npos) {
+      stepsEnd = xpath.size();
+    } else {
+      if (stepsEnd + 1 >= xpath.size()) return 0;
+      for (size_t i = stepsEnd + 1; i < xpath.size(); i++) {
+        if (xpath[i] < '0' || xpath[i] > '9') return 0;
+      }
     }
   }
   if (stepsEnd <= pos) return 0;
@@ -229,6 +235,22 @@ class ParagraphStreamer final : public Print {
   int tagNameLen = 0;
 
   int matchedDepth = 0;
+
+  // Ancestry-mode text()[N].offset (KOReader/crengine): only direct text of the matched
+  // element counts, runs are split by its child elements, and only runs holding
+  // non-whitespace are numbered. The offset counts codepoints from the run's start.
+  bool hasTextStep = true;
+  int bodyDepth = -1;  // htmlDepth of <body>, once seen
+  size_t elementStartVisChars = 0;
+  size_t segmentStart = 0;
+  bool segmentHasContent = false;
+  int contentSegments = 0;
+  bool targetSegmentKnown = false;
+
+  // Body text is decoded per codepoint so whitespace can be classified.
+  uint32_t pendingCp = 0;
+  uint8_t pendingCpBytes = 0;
+  bool lastWasCarriageReturn = false;
 
   // Anchor ID capture
   static constexpr int MAX_ANCHOR_ID = 64;
@@ -378,20 +400,94 @@ class ParagraphStreamer final : public Print {
     }
   }
 
-  void onVisibleCodepoint() {
+  // The whitespace class the companion app and KOReader use to skip empty text nodes
+  // (ECMAScript \s): ASCII space/tab/line breaks plus the Unicode space separators.
+  static bool isTextWhitespace(const uint32_t cp) {
+    return cp == ' ' || (cp >= 0x09 && cp <= 0x0D) || cp == 0xA0 || cp == 0x1680 || (cp >= 0x2000 && cp <= 0x200A) ||
+           cp == 0x2028 || cp == 0x2029 || cp == 0x202F || cp == 0x205F || cp == 0x3000 || cp == 0xFEFF;
+  }
+
+  void onVisibleCodepoint(const uint32_t cp) {
     totalVisChars++;
-    if (revPFound && !revDone) {
-      // Ancestry mode: count only while inside the fully-matched element and in the target text node.
-      // Legacy mode: count only while still inside the matched paragraph and in the target text node.
-      const bool inTargetNode = (stepCount > 0) ? (matchedDepth == stepCount && currentTextNode == targetTextNode)
-                                                : (paragraphHtmlDepth >= 0 && currentTextNode == targetTextNode);
-      if (inTargetNode) {
-        revVisChars++;
-        if (revVisChars >= revChar) {
-          targetVisChars = totalVisChars;
-          revDone = true;
-        }
+    if (!revPFound || revDone) return;
+    if (stepCount > 0) {
+      onAncestryCodepoint(cp);
+      return;
+    }
+    // Legacy mode: count only while still inside the matched paragraph and in the target text node.
+    if (paragraphHtmlDepth >= 0 && currentTextNode == targetTextNode) {
+      revVisChars++;
+      if (revVisChars >= revChar) {
+        targetVisChars = totalVisChars;
+        revDone = true;
       }
+    }
+  }
+
+  void onAncestryCodepoint(const uint32_t cp) {
+    // Text inside a child element belongs to that child's own text nodes.
+    if (matchedDepth != stepCount || htmlDepth != stepEnteredAtDepth[stepCount - 1]) return;
+    if (!segmentHasContent && !isTextWhitespace(cp)) {
+      segmentHasContent = true;
+      contentSegments++;
+      if (contentSegments == targetTextNode) {
+        targetSegmentKnown = true;
+        targetVisChars = segmentStart + static_cast<size_t>(revChar);
+      }
+    }
+    if (targetSegmentKnown && totalVisChars >= targetVisChars) revDone = true;
+  }
+
+  // A child element starts (or the element ends): an offset past the run's end clamps to it.
+  void endTextSegment() {
+    if (targetSegmentKnown && !revDone) {
+      targetVisChars = std::min(targetVisChars, totalVisChars);
+      revDone = true;
+    }
+  }
+
+  void beginTextSegment() {
+    segmentStart = totalVisChars;
+    segmentHasContent = false;
+  }
+
+  void flushPendingCodepoint() {
+    if (pendingCpBytes > 0) {
+      pendingCpBytes = 0;
+      onVisibleCodepoint(0xFFFD);  // Truncated sequence still occupies one position.
+    }
+  }
+
+  void onTextByte(const uint8_t c) {
+    // XML line-end normalization: CRLF and a lone CR each read as one LF.
+    if (c == '\n' && lastWasCarriageReturn) {
+      lastWasCarriageReturn = false;
+      return;
+    }
+    lastWasCarriageReturn = c == '\r';
+    if ((c & 0xC0) == 0x80) {
+      if (pendingCpBytes > 0) {
+        pendingCp = (pendingCp << 6) | (c & 0x3F);
+        if (--pendingCpBytes == 0) onVisibleCodepoint(pendingCp);
+      }
+      return;  // A stray continuation byte is not a position.
+    }
+    flushPendingCodepoint();
+    if (c < 0x80) {
+      onVisibleCodepoint(c == '\r' ? '\n' : c);
+      return;
+    }
+    if ((c & 0xE0) == 0xC0) {
+      pendingCpBytes = 1;
+      pendingCp = c & 0x1F;
+    } else if ((c & 0xF0) == 0xE0) {
+      pendingCpBytes = 2;
+      pendingCp = c & 0x0F;
+    } else if ((c & 0xF8) == 0xF0) {
+      pendingCpBytes = 3;
+      pendingCp = c & 0x07;
+    } else {
+      onVisibleCodepoint(0xFFFD);  // Invalid lead byte still occupies one position.
     }
   }
 
@@ -399,22 +495,50 @@ class ParagraphStreamer final : public Print {
     if (!text) return;
     const unsigned char* ptr = reinterpret_cast<const unsigned char*>(text);
     while (*ptr != 0) {
-      utf8NextCodepoint(&ptr);
-      onVisibleCodepoint();
+      onVisibleCodepoint(utf8NextCodepoint(&ptr));
     }
   }
 
   void flushEntityAsLiteral() {
-    for (size_t i = 0; i < entityLen; i++) onVisibleCodepoint();
+    for (size_t i = 0; i < entityLen; i++) onTextByte(static_cast<uint8_t>(entityBuffer[i]));
+  }
+
+  // &#NNN; / &#xHH; decode to one codepoint, as an XML parser (and the companion's DOM) reads them.
+  bool numericEntity(uint32_t& cp) const {
+    if (entityLen < 4 || entityBuffer[1] != '#') return false;
+    const bool hex = entityBuffer[2] == 'x' || entityBuffer[2] == 'X';
+    size_t i = hex ? 3 : 2;
+    if (i >= entityLen - 1) return false;
+    uint32_t value = 0;
+    for (; i < entityLen - 1; i++) {
+      const char d = entityBuffer[i];
+      uint32_t digit;
+      if (d >= '0' && d <= '9') {
+        digit = static_cast<uint32_t>(d - '0');
+      } else if (hex && d >= 'a' && d <= 'f') {
+        digit = static_cast<uint32_t>(d - 'a' + 10);
+      } else if (hex && d >= 'A' && d <= 'F') {
+        digit = static_cast<uint32_t>(d - 'A' + 10);
+      } else {
+        return false;
+      }
+      value = value * (hex ? 16 : 10) + digit;
+      if (value > 0x10FFFF) return false;
+    }
+    cp = value;
+    return true;
   }
 
   void finishEntity() {
     entityBuffer[entityLen] = '\0';
-    const char* resolved = lookupHtmlEntity(entityBuffer, entityLen);
-    if (resolved)
+    uint32_t numeric = 0;
+    if (numericEntity(numeric)) {
+      onVisibleCodepoint(numeric);
+    } else if (const char* resolved = lookupHtmlEntity(entityBuffer, entityLen)) {
       onVisibleText(resolved);
-    else
+    } else {
       flushEntityAsLiteral();
+    }
     globalInEntity = false;
     entityLen = 0;
   }
@@ -445,6 +569,7 @@ class ParagraphStreamer final : public Print {
       if (strcasecmp(tagName, "p") == 0) onLegacyP();
       return;
     }
+    if (bodyDepth < 0 && strcasecmp(tagName, "body") == 0) bodyDepth = htmlDepth;
 
     // Capture a child <a id> inside the fully-matched element even after target char is found.
     if (revPFound && matchedDepth == stepCount && capturedAnchorIdLen == 0 && strcasecmp(tagName, "a") == 0) {
@@ -453,6 +578,11 @@ class ParagraphStreamer final : public Print {
 
     if (revDone) return;
 
+    if (revPFound && matchedDepth == stepCount && htmlDepth == stepEnteredAtDepth[stepCount - 1] + 1) {
+      endTextSegment();
+      if (revDone) return;
+    }
+
     if (strcasecmp(tagName, "p") == 0) pCount++;
     if (strcasecmp(tagName, "li") == 0) liCount++;
 
@@ -460,8 +590,10 @@ class ParagraphStreamer final : public Print {
       const XPathStep& target = steps[matchedDepth];
       if (strcasecmp(tagName, target.tag) == 0) {
         // Count only direct children of the previously matched ancestor step.
-        // For step 0 any depth is valid; subsequent steps must be exactly one level deeper.
-        const bool atCorrectDepth = (matchedDepth == 0) || (htmlDepth == stepEnteredAtDepth[matchedDepth - 1] + 1);
+        // Step 0 is a child of <body> (any depth if no <body> was seen); later steps are
+        // exactly one level below the previous one.
+        const bool atCorrectDepth = (matchedDepth == 0) ? (bodyDepth < 0 || htmlDepth == bodyDepth + 1)
+                                                        : (htmlDepth == stepEnteredAtDepth[matchedDepth - 1] + 1);
         if (!atCorrectDepth) return;
         siblingCounters[matchedDepth]++;
         if (siblingCounters[matchedDepth] == target.siblingIndex) {
@@ -474,9 +606,12 @@ class ParagraphStreamer final : public Print {
             liCountAtMatch = liCount;
             revPFound = true;
             capturedAnchorIdLen = 0;
-            revVisChars = 0;
-            currentTextNode = 1;  // Reset text node counter for this element
-            if (revChar <= 0 && targetTextNode <= 1) {
+            elementStartVisChars = totalVisChars;
+            contentSegments = 0;
+            targetSegmentKnown = false;
+            beginTextSegment();
+            if (!hasTextStep) {
+              // An element-only XPath points at the element's start.
               targetVisChars = totalVisChars;
               revDone = true;
             }
@@ -507,16 +642,10 @@ class ParagraphStreamer final : public Print {
       paragraphHtmlDepth = -1;
     }
 
-    // Ancestry mode: advance text node when a direct child of the fully-matched element closes.
-    if (stepCount > 0 && matchedDepth == stepCount && revPFound && !revDone) {
-      const int elementDepth = stepEnteredAtDepth[stepCount - 1];
-      if (htmlDepth == elementDepth + 1) {
-        currentTextNode++;
-        if (currentTextNode == targetTextNode && revChar <= 0) {
-          targetVisChars = totalVisChars;
-          revDone = true;
-        }
-      }
+    // Ancestry mode: a new direct text run starts when a child of the fully-matched element closes.
+    if (stepCount > 0 && matchedDepth == stepCount && revPFound && !revDone &&
+        htmlDepth == stepEnteredAtDepth[stepCount - 1] + 1) {
+      beginTextSegment();
     }
 
     if (stepCount > 0 && matchedDepth > 0) {
@@ -524,9 +653,14 @@ class ParagraphStreamer final : public Print {
       if (insideStep[step] && htmlDepth == stepEnteredAtDepth[step]) {
         insideStep[step] = false;
         matchedDepth--;
-        // If the fully-matched element just closed without finding the target, abort.
+        // The fully-matched element closed: clamp an offset past its last run, or land on the
+        // element's start when the text node does not exist (a slightly different copy of the book).
         if (matchedDepth < stepCount && revPFound && !revDone) {
-          revPFound = false;
+          endTextSegment();
+          if (!revDone) {
+            targetVisChars = elementStartVisChars;
+            revDone = true;
+          }
         }
         for (int i = matchedDepth + 1; i < stepCount; i++) {
           siblingCounters[i] = 0;
@@ -601,12 +735,13 @@ class ParagraphStreamer final : public Print {
     memset(stepEnteredAtDepth, -1, sizeof(stepEnteredAtDepth));
   }
 
-  ParagraphStreamer(const XPathStep* xpathSteps, int xpathStepCount, int charOff, int textNodeIdx = 1)
+  ParagraphStreamer(const XPathStep* xpathSteps, int xpathStepCount, int charOff, int textNodeIdx, bool textStep)
       : fwdTarget(SIZE_MAX),
         revChar(charOff),
+        targetTextNode(textNodeIdx),
         steps(xpathSteps),
         stepCount(xpathStepCount),
-        targetTextNode(textNodeIdx) {
+        hasTextStep(textStep) {
     memset(stepEnteredAtDepth, -1, sizeof(stepEnteredAtDepth));
   }
 
@@ -638,6 +773,8 @@ class ParagraphStreamer final : public Print {
     }
 
     if (c == '<') {
+      flushPendingCodepoint();
+      lastWasCarriageReturn = false;
       globalInTag = true;
       tagState = TAG_IDLE;
       tagNameLen = 0;
@@ -668,12 +805,13 @@ class ParagraphStreamer final : public Print {
       // should not contribute to intra-spine progress.
     } else {
       if (c == '&') {
+        flushPendingCodepoint();
+        lastWasCarriageReturn = false;
         globalInEntity = true;
         entityBuffer[0] = '&';
         entityLen = 1;
       } else {
-        const bool startsCodepoint = (c & 0xC0) != 0x80;
-        if (startsCodepoint) onVisibleCodepoint();
+        onTextByte(c);
       }
     }
     return 1;
@@ -698,8 +836,7 @@ class ParagraphStreamer final : public Print {
 };
 
 bool streamSpine(const std::shared_ptr<Epub>& epub, int spineIndex, ParagraphStreamer& s) {
-  const auto href = epub->getSpineItem(spineIndex).href;
-  return !href.empty() && epub->readItemContentsToStream(href, s, 1024);
+  return epub->readSpineItemToStream(spineIndex, s, 1024);
 }
 }  // namespace
 
@@ -736,15 +873,7 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
   const size_t targetBytes = static_cast<size_t>(static_cast<float>(bookSize) * clampedPercentage);
 
   const int docFrag = parseIndex(koPos.xpath, "/body/DocFragment[");
-  const int xpathP = parseIndex(koPos.xpath, "/p[", true);
-  const int xpathChar = parseCharOffset(koPos.xpath);
-  const int xpathTextNode = parseTextNodeIndex(koPos.xpath);
   const int xpathSpine = (docFrag >= 1) ? (docFrag - 1) : -1;
-
-  XPathStep xpathSteps[MAX_XPATH_DEPTH];
-  const int xpathStepCount = parseXPathSteps(koPos.xpath, xpathSteps);
-  // Use ancestry mode whenever the XPath has a structured path (always more accurate than global counting).
-  const bool useAncestry = xpathStepCount > 0;
 
   if (xpathSpine >= 0 && xpathSpine < spineCount) {
     result.spineIndex = xpathSpine;
@@ -783,40 +912,21 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
 
   float intra = 0.0f;
   bool resolvedIntra = false;
-  if (useAncestry) {
-    ParagraphStreamer s(xpathSteps, xpathStepCount, xpathChar, xpathTextNode);
-    if (streamSpine(epub, result.spineIndex, s) && s.found()) {
-      intra = s.progress();
-      resolvedIntra = true;
-      const int pAtMatch = s.getParagraphAtMatch();
-      if (pAtMatch > 0) {
-        result.paragraphIndex = static_cast<uint16_t>(pAtMatch);
-        result.hasParagraphIndex = true;
-      }
-      if (xpathStepCount > 0 && strcasecmp(xpathSteps[xpathStepCount - 1].tag, "li") == 0) {
-        const int liAtMatch = s.getListItemAtMatch();
-        if (liAtMatch > 0) {
-          result.liIndex = static_cast<uint16_t>(liAtMatch);
-          result.hasLiIndex = true;
-        }
-      }
-      const char* anchorId = s.getCapturedAnchorId();
-      if (anchorId) {
-        strncpy(result.xpathAnchorId, anchorId, sizeof(result.xpathAnchorId) - 1);
-      }
-      LOG_DBG("PM", "XPath ancestry(%s[%d])/text()[%d]+%d -> %.1f%% (target=%zu total=%zu p~%d li~%d anchor=%s)",
-              xpathSteps[xpathStepCount - 1].tag, xpathSteps[xpathStepCount - 1].siblingIndex, xpathTextNode, xpathChar,
-              intra * 100, s.getTargetVisChars(), s.getTotalVisChars(), pAtMatch,
-              result.hasLiIndex ? static_cast<int>(result.liIndex) : 0, anchorId ? anchorId : "none");
+  const XPathSpineTarget target = locateInSpine(epub, result.spineIndex, koPos.xpath);
+  if (target.found) {
+    intra = target.totalVisibleChars > 0
+                ? static_cast<float>(target.visibleChar) / static_cast<float>(target.totalVisibleChars)
+                : 0.0f;
+    resolvedIntra = true;
+    if (target.paragraphIndex > 0) {
+      result.paragraphIndex = target.paragraphIndex;
+      result.hasParagraphIndex = true;
     }
-  } else if (xpathP > 0) {
-    ParagraphStreamer s(xpathP, xpathChar, xpathTextNode);
-    if (streamSpine(epub, result.spineIndex, s) && s.found()) {
-      intra = s.progress();
-      resolvedIntra = true;
-      LOG_DBG("PM", "XPath p[%d]/text()[%d]+%d -> %.1f%% (target=%zu total=%zu)", xpathP, xpathTextNode, xpathChar,
-              intra * 100, s.getTargetVisChars(), s.getTotalVisChars());
+    if (target.liIndex > 0) {
+      result.liIndex = target.liIndex;
+      result.hasLiIndex = true;
     }
+    strncpy(result.xpathAnchorId, target.anchorId, sizeof(result.xpathAnchorId) - 1);
   }
   if (!resolvedIntra && xpathSpine >= 0 && xpathSpine < spineCount && isChapterStartXPath(koPos.xpath)) {
     intra = 0.0f;
@@ -885,6 +995,49 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
     }
   }
   return result;
+}
+
+XPathSpineTarget ProgressMapper::locateInSpine(const std::shared_ptr<Epub>& epub, const int spineIndex,
+                                               const std::string& xpath) {
+  XPathSpineTarget target;
+  if (!epub || spineIndex < 0 || spineIndex >= epub->getSpineItemsCount()) return target;
+
+  const int xpathP = parseIndex(xpath, "/p[", true);
+  const int xpathChar = parseCharOffset(xpath);
+  const int xpathTextNode = parseTextNodeIndex(xpath);
+  XPathStep xpathSteps[MAX_XPATH_DEPTH];
+  const int xpathStepCount = parseXPathSteps(xpath, xpathSteps);
+
+  // Ancestry mode whenever the XPath has a structured path (always more accurate than global counting).
+  if (xpathStepCount > 0) {
+    ParagraphStreamer s(xpathSteps, xpathStepCount, xpathChar, xpathTextNode,
+                        xpath.rfind("/text()") != std::string::npos);
+    if (!streamSpine(epub, spineIndex, s) || !s.found()) return target;
+    target.found = true;
+    target.visibleChar = s.getTargetVisChars();
+    target.totalVisibleChars = s.getTotalVisChars();
+    const int pAtMatch = s.getParagraphAtMatch();
+    if (pAtMatch > 0) target.paragraphIndex = static_cast<uint16_t>(pAtMatch);
+    if (strcasecmp(xpathSteps[xpathStepCount - 1].tag, "li") == 0 && s.getListItemAtMatch() > 0) {
+      target.liIndex = static_cast<uint16_t>(s.getListItemAtMatch());
+    }
+    if (const char* anchorId = s.getCapturedAnchorId()) {
+      strncpy(target.anchorId, anchorId, sizeof(target.anchorId) - 1);
+    }
+    LOG_DBG("PM", "XPath ancestry(%s[%d])/text()[%d]+%d -> %zu/%zu (p~%d li~%u anchor=%s)",
+            xpathSteps[xpathStepCount - 1].tag, xpathSteps[xpathStepCount - 1].siblingIndex, xpathTextNode, xpathChar,
+            target.visibleChar, target.totalVisibleChars, pAtMatch, target.liIndex,
+            target.anchorId[0] ? target.anchorId : "none");
+  } else if (xpathP > 0) {
+    ParagraphStreamer s(xpathP, xpathChar, xpathTextNode);
+    if (!streamSpine(epub, spineIndex, s) || !s.found()) return target;
+    target.found = true;
+    target.visibleChar = s.getTargetVisChars();
+    target.totalVisibleChars = s.getTotalVisChars();
+    LOG_DBG("PM", "XPath p[%d]/text()[%d]+%d -> %zu/%zu", xpathP, xpathTextNode, xpathChar, target.visibleChar,
+            target.totalVisibleChars);
+  }
+  return target;
 }
 
 std::string ProgressMapper::generateXPath(const std::shared_ptr<Epub>& epub, int spineIndex, float intra) {

@@ -28,6 +28,19 @@ struct SavedProgressPosition {
 };
 
 /**
+ * Where an XPath lands inside one spine item, counted in the item's visible text
+ * (codepoints outside markup and outside head/style/script/title, entities decoded).
+ */
+struct XPathSpineTarget {
+  bool found = false;            // The XPath's element (and text node, if any) exists in the item
+  size_t visibleChar = 0;        // 0-based visible codepoint index the XPath points at
+  size_t totalVisibleChars = 0;  // Visible codepoints in the whole item
+  uint16_t paragraphIndex = 0;   // <p> count at the matched element (0 = none)
+  uint16_t liIndex = 0;          // <li> count at the matched element when it is an <li>
+  char anchorId[64] = {};        // First <a id> inside the matched element
+};
+
+/**
  * Maps between CrossPoint and SavedProgress position formats, such as those used by KOReader.
  *
  * CrossPoint tracks position as (spineIndex, pageNumber).
@@ -64,6 +77,13 @@ class ProgressMapper {
   static CrossPointPosition toCrossPoint(const std::shared_ptr<Epub>& epub, const SavedProgressPosition& savedPos,
                                          GfxRenderer& renderer, int currentSpineIndex = -1,
                                          int totalPagesInCurrentSpine = 0, int fallbackTotalPages = 0);
+
+  /**
+   * Stream one spine item and locate the XPath's element/text offset in its visible text.
+   * Text steps count only direct text nodes that contain non-whitespace, and the offset
+   * counts codepoints, matching KOReader/crengine serialization.
+   */
+  static XPathSpineTarget locateInSpine(const std::shared_ptr<Epub>& epub, int spineIndex, const std::string& xpath);
 
  private:
   /**

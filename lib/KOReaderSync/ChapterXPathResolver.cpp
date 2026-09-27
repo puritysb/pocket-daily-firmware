@@ -55,10 +55,17 @@ std::string buildParagraphXPath(const int spineIndex, const std::vector<PathSegm
   for (const auto& segment : path) {
     xpath += "/" + segment.name + "[" + std::to_string(segment.index) + "]";
   }
-  if (textNodeIndex > 0 && charOffset > 0) {
+  if (textNodeIndex > 0) {
     xpath += "/text()[" + std::to_string(textNodeIndex) + "]." + std::to_string(charOffset);
   }
   return xpath;
+}
+
+// ECMAScript \s: the class KOReader-compatible readers (and the companion app) use to
+// skip whitespace-only text nodes when numbering text()[N].
+bool isTextWhitespace(const uint32_t cp) {
+  return cp == ' ' || (cp >= 0x09 && cp <= 0x0D) || cp == 0xA0 || cp == 0x1680 || (cp >= 0x2000 && cp <= 0x200A) ||
+         cp == 0x2028 || cp == 0x2029 || cp == 0x202F || cp == 0x205F || cp == 0x3000 || cp == 0xFEFF;
 }
 
 size_t countUtf8Codepoints(const XML_Char* data, const int len) {
@@ -155,7 +162,7 @@ class ParagraphTextCounter final : public Print {
       return;
     }
 
-    if (name == "p") {
+    if (name == "p" || name == "li") {
       paragraphDepth++;
     }
     depth++;
@@ -174,7 +181,7 @@ class ParagraphTextCounter final : public Print {
       return;
     }
 
-    if (name == "p" && paragraphDepth > 0) {
+    if ((name == "p" || name == "li") && paragraphDepth > 0) {
       paragraphDepth--;
     }
   }
@@ -278,18 +285,16 @@ class XPathParagraphResolver final : public Print {
     path.push_back({name, siblingIndex});
     parentStates.emplace_back();
 
-    // Count both <p> and <li> as paragraph-like positions, matching how the section
-    // layout tracks them (xpathParagraphIndex and xpathListItemIndex). This ensures
-    // KOReader progress in list items maps to the correct XPath.
+    // Count <p> only: the index comes from Section's paragraph LUT, which the layout
+    // (ChapterHtmlSlimParser::xpathParagraphIndex) advances on <p> alone. Counting <li>
+    // too shifted every paragraph after a list to a later one.
     if (name == "p") {
       paragraphCount++;
-    } else if (name == "li") {
-      paragraphCount++;
-    }
-    if (paragraphCount == targetParagraph) {
-      xpath = buildParagraphXPath(spineIndex, path, 0, 0);
-      stopped = true;
-      XML_StopParser(parser, XML_FALSE);
+      if (paragraphCount == targetParagraph) {
+        xpath = buildParagraphXPath(spineIndex, path, 0, 0);
+        stopped = true;
+        XML_StopParser(parser, XML_FALSE);
+      }
     }
 
     depth++;
@@ -471,34 +476,50 @@ class XPathProgressResolver final : public Print {
       return;
     }
 
-    const size_t codepointCount = countUtf8Codepoints(data, len);
-    if (codepointCount == 0) {
-      return;
-    }
-
-    // Start a new text node on first non-empty content after any element boundary.
-    // Only counting non-empty nodes matches KOReader's text()[N] indexing behavior,
-    // which skips empty text nodes created by bare <a id="anchor"/> anchors.
+    // A text node starts at the first character data after any element boundary (expat
+    // may deliver one node in several chunks). Only nodes holding non-whitespace are
+    // numbered, matching KOReader's text()[N] and the companion app, which skip the
+    // whitespace-only nodes between elements and the empty ones bare anchors create.
     if (pendingTextNode) {
-      if (!textNodeIndexStack.empty()) {
-        textNodeIndexStack.back()++;
-      }
       textNodeStartChars = visibleChars;
+      textNodeHasContent = false;
+      textNodeSerial++;
       pendingTextNode = false;
     }
 
-    const size_t nextVisibleChars = visibleChars + codepointCount;
-    if (targetVisibleChar <= nextVisibleChars) {
-      const size_t delta = targetVisibleChar - visibleChars;
-      const int texNode = textNodeIndexStack.empty() ? 0 : textNodeIndexStack.back();
-      const size_t charOff = visibleChars - textNodeStartChars + delta;
-      xpath = buildParagraphXPath(spineIndex, path, texNode, charOff);
-      stopped = true;
-      XML_StopParser(parser, XML_FALSE);
-      return;
+    const unsigned char* ptr = reinterpret_cast<const unsigned char*>(data);
+    const unsigned char* end = ptr + len;
+    while (ptr < end) {
+      const uint32_t cp = utf8NextCodepoint(&ptr);
+      const size_t index = visibleChars++;
+      if (!textNodeHasContent && !isTextWhitespace(cp)) {
+        textNodeHasContent = true;
+        if (!textNodeIndexStack.empty()) {
+          textNodeIndexStack.back()++;
+        }
+        if (awaitingContent) {
+          // The target fell in whitespace: keep its offset if the node it was in turned out
+          // to hold content, otherwise land on the next content character.
+          emit(awaitingSerial == textNodeSerial ? targetVisibleChar - textNodeStartChars : index - textNodeStartChars);
+          return;
+        }
+      }
+      if (!awaitingContent && visibleChars == targetVisibleChar) {
+        if (textNodeHasContent) {
+          emit(targetVisibleChar - textNodeStartChars);
+          return;
+        }
+        awaitingContent = true;
+        awaitingSerial = textNodeSerial;
+      }
     }
+  }
 
-    visibleChars = nextVisibleChars;
+  void emit(const size_t charOffset) {
+    const int texNode = textNodeIndexStack.empty() ? 0 : textNodeIndexStack.back();
+    xpath = buildParagraphXPath(spineIndex, path, texNode, charOffset);
+    stopped = true;
+    XML_StopParser(parser, XML_FALSE);
   }
 
   XML_Parser parser = nullptr;
@@ -513,11 +534,152 @@ class XPathProgressResolver final : public Print {
   int liDepth = 0;
   size_t visibleChars = 0;
   size_t textNodeStartChars = 0;
+  bool textNodeHasContent = false;
+  uint32_t textNodeSerial = 0;
+  bool awaitingContent = false;
+  uint32_t awaitingSerial = 0;
   std::vector<int> textNodeIndexStack;
   std::vector<ParentState> parentStates;
   std::vector<PathSegment> path;
   std::string xpath;
 };
+// Where the Nth <p> starts and how much text it holds, counted like XPathProgressResolver
+// (text inside <p>/<li> only), so a position inside it can be handed to that resolver.
+class ParagraphSpanCounter final : public Print {
+ public:
+  explicit ParagraphSpanCounter(const int targetParagraph) : targetParagraph(targetParagraph) {
+    parser = XML_ParserCreate(nullptr);
+    if (!parser) {
+      LOG_ERR("KOX", "Failed to create XML parser");
+      return;
+    }
+    XML_SetUserData(parser, this);
+    XML_SetElementHandler(parser, &ParagraphSpanCounter::startElement, &ParagraphSpanCounter::endElement);
+    XML_SetCharacterDataHandler(parser, &ParagraphSpanCounter::characterData);
+  }
+
+  ~ParagraphSpanCounter() override { destroyXmlParser(parser); }
+
+  bool ok() const { return parser != nullptr && parseOk; }
+  bool found() const { return closed; }
+  size_t charsBefore() const { return before; }
+  size_t charsInside() const { return inside; }
+
+  bool finish() {
+    if (!parser || !parseOk || closed) {
+      return parseOk;
+    }
+    if (XML_Parse(parser, "", 0, XML_TRUE) == XML_STATUS_ERROR) {
+      LOG_ERR("KOX", "Final XML parse error: %s", XML_ErrorString(XML_GetErrorCode(parser)));
+      parseOk = false;
+    }
+    return parseOk;
+  }
+
+  size_t write(uint8_t c) override { return write(&c, 1); }
+
+  size_t write(const uint8_t* buffer, size_t size) override {
+    if (!parser || !parseOk || closed) {
+      return size;
+    }
+    if (XML_Parse(parser, reinterpret_cast<const char*>(buffer), static_cast<int>(size), XML_FALSE) != XML_STATUS_OK) {
+      const enum XML_Error error = XML_GetErrorCode(parser);
+      if (error != XML_ERROR_ABORTED) {
+        LOG_ERR("KOX", "XML parse error: %s", XML_ErrorString(error));
+        parseOk = false;
+      }
+    }
+    return size;
+  }
+
+ private:
+  static void XMLCALL startElement(void* userData, const XML_Char* name, const XML_Char**) {
+    static_cast<ParagraphSpanCounter*>(userData)->onStartElement(name);
+  }
+
+  static void XMLCALL endElement(void* userData, const XML_Char* name) {
+    static_cast<ParagraphSpanCounter*>(userData)->onEndElement(name);
+  }
+
+  static void XMLCALL characterData(void* userData, const XML_Char* data, const int len) {
+    auto* self = static_cast<ParagraphSpanCounter*>(userData);
+    if (self->insideBody && (self->paragraphDepth > 0 || self->liDepth > 0) && !self->closed) {
+      self->visibleChars += countUtf8Codepoints(data, len);
+    }
+  }
+
+  void onStartElement(const XML_Char* rawName) {
+    const std::string name = stripPrefix(rawName);
+    if (!insideBody) {
+      if (name == "body") {
+        insideBody = true;
+        bodyDepth = depth;
+      }
+      depth++;
+      return;
+    }
+    if (name == "p") {
+      paragraphDepth++;
+      if (++paragraphCount == targetParagraph) {
+        targetDepth = depth;
+        before = visibleChars;
+      }
+    } else if (name == "li") {
+      liDepth++;
+    }
+    depth++;
+  }
+
+  void onEndElement(const XML_Char* rawName) {
+    const std::string name = stripPrefix(rawName);
+    depth--;
+    if (!insideBody) {
+      return;
+    }
+    if (depth == bodyDepth && name == "body") {
+      insideBody = false;
+      return;
+    }
+    if (name == "p" && paragraphDepth > 0) {
+      paragraphDepth--;
+      if (depth == targetDepth) {
+        inside = visibleChars - before;
+        closed = true;
+        XML_StopParser(parser, XML_FALSE);
+      }
+    } else if (name == "li" && liDepth > 0) {
+      liDepth--;
+    }
+  }
+
+  XML_Parser parser = nullptr;
+  const int targetParagraph;
+  bool parseOk = true;
+  bool insideBody = false;
+  bool closed = false;
+  int depth = 0;
+  int bodyDepth = -1;
+  int targetDepth = -1;
+  int paragraphDepth = 0;
+  int liDepth = 0;
+  int paragraphCount = 0;
+  size_t visibleChars = 0;
+  size_t before = 0;
+  size_t inside = 0;
+};
+
+std::string resolveVisibleChar(const std::shared_ptr<Epub>& epub, const int spineIndex,
+                               const size_t targetVisibleChar) {
+  XPathProgressResolver resolver(targetVisibleChar);
+  if (!resolver.ok()) {
+    return "";
+  }
+  resolver.spineIndex = spineIndex;
+  if (!epub->readSpineItemToStream(spineIndex, resolver, 1024) || !resolver.finish()) {
+    return "";
+  }
+  return resolver.hasMatch() ? resolver.getXPath() : "";
+}
 }  // namespace
 
 std::string ChapterXPathResolver::findXPathForParagraph(const std::shared_ptr<Epub>& epub, const int spineIndex,
@@ -537,7 +699,7 @@ std::string ChapterXPathResolver::findXPathForParagraph(const std::shared_ptr<Ep
   }
 
   resolver.spineIndex = spineIndex;
-  if (!epub->readItemContentsToStream(href, resolver, 1024) || !resolver.finish()) {
+  if (!epub->readSpineItemToStream(spineIndex, resolver, 1024) || !resolver.finish()) {
     return "";
   }
 
@@ -566,7 +728,7 @@ std::string ChapterXPathResolver::findXPathForProgress(const std::shared_ptr<Epu
   }
 
   ParagraphTextCounter counter;
-  if (!counter.ok() || !epub->readItemContentsToStream(href, counter, 1024) || !counter.finish()) {
+  if (!counter.ok() || !epub->readSpineItemToStream(spineIndex, counter, 1024) || !counter.finish()) {
     return "";
   }
 
@@ -579,22 +741,40 @@ std::string ChapterXPathResolver::findXPathForProgress(const std::shared_ptr<Epu
   const size_t targetVisibleChar =
       std::max<size_t>(1, std::min(totalVisibleChars, static_cast<size_t>(std::ceil(clamped * totalVisibleChars))));
 
-  XPathProgressResolver resolver(targetVisibleChar);
-  if (!resolver.ok()) {
-    return "";
-  }
-
-  resolver.spineIndex = spineIndex;
-  if (!epub->readItemContentsToStream(href, resolver, 1024) || !resolver.finish()) {
-    return "";
-  }
-
-  if (resolver.hasMatch()) {
-    LOG_DBG("KOX", "Resolved progress %.3f in spine %d -> %s", intraSpineProgress, spineIndex,
-            resolver.getXPath().c_str());
-    return resolver.getXPath();
+  std::string xpath = resolveVisibleChar(epub, spineIndex, targetVisibleChar);
+  if (!xpath.empty()) {
+    LOG_DBG("KOX", "Resolved progress %.3f in spine %d -> %s", intraSpineProgress, spineIndex, xpath.c_str());
+    return xpath;
   }
 
   LOG_DBG("KOX", "Could not resolve progress %.3f in spine %d", intraSpineProgress, spineIndex);
   return "";
+}
+
+std::string ChapterXPathResolver::findXPathForParagraphProgress(const std::shared_ptr<Epub>& epub, const int spineIndex,
+                                                                const uint16_t paragraphIndex, const float fraction) {
+  if (!epub || paragraphIndex == 0 || spineIndex < 0 || spineIndex >= epub->getSpineItemsCount()) {
+    return "";
+  }
+  if (!(fraction > 0.0f)) {
+    return findXPathForParagraph(epub, spineIndex, paragraphIndex);
+  }
+
+  ParagraphSpanCounter counter(paragraphIndex);
+  if (!counter.ok() || !epub->readSpineItemToStream(spineIndex, counter, 1024) || !counter.finish() ||
+      !counter.found() || counter.charsInside() == 0) {
+    return findXPathForParagraph(epub, spineIndex, paragraphIndex);
+  }
+
+  const size_t inside = counter.charsInside();
+  const size_t offset =
+      std::min(inside - 1, static_cast<size_t>(std::min(1.0f, fraction) * static_cast<float>(inside)));
+  if (offset == 0) {
+    return findXPathForParagraph(epub, spineIndex, paragraphIndex);
+  }
+  // XPathProgressResolver points just past its Nth counted character.
+  std::string xpath = resolveVisibleChar(epub, spineIndex, counter.charsBefore() + offset);
+  LOG_DBG("KOX", "Paragraph %u + %.3f (%zu/%zu) in spine %d -> %s", paragraphIndex, fraction, offset, inside,
+          spineIndex, xpath.c_str());
+  return !xpath.empty() ? xpath : findXPathForParagraph(epub, spineIndex, paragraphIndex);
 }
