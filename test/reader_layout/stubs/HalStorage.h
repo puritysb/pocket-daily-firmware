@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
 #ifndef O_RDONLY
@@ -35,12 +36,21 @@ class HalFile : public Print {
   ~HalFile() override { close(); }
   HalFile(const HalFile&) = delete;
   HalFile& operator=(const HalFile&) = delete;
-  HalFile(HalFile&& o) noexcept : fp_(o.fp_) { o.fp_ = nullptr; }
+  HalFile(HalFile&& o) noexcept : fp_(o.fp_), wbuf_(o.wbuf_), wcap_(o.wcap_), wlen_(o.wlen_) {
+    o.fp_ = nullptr;
+    o.wbuf_ = nullptr;
+    o.wcap_ = o.wlen_ = 0;
+  }
   HalFile& operator=(HalFile&& o) noexcept {
     if (this != &o) {
       close();
       fp_ = o.fp_;
+      wbuf_ = o.wbuf_;
+      wcap_ = o.wcap_;
+      wlen_ = o.wlen_;
       o.fp_ = nullptr;
+      o.wbuf_ = nullptr;
+      o.wcap_ = o.wlen_ = 0;
     }
     return *this;
   }
@@ -54,6 +64,7 @@ class HalFile : public Print {
   bool isOpen() const { return fp_ != nullptr; }
   bool isDirectory() const { return false; }
   size_t size() const {
+    const_cast<HalFile*>(this)->drain();
     if (!fp_) return 0;
     const long p = std::ftell(fp_);
     std::fseek(fp_, 0, SEEK_END);
@@ -62,12 +73,16 @@ class HalFile : public Print {
     return s < 0 ? 0 : static_cast<size_t>(s);
   }
   size_t fileSize() const { return size(); }
-  size_t position() const { return fp_ ? static_cast<size_t>(std::ftell(fp_)) : 0; }
+  size_t position() const { return fp_ ? static_cast<size_t>(std::ftell(fp_)) + wlen_ : 0; }
   int available() const { return fp_ ? static_cast<int>(size() - position()) : 0; }
-  bool seek(size_t off) { return fp_ && std::fseek(fp_, static_cast<long>(off), SEEK_SET) == 0; }
+  bool seek(size_t off) {
+    drain();
+    return fp_ && std::fseek(fp_, static_cast<long>(off), SEEK_SET) == 0;
+  }
   bool seekSet(size_t off) { return seek(off); }
   bool seekCur(int64_t n) { return fp_ && std::fseek(fp_, static_cast<long>(n), SEEK_CUR) == 0; }
   int read(void* out, size_t n) {
+    drain();
     if (!fp_) return -1;
     const int got = static_cast<int>(std::fread(out, 1, n, fp_));
     halIoCounters.readCalls++;
@@ -78,13 +93,40 @@ class HalFile : public Print {
     uint8_t b;
     return read(&b, 1) == 1 ? b : -1;
   }
-  size_t write(const void* in, size_t n) { return fp_ ? std::fwrite(in, 1, n, fp_) : 0; }
+  size_t rawWrite(const void* in, size_t n) { return fp_ ? std::fwrite(in, 1, n, fp_) : 0; }
+  size_t write(const void* in, size_t n) {
+    if (wbuf_ && fp_) {
+      if (wlen_ + n > wcap_ && !drain()) return 0;
+      if (n < wcap_) {
+        memcpy(wbuf_ + wlen_, in, n);
+        wlen_ += n;
+        return n;
+      }
+    }
+    return rawWrite(in, n);
+  }
   size_t write(uint8_t b) override { return write(&b, 1); }
   size_t write(const uint8_t* b, size_t n) override { return write(static_cast<const void*>(b), n); }
   void flush() {
+    drain();
     if (fp_) std::fflush(fp_);
   }
+  // Mirrors HalFile's write-behind buffer (lib/hal/HalStorage.cpp).
+  void setWriteBuffer(uint8_t* buffer, size_t capacity) {
+    drain();
+    wbuf_ = buffer && capacity ? buffer : nullptr;
+    wcap_ = wbuf_ ? capacity : 0;
+  }
+  bool drain() {
+    if (!wlen_) return true;
+    const size_t n = wlen_;
+    wlen_ = 0;
+    return rawWrite(wbuf_, n) == n;
+  }
   bool close() {
+    drain();
+    wbuf_ = nullptr;
+    wcap_ = 0;
     if (fp_) std::fclose(fp_);
     fp_ = nullptr;
     return true;
@@ -92,6 +134,8 @@ class HalFile : public Print {
 
  private:
   mutable FILE* fp_ = nullptr;
+  uint8_t* wbuf_ = nullptr;
+  size_t wcap_ = 0, wlen_ = 0;
 };
 
 class HalStorage {

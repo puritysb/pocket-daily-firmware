@@ -72,6 +72,30 @@ class HalFile : public Print {
   friend class HalStorage;
   class Impl;
   std::unique_ptr<Impl> impl;
+  // setWriteBuffer() state; moves with the handle (the moved-from handle keeps none).
+  struct WriteBuffer {
+    uint8_t* data = nullptr;
+    size_t capacity = 0;
+    size_t pending = 0;
+    WriteBuffer() = default;
+    WriteBuffer(const WriteBuffer&) = delete;
+    WriteBuffer& operator=(const WriteBuffer&) = delete;
+    WriteBuffer(WriteBuffer&& other) noexcept : data(other.data), capacity(other.capacity), pending(other.pending) {
+      other.data = nullptr;
+      other.capacity = other.pending = 0;
+    }
+    WriteBuffer& operator=(WriteBuffer&& other) noexcept {
+      data = other.data;
+      capacity = other.capacity;
+      pending = other.pending;
+      other.data = nullptr;
+      other.capacity = other.pending = 0;
+      return *this;
+    }
+  };
+  WriteBuffer wbuf_;
+  // Writes the pending buffered bytes; false when the SD write came up short.
+  bool drainWriteBuffer();
   static std::unique_ptr<Impl> allocateImpl();
   explicit HalFile(std::unique_ptr<Impl> impl);
 
@@ -80,11 +104,17 @@ class HalFile : public Print {
   // writes return zero, and seek/rename/preallocation return false.
   HalFile();
   ~HalFile();
-  HalFile(HalFile&&);
-  HalFile& operator=(HalFile&&);
+  HalFile(HalFile&&) noexcept;
+  HalFile& operator=(HalFile&&) noexcept;
   HalFile(const HalFile&) = delete;
   HalFile& operator=(const HalFile&) = delete;
 
+  // Write-behind buffer (caller-owned, `capacity` bytes): write() collects small writes and
+  // hands the SD layer whole chunks, so a stream of 2-4 byte fields becomes one locked,
+  // sector-spanning transfer per chunk. Every other operation (seek, read, size, flush, close,
+  // rename, ...) first writes the pending bytes; position() includes them. The buffer must
+  // outlive its use: pass nullptr (which writes pending bytes) or close() before freeing it.
+  void setWriteBuffer(uint8_t* buffer, size_t capacity);
   void flush();
   size_t getName(char* name, size_t len);
   size_t size();

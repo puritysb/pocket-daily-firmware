@@ -16,6 +16,7 @@ inline bool errorAfterRead = false;
 inline uint8_t readError = 0, recordByte = 7;
 inline int readCount = -2;
 inline unsigned reads = 0;
+inline std::vector<uint8_t> written;  // bytes passed to FsFile::write, in order
 inline uint32_t clusters = 8;
 inline bool failSector = false;
 inline uint8_t allocationByte = 0;
@@ -32,6 +33,7 @@ inline void reset() {
   recordByte = 7;
   readCount = -2;
   reads = 0;
+  written.clear();
   clusters = 8;
   failSector = false;
   allocationByte = 0;
@@ -111,10 +113,14 @@ class FsFile {
     FakeSDK::checkLock();
     return opened ? 7 : -1;
   }
-  size_t write(const void*, size_t count) {
+  size_t write(const void* data, size_t count) {
     FakeSDK::checkLock();
     ++FakeSDK::writes;
-    return opened ? count : 0;
+    if (!opened) return 0;
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    FakeSDK::written.insert(FakeSDK::written.end(), bytes, bytes + count);
+    cursor += count;
+    return count;
   }
   size_t write(uint8_t byte) { return write(&byte, 1); }
   bool rename(const char*) {

@@ -206,3 +206,49 @@ TEST_F(StorageAllocation, SpaceScanIsChunkedAndStopsOnIOFailure) {
   FakeSDK::failSector = true;
   EXPECT_FALSE(Storage.spaceChunk(0, result, nullptr));
 }
+
+// Write-behind buffer (HalFile::setWriteBuffer): section builds serialize pages as 2-4 byte
+// fields. Buffered, the SD layer sees one locked call per chunk with the same bytes in the
+// same order, position() counts the pending bytes, and every other operation (seek, read,
+// size, close, destruction) writes them first.
+TEST_F(StorageAllocation, WriteBufferBatchesSmallWritesWithoutChangingBytes) {
+  std::vector<uint8_t> expected;
+  {
+    HalFile file = Storage.open("/section.bin", O_WRITE);
+    ASSERT_TRUE(file);
+    uint8_t buffer[16];
+    file.setWriteBuffer(buffer, sizeof(buffer));
+    for (uint8_t i = 0; i < 40; ++i) {
+      const uint8_t field[3] = {i, static_cast<uint8_t>(i + 1), static_cast<uint8_t>(i + 2)};
+      EXPECT_EQ(file.write(field, sizeof(field)), sizeof(field));
+      expected.insert(expected.end(), field, field + sizeof(field));
+    }
+    EXPECT_EQ(file.position(), expected.size());  // pending bytes included
+    EXPECT_LE(FakeSDK::writes, expected.size() / 15 + 1);
+    const unsigned before = FakeSDK::writes;
+    const uint8_t big[20] = {};  // larger than the buffer: pending bytes, then straight through
+    EXPECT_EQ(file.write(big, sizeof(big)), sizeof(big));
+    expected.insert(expected.end(), big, big + sizeof(big));
+    EXPECT_EQ(FakeSDK::written, expected);
+    EXPECT_LE(FakeSDK::writes, before + 2);
+    EXPECT_EQ(file.write(uint8_t{9}), 1u);
+    expected.push_back(9);
+    EXPECT_TRUE(file.seek(0));  // seek writes the pending byte first
+    EXPECT_EQ(FakeSDK::written, expected);
+    EXPECT_EQ(file.write(uint8_t{8}), 1u);
+    expected.push_back(8);
+    EXPECT_TRUE(file.close());  // so does close
+    EXPECT_EQ(FakeSDK::written, expected);
+  }
+  {
+    HalFile file = Storage.open("/section.bin", O_WRITE);
+    uint8_t buffer[8];
+    file.setWriteBuffer(buffer, sizeof(buffer));
+    EXPECT_EQ(file.write(uint8_t{7}), 1u);
+    expected.push_back(7);
+    HalFile moved(std::move(file));  // the pending byte moves with the handle
+    EXPECT_EQ(file.position(), 0u);
+    EXPECT_EQ(moved.position(), 1u);
+  }  // and destruction writes it
+  EXPECT_EQ(FakeSDK::written, expected);
+}

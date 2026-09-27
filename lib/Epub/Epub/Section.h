@@ -17,7 +17,14 @@ class Section {
   const int spineIndex;
   GfxRenderer& renderer;
   std::string filePath;
+  // Write-behind buffer of the build's `file` (declared first: it must outlive the handle).
+  // Page serialization writes 2-4 byte fields; ~140,000 of them for a 240 KB chapter each
+  // took the storage lock and an SdFat call on the device. 2 KB = four sectors per SD call.
+  static constexpr size_t WRITE_BUFFER_BYTES = 2048;
+  std::unique_ptr<uint8_t[]> writeBuffer_;
   HalFile file;
+  // Closes `file` (writing buffered bytes) and frees its write buffer.
+  void closeFile();
 
   void writeSectionFileHeader(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
                               uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled,

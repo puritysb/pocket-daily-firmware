@@ -570,6 +570,23 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
 
   const size_t totalWordCount = words.size();
 
+  // The gap before word j (space advance, cross-boundary kerning for a continuation, or none)
+  // depends on j alone, but the DP below revisits it for every line start that reaches it
+  // (~one line of words). Measure each gap once: identical values, a fraction of the lookups.
+  std::vector<int16_t> gapBefore(totalWordCount, 0);
+  for (size_t j = 1; j < totalWordCount; ++j) {
+    if (noSpaceBeforeVec[j]) {
+      gapBefore[j] = 0;
+    } else if (!continuesVec[j]) {
+      gapBefore[j] = static_cast<int16_t>(
+          renderer.getSpaceAdvance(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]));
+    } else {
+      // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
+      gapBefore[j] = static_cast<int16_t>(
+          renderer.getKerning(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]));
+    }
+  }
+
   // DP table to store the minimum badness (cost) of lines starting at index i
   std::vector<int> dp(totalWordCount);
   // 'ans[i]' stores the index 'j' of the *last word* in the optimal line starting at 'i'
@@ -587,17 +604,8 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
     const int effectivePageWidth = i == 0 ? pageWidth - firstLineIndent : pageWidth;
 
     for (size_t j = i; j < totalWordCount; ++j) {
-      // Add space before word j, unless it's the first word on the line or a continuation
-      int gap = 0;
-      if (j > static_cast<size_t>(i) && noSpaceBeforeVec[j]) {
-        gap = 0;
-      } else if (j > static_cast<size_t>(i) && !continuesVec[j]) {
-        gap =
-            renderer.getSpaceAdvance(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
-      } else if (j > static_cast<size_t>(i) && continuesVec[j]) {
-        // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
-        gap = renderer.getKerning(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
-      }
+      // Add the gap before word j, unless it's the first word on the line
+      const int gap = j > static_cast<size_t>(i) ? gapBefore[j] : 0;
       currlen += wordWidths[j] + gap;
 
       if (currlen > effectivePageWidth) {

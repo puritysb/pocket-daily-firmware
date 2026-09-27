@@ -68,6 +68,11 @@ Section::Section(const std::shared_ptr<Epub>& epub, const int spineIndex, GfxRen
 // (no-op once a build has completed or never started).
 Section::~Section() { suspendBuild(); }
 
+void Section::closeFile() {
+  file.close();
+  writeBuffer_.reset();
+}
+
 uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
   if (!file) {
     LOG_ERR("SCT", "File not open for writing page %d", builtPageCount_);
@@ -143,7 +148,7 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
     serialization::readPod(file, version);
     if (version != SECTION_FILE_VERSION && version != SECTION_FILE_PARTIAL_VERSION) {
       // Explicit close() required: member variable persists beyond function scope
-      file.close();
+      closeFile();
       LOG_ERR("SCT", "Deserialization failed: Unknown version %u", version);
       clearCache();
       return false;
@@ -181,7 +186,7 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
         hyphenationEnabled != fileHyphenationEnabled || embeddedStyle != fileEmbeddedStyle ||
         imageRendering != fileImageRendering || focusReadingEnabled != fileFocusReadingEnabled ||
         (!bilingualModeAgnostic && bilingualViewMode != fileBilingualViewMode)) {
-      file.close();
+      closeFile();
       LOG_ERR("SCT", "Deserialization failed: Parameters do not match");
       clearCache();
       return false;
@@ -200,7 +205,7 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
     const bool trailerValid =
         pageCount > 0 && liLutOffset >= HEADER_SIZE && trailerOffset + 2 * sizeof(uint32_t) <= file.size();
     if (!trailerValid) {
-      file.close();
+      closeFile();
       LOG_ERR("SCT", "Deserialization failed: malformed partial section");
       clearCache();
       pageCount = 0;
@@ -214,7 +219,7 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
   }
 
   // Explicit close() required: member variable persists beyond function scope
-  file.close();
+  closeFile();
   LOG_DBG("SCT", "Deserialization succeeded: %d pages%s", pageCount, filePartial ? " (partial)" : "");
   return true;
 }
@@ -362,6 +367,9 @@ bool Section::startBuild(const int fontId, const float lineCompression, const bo
     if (!reusedHtml) Storage.remove(tmpHtmlPath.c_str());
     return buildFailed(BuildStep::SectionFile);
   }
+  // Allocated after the inflate has released its buffers; without it writes go straight through.
+  writeBuffer_ = makeUniqueNoThrow<uint8_t[]>(WRITE_BUFFER_BYTES);
+  if (writeBuffer_) file.setWriteBuffer(writeBuffer_.get(), WRITE_BUFFER_BYTES);
   // Header is written with the incomplete-version sentinel; finalizeBuild() commits it.
   writeSectionFileHeader(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
                          viewportHeight, hyphenationEnabled, embeddedStyle, imageRendering, focusReadingEnabled,
@@ -370,7 +378,7 @@ bool Section::startBuild(const int fontId, const float lineCompression, const bo
   auto ctx = makeUniqueNoThrow<BuildContext>();
   if (!ctx) {
     LOG_ERR("SCT", "OOM: BuildContext");
-    file.close();
+    closeFile();
     Storage.remove(binTmpPath().c_str());
     if (!reusedHtml) Storage.remove(tmpHtmlPath.c_str());
     return buildFailed(BuildStep::BuildContext);
@@ -424,7 +432,7 @@ bool Section::startBuild(const int fontId, const float lineCompression, const bo
   if (!ctx->parser) {
     LOG_ERR("SCT", "OOM: ChapterHtmlSlimParser");
     if (ctx->cssParser) ctx->cssParser->clear();
-    file.close();
+    closeFile();
     Storage.remove(binTmpPath().c_str());
     if (!reusedHtml) Storage.remove(tmpHtmlPath.c_str());
     return buildFailed(BuildStep::Parser);
@@ -552,7 +560,7 @@ bool Section::commitBuildFile(const uint8_t version, const uint32_t bytesConsume
 
   const auto failCommit = [this]() {
     // Explicit close() required before remove (member variable, O_RDWR handle).
-    file.close();
+    closeFile();
     Storage.remove(binTmpPath().c_str());
     return false;
   };
@@ -620,7 +628,7 @@ bool Section::commitBuildFile(const uint8_t version, const uint32_t bytesConsume
   file.seek(0);
   serialization::writePod(file, version);
   // Explicit close() required: member variable persists beyond function scope
-  file.close();
+  closeFile();
 
   // Swap into place. A crash between remove and rename loses the old file but keeps a
   // fully-committed tmp; the next build just removes it and rebuilds.
@@ -699,7 +707,7 @@ void Section::suspendBuild() {
   if (build_->cssParser) build_->cssParser->clear();
   if (!committed && file) {
     // Explicit close() required before remove (member variable, O_RDWR handle).
-    file.close();
+    closeFile();
     Storage.remove(binTmpPath().c_str());
   }
   if (!build_->reusedHtml && Storage.exists(build_->tmpHtmlPath.c_str())) {
@@ -717,7 +725,7 @@ void Section::abandonBuild() {
   if (build_->cssParser) build_->cssParser->clear();
   if (file) {
     // Explicit close() required before remove (member variable, O_RDWR handle).
-    file.close();
+    closeFile();
     Storage.remove(binTmpPath().c_str());
   }
   // A parse error would recur against the same HTML, so drop any partial too -- resuming

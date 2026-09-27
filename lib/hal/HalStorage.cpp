@@ -142,9 +142,35 @@ std::unique_ptr<HalFile::Impl> HalFile::allocateImpl() {
 
 HalFile::HalFile() = default;
 HalFile::HalFile(std::unique_ptr<Impl> impl) : impl(std::move(impl)) {}
-HalFile::~HalFile() = default;
-HalFile::HalFile(HalFile&&) = default;
-HalFile& HalFile::operator=(HalFile&&) = default;
+HalFile::~HalFile() { drainWriteBuffer(); }
+HalFile::HalFile(HalFile&&) noexcept = default;
+HalFile& HalFile::operator=(HalFile&& other) noexcept {
+  if (this != &other) {
+    drainWriteBuffer();  // this handle's pending bytes belong to its own file
+    impl = std::move(other.impl);
+    wbuf_ = std::move(other.wbuf_);
+  }
+  return *this;
+}
+
+bool HalFile::drainWriteBuffer() {
+  if (wbuf_.pending == 0) return true;
+  const size_t pending = wbuf_.pending;
+  wbuf_.pending = 0;
+  if (!impl) return false;
+  HalStorage::StorageLock lock;
+  if (impl->file.write(wbuf_.data, pending) != pending) {
+    LOG_ERR("STORAGE", "Buffered write of %u B came up short", static_cast<unsigned>(pending));
+    return false;
+  }
+  return true;
+}
+
+void HalFile::setWriteBuffer(uint8_t* buffer, const size_t capacity) {
+  drainWriteBuffer();
+  wbuf_.data = buffer && capacity > 0 ? buffer : nullptr;
+  wbuf_.capacity = wbuf_.data ? capacity : 0;
+}
 
 HalFile HalStorage::open(const char* path, const oflag_t oflag) {
   StorageLock lock;  // ensure thread safety for the duration of this function
@@ -223,22 +249,54 @@ bool HalStorage::removeDir(const char* path) { HAL_STORAGE_WRAPPED_CALL(removeDi
   if (!impl) return fallback;                        \
   return impl->file.method(__VA_ARGS__);
 
-void HalFile::flush() { HAL_FILE_WRAPPED_CALL(flush, , ); }
+void HalFile::flush() {
+  drainWriteBuffer();
+  HAL_FILE_WRAPPED_CALL(flush, , );
+}
 size_t HalFile::getName(char* name, size_t len) {
   if (!impl && name && len) name[0] = '\0';
   HAL_FILE_WRAPPED_CALL(getName, 0, name, len);
 }
-size_t HalFile::size() { HAL_FILE_FORWARD_CALL(size, 0, ); }
-size_t HalFile::fileSize() { HAL_FILE_FORWARD_CALL(fileSize, 0, ); }
-uint64_t HalFile::fileSize64() { HAL_FILE_FORWARD_CALL(fileSize, 0, ); }
-bool HalFile::seek(size_t pos) { HAL_FILE_WRAPPED_CALL(seekSet, false, pos); }
-bool HalFile::seek64(uint64_t pos) { HAL_FILE_WRAPPED_CALL(seekSet, false, pos); }
-bool HalFile::seekCur(int64_t offset) { HAL_FILE_WRAPPED_CALL(seekCur, false, offset); }
-bool HalFile::seekSet(size_t offset) { HAL_FILE_WRAPPED_CALL(seekSet, false, offset); }
-bool HalFile::preAllocate(size_t length) { HAL_FILE_WRAPPED_CALL(preAllocate, false, length); }
+size_t HalFile::size() {
+  drainWriteBuffer();
+  HAL_FILE_FORWARD_CALL(size, 0, );
+}
+size_t HalFile::fileSize() {
+  drainWriteBuffer();
+  HAL_FILE_FORWARD_CALL(fileSize, 0, );
+}
+uint64_t HalFile::fileSize64() {
+  drainWriteBuffer();
+  HAL_FILE_FORWARD_CALL(fileSize, 0, );
+}
+bool HalFile::seek(size_t pos) {
+  drainWriteBuffer();
+  HAL_FILE_WRAPPED_CALL(seekSet, false, pos);
+}
+bool HalFile::seek64(uint64_t pos) {
+  drainWriteBuffer();
+  HAL_FILE_WRAPPED_CALL(seekSet, false, pos);
+}
+bool HalFile::seekCur(int64_t offset) {
+  drainWriteBuffer();
+  HAL_FILE_WRAPPED_CALL(seekCur, false, offset);
+}
+bool HalFile::seekSet(size_t offset) {
+  drainWriteBuffer();
+  HAL_FILE_WRAPPED_CALL(seekSet, false, offset);
+}
+bool HalFile::preAllocate(size_t length) {
+  drainWriteBuffer();
+  HAL_FILE_WRAPPED_CALL(preAllocate, false, length);
+}
 int HalFile::available() const { HAL_FILE_WRAPPED_CALL(available, 0, ); }
-size_t HalFile::position() const { HAL_FILE_WRAPPED_CALL(position, 0, ); }
+size_t HalFile::position() const {
+  HalStorage::StorageLock lock;
+  if (!impl) return 0;
+  return impl->file.position() + wbuf_.pending;
+}
 int HalFile::read(void* buf, size_t count) {
+  drainWriteBuffer();
   HalStorage::StorageLock lock;
   if (!impl) return -1;
   const int got = impl->file.read(buf, count);
@@ -247,6 +305,7 @@ int HalFile::read(void* buf, size_t count) {
   return got;
 }
 int HalFile::read() {
+  drainWriteBuffer();
   HalStorage::StorageLock lock;
   if (!impl) return -1;
   const int value = impl->file.read();
@@ -254,12 +313,33 @@ int HalFile::read() {
   if (value >= 0) halIoCounters.readBytes++;
   return value;
 }
-size_t HalFile::write(const void* buf, size_t count) { HAL_FILE_WRAPPED_CALL(write, 0, buf, count); }
-size_t HalFile::write(uint8_t b) { HAL_FILE_WRAPPED_CALL(write, 0, b); }
-bool HalFile::rename(const char* newPath) { HAL_FILE_WRAPPED_CALL(rename, false, newPath); }
+size_t HalFile::write(const void* buf, size_t count) {
+  if (wbuf_.data && impl) {
+    if (wbuf_.pending + count > wbuf_.capacity && !drainWriteBuffer()) return 0;
+    if (count < wbuf_.capacity) {
+      memcpy(wbuf_.data + wbuf_.pending, buf, count);
+      wbuf_.pending += count;
+      return count;
+    }
+    // Larger than the buffer: straight through (pending bytes already written above).
+  }
+  HAL_FILE_WRAPPED_CALL(write, 0, buf, count);
+}
+size_t HalFile::write(uint8_t b) { return write(&b, 1); }
+bool HalFile::rename(const char* newPath) {
+  drainWriteBuffer();
+  HAL_FILE_WRAPPED_CALL(rename, false, newPath);
+}
 bool HalFile::isDirectory() const { HAL_FILE_FORWARD_CALL(isDirectory, false, ); }
 void HalFile::rewindDirectory() { HAL_FILE_WRAPPED_CALL(rewindDirectory, , ); }
-bool HalFile::close() { HAL_FILE_WRAPPED_CALL(close, true, ); }
+bool HalFile::close() {
+  const bool drained = drainWriteBuffer();
+  wbuf_.data = nullptr;
+  wbuf_.capacity = 0;
+  HalStorage::StorageLock lock;
+  if (!impl) return drained;
+  return impl->file.close() && drained;
+}
 HalFile::DirectoryRead HalFile::openNextEntry(HalFile& entry) {
   HalStorage::StorageLock lock;
   if (!impl || &entry == this) return DirectoryRead::Error;
