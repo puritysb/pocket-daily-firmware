@@ -7,6 +7,7 @@
 #include <string>
 
 class FontDecompressor;
+class GfxRenderer;
 class SdCardFont;
 
 class FontCacheManager {
@@ -14,6 +15,9 @@ class FontCacheManager {
   FontCacheManager(const std::map<int, EpdFontFamily>& fontMap, const std::map<int, SdCardFont*>& sdCardFonts);
 
   void setFontDecompressor(FontDecompressor* d);
+  // Set by GfxRenderer::setFontCacheManager(); gives page prewarm access to the
+  // renderer's glyph-fallback font.
+  void attachRenderer(const GfxRenderer* renderer) { renderer_ = renderer; }
 
   void clearCache();
   void prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask = 0x0F);
@@ -54,6 +58,7 @@ class FontCacheManager {
   const std::map<int, EpdFontFamily>& fontMap_;
   const std::map<int, SdCardFont*>& sdCardFonts_;
   FontDecompressor* fontDecompressor_ = nullptr;
+  const GfxRenderer* renderer_ = nullptr;
 
   enum class ScanMode : uint8_t { None, Scanning };
   ScanMode scanMode_ = ScanMode::None;

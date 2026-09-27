@@ -39,5 +39,6 @@ class Hyphenator {
   static void setPreferredLanguage(const std::string& lang);
 
  private:
+  static std::vector<BreakInfo> rawBreakOffsets(const std::string& word, bool includeFallback);
   static const LanguageHyphenator* cachedHyphenator_;
 };

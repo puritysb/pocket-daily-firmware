@@ -93,14 +93,18 @@ if (parsedSize != fileSize) {
 ### Version 25
 
 > **Note**: The ImHex pattern below documents the v25 layout for historical reference.
-> Pocket Daily currently writes finalized sections as fork-private **v130** (see
+> Pocket Daily currently writes finalized sections as fork-private **v131** (see
 > `SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`). It includes one
 > `u8 bilingualViewMode` field between `focusReadingEnabled` and `pageCount`.
 > Incremental builds use an incomplete `.bin.part` file and may be committed as a
 > fork-private `0xFF` partial section with an eight-byte
-> `{bytesConsumed, totalBytes}` trailer after the list-item LUT. Finalized v130 files
+> `{bytesConsumed, totalBytes}` trailer after the list-item LUT. Finalized v131 files
 > omit that trailer. See [`docs/bilingual-epub.md`](bilingual-epub.md) for the marker
-> classes that drive the view mode.
+> classes that drive the view mode. v131 keeps the v130 byte layout; its `fontId`
+> field stores `fontId ^ GfxRenderer::glyphLayoutKey()` (the installed glyph-fallback
+> font's identity, 0 when none), and v131 layouts give invisible codepoints zero width,
+> measure each emoji cluster once and size uncovered glyphs from the fallback font or
+> the missing-glyph mark ([`sd-card-fonts.md`](sd-card-fonts.md)).
 
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the

@@ -21,7 +21,7 @@ hash, a new cache, and **lost reading progress**. That is expected behaviour, no
 |---|---|
 | `book.bin` | **7** (metadata structure) |
 | `section.bin` — incremental upstream baseline | **28** (layout structure) |
-| `section.bin` — **this fork** | **130** |
+| `section.bin` — **this fork** | **131** |
 
 The fork adds a `bilingualViewMode` header field and numbers itself in the **reserved 128–255
 range** rather than `upstream + 1`. Upstream keeps incrementing 27→28→…; a
@@ -48,7 +48,12 @@ sections retain the requested view mode; only a completed parse may be marked mo
    it), never onto upstream's line. The upstream-contribution branch
    (`bilingual-toggle-upstream`) uses `upstream + 1` instead. See the `fork-sync` skill.
 
-The next fork-specific finalized format must use `131`, not an upstream version number or
+v131 keeps the v130 byte layout but changes measurement: invisible codepoints are zero
+width, emoji clusters measure once, uncovered glyphs come from the glyph-fallback font or a
+missing-glyph mark, and the header's font field is `fontId ^ GfxRenderer::glyphLayoutKey()`
+so installing or removing `/.fonts/PocketSymbols` re-lays out cached sections.
+
+The next fork-specific finalized format must use `132`, not an upstream version number or
 the `0xFF` partial sentinel.
 
 ## What else invalidates a cache

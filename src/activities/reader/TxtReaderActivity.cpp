@@ -22,7 +22,9 @@ namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
 // Cache file magic and version
 constexpr uint32_t CACHE_MAGIC = 0x54585449;  // "TXTI"
-constexpr uint8_t CACHE_VERSION = 3;          // Increment when cache format changes
+constexpr uint8_t CACHE_VERSION = 4;          // Increment when cache format changes
+// v4: font field holds cachedFontId ^ GfxRenderer::glyphLayoutKey(); invisible codepoints
+// and uncovered glyphs measure differently (glyph fallback, missing-glyph mark).
 }  // namespace
 
 void TxtReaderActivity::onEnter() {
@@ -508,8 +510,9 @@ bool TxtReaderActivity::loadPageIndexCache() {
 
   int32_t fontId;
   serialization::readPod(f, fontId);
-  if (fontId != cachedFontId) {
-    LOG_DBG("TRS", "Cache font ID mismatch (%d != %d), rebuilding", fontId, cachedFontId);
+  const auto layoutKey = static_cast<int32_t>(static_cast<uint32_t>(cachedFontId) ^ renderer.glyphLayoutKey());
+  if (fontId != layoutKey) {
+    LOG_DBG("TRS", "Cache font key mismatch (%d != %d), rebuilding", fontId, layoutKey);
     return false;
   }
 
@@ -559,7 +562,7 @@ void TxtReaderActivity::savePageIndexCache() const {
   serialization::writePod(f, static_cast<uint32_t>(txt->getFileSize()));
   serialization::writePod(f, static_cast<int32_t>(viewportWidth));
   serialization::writePod(f, static_cast<int32_t>(linesPerPage));
-  serialization::writePod(f, static_cast<int32_t>(cachedFontId));
+  serialization::writePod(f, static_cast<int32_t>(static_cast<uint32_t>(cachedFontId) ^ renderer.glyphLayoutKey()));
   serialization::writePod(f, static_cast<int32_t>(cachedScreenMargin));
   serialization::writePod(f, cachedParagraphAlignment);
   serialization::writePod(f, static_cast<uint32_t>(pageOffsets.size()));

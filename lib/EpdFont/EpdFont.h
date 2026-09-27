@@ -10,7 +10,10 @@ class EpdFont {
   ~EpdFont() = default;
   void getTextDimensions(const char* string, int* w, int* h) const;
 
+  /// Glyph for cp, or the font's U+FFFD glyph when cp is not covered.
   const EpdGlyph* getGlyph(uint32_t cp) const;
+  /// Glyph for cp, or nullptr when the font does not cover cp (no replacement).
+  const EpdGlyph* findGlyph(uint32_t cp) const;
 
   /// Returns the kerning adjustment (4.4 fixed-point in pixels) between two codepoints.
   /// Returns 0 if no kerning data exists for the pair.

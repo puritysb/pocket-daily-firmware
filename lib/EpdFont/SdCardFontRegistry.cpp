@@ -236,6 +236,18 @@ bool SdCardFontRegistry::discover() {
   scanRoot(FONTS_DIR_HIDDEN, families_);
   scanRoot(FONTS_DIR_VISIBLE, families_);
 
+  // Separate the glyph-fallback family from the selectable reader fonts.
+  hasFallback_ = false;
+  fallbackFamily_ = SdCardFontFamilyInfo{};
+  for (auto it = families_.begin(); it != families_.end(); ++it) {
+    if (it->name == FALLBACK_FAMILY) {
+      fallbackFamily_ = std::move(*it);
+      families_.erase(it);
+      hasFallback_ = true;
+      break;
+    }
+  }
+
   // Sort families alphabetically
   std::sort(families_.begin(), families_.end(),
             [](const SdCardFontFamilyInfo& a, const SdCardFontFamilyInfo& b) { return a.name < b.name; });

@@ -95,6 +95,8 @@ class Section {
                        uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled, bool embeddedStyle,
                        uint8_t imageRendering, bool focusReadingEnabled, uint8_t bilingualViewMode);
   bool clearCache() const;
+  // Header key for the fonts that shaped the layout (see SECTION_FILE_VERSION 131).
+  int layoutFontKey(int fontId) const;
   bool createSectionFile(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
                          uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled, bool embeddedStyle,
                          uint8_t imageRendering, bool focusReadingEnabled, uint8_t bilingualViewMode,

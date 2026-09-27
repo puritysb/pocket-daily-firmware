@@ -170,9 +170,31 @@ void sortAndDedupeBreakInfos(std::vector<Hyphenator::BreakInfo>& infos) {
               infos.end());
 }
 
+// A break must not split a grapheme cluster: nothing may start a line with a
+// joiner, variation selector, skin tone or combining mark, and no line may end
+// with a zero-width joiner (it would separate the parts of an emoji sequence).
+bool breakSplitsCluster(const std::string& word, const size_t byteOffset) {
+  if (byteOffset == 0 || byteOffset >= word.size()) return false;
+  const auto* next = reinterpret_cast<const unsigned char*>(word.c_str() + byteOffset);
+  const uint32_t after = utf8NextCodepoint(&next);
+  if (utf8IsInvisible(after) || utf8IsCombiningMark(after)) return true;
+  size_t lead = byteOffset - 1;
+  while (lead > 0 && (static_cast<uint8_t>(word[lead]) & 0xC0) == 0x80) --lead;
+  const auto* prev = reinterpret_cast<const unsigned char*>(word.c_str() + lead);
+  return utf8NextCodepoint(&prev) == 0x200D;
+}
+
 }  // namespace
 
 std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& word, const bool includeFallback) {
+  auto breaks = rawBreakOffsets(word, includeFallback);
+  breaks.erase(std::remove_if(breaks.begin(), breaks.end(),
+                              [&](const BreakInfo& info) { return breakSplitsCluster(word, info.byteOffset); }),
+               breaks.end());
+  return breaks;
+}
+
+std::vector<Hyphenator::BreakInfo> Hyphenator::rawBreakOffsets(const std::string& word, const bool includeFallback) {
   if (word.empty()) {
     return {};
   }

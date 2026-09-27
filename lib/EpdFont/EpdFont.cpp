@@ -23,7 +23,9 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
   uint32_t cp;
   uint32_t prevCp = 0;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&string)))) {
+    if (utf8IsInvisible(cp)) continue;  // zero width, never drawn (see GfxRenderer::drawText)
     const bool isCombining = utf8IsCombiningMark(cp);
+    if (!isCombining) utf8SkipEmojiClusterTail(reinterpret_cast<const unsigned char**>(&string), cp);
 
     if (!isCombining) {
       cp = applyLigatures(cp, string);
@@ -157,6 +159,14 @@ uint32_t EpdFont::applyLigatures(uint32_t cp, const char*& text) const {
 }
 
 const EpdGlyph* EpdFont::getGlyph(const uint32_t cp) const {
+  if (const EpdGlyph* glyph = findGlyph(cp)) return glyph;
+  if (cp != REPLACEMENT_GLYPH) {
+    return findGlyph(REPLACEMENT_GLYPH);
+  }
+  return nullptr;
+}
+
+const EpdGlyph* EpdFont::findGlyph(const uint32_t cp) const {
   const int count = data->intervalCount;
   if (count == 0 && !data->glyphMissHandler) return nullptr;
 
@@ -180,12 +190,7 @@ const EpdGlyph* EpdFont::getGlyph(const uint32_t cp) const {
 
   // Codepoint not in interval table — try on-demand loading (SD card fonts).
   if (data->glyphMissHandler) {
-    const EpdGlyph* loaded = data->glyphMissHandler(data->glyphMissCtx, cp);
-    if (loaded) return loaded;
-  }
-
-  if (cp != REPLACEMENT_GLYPH) {
-    return getGlyph(REPLACEMENT_GLYPH);
+    return data->glyphMissHandler(data->glyphMissCtx, cp);
   }
   return nullptr;
 }

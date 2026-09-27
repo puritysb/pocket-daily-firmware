@@ -1,5 +1,6 @@
 #include "Section.h"
 
+#include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -23,7 +24,12 @@ namespace {
 // BILINGUAL_MODE_ANY so mode toggles reuse them.
 // v130: incremental/partial section builds, persistent inflated HTML, and atomic
 // finalization. The binary layout is unchanged except for the partial-build trailer.
-constexpr uint8_t SECTION_FILE_VERSION = 130;
+// v131: same binary layout. Invisible codepoints (ZWJ, variation selectors, ...) now
+// measure zero width, emoji clusters measure as one glyph, uncovered glyphs use the
+// glyph-fallback font or a missing-glyph mark, and the header's font field holds
+// fontId ^ GfxRenderer::glyphLayoutKey() so installing or removing the fallback font
+// re-lays out affected sections.
+constexpr uint8_t SECTION_FILE_VERSION = 131;
 
 // Written into the version field while a build is in progress and replaced only after
 // every table has been committed. A crash-interrupted .part file is therefore rejected.
@@ -41,6 +47,12 @@ constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) +
                                  sizeof(uint8_t) + sizeof(bool) + sizeof(uint8_t) + sizeof(uint32_t) +
                                  sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
 }  // namespace
+
+// Identity of the fonts that shape this section's layout: the reader font and
+// the glyph-fallback font that supplies glyphs it lacks.
+int Section::layoutFontKey(const int fontId) const {
+  return static_cast<int>(static_cast<uint32_t>(fontId) ^ renderer.glyphLayoutKey());
+}
 
 // Out-of-line so the unique_ptr<ChapterHtmlSlimParser> in BuildContext can be
 // constructed/destroyed where the parser's full definition is visible.
@@ -96,7 +108,7 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
   // Written as the incomplete sentinel; finalizeBuild() patches it to
   // SECTION_FILE_VERSION as the last step, committing the file.
   serialization::writePod(file, SECTION_FILE_INCOMPLETE_VERSION);
-  serialization::writePod(file, fontId);
+  serialization::writePod(file, layoutFontKey(fontId));
   serialization::writePod(file, lineCompression);
   serialization::writePod(file, extraParagraphSpacing);
   serialization::writePod(file, paragraphAlignment);
@@ -162,7 +174,7 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
     // out identically, so the cache stays valid across mode toggles.
     bilingualModeAgnostic = (fileBilingualViewMode == BILINGUAL_MODE_ANY);
 
-    if (fontId != fileFontId || lineCompression != fileLineCompression ||
+    if (layoutFontKey(fontId) != fileFontId || lineCompression != fileLineCompression ||
         extraParagraphSpacing != fileExtraParagraphSpacing || paragraphAlignment != fileParagraphAlignment ||
         viewportWidth != fileViewportWidth || viewportHeight != fileViewportHeight ||
         hyphenationEnabled != fileHyphenationEnabled || embeddedStyle != fileEmbeddedStyle ||

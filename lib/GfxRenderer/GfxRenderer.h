@@ -14,6 +14,10 @@ enum class BidiBaseDir : signed char { AUTO = -1, LTR = 0, RTL = 1 };
 class FontCacheManager;
 class SdCardFont;
 
+// Supplies the optional glyph-fallback SD font. `load == false` only reports an
+// already-loaded font (no SD I/O); the provider owns the font object.
+using FallbackFontProviderFn = SdCardFont* (*)(void* context, bool load);
+
 #include <cstring>
 #include <map>
 #include <string>
@@ -74,8 +78,31 @@ class GfxRenderer {
   mutable int _stripRows = 0;
   mutable bool _stripActive = false;
 
-  void renderChar(const EpdFontFamily& fontFamily, uint32_t cp, int* x, int* y, bool pixelState,
-                  EpdFontFamily::Style style) const;
+  // Optional glyph-fallback font supplied by the SD font system (see
+  // setFallbackFontProvider). Called, not cached, so the owner may unload it.
+  FallbackFontProviderFn fallbackProvider_ = nullptr;
+  void* fallbackContext_ = nullptr;
+  uint32_t glyphLayoutKey_ = 0;
+
+ public:
+  // A glyph together with the font data that owns its bitmap. `primary` is
+  // false for glyphs borrowed from the fallback font.
+  struct GlyphRef {
+    const EpdGlyph* glyph = nullptr;
+    const EpdFontData* data = nullptr;
+    bool primary = false;
+  };
+
+ private:
+  bool fallbackAllowed(int fontId) const;
+  // RAM-only coverage check: never loads a glyph or touches SD for Cached SD
+  // fonts and flash fonts.
+  bool fontCovers(int fontId, const EpdFontFamily& font, uint32_t cp, EpdFontFamily::Style style) const;
+  GlyphRef resolveGlyph(const EpdFontFamily& font, uint32_t cp, EpdFontFamily::Style style, bool allowFallback) const;
+  int32_t fallbackAdvanceFP(uint32_t cp, EpdFontFamily::Style style, bool allowFallback,
+                            const EpdFontData* primaryData) const;
+  int prepareFallbackAdvances(int fontId, const std::vector<std::string>* words, const char* text,
+                              const std::vector<EpdFontFamily::Style>* wordStyles) const;
   void freeBwBufferChunks();
   template <Color color>
   void drawPixelDither(int x, int y) const;
@@ -108,7 +135,7 @@ class GfxRenderer {
     fontMap.erase(fontId);
     sdCardFonts_.erase(fontId);
   }
-  void setFontCacheManager(FontCacheManager* m) { fontCacheManager_ = m; }
+  void setFontCacheManager(FontCacheManager* m);
   FontCacheManager* getFontCacheManager() const { return fontCacheManager_; }
   bool isFontCacheScanning() const;
   const std::map<int, EpdFontFamily>& getFontMap() const { return fontMap; }
@@ -118,14 +145,43 @@ class GfxRenderer {
   const std::map<int, SdCardFont*>& getSdCardFonts() const { return sdCardFonts_; }
   bool isSdCardFont(int fontId) const { return sdCardFonts_.count(fontId) > 0; }
   // Ensure SD card font glyph data is loaded for the given text. Called from layout code
-  // (which holds a const GfxRenderer&) before measuring word widths. Safe to call on non-SD fonts (no-op).
+  // (which holds a const GfxRenderer&) before measuring word widths. Safe to call on non-SD fonts (returns 0).
   // styleMask: bitmask of styles to prepare (bit 0=regular, 1=bold, 2=italic, 3=bold-italic).
+  // Returns the number of glyphs that will not render from a font: for Cached SD fonts with a glyph
+  // fallback, the uncovered emoji-cluster bases the fallback font lacks too (0 when all render).
   int ensureSdCardFontReady(int fontId, const char* utf8Text, uint8_t styleMask = 0x0F) const;
+  // `wordStyles` (optional, parallel to words) limits each word to its own style's advance table.
+  // Also prepares the fallback font's advances for glyphs the font lacks (flash fonts included).
   int ensureSdCardFontReady(int fontId, const std::vector<std::string>& words, bool includeHyphen,
-                            uint8_t styleMask = 0x0F) const;
+                            uint8_t styleMask = 0x0F,
+                            const std::vector<EpdFontFamily::Style>* wordStyles = nullptr) const;
   // Replaces the SD font's resident glyph set with this text's glyphs. No-op (returns 0) while a
   // FontCacheManager page prewarm is pinned; the text's glyphs then load on demand.
   int prewarmSdCardFont(int fontId, const char* utf8Text, uint8_t styleMask = 0x0F) const;
+
+  // Glyph fallback. When the font lacks a visible codepoint, drawing and
+  // measuring borrow it from the provider's fallback font (e.g. a symbol and
+  // emoji .cpfont); if that lacks it too, one small dotted mark is drawn per
+  // grapheme cluster. Never used for BoundedUI SD fonts.
+  void setFallbackFontProvider(FallbackFontProviderFn provider, void* context) {
+    fallbackProvider_ = provider;
+    fallbackContext_ = context;
+  }
+  // Identity of the installed fallback font (0 when none). Layout caches mix it
+  // into their font key, since fallback glyphs change measured widths.
+  void setGlyphLayoutKey(uint32_t key) { glyphLayoutKey_ = key; }
+  uint32_t glyphLayoutKey() const { return glyphLayoutKey_; }
+  SdCardFont* fallbackFont(bool load) const {
+    return fallbackProvider_ ? fallbackProvider_(fallbackContext_, load) : nullptr;
+  }
+  // Appends (UTF-8, unique) the visible cluster-base codepoints of `text` that
+  // fontId lacks. Used to prewarm the fallback font with a page's misses.
+  void appendFallbackCodepoints(int fontId, const char* text, std::string& out) const;
+  // Replaces the fallback font's resident glyph set; no-op for empty text or no fallback.
+  int prewarmFallbackFont(const char* utf8Text) const;
+  void clearFallbackCache() const;
+  // Advance of the mark drawn for a cluster no installed font covers (12.4 fixed point).
+  static int32_t missingGlyphAdvanceFP(const EpdFontData* data);
 
   // Orientation control (affects logical width/height and coordinate transforms)
   void setOrientation(const Orientation o) { orientation = o; }

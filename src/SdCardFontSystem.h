@@ -66,14 +66,35 @@ class SdCardFontSystem {
   /// without waiting for the reader activity to run ensureLoaded().
   void refreshIfDirty() {
     if (registryDirty_.exchange(false, std::memory_order_acquire)) {
-      registry_.discover();
+      rediscover();
     }
   }
+
+  /// The glyph-fallback font (SdCardFontRegistry::FALLBACK_FAMILY) if it is
+  /// currently loaded; never loads it. Exposed for diagnostics and tests.
+  const SdCardFont* loadedFallbackFont() const { return fallback_; }
 
  private:
   SdCardFontRegistry registry_;
   SdCardFontManager manager_;
   std::atomic<bool> registryDirty_{false};
+
+  // Glyph fallback (symbols/emoji). Loaded lazily in Cached mode the first time
+  // a reader or Cached UI font lacks a visible glyph, and only while enabled:
+  // reader and Cached UI paths enable it; releaseLoaded() and BoundedUI loads
+  // (network-mode live views) disable and free it. A missing or unloadable
+  // file is remembered so repeated misses cost no SD access.
+  GfxRenderer* renderer_ = nullptr;  // set by begin(); receives the fallback provider and layout key
+  SdCardFont* fallback_ = nullptr;   // owned
+  uint8_t fallbackPointSize_ = 0;
+  bool fallbackEnabled_ = false;
+  bool fallbackUnavailable_ = false;
+  static SdCardFont* provideFallback(void* context, bool load);
+  SdCardFont* fallbackFont(bool load);
+  void setFallbackEnabled(bool enabled);
+  void dropFallback();
+  void rediscover();
+  void publishFallbackLayoutKey();
 };
 
 // Global SD card font system instance (defined in main.cpp).

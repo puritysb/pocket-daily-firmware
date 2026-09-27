@@ -30,6 +30,10 @@ class SdCardFontRegistry {
   // when creating new installs; both are read from if present.
   static constexpr const char* FONTS_DIR_HIDDEN = "/.fonts";
   static constexpr const char* FONTS_DIR_VISIBLE = "/fonts";
+  // Glyph-fallback family (symbols and monochrome emoji), installed like any
+  // family at /.fonts/PocketSymbols/PocketSymbols_<size>.cpfont. It is kept
+  // out of getFamilies() so it never appears as a selectable reader font.
+  static constexpr const char* FALLBACK_FAMILY = "PocketSymbols";
 
   // Returns the existing root for `familyName` (the one that contains
   // /<root>/<familyName>/), or nullptr if the family is not installed in
@@ -45,12 +49,16 @@ class SdCardFontRegistry {
   bool discover();
 
   const std::vector<SdCardFontFamilyInfo>& getFamilies() const { return families_; }
+  // The discovered glyph-fallback family, or nullptr when it is not installed.
+  const SdCardFontFamilyInfo* fallbackFamily() const { return hasFallback_ ? &fallbackFamily_ : nullptr; }
   const SdCardFontFamilyInfo* findFamily(const std::string& name) const;
   int getFamilyIndex(const std::string& name) const;
   int getFamilyCount() const { return static_cast<int>(families_.size()); }
 
  private:
   std::vector<SdCardFontFamilyInfo> families_;  // sorted alphabetically
+  SdCardFontFamilyInfo fallbackFamily_;
+  bool hasFallback_ = false;
 
   static bool parseFilename(const char* filename, uint8_t& size, uint8_t& style);
   static void scanDirectory(const char* dirPath, SdCardFontFamilyInfo& family);

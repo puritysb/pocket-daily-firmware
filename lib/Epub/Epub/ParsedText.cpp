@@ -139,6 +139,9 @@ bool hasCjkBreakOpportunityBetween(const uint32_t leftCp, const uint32_t rightCp
   if (!utf8IsCjkBreakable(leftCp) && !utf8IsCjkBreakable(rightCp)) return false;
   if (isNoBreakAfterCjkPunctuation(leftCp) || isNoBreakBeforeCjkPunctuation(rightCp)) return false;
   if (utf8IsCombiningMark(rightCp)) return false;
+  // Never strand a joiner, variation selector or skin tone at a line start, and
+  // never break right after a zero-width joiner.
+  if (utf8IsInvisible(rightCp) || leftCp == 0x200D) return false;
   return true;
 }
 
@@ -487,12 +490,13 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
       blockStyle.alignment == CssTextAlign::Justify ||
       (blockStyle.isRtl ? blockStyle.alignment == CssTextAlign::Right : blockStyle.alignment == CssTextAlign::Left);
 
-  // Ensure SD card font glyph metrics are loaded before measuring word widths.
-  // For flash-based fonts isSdCardFont() returns false and this block is skipped
-  // entirely — no heap allocation. For SD card fonts this reads glyph metadata
-  // (advanceX only, no bitmaps) for all unique codepoints in this paragraph so
-  // that calculateWordWidths() can measure text without on-demand SD I/O.
-  if (renderer.isSdCardFont(fontId)) {
+  // Ensure glyph metrics are resident before measuring word widths. For SD
+  // card fonts this reads glyph metadata (advanceX only, no bitmaps) for the
+  // paragraph's codepoints, each word for its own style, so that
+  // calculateWordWidths() can measure text without on-demand SD I/O. For any
+  // font it also prepares the glyph-fallback font's advances for codepoints the
+  // font lacks (a paragraph without such codepoints allocates nothing there).
+  {
     // Style mask: only ask the SD font to load advances for styles actually
     // used in this paragraph. Style index is the low two bits (regular/bold/
     // italic/bold-italic); the underline bit is irrelevant to advance metrics.
@@ -501,7 +505,7 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
       styleMask |= static_cast<uint8_t>(1u << (static_cast<uint8_t>(s) & 0x03));
     }
     if (styleMask == 0) styleMask = 0x01;  // defensive: regular only
-    renderer.ensureSdCardFontReady(fontId, words, hyphenationEnabled, styleMask);
+    renderer.ensureSdCardFontReady(fontId, words, hyphenationEnabled, styleMask, &wordStyles);
   }
 
   const int pageWidth = viewportWidth;

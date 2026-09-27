@@ -1,6 +1,7 @@
 #include "FontCacheManager.h"
 
 #include <FontDecompressor.h>
+#include <GfxRenderer.h>
 #include <Logging.h>
 #include <SdCardFont.h>
 
@@ -17,6 +18,7 @@ void FontCacheManager::clearCache() {
   for (auto& [id, font] : sdCardFonts_) {
     font->clearCache();
   }
+  if (renderer_) renderer_->clearFallbackCache();
 }
 
 void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask) {
@@ -97,6 +99,18 @@ void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
     }
     if (styleMask == 0) styleMask = 1;  // default to regular
     manager_->prewarmCache(fontId, bucket.text.c_str(), styleMask);
+  }
+
+  // Glyphs no page font covers come from the fallback font. Prewarm them all
+  // in one set (its resident set is shared by every font on the page), so the
+  // grayscale strip passes do not reload them one by one through the overflow
+  // ring. Pages without such glyphs never touch or load the fallback font.
+  if (manager_->renderer_) {
+    std::string fallbackText;
+    for (auto& [fontId, bucket] : manager_->scanBuckets_) {
+      manager_->renderer_->appendFallbackCodepoints(fontId, bucket.text.c_str(), fallbackText);
+    }
+    if (!fallbackText.empty()) manager_->renderer_->prewarmFallbackFont(fallbackText.c_str());
   }
 
   manager_->scanBuckets_.clear();

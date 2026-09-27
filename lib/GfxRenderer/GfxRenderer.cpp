@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 #include "FontCacheManager.h"
 
@@ -56,31 +57,177 @@ const uint8_t* GfxRenderer::getGlyphBitmap(const EpdFontData* fontData, const Ep
 }
 
 int GfxRenderer::ensureSdCardFontReady(int fontId, const char* utf8Text, uint8_t styleMask) const {
+  int missed = 0;
   auto it = sdCardFonts_.find(fontId);
   if (it != sdCardFonts_.end()) {
-    int missed = it->second->buildAdvanceTable(utf8Text, styleMask);
+    missed = it->second->buildAdvanceTable(utf8Text, styleMask);
     if (missed > 0) {
       LOG_DBG("GFX", "ensureSdCardFontReady: %d glyph(s) not found", missed);
     }
-    return missed;
   }
-  return 0;
+  if (it == sdCardFonts_.end()) {
+    prepareFallbackAdvances(fontId, nullptr, utf8Text, nullptr);
+  } else if (missed > 0 && fallbackAllowed(fontId)) {
+    missed = prepareFallbackAdvances(fontId, nullptr, utf8Text, nullptr);
+  }
+  return missed;
 }
 
 int GfxRenderer::ensureSdCardFontReady(int fontId, const std::vector<std::string>& words, bool includeHyphen,
-                                       uint8_t styleMask) const {
+                                       uint8_t styleMask, const std::vector<EpdFontFamily::Style>* wordStyles) const {
+  int missed = 0;
   auto it = sdCardFonts_.find(fontId);
   if (it != sdCardFonts_.end()) {
-    // Augment the persistent advance-only table for layout measurement.
-    // The table survives across paragraphs/sections (capped per font), so
-    // repeated indexing of the same SD font amortizes glyph-metric SD reads.
-    int missed = it->second->buildAdvanceTable(words, includeHyphen, styleMask);
+    // Make the paragraph's advances resident in the bounded, persistent
+    // advance cache (batched SD reads, least recently requested evicted).
+    missed = it->second->buildAdvanceTable(words, includeHyphen, styleMask, wordStyles);
     if (missed > 0) {
       LOG_DBG("GFX", "ensureSdCardFontReady: %d glyph(s) not found", missed);
     }
-    return missed;
   }
-  return 0;
+  if (it == sdCardFonts_.end()) {
+    prepareFallbackAdvances(fontId, &words, nullptr, wordStyles);
+  } else if (missed > 0 && fallbackAllowed(fontId)) {
+    missed = prepareFallbackAdvances(fontId, &words, nullptr, wordStyles);
+  }
+  return missed;
+}
+
+void GfxRenderer::setFontCacheManager(FontCacheManager* m) {
+  fontCacheManager_ = m;
+  if (m) m->attachRenderer(this);
+}
+
+bool GfxRenderer::fallbackAllowed(const int fontId) const {
+  if (!fallbackProvider_) return false;
+  // BoundedUI fonts serve live network-mode views: no second font there.
+  const auto it = sdCardFonts_.find(fontId);
+  return it == sdCardFonts_.end() || it->second->loadMode() != SdCardFont::LoadMode::BoundedUI;
+}
+
+bool GfxRenderer::fontCovers(const int fontId, const EpdFontFamily& font, const uint32_t cp,
+                             const EpdFontFamily::Style style) const {
+  const auto it = sdCardFonts_.find(fontId);
+  if (it != sdCardFonts_.end()) return it->second->hasGlyph(cp, static_cast<uint8_t>(style) & 0x03);
+  return font.findGlyph(cp, style) != nullptr;  // flash font: interval lookup, no I/O
+}
+
+GfxRenderer::GlyphRef GfxRenderer::resolveGlyph(const EpdFontFamily& font, const uint32_t cp,
+                                                const EpdFontFamily::Style style, const bool allowFallback) const {
+  if (const EpdGlyph* glyph = font.findGlyph(cp, style)) return {glyph, font.getData(style), true};
+  if (!allowFallback) return {};
+  SdCardFont* fallback = fallbackFont(true);
+  if (!fallback) return {};
+  const uint8_t fallbackStyle = fallback->resolveStyle(static_cast<uint8_t>(style) & 0x03);
+  const EpdFont* fallbackFace = fallback->getEpdFont(fallbackStyle);
+  // hasGlyph() is a resident-interval check, so a codepoint the fallback lacks
+  // costs no SD access however often it repeats.
+  if (!fallbackFace || !fallback->hasGlyph(cp, fallbackStyle)) return {};
+  if (const EpdGlyph* glyph = fallbackFace->findGlyph(cp)) return {glyph, fallbackFace->data, false};
+  return {};
+}
+
+int32_t GfxRenderer::missingGlyphAdvanceFP(const EpdFontData* data) {
+  const int lineHeight = data ? data->advanceY : 0;
+  return fp4::fromPixel(std::max(4, lineHeight * 5 / 12));
+}
+
+int32_t GfxRenderer::fallbackAdvanceFP(const uint32_t cp, const EpdFontFamily::Style style, const bool allowFallback,
+                                       const EpdFontData* primaryData) const {
+  if (allowFallback) {
+    if (SdCardFont* fallback = fallbackFont(true)) {
+      const uint8_t fallbackStyle = fallback->resolveStyle(static_cast<uint8_t>(style) & 0x03);
+      uint16_t advance = 0;
+      if (fallback->lookupAdvance(cp, fallbackStyle, &advance)) return advance;
+      if (fallback->hasGlyph(cp, fallbackStyle)) {
+        const EpdFont* face = fallback->getEpdFont(fallbackStyle);
+        const EpdGlyph* glyph = face ? face->findGlyph(cp) : nullptr;
+        if (glyph) return glyph->advanceX;
+      }
+    }
+  }
+  return missingGlyphAdvanceFP(primaryData);
+}
+
+namespace {
+// Collects unique visible cluster-base codepoints (the ones a renderer asks a
+// font for) that `covers` rejects. Bounded: a paragraph with more distinct
+// uncovered symbols than this falls back to on-demand loads for the rest.
+constexpr uint32_t MAX_FALLBACK_REQUEST = 256;
+
+template <typename Covers>
+void collectUncovered(const char* text, Covers&& covers, std::unique_ptr<uint32_t[]>& out, uint32_t& count) {
+  const auto* p = reinterpret_cast<const unsigned char*>(text);
+  while (*p && count < MAX_FALLBACK_REQUEST) {
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (cp == 0) break;
+    if (utf8IsInvisible(cp)) continue;
+    if (!utf8IsCombiningMark(cp)) utf8SkipEmojiClusterTail(&p, cp);
+    if (covers(cp)) continue;
+    if (!out) {
+      out.reset(new (std::nothrow) uint32_t[MAX_FALLBACK_REQUEST]);
+      if (!out) return;
+    }
+    bool seen = false;
+    for (uint32_t i = 0; i < count && !seen; i++) seen = out[i] == cp;
+    if (!seen) out[count++] = cp;
+  }
+}
+}  // namespace
+
+int GfxRenderer::prepareFallbackAdvances(const int fontId, const std::vector<std::string>* words, const char* text,
+                                         const std::vector<EpdFontFamily::Style>* wordStyles) const {
+  if (!fallbackAllowed(fontId)) return 0;
+  const auto fontIt = fontMap.find(fontId);
+  if (fontIt == fontMap.end()) return 0;
+  const auto& font = fontIt->second;
+  if (wordStyles && words && wordStyles->size() != words->size()) wordStyles = nullptr;
+
+  std::unique_ptr<uint32_t[]> missing;  // allocated only when something is uncovered
+  uint32_t count = 0;
+  if (words) {
+    for (size_t i = 0; i < words->size(); i++) {
+      const auto style = wordStyles ? (*wordStyles)[i] : EpdFontFamily::REGULAR;
+      collectUncovered((*words)[i].c_str(), [&](uint32_t cp) { return fontCovers(fontId, font, cp, style); }, missing,
+                       count);
+    }
+  } else if (text) {
+    collectUncovered(
+        text, [&](uint32_t cp) { return fontCovers(fontId, font, cp, EpdFontFamily::REGULAR); }, missing, count);
+  }
+  if (count == 0) return 0;
+  SdCardFont* fallback = fallbackFont(true);
+  if (!fallback) return static_cast<int>(count);
+  // One batched metric read for every uncovered codepoint of the paragraph;
+  // codepoints the fallback lacks are answered from its resident intervals.
+  return fallback->buildAdvanceTable(missing.get(), count, 0x01);
+}
+
+void GfxRenderer::appendFallbackCodepoints(const int fontId, const char* text, std::string& out) const {
+  if (!text || !fallbackAllowed(fontId)) return;
+  const auto fontIt = fontMap.find(fontId);
+  if (fontIt == fontMap.end()) return;
+  const auto& font = fontIt->second;
+  std::unique_ptr<uint32_t[]> missing;
+  uint32_t count = 0;
+  collectUncovered(
+      text, [&](uint32_t cp) { return fontCovers(fontId, font, cp, EpdFontFamily::REGULAR); }, missing, count);
+  for (uint32_t i = 0; i < count; i++) {
+    std::string encoded;
+    utf8AppendCodepoint(missing[i], encoded);
+    if (out.find(encoded) == std::string::npos) out += encoded;
+  }
+}
+
+int GfxRenderer::prewarmFallbackFont(const char* utf8Text) const {
+  if (!utf8Text || !*utf8Text) return 0;
+  SdCardFont* fallback = fallbackFont(true);
+  if (!fallback) return 0;
+  return fallback->prewarm(utf8Text, 0x01, /*metadataOnly=*/false);
+}
+
+void GfxRenderer::clearFallbackCache() const {
+  if (SdCardFont* fallback = fallbackFont(false)) fallback->clearCache();
 }
 
 int GfxRenderer::prewarmSdCardFont(int fontId, const char* utf8Text, uint8_t styleMask) const {
@@ -171,13 +318,12 @@ enum class TextRotation { None, Rotated90CW };
 //
 // The advance width is also halved in drawText() so layout reserves exactly the right
 // horizontal space for the scaled glyph.
-static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
-                             const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
-                             const bool pixelState, const EpdFontFamily::Style style) {
-  const EpdGlyph* glyph = fontFamily.getGlyph(cp, style);
+static void renderCharScaled(const GfxRenderer& renderer, const GfxRenderer::GlyphRef& ref, int cursorX, int cursorY,
+                             const bool pixelState) {
+  const EpdGlyph* glyph = ref.glyph;
   if (!glyph) return;
 
-  const EpdFontData* fontData = fontFamily.getData(style);
+  const EpdFontData* fontData = ref.data;
   const uint8_t* bitmap = renderer.getGlyphBitmap(fontData, glyph);
   if (!bitmap) return;
 
@@ -240,15 +386,11 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
 
 template <TextRotation rotation = TextRotation::None>
 static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
-                           const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
-                           const bool pixelState, const EpdFontFamily::Style style) {
-  const EpdGlyph* glyph = fontFamily.getGlyph(cp, style);
-  if (!glyph) {
-    LOG_ERR("GFX", "No glyph for codepoint %d", cp);
-    return;
-  }
+                           const GfxRenderer::GlyphRef& ref, int cursorX, int cursorY, const bool pixelState) {
+  const EpdGlyph* glyph = ref.glyph;
+  if (!glyph) return;
 
-  const EpdFontData* fontData = fontFamily.getData(style);
+  const EpdFontData* fontData = ref.data;
   const bool is2Bit = fontData->is2Bit;
   const uint8_t width = glyph->width;
   const uint8_t height = glyph->height;
@@ -347,6 +489,39 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   }
 }
 
+// Mark for a grapheme cluster that neither the font nor the fallback font
+// covers: a small dotted outline, lighter than the font's U+FFFD glyph, drawn
+// in the BW pass only. Geometry derives from the primary font's metrics so
+// measurement (missingGlyphAdvanceFP) and drawing agree.
+template <TextRotation rotation = TextRotation::None>
+static void renderMissingMark(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
+                              const EpdFontData* fontData, int cursorX, int cursorY, const bool pixelState,
+                              const bool halfScale) {
+  if (renderMode != GfxRenderer::BW || !fontData) return;
+  int advance = fp4::toPixel(GfxRenderer::missingGlyphAdvanceFP(fontData));
+  if (halfScale) advance = (advance + 1) / 2;
+  const int pad = std::max(1, advance / 5);
+  const int width = std::max(2, advance - 2 * pad);
+  const int height = std::max(3, std::min(advance, fontData->ascender * 2 / 3));
+  const int left = pad;
+  const int top = height;  // the box sits on the baseline
+  for (int gy = 0; gy < height; gy++) {
+    for (int gx = 0; gx < width; gx++) {
+      const bool edge = gy == 0 || gy == height - 1 || gx == 0 || gx == width - 1;
+      if (!edge || ((gx + gy) & 1) != 0) continue;
+      int screenX, screenY;
+      if constexpr (rotation == TextRotation::Rotated90CW) {
+        screenX = cursorX + fontData->ascender - top + gy;
+        screenY = cursorY - left - gx;
+      } else {
+        screenX = cursorX + left + gx;
+        screenY = cursorY - top + gy;
+      }
+      renderer.drawPixel(screenX, screenY, pixelState);
+    }
+  }
+}
+
 // IMPORTANT: This function is in critical rendering path and is called for every pixel. Please keep it as simple and
 // efficient as possible.
 void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
@@ -400,9 +575,55 @@ int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontF
   std::string visual;
   const char* renderedText = resolveVisualText(text, visual, baseDir);
 
-  int w = 0, h = 0;
-  fontIt->second.getTextDimensions(renderedText, &w, &h, style);
-  return w;
+  // Ink extent of exactly what drawText() draws (same kerning, invisible
+  // codepoints, emoji clusters, fallback glyphs and missing-glyph marks).
+  const auto& font = fontIt->second;
+  const bool allowFallback = fallbackAllowed(fontId);
+  const EpdFontData* primaryData = font.getData(style);
+  int minX = 0, maxX = 0;
+  int lastBaseX = 0;
+  int lastBaseLeft = 0;
+  int lastBaseWidth = 0;
+  int32_t prevAdvanceFP = 0;
+  bool hasPrev = false;
+  uint32_t prevKernCp = 0;
+  const char* cursor = renderedText;
+  uint32_t cp;
+  while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&cursor)))) {
+    if (utf8IsInvisible(cp)) continue;
+    if (utf8IsCombiningMark(cp)) {
+      const GlyphRef mark = resolveGlyph(font, cp, style, allowFallback);
+      if (!mark.glyph) continue;
+      const int markX =
+          combiningMark::centerOver(lastBaseX, lastBaseLeft, lastBaseWidth, mark.glyph->left, mark.glyph->width);
+      minX = std::min(minX, markX + mark.glyph->left);
+      maxX = std::max(maxX, markX + mark.glyph->left + mark.glyph->width);
+      continue;
+    }
+    const uint32_t clusterBase = cp;
+    cp = font.applyLigatures(cp, cursor, style);
+    const GlyphRef ref = resolveGlyph(font, cp, style, allowFallback);
+    if (hasPrev) {
+      const int32_t kernFP = (prevKernCp != 0 && ref.primary) ? font.getKerning(prevKernCp, cp, style) : 0;
+      lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);
+    }
+    if (ref.glyph) {
+      lastBaseLeft = ref.glyph->left;
+      lastBaseWidth = ref.glyph->width;
+      prevAdvanceFP = ref.glyph->advanceX;
+    } else {
+      prevAdvanceFP = missingGlyphAdvanceFP(primaryData);
+      const int advance = fp4::toPixel(prevAdvanceFP);
+      lastBaseLeft = std::max(1, advance / 5);
+      lastBaseWidth = std::max(2, advance - 2 * lastBaseLeft);
+    }
+    minX = std::min(minX, lastBaseX + lastBaseLeft);
+    maxX = std::max(maxX, lastBaseX + lastBaseLeft + lastBaseWidth);
+    hasPrev = true;
+    prevKernCp = ref.primary ? cp : 0;
+    utf8SkipEmojiClusterTail(reinterpret_cast<const unsigned char**>(&cursor), clusterBase);
+  }
+  return maxX - minX;
 }
 
 void GfxRenderer::drawCenteredText(const int fontId, const int y, const char* text, const bool black,
@@ -441,56 +662,71 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   const auto& font = fontIt->second;
 
   const char* textCursor = renderedText;
+  const bool allowFallback = fallbackAllowed(fontId);
+  const EpdFontData* primaryData = font.getData(style);
+  const bool isSupSub = (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
   uint32_t cp;
-  uint32_t prevCp = 0;
+  bool hasPrev = false;
+  uint32_t prevKernCp = 0;  // previous base codepoint when it came from this font (kerning), else 0
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&textCursor)))) {
     // Skip Hebrew Niqqud (vowel marks)
     // Temporary: avoid adding Niqqud to built-in fonts. Remove when custom fonts are supported.
     if (cp >= 0x0591 && cp <= 0x05C7) {
       continue;
     }
-
-    if (utf8IsCombiningMark(cp)) {
-      const EpdGlyph* combiningGlyph = font.getGlyph(cp, style);
-      if (!combiningGlyph) continue;
-      const int raiseBy = combiningMark::raiseAboveBase(combiningGlyph->top, combiningGlyph->height, lastBaseTop);
-      const int combiningX = combiningMark::centerOver(lastBaseX, lastBaseLeft, lastBaseWidth, combiningGlyph->left,
-                                                       combiningGlyph->width);
-      renderCharImpl<TextRotation::None>(*this, renderMode, font, cp, combiningX, yPos - raiseBy, black, style);
+    // Default-ignorable controls (ZWJ/ZWNJ, variation selectors, tags, bidi
+    // marks, ...) and stray skin-tone modifiers carry no ink and no width.
+    if (utf8IsInvisible(cp)) {
       continue;
     }
 
+    if (utf8IsCombiningMark(cp)) {
+      const GlyphRef mark = resolveGlyph(font, cp, style, allowFallback);
+      if (!mark.glyph) continue;  // an uncovered mark adds nothing to its cluster
+      const EpdGlyph* combiningGlyph = mark.glyph;
+      const int raiseBy = combiningMark::raiseAboveBase(combiningGlyph->top, combiningGlyph->height, lastBaseTop);
+      const int combiningX = combiningMark::centerOver(lastBaseX, lastBaseLeft, lastBaseWidth, combiningGlyph->left,
+                                                       combiningGlyph->width);
+      renderCharImpl<TextRotation::None>(*this, renderMode, mark, combiningX, yPos - raiseBy, black);
+      continue;
+    }
+
+    const uint32_t clusterBase = cp;
     cp = font.applyLigatures(cp, textCursor, style);
+    const GlyphRef ref = resolveGlyph(font, cp, style, allowFallback);
 
     // Differential rounding: snap (previous advance + current kern) as one unit so
     // identical character pairs always produce the same pixel step regardless of
-    // where they fall on the line.
-    if (prevCp != 0) {
-      const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
-      lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);       // snap 12.4 fixed-point to nearest pixel
+    // where they fall on the line. Kerning applies only between this font's glyphs.
+    if (hasPrev) {
+      const int32_t kernFP = (prevKernCp != 0 && ref.primary) ? font.getKerning(prevKernCp, cp, style) : 0;
+      lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);  // snap 12.4 fixed-point to nearest pixel
     }
 
-    const EpdGlyph* glyph = font.getGlyph(cp, style);
-
+    const EpdGlyph* glyph = ref.glyph;
     lastBaseLeft = glyph ? glyph->left : 0;
     lastBaseWidth = glyph ? glyph->width : 0;
     lastBaseTop = glyph ? glyph->top : 0;
-    prevAdvanceFP = glyph ? glyph->advanceX : 0;  // 12.4 fixed-point
+    prevAdvanceFP = glyph ? glyph->advanceX : missingGlyphAdvanceFP(primaryData);  // 12.4 fixed-point
 
-    const bool isSupSub = (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
     if (isSupSub) {
       // Halve the advance so the cursor advances by the same amount the scaled glyph
       // actually occupies, keeping spacing correct without needing a separate smaller font.
       prevAdvanceFP = (prevAdvanceFP + 1) / 2;
     }
 
-    if (isSupSub) {
+    if (!glyph) {
+      renderMissingMark<TextRotation::None>(*this, renderMode, primaryData, lastBaseX, yPos, black, isSupSub);
+    } else if (isSupSub) {
       // yPos already carries the vertical offset applied by TextBlock::render().
-      renderCharScaled(*this, renderMode, font, cp, lastBaseX, yPos, black, style);
+      renderCharScaled(*this, ref, lastBaseX, yPos, black);
     } else {
-      renderCharImpl<TextRotation::None>(*this, renderMode, font, cp, lastBaseX, yPos, black, style);
+      renderCharImpl<TextRotation::None>(*this, renderMode, ref, lastBaseX, yPos, black);
     }
-    prevCp = cp;
+    hasPrev = true;
+    prevKernCp = ref.primary ? cp : 0;
+    // One glyph per emoji cluster: modifiers, joiners and joined pictographs are consumed here.
+    utf8SkipEmojiClusterTail(reinterpret_cast<const unsigned char**>(&textCursor), clusterBase);
   }
 }
 
@@ -1598,7 +1834,8 @@ int GfxRenderer::getSpaceWidth(const int fontId, const EpdFontFamily::Style styl
   auto sdIt = sdCardFonts_.find(fontId);
   if (sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
     const uint8_t resolvedStyle = resolveSdCardStyle(*sdIt->second, style);
-    return fp4::toPixel(sdIt->second->getAdvance(' ', resolvedStyle));
+    uint16_t advance = 0;
+    if (sdIt->second->lookupAdvance(' ', resolvedStyle, &advance)) return fp4::toPixel(advance);
   }
 
   const auto fontIt = fontMap.find(fontId);
@@ -1617,9 +1854,11 @@ int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const 
   // Kern data is not loaded during layout (consistent with previous metadataOnly behavior),
   // so we return just the space advance without kerning.
   auto sdIt = sdCardFonts_.find(fontId);
-  if (sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
+  const bool sdLayout = sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable();
+  if (sdLayout) {
     const uint8_t resolvedStyle = resolveSdCardStyle(*sdIt->second, style);
-    return fp4::toPixel(sdIt->second->getAdvance(' ', resolvedStyle));
+    uint16_t advance = 0;
+    if (sdIt->second->lookupAdvance(' ', resolvedStyle, &advance)) return fp4::toPixel(advance);
   }
 
   const auto fontIt = fontMap.find(fontId);
@@ -1627,6 +1866,7 @@ int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const 
   const auto& font = fontIt->second;
   const EpdGlyph* spaceGlyph = font.getGlyph(' ', style);
   const int32_t spaceAdvanceFP = spaceGlyph ? static_cast<int32_t>(spaceGlyph->advanceX) : 0;
+  if (sdLayout) return fp4::toPixel(spaceAdvanceFP);  // layout measures SD fonts without kerning
   // Combine space advance + flanking kern into one fixed-point sum before snapping.
   // Snapping the combined value avoids the +/-1 px error from snapping each component separately.
   const int32_t kernFP = static_cast<int32_t>(font.getKerning(leftCp, ' ', style)) +
@@ -1643,61 +1883,73 @@ int GfxRenderer::getKerning(const int fontId, const uint32_t leftCp, const uint3
 }
 
 int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFamily::Style style) const {
-  // Advance table fast-path for SD card fonts during layout.
-  // No kerning/ligature lookup — consistent with previous metadataOnly behavior
-  // where kern/lig data was not loaded.
-  auto sdIt = sdCardFonts_.find(fontId);
-  if (sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
-    int32_t widthFP = 0;
-    const bool isSupSub = (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
-    const uint8_t styleIdx = resolveSdCardStyle(*sdIt->second, style);
-    const auto fontIt = fontMap.find(fontId);
-    if (fontIt == fontMap.end()) {
-      LOG_ERR("GFX", "Font %d not found", fontId);
-      return 0;
-    }
-    const auto& font = fontIt->second;
-    while (uint32_t cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text))) {
-      int32_t advFP = sdIt->second->getAdvance(cp, styleIdx);
-      if (advFP == 0 && !utf8IsCombiningMark(cp)) {
-        const EpdGlyph* glyph = font.getGlyph(cp, style);
-        advFP = glyph ? glyph->advanceX : 0;
-      }
-      widthFP += isSupSub ? (advFP + 1) / 2 : advFP;
-    }
-    return fp4::toPixel(widthFP);
-  }
-
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) {
     LOG_ERR("GFX", "Font %d not found", fontId);
     return 0;
   }
+  const auto& font = fontIt->second;
+  const bool isSupSub = (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
+  const bool allowFallback = fallbackAllowed(fontId);
+  const EpdFontData* primaryData = font.getData(style);
+
+  // Advance table fast-path for SD card fonts during layout.
+  // No kerning/ligature lookup — consistent with previous metadataOnly behavior
+  // where kern/lig data was not loaded.
+  auto sdIt = sdCardFonts_.find(fontId);
+  if (sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
+    SdCardFont& sdFont = *sdIt->second;
+    int32_t widthFP = 0;
+    const uint8_t styleIdx = resolveSdCardStyle(sdFont, style);
+    while (uint32_t cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text))) {
+      if (utf8IsInvisible(cp)) continue;
+      const bool combining = utf8IsCombiningMark(cp);
+      int32_t advFP = 0;
+      uint16_t cached = 0;
+      if (sdFont.lookupAdvance(cp, styleIdx, &cached)) {
+        advFP = cached;
+      } else if (combining) {
+        advFP = 0;
+      } else if (sdFont.hasGlyph(cp, styleIdx)) {
+        // Present but not prepared (request limit exceeded): exact per-glyph load.
+        const EpdGlyph* glyph = font.findGlyph(cp, style);
+        advFP = glyph ? glyph->advanceX : 0;
+      } else {
+        advFP = fallbackAdvanceFP(cp, style, allowFallback, primaryData);
+      }
+      widthFP += isSupSub ? (advFP + 1) / 2 : advFP;
+      if (!combining) utf8SkipEmojiClusterTail(reinterpret_cast<const unsigned char**>(&text), cp);
+    }
+    return fp4::toPixel(widthFP);
+  }
 
   uint32_t cp;
-  uint32_t prevCp = 0;
+  bool hasPrev = false;
+  uint32_t prevKernCp = 0;
   int widthPx = 0;
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
-  const auto& font = fontIt->second;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
-    if (utf8IsCombiningMark(cp)) {
+    if (utf8IsCombiningMark(cp) || utf8IsInvisible(cp)) {
       continue;
     }
+    const uint32_t clusterBase = cp;
     cp = font.applyLigatures(cp, text, style);
+    const GlyphRef ref = resolveGlyph(font, cp, style, allowFallback);
 
     // Differential rounding: snap (previous advance + current kern) together,
     // matching drawText so measurement and rendering agree exactly.
-    if (prevCp != 0) {
-      const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
-      widthPx += fp4::toPixel(prevAdvanceFP + kernFP);         // snap 12.4 fixed-point to nearest pixel
+    if (hasPrev) {
+      const int32_t kernFP = (prevKernCp != 0 && ref.primary) ? font.getKerning(prevKernCp, cp, style) : 0;
+      widthPx += fp4::toPixel(prevAdvanceFP + kernFP);  // snap 12.4 fixed-point to nearest pixel
     }
 
-    const EpdGlyph* glyph = font.getGlyph(cp, style);
-    prevAdvanceFP = glyph ? glyph->advanceX : 0;
-    if ((style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0) {
+    prevAdvanceFP = ref.glyph ? ref.glyph->advanceX : missingGlyphAdvanceFP(primaryData);
+    if (isSupSub) {
       prevAdvanceFP = (prevAdvanceFP + 1) / 2;
     }
-    prevCp = cp;
+    hasPrev = true;
+    prevKernCp = ref.primary ? cp : 0;
+    utf8SkipEmojiClusterTail(reinterpret_cast<const unsigned char**>(&text), clusterBase);
   }
   widthPx += fp4::toPixel(prevAdvanceFP);  // final glyph's advance
   return widthPx;
@@ -1746,6 +1998,8 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
   }
 
   const auto& font = fontIt->second;
+  const bool allowFallback = fallbackAllowed(fontId);
+  const EpdFontData* primaryData = font.getData(style);
 
   int lastBaseY = y;
   int lastBaseLeft = 0;
@@ -1754,43 +2008,58 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
 
   uint32_t cp;
-  uint32_t prevCp = 0;
+  bool hasPrev = false;
+  uint32_t prevKernCp = 0;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
     // Skip Hebrew Niqqud (vowel marks)
     // Temporary: avoid adding Niqqud to built-in fonts. Remove when custom fonts are supported.
     if (cp >= 0x0591 && cp <= 0x05C7) {
       continue;
     }
+    if (utf8IsInvisible(cp)) {
+      continue;
+    }
 
     if (utf8IsCombiningMark(cp)) {
-      const EpdGlyph* combiningGlyph = font.getGlyph(cp, style);
-      if (!combiningGlyph) continue;
+      const GlyphRef mark = resolveGlyph(font, cp, style, allowFallback);
+      if (!mark.glyph) continue;
+      const EpdGlyph* combiningGlyph = mark.glyph;
       const int raiseBy = combiningMark::raiseAboveBase(combiningGlyph->top, combiningGlyph->height, lastBaseTop);
       const int combiningX = x - raiseBy;
       const int combiningY = combiningMark::centerOverRotated90CW(lastBaseY, lastBaseLeft, lastBaseWidth,
                                                                   combiningGlyph->left, combiningGlyph->width);
-      renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, font, cp, combiningX, combiningY, black, style);
+      renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, mark, combiningX, combiningY, black);
       continue;
     }
 
+    const uint32_t clusterBase = cp;
     cp = font.applyLigatures(cp, text, style);
+    const GlyphRef ref = resolveGlyph(font, cp, style, allowFallback);
 
     // Differential rounding: snap (previous advance + current kern) as one unit,
     // subtracting for the rotated coordinate direction.
-    if (prevCp != 0) {
-      const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
-      lastBaseY -= fp4::toPixel(prevAdvanceFP + kernFP);       // snap 12.4 fixed-point to nearest pixel
+    if (hasPrev) {
+      const int32_t kernFP = (prevKernCp != 0 && ref.primary) ? font.getKerning(prevKernCp, cp, style) : 0;
+      lastBaseY -= fp4::toPixel(prevAdvanceFP + kernFP);  // snap 12.4 fixed-point to nearest pixel
     }
 
-    const EpdGlyph* glyph = font.getGlyph(cp, style);
-
+    const EpdGlyph* glyph = ref.glyph;
     lastBaseLeft = glyph ? glyph->left : 0;
     lastBaseWidth = glyph ? glyph->width : 0;
     lastBaseTop = glyph ? glyph->top : 0;
-    prevAdvanceFP = glyph ? glyph->advanceX : 0;  // 12.4 fixed-point
+    prevAdvanceFP = glyph ? glyph->advanceX : missingGlyphAdvanceFP(primaryData);  // 12.4 fixed-point
 
-    renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, font, cp, x, lastBaseY, black, style);
-    prevCp = cp;
+    if (glyph) {
+      // Rotated glyphs are placed from their font's ascender; keep a fallback
+      // glyph on this font's baseline.
+      const int baselineShift = ref.primary ? 0 : primaryData->ascender - ref.data->ascender;
+      renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, ref, x + baselineShift, lastBaseY, black);
+    } else {
+      renderMissingMark<TextRotation::Rotated90CW>(*this, renderMode, primaryData, x, lastBaseY, black, false);
+    }
+    hasPrev = true;
+    prevKernCp = ref.primary ? cp : 0;
+    utf8SkipEmojiClusterTail(reinterpret_cast<const unsigned char**>(&text), clusterBase);
   }
 }
 

@@ -86,7 +86,10 @@ class HalStorage {
     static HalStorage storage;
     return storage;
   }
+  // Host diagnostics only: counts open attempts so tests can bound SD traffic.
+  inline static thread_local unsigned readOpenCount = 0;
   bool openFileForRead(const char*, const char* path, HalFile& file) const {
+    ++readOpenCount;
     file.close();
     const auto* asset = PocketUIHost::AssetScope::find(path);
     if (!asset) return false;
