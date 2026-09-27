@@ -233,6 +233,14 @@ coordinates or guarantee every theme implements every registered field (e.g.
 some RoundedRaff dimensions remain font-derived). Host/device pixel parity,
 field-specific bounds and physical apply/revert remain pending.
 
+Popup colour update (2026-09-27): `popupTextInverted` chooses the popup text
+colour (true = black) and the box always takes the opposite colour with a frame
+in the text colour; `popupCornerRadius` only shapes the box. Previously a
+nonzero radius forced a black box regardless of the text colour, so a pack that
+rounded Classic's popups drew black text on black. Native themes draw the same
+pixels as before (gfx_host PopupFrame tests). The popup progress-bar colours
+remain independent fields.
+
 A UI pack overrides chrome appearance only. It follows the learning/font pack
 pattern: fixed header, hash-validated, atomically installed, state-file
 recorded.

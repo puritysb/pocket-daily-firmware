@@ -5,6 +5,22 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-27 X3 black popup (`1.7.0-dev-feat-reader-support-75df8f0e`,
+  Classic + active pack `studio-6c134a9368a44871`: popupCornerRadius 8,
+  popupTextBold 1). `BaseTheme::drawPopup` let the corner radius pick the fill
+  (rounded = black box) while `popupTextInverted` picked the text colour, so
+  rounding Classic drew black text on black: every popup was a solid bar. The
+  user's blank page + vertical bar (Landscape CW) was `showBuildError`'s
+  "Failed to index - invalid book or SD error" (host frame matches the photo).
+  Now `PopupFrame::inkFor`: box = opposite of the text colour, frame = text
+  colour, radius shapes only; native themes unchanged (gfx_host PopupFrame
+  tests, PBMs in build/host-tests/gfx_host). Same code in v1.7.0-beta.1.
+  Open: `吾輩は猫である.epub` spine 5 (OEBPS/chapter4.xhtml) never builds on the
+  X3: no `html/5.html`, no `sections/5.bin(.part)`, pocket-reading.bin at
+  spine 5 page 0/0, so `startBuild` failed before promoting the inflated HTML
+  (zip stream: 2x8 KiB + one 32 KiB ring). Likely heap; unconfirmed, no log.
+  Host-only; not on X3.
+
 - 2026-09-27 Reading-progress v1 (docs/reading-progress-v1.md; app side
   docs/READING_PROGRESS.md): Sync advertises `readingProgress: 1`; GET/POST
   `/api/pocket/v1/reading` read per-book records and queue offers only. The
