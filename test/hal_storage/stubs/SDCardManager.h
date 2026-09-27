@@ -16,6 +16,9 @@ inline bool errorAfterRead = false;
 inline uint8_t readError = 0, recordByte = 7;
 inline int readCount = -2;
 inline unsigned reads = 0;
+inline uint32_t clusters = 8;
+inline bool failSector = false;
+inline uint8_t allocationByte = 0;
 inline void checkLock() {
   if (lockDepth == 0) ++unlocked;
 }
@@ -29,6 +32,9 @@ inline void reset() {
   recordByte = 7;
   readCount = -2;
   reads = 0;
+  clusters = 8;
+  failSector = false;
+  allocationByte = 0;
 }
 }  // namespace FakeSDK
 
@@ -116,6 +122,12 @@ class FsFile {
     return opened;
   }
   void rewindDirectory() { FakeSDK::checkLock(); }
+  bool openNext(FsFile* directory) {
+    FakeSDK::checkLock();
+    opened = directory->opened;
+    ++FakeSDK::nexts;
+    return opened;
+  }
   FsFile openNextFile() {
     FakeSDK::checkLock();
     ++FakeSDK::nexts;
@@ -135,6 +147,14 @@ class SDCardManager {
   }
   bool begin() { return true; }
   bool ready() const { return true; }
+  uint32_t volumeClusters() const { return FakeSDK::clusters; }
+  uint32_t clusterBytes() const { return 4096; }
+  uint32_t fatStart() const { return 1; }
+  bool readAllocationSector(uint32_t, uint8_t* data) {
+    FakeSDK::checkLock();
+    memset(data, FakeSDK::allocationByte, 512);
+    return !FakeSDK::failSector;
+  }
   uint8_t filesystemType() const {
     FakeSDK::checkLock();
     return FakeSDK::filesystemType;

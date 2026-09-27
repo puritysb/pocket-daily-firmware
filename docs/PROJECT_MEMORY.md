@@ -5,6 +5,13 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-27 Sync SD management: `readerFiles: 1`, optional `totalHeap`,
+  identity-checked paginated folder listing, reading-file deletion and bounded
+  FAT16/FAT32 usage scans. System paths/firmware protected; other formats report
+  capacity only. Contract: docs/reader-files.md. Host 445, routes 11, SDK patch 3,
+  default build and strict cppcheck 2.11 pass. Not installed on X3; sparse-folder
+  timing, deletion cleanup, cancellation and SD usage still need hardware acceptance.
+
 - 2026-09-27 X3 EPUB acceptance failed on installed
   `1.7.0-dev-main-bca376e7-wa4be8509`: sample
   `/Pocket-EPUB-check-c175a49c.epub` opened, but the user reported garbled emoji

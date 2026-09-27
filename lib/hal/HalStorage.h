@@ -18,6 +18,13 @@ class HalStorage {
   enum class FilesystemFormat { Unavailable, Fat, ExFat };
   // Reads mounted SDK metadata under the storage lock; never scans the card.
   FilesystemFormat filesystemFormat() const;
+  struct SpaceChunk {
+    uint64_t totalBytes = 0, freeBytes = 0;
+    uint32_t nextCluster = 0;
+    bool supported = false;
+  };
+  // At most 4096 clusters per request; yields between sectors, never scans on heartbeat.
+  bool spaceChunk(uint32_t cluster, SpaceChunk& result, void (*progress)());
   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
   // Read the entire file at `path` into a String. Returns empty string on failure.
   String readFile(const char* path);
@@ -104,6 +111,7 @@ class HalFile : public Print {
   bool close();
   HalFile openNextFile();
   enum class DirectoryRead { Record, End, Error };
+  DirectoryRead openNextEntry(HalFile& entry);
   // One raw 32-byte FAT/exFAT directory slot, including deleted/LFN slots.
   // Does not decode names or prove directory semantic validity. Use a dedicated
   // directory handle at a 32-byte boundary and stop on End/Error. Callers bound

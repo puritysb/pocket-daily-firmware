@@ -47,6 +47,8 @@ String buildStatusJson(const StatusInputs& in) {
   doc["mode"] = in.apMode ? "AP" : "STA";
   doc["rssi"] = in.apMode ? 0 : WiFi.RSSI();
   doc["freeHeap"] = ESP.getFreeHeap();
+  doc["totalHeap"] = ESP.getHeapSize();
+  if (isSyncProfile(in.profile)) doc["readerFiles"] = 1;
   doc["uptime"] = millis() / 1000;
   doc["device"] = gpio.deviceIsX3() ? "X3" : "X4";
   // Diagnoses a silent reboot during private-AP startup: the last runtime

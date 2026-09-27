@@ -158,3 +158,51 @@ TEST_F(StorageAllocation, NormalAndFilesystemFailedOpensPreserveBehavior) {
   EXPECT_FALSE(file);
   EXPECT_TRUE(file.close());
 }
+
+TEST_F(StorageAllocation, SpaceScanCountsFreeClustersAndRejectsInvalidCursor) {
+  HalStorage::SpaceChunk result;
+  ASSERT_TRUE(Storage.spaceChunk(0, result, nullptr));
+  EXPECT_TRUE(result.supported);
+  EXPECT_EQ(result.totalBytes, 8u * 4096u);
+  EXPECT_EQ(result.freeBytes, result.totalBytes);
+  EXPECT_EQ(result.nextCluster, 0u);
+  EXPECT_FALSE(Storage.spaceChunk(1, result, nullptr));
+  EXPECT_FALSE(Storage.spaceChunk(11, result, nullptr));
+  FakeMemory::fail = true;
+  EXPECT_FALSE(Storage.spaceChunk(0, result, nullptr));
+}
+TEST_F(StorageAllocation, ExFatReturnsCapacityWithoutInventingFreeSpace) {
+  FakeSDK::filesystemType = 64;
+  FakeMemory::fail = true;
+  HalStorage::SpaceChunk result;
+  ASSERT_TRUE(Storage.spaceChunk(0, result, nullptr));
+  EXPECT_FALSE(result.supported);
+  EXPECT_EQ(result.totalBytes, 32768u);
+  EXPECT_EQ(result.freeBytes, 0u);
+}
+#include "pocket_daily/web/ReaderFilesPolicy.h"
+TEST(ReaderFilesPolicy, ProtectsSystemPathsAndOnlyDeletesReadingFiles) {
+  using namespace PocketDaily::Web;
+  for (const auto path : {"/", "/Books", "/Articles/한글.epub"}) EXPECT_TRUE(readerFilePath(path));
+  for (const auto path : {"", "relative", "/../book", "/.cache/book", "/Books//x", "/Books/", "/Books./x",
+                          "/POCKET-DAILY/profile", "/crash_report.txt", "/%2e%2e/x"})
+    EXPECT_FALSE(readerFilePath(path));
+  EXPECT_TRUE(deletableReaderFile("/Books/BOOK.EPUB"));
+  EXPECT_TRUE(deletableReaderFile("/Articles/note.txt"));
+  EXPECT_FALSE(deletableReaderFile("/firmware.bin"));
+  EXPECT_FALSE(deletableReaderFile("/crash_report.txt"));
+}
+
+TEST_F(StorageAllocation, SpaceScanIsChunkedAndStopsOnIOFailure) {
+  FakeSDK::clusters = 8192;
+  HalStorage::SpaceChunk result;
+  ASSERT_TRUE(Storage.spaceChunk(0, result, nullptr));
+  EXPECT_EQ(result.nextCluster, 4098u);
+  EXPECT_EQ(result.freeBytes, 4096u * 4096u);
+  FakeSDK::allocationByte = 255;
+  ASSERT_TRUE(Storage.spaceChunk(4098, result, nullptr));
+  EXPECT_EQ(result.nextCluster, 0u);
+  EXPECT_EQ(result.freeBytes, 0u);
+  FakeSDK::failSector = true;
+  EXPECT_FALSE(Storage.spaceChunk(0, result, nullptr));
+}

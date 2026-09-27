@@ -15,9 +15,9 @@ class StorageSDKPatchTests(unittest.TestCase):
         relative = Path("open-x4-sdk/libs/hardware/SDCardManager/include/SDCardManager.h")
         self.header = self.project / relative
         self.header.parent.mkdir(parents=True)
-        addition = ("  // Pocket HAL-only query: 0 unavailable, 12/16/32 FAT, 64 exFAT. No scan.\n"
-                    "  uint8_t filesystemType() const { return initialized ? sd.fatType() : 0; }\n")
-        self.original = (root / relative).read_text().replace(addition, "")
+        import subprocess
+        self.original = subprocess.check_output(
+            ["git", "-C", str(root / "open-x4-sdk"), "show", "HEAD:libs/hardware/SDCardManager/include/SDCardManager.h"], text=True)
         self.header.write_text(self.original)
         (self.project / "scripts").mkdir()
         shutil.copyfile(root / "scripts/storage_sdk.patch", self.project / "scripts/storage_sdk.patch")

@@ -16,6 +16,7 @@
 #include <ctime>
 
 #include "CrossPointSettings.h"
+#include "RecentBooksStore.h"
 #include "activities/RenderLock.h"
 #include "articles/ArticleStorage.h"
 #include "components/UITheme.h"
@@ -41,6 +42,7 @@
 #include "pocket_daily/web/GenerationArgument.h"
 #include "pocket_daily/web/PocketStatus.h"
 #include "pocket_daily/web/PreferencesUpdate.h"
+#include "pocket_daily/web/ReaderFilesPolicy.h"
 #include "pocket_daily/web/TcpCensus.h"
 #include "util/BookCacheUtils.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
@@ -592,6 +594,115 @@ void handleCrashReport(WebServer& server) {
   feedLoopWDT();
   LOG_DBG("WEB", "Crash report chunk offset=%u bytes=%u total=%u", static_cast<unsigned>(offset),
           static_cast<unsigned>(count), static_cast<unsigned>(reportSize));
+}
+
+enum class ReaderFileAction { List, Remove, Space };
+void handleReaderFiles(WebServer& server, const RouteDeps& d, ReaderFileAction action) {
+  char deviceId[9];
+  if (!admitContentOperation(server, d, deviceId)) return;
+  if (ESP.getFreeHeap() < 16384 || ESP.getMaxAllocHeap() < 4096) {
+    server.send(503, "text/plain", "Reader is busy; retry file management shortly");
+    return;
+  }
+  const String path = server.arg("path");
+  if (action != ReaderFileAction::Space && !readerFilePath({path.c_str(), path.length()})) {
+    server.send(400, "text/plain", "Invalid or protected file path");
+    return;
+  }
+  uint32_t cursor = 0;
+  const String cursorArg = server.arg("cursor");
+  if (!parseGeneration({cursorArg.c_str(), cursorArg.length()}, cursor)) {
+    server.send(400, "text/plain", "Invalid cursor");
+    return;
+  }
+  JsonDocument doc;
+  doc["deviceID"] = deviceId;
+  if (action == ReaderFileAction::Space) {
+    HalStorage::SpaceChunk chunk;
+    if (!Storage.spaceChunk(cursor, chunk, [] {
+          HalSystem::feedWatchdogIfRegistered();
+          delay(1);
+        })) {
+      server.send(503, "text/plain", "SD usage unavailable; check the card and retry");
+      return;
+    }
+    doc["totalBytes"] = chunk.totalBytes;
+    doc["freeBytes"] = chunk.freeBytes;
+    doc["nextCursor"] = chunk.nextCluster;
+    doc["supported"] = chunk.supported;
+  } else {
+    auto file = Storage.open(path.c_str());
+    if (!file) {
+      server.send(404, "text/plain", "File or folder not found");
+      return;
+    }
+    if (action == ReaderFileAction::Remove) {
+      if (file.isDirectory() || !deletableReaderFile({path.c_str(), path.length()})) {
+        server.send(403, "text/plain", "Only reading files can be deleted here");
+        return;
+      }
+      const String size = server.arg("size");
+      char expected[24];
+      snprintf(expected, sizeof(expected), "%llu", static_cast<unsigned long long>(file.fileSize64()));
+      if (size != expected) {
+        server.send(409, "text/plain", "File changed; refresh before deleting");
+        return;
+      }
+      file.close();
+      if (!Storage.remove(path.c_str())) {
+        server.send(500, "text/plain", "Could not delete file; retry");
+        return;
+      }
+      clearBookCache(path.c_str());
+      RECENT_BOOKS.removeByPath(path.c_str());
+      if (Articles::isPath(path.c_str())) Storage.remove(Articles::donePath(path.c_str()).c_str());
+      doc["deleted"] = true;
+    } else {
+      if (!file.isDirectory() || cursor % 32 != 0 || cursor > 8U * 1024U * 1024U || !file.seekSet(cursor)) {
+        server.send(400, "text/plain", "Invalid folder cursor");
+        return;
+      }
+      doc["path"] = path;
+      auto entries = doc["entries"].to<JsonArray>();
+      bool more = true;
+      // At most 12 rows/48 inspected entries; no recursive tree or retained catalog.
+      HalFile entry;
+      for (unsigned scanned = 0; scanned < 48 && entries.size() < 12; ++scanned) {
+        HalSystem::feedWatchdogIfRegistered();
+        delay(1);
+        const auto read = file.openNextEntry(entry);
+        if (read == HalFile::DirectoryRead::Error) {
+          server.send(503, "text/plain", "Could not read folder; retry");
+          return;
+        }
+        if (read == HalFile::DirectoryRead::End) {
+          more = false;
+          break;
+        }
+        char name[128];
+        const auto length = entry.getName(name, sizeof(name));
+        if (!length || length >= sizeof(name) - 1) continue;
+        String full = path == "/" ? path + name : path + "/" + name;
+        if (!readerFilePath({full.c_str(), full.length()})) continue;
+        auto row = entries.add<JsonObject>();
+        row["name"] = name;
+        row["directory"] = entry.isDirectory();
+        row["size"] = entry.isDirectory() ? 0 : entry.fileSize64();
+        row["deletable"] = !entry.isDirectory() && deletableReaderFile({full.c_str(), full.length()});
+        HalSystem::feedWatchdogIfRegistered();
+        delay(1);
+      }
+      doc["nextCursor"] = more ? file.position() : 0;
+    }
+  }
+  if (doc.overflowed()) {
+    server.send(503, "text/plain", "Reader is busy; retry shortly");
+    return;
+  }
+  String response;
+  serializeJson(doc, response);
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", response);
 }
 
 // Idempotent cleanup owns only the supplied hidden UUID file. A completed
@@ -1218,6 +1329,18 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     });
   }
   if (isSyncProfile(d.profile)) {
+    routes.on("/api/pocket/v1/files", HTTP_GET, [server = &server, deps = &d] {
+      note(*deps);
+      handleReaderFiles(*server, *deps, ReaderFileAction::List);
+    });
+    routes.on("/api/pocket/v1/files", HTTP_DELETE, [server = &server, deps = &d] {
+      note(*deps);
+      handleReaderFiles(*server, *deps, ReaderFileAction::Remove);
+    });
+    routes.on("/api/pocket/v1/storage", HTTP_GET, [server = &server, deps = &d] {
+      note(*deps);
+      handleReaderFiles(*server, *deps, ReaderFileAction::Space);
+    });
     routes.on("/api/pocket/v1/profile", HTTP_GET, [server = &server, deps = &d] {
       note(*deps);
       handleGetProfile(*server, *deps);

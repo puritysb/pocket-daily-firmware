@@ -5,6 +5,7 @@
 #include <Memory.h>
 #include <SDCardManager.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 
@@ -49,6 +50,46 @@ HalStorage::FilesystemFormat HalStorage::filesystemFormat() const {
     default:
       return FilesystemFormat::Unavailable;
   }
+}
+
+bool HalStorage::spaceChunk(uint32_t cluster, SpaceChunk& result, void (*progress)()) {
+  result = {};
+  StorageLock lock;
+  if (!SDCard.ready()) return false;
+  const uint32_t count = SDCard.volumeClusters(), clusterBytes = SDCard.clusterBytes();
+  result.totalBytes = static_cast<uint64_t>(count) * clusterBytes;
+  const auto type = SDCard.filesystemType();
+  if (type != 16 && type != 32) return true;
+  if (!count || !clusterBytes || count > 0x0FFFFFF5U) return false;
+  if (cluster == 0) cluster = 2;
+  if (cluster < 2 || cluster > count + 2) return false;
+  // One temporary 512-byte sector is too large for the task stack; released per request.
+  struct Sector {
+    uint8_t bytes[512];
+  };
+  auto sector = makeUniqueNoThrow<Sector>();
+  if (!sector) {
+    LOG_ERR("STORAGE", "OOM reading space usage");
+    return false;
+  }
+  const uint32_t width = type == 16 ? 2 : 4;
+  const uint32_t end = std::min(cluster + 4096U, count + 2);
+  uint32_t loaded = UINT32_MAX;
+  for (; cluster < end; ++cluster) {
+    const uint32_t index = cluster / (512 / width);
+    if (loaded != index) {
+      if (!SDCard.readAllocationSector(SDCard.fatStart() + index, sector->bytes)) return false;
+      loaded = index;
+      if (progress) progress();
+    }
+    const auto* bytes = sector->bytes + (cluster % (512 / width)) * width;
+    uint32_t value = bytes[0] | (uint32_t(bytes[1]) << 8);
+    if (width == 4) value |= (uint32_t(bytes[2]) << 16) | (uint32_t(bytes[3] & 15) << 24);
+    if (value == 0) result.freeBytes += clusterBytes;
+  }
+  result.supported = true;
+  result.nextCluster = end < count + 2 ? end : 0;
+  return true;
 }
 
 #define HAL_STORAGE_WRAPPED_CALL(method, ...) \
@@ -201,6 +242,15 @@ bool HalFile::rename(const char* newPath) { HAL_FILE_WRAPPED_CALL(rename, false,
 bool HalFile::isDirectory() const { HAL_FILE_FORWARD_CALL(isDirectory, false, ); }
 void HalFile::rewindDirectory() { HAL_FILE_WRAPPED_CALL(rewindDirectory, , ); }
 bool HalFile::close() { HAL_FILE_WRAPPED_CALL(close, true, ); }
+HalFile::DirectoryRead HalFile::openNextEntry(HalFile& entry) {
+  HalStorage::StorageLock lock;
+  if (!impl || &entry == this) return DirectoryRead::Error;
+  if (!entry.impl) entry.impl = allocateImpl();
+  if (!entry.impl) return DirectoryRead::Error;
+  entry.impl->file.close();
+  if (entry.impl->file.openNext(&impl->file)) return DirectoryRead::Record;
+  return impl->file.getError() || entry.impl->file.getError() ? DirectoryRead::Error : DirectoryRead::End;
+}
 HalFile HalFile::openNextFile() {
   HalStorage::StorageLock lock;
   if (!impl) return {};
