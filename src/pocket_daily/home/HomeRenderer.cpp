@@ -258,7 +258,7 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
       drawWeatherPoster(renderer, renderGlanceSnapshot.weather, x, nowY, cw, std::max(52, gridY - nowY - 6));
       if (gridH > 0) drawForecastGrid(renderer, renderGlanceSnapshot.weather, x, gridY, cw, gridH);
     } else {
-      drawWeatherPlaceholder(renderer, x, y, cw, weatherBottom - y, s.noWeather, s.weatherHint);
+      drawWeatherPlaceholder(renderer, x, y, cw, weatherBottom - y, s.noWeather, s.weatherHint, env.text);
     }
 
     if (hasEvent) {
@@ -592,8 +592,11 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
     drawToday(pad + colW + gap, rightY, colW, statusY - 8);
   }
 
-  renderer.drawText(SMALL_FONT_ID, pad, statusY,
-                    renderer.truncatedText(SMALL_FONT_ID, view.status, w - pad * 2, EpdFontFamily::BOLD).c_str(), true,
+  // Localized status text (Korean, for example) needs the CJK font like every
+  // other label on this face; Latin text keeps the built-in small font.
+  const int statusFont = fontForText(SMALL_FONT_ID, view.status);
+  renderer.drawText(statusFont, pad, statusY,
+                    renderer.truncatedText(statusFont, view.status, w - pad * 2, EpdFontFamily::BOLD).c_str(), true,
                     EpdFontFamily::BOLD);
 }
 }  // namespace PocketDaily::Home

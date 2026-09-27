@@ -7,6 +7,7 @@
 
 #include "pocket_daily/ContentCard.h"
 #include "pocket_daily/ContentPageRenderer.h"
+#include "pocket_daily/home/HomeDrawing.h"
 
 TEST(GfxHost, RealRasterizerKeepsPanelGuardsForEveryOrientation) {
   for (const auto [width, height] : {std::pair{800, 480}, {792, 528}}) {
@@ -82,6 +83,24 @@ TEST_F(ContentPageHost, CompletePageUsesRealRasterizerWithoutDisplaying) {
   EXPECT_TRUE(std::any_of(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize(),
                           [](auto byte) { return byte != 0xFF; }));
   EXPECT_TRUE(PocketDaily::Content::renderContentPage(renderer, nullptr, options));
+}
+
+TEST_F(ContentPageHost, WeatherPlaceholderDrawsWithTheSelectedFontOnBothPanelSizes) {
+  // Only font 1 is registered. Default font ids cannot draw these labels;
+  // supplying the same resolver as Home must add their actual glyph pixels.
+  const PocketDaily::HomeDraw::FontResolver fonts{nullptr,
+                                                  [](void*, const char*, int, EpdFontFamily::Style) { return 1; }};
+  for (const int width : {60, 200}) {
+    renderer.clearScreen();
+    PocketDaily::HomeDraw::drawWeatherPlaceholder(renderer, 20, 20, width, 160, "No weather", "Sync for forecast");
+    const std::vector<uint8_t> withoutText(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize());
+    renderer.clearScreen();
+    PocketDaily::HomeDraw::drawWeatherPlaceholder(renderer, 20, 20, width, 160, "No weather", "Sync for forecast",
+                                                  fonts);
+    EXPECT_NE(std::memcmp(withoutText.data(), panel.getFrameBuffer(), withoutText.size()), 0);
+    EXPECT_TRUE(panel.guardsIntact());
+    EXPECT_EQ(panel.presentations, 0U);
+  }
 }
 
 TEST_F(ContentPageHost, InvalidOptionsDoNotTouchPriorFrame) {

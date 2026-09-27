@@ -298,14 +298,16 @@ int drawWeatherPoster(const GfxRenderer& renderer, const PocketDaily::Weather& w
 // populated poster — ringed mark, one honest line, the action that fixes it —
 // centred so the reserved space looks deliberate.
 void drawWeatherPlaceholder(const GfxRenderer& renderer, int x, int y, int width, int height, const char* noWeather,
-                            const char* hint) {
+                            const char* hint, const FontResolver& fonts) {
+  const int labelFont = fonts.resolve(noWeather, SMALL_FONT_ID, EpdFontFamily::BOLD);
+  const int hintFont = fonts.resolve(hint, UI_10_FONT_ID);
   if (width < 80 || height < 40) {
-    renderer.drawText(SMALL_FONT_ID, x, y, noWeather, true);
+    renderer.drawText(labelFont, x, y, noWeather, true);
     return;
   }
   const int ringD = std::min(46, std::max(26, height / 3));
-  const int lineH = renderer.getLineHeight(SMALL_FONT_ID);
-  const int hintH = renderer.getLineHeight(UI_10_FONT_ID);
+  const int lineH = renderer.getLineHeight(labelFont);
+  const int hintH = renderer.getLineHeight(hintFont);
   const int blockH = ringD + 8 + lineH + 2 + hintH;
   int cy = y + std::max(0, (height - blockH) / 2);
   const int cx = x + width / 2;
@@ -317,12 +319,12 @@ void drawWeatherPlaceholder(const GfxRenderer& renderer, int x, int y, int width
   cy += ringD + 8;
 
   const char* label = noWeather;
-  int tw = renderer.getTextWidth(SMALL_FONT_ID, label, EpdFontFamily::BOLD);
-  renderer.drawText(SMALL_FONT_ID, cx - tw / 2, cy, label, true, EpdFontFamily::BOLD);
+  int tw = renderer.getTextWidth(labelFont, label, EpdFontFamily::BOLD);
+  renderer.drawText(labelFont, cx - tw / 2, cy, label, true, EpdFontFamily::BOLD);
   cy += lineH + 2;
 
-  tw = renderer.getTextWidth(UI_10_FONT_ID, hint);
-  renderer.drawText(UI_10_FONT_ID, cx - tw / 2, cy, hint, true);
+  tw = renderer.getTextWidth(hintFont, hint);
+  renderer.drawText(hintFont, cx - tw / 2, cy, hint, true);
 }
 
 // Five-day grid. Each column is weekday / condition / high-low / rain, ruled
