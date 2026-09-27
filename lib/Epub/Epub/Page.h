@@ -39,7 +39,8 @@ class PageLine final : public PageElement {
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(HalFile& file) override;
   PageElementTag getTag() const override { return TAG_PageLine; }
-  static std::unique_ptr<PageLine> deserialize(HalFile& file);
+  // nullptr on a malformed line. Shared (Page::elements), one allocation with its control block.
+  static std::shared_ptr<PageLine> deserialize(HalFile& file);
 };
 
 // New PageImage class

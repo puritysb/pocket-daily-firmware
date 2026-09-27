@@ -48,5 +48,6 @@ class TextBlock final : public Block {
   void render(const GfxRenderer& renderer, int fontId, int x, int y) const;
   BlockType getType() override { return TEXT_BLOCK; }
   bool serialize(HalFile& file) const;
-  static std::unique_ptr<TextBlock> deserialize(HalFile& file);
+  // Shared ownership (PageLine), allocated with its control block in one block.
+  static std::shared_ptr<TextBlock> deserialize(HalFile& file);
 };

@@ -118,7 +118,7 @@ bool TextBlock::serialize(HalFile& file) const {
   return true;
 }
 
-std::unique_ptr<TextBlock> TextBlock::deserialize(HalFile& file) {
+std::shared_ptr<TextBlock> TextBlock::deserialize(HalFile& file) {
   uint16_t wc;
   std::vector<std::string> words;
   std::vector<int16_t> wordXpos;
@@ -170,7 +170,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(HalFile& file) {
   serialization::readPod(file, blockStyle.isRtl);
   serialization::readPod(file, blockStyle.directionDefined);
 
-  return std::unique_ptr<TextBlock>(new TextBlock(std::move(words), std::move(wordXpos), std::move(wordStyles),
-                                                  std::move(wordFocusBoundary), std::move(wordFocusSuffixX),
-                                                  blockStyle));
+  // One allocation for block and control block (a unique_ptr converted to shared_ptr needs two).
+  return std::make_shared<TextBlock>(std::move(words), std::move(wordXpos), std::move(wordStyles),
+                                     std::move(wordFocusBoundary), std::move(wordFocusSuffixX), blockStyle);
 }

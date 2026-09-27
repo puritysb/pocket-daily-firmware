@@ -32,14 +32,15 @@ bool PageLine::serialize(HalFile& file) {
   return block->serialize(file);
 }
 
-std::unique_ptr<PageLine> PageLine::deserialize(HalFile& file) {
+std::shared_ptr<PageLine> PageLine::deserialize(HalFile& file) {
   int16_t xPos;
   int16_t yPos;
   serialization::readPod(file, xPos);
   serialization::readPod(file, yPos);
 
   auto tb = TextBlock::deserialize(file);
-  return std::unique_ptr<PageLine>(new PageLine(std::move(tb), xPos, yPos));
+  if (!tb) return nullptr;
+  return std::make_shared<PageLine>(std::move(tb), xPos, yPos);
 }
 
 void PageImage::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
@@ -148,6 +149,8 @@ std::unique_ptr<Page> Page::deserialize(HalFile& file) {
 
   uint16_t count;
   serialization::readPod(file, count);
+  // Exact capacity for a sane page (a malformed count fails below, element by element).
+  if (count <= 256) page->elements.reserve(count);
 
   for (uint16_t i = 0; i < count; i++) {
     uint8_t tag;
@@ -155,6 +158,9 @@ std::unique_ptr<Page> Page::deserialize(HalFile& file) {
 
     if (tag == TAG_PageLine) {
       auto pl = PageLine::deserialize(file);
+      if (!pl) {
+        return nullptr;
+      }
       page->elements.push_back(std::move(pl));
     } else if (tag == TAG_PageImage) {
       auto pi = PageImage::deserialize(file);
