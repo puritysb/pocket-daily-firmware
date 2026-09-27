@@ -11,7 +11,9 @@ class FontFile : public HalFile {
 };
 class FontStorage {
  public:
+  unsigned readOpens = 0;  // every open attempt; tests bound SD traffic with it
   bool openFileForRead(const char*, const char* path, FontFile& file) {
+    ++readOpens;
     file = FontFile(HalStorage::getInstance().open(path, O_RDONLY));
     return static_cast<bool>(file);
   }

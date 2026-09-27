@@ -6,6 +6,7 @@
 
 #include "EpdFont.h"
 #include "EpdFontData.h"
+#include "EpdFontFamily.h"
 
 // On-disk binary format version for .cpfont files. Defined as a preprocessor
 // macro (rather than a constexpr) so it can be stringified into the SD-fonts
@@ -52,22 +53,37 @@ class SdCardFont {
   // Returns number of glyphs that couldn't be loaded (0 on full success).
   int prewarm(const char* utf8Text, uint8_t styleMask = 0x0F, bool metadataOnly = false);
 
-  // Build a compact advance-only table for layout measurement.
-  // Extracts ALL unique codepoints from words (no MAX_PAGE_GLYPHS cap),
-  // batch-reads advanceX from SD, stores in a sorted per-style table.
-  // Returns number of codepoints not found in font coverage.
+  // Prepare advance widths for layout measurement. Every glyph the request
+  // needs is resident when the call returns (bounded LRU, see
+  // ADVANCE_CACHE_LIMIT): misses are batched and read with one file open per
+  // ADVANCE_FETCH_BATCH codepoints, sorted by glyph index. Invisible
+  // (default-ignorable) codepoints are skipped: renderers give them no width.
+  // Returns number of codepoints (per style) not covered by the font.
   int buildAdvanceTable(const char* utf8Text, uint8_t styleMask = 0x0F);
-  int buildAdvanceTable(const std::vector<std::string>& words, bool includeHyphen, uint8_t styleMask = 0x0F);
+  // `wordStyles`, when given, is parallel to `words`: each word's codepoints
+  // are prepared only for its own (resolved) style instead of every style in
+  // styleMask. Space and, when includeHyphen, '-' are prepared for each style.
+  int buildAdvanceTable(const std::vector<std::string>& words, bool includeHyphen, uint8_t styleMask = 0x0F,
+                        const std::vector<EpdFontFamily::Style>* wordStyles = nullptr);
+  int buildAdvanceTable(const uint32_t* codepoints, uint32_t count, uint8_t styleMask);
 
   // Look up advanceX for a codepoint from the advance table.
   // Returns the 12.4 fixed-point advance, or 0 if not found.
   uint16_t getAdvance(uint32_t codepoint, uint8_t style) const;
+  // Same lookup, distinguishing "not prepared" from a zero advance.
+  bool lookupAdvance(uint32_t codepoint, uint8_t style, uint16_t* outAdvance) const;
 
   // Returns true if advance table is populated for at least one style.
   bool hasAdvanceTable() const;
 
+  // True when the font file maps `codepoint` for the (resolved) style. Cached
+  // mode answers from the resident interval table without SD I/O; BoundedUI
+  // mode reads intervals from SD (with a small negative cache).
+  bool hasGlyph(uint32_t codepoint, uint8_t style) const;
+
   // Free mini data for all styles and restore stub EpdFontData.
-  // Preserves the persistent advance cache so repeated layout passes can reuse
+  // Preserves the persistent advance cache (trimmed back to
+  // ADVANCE_CACHE_LIMIT per style) so repeated layout passes can reuse
   // previously fetched metrics.
   void clearCache();
 
@@ -108,6 +124,9 @@ class SdCardFont {
     uint32_t seekCount = 0;
     uint32_t uniqueGlyphs = 0;
     uint32_t bitmapBytes = 0;
+    uint32_t advanceFileOpens = 0;  // advance-table batch reads (one open each)
+    uint32_t advanceEvictions = 0;  // advance entries evicted to stay bounded
+    uint32_t uniformScans = 0;      // intervals read whole to detect uniform advances
   };
   void logStats(const char* label = "SDCF");
   void resetStats();
@@ -223,23 +242,84 @@ class SdCardFont {
   uint32_t overflowCount_ = 0;
   uint32_t overflowNext_ = 0;
 
-  // Compact advance-only table for layout measurement (per-style).
-  // Built by buildAdvanceTable(), queried by getAdvance().
+  // Advance-only metrics for layout measurement, one table per style, sorted
+  // by codepoint for binary lookup. It is a bounded cache, not a coverage
+  // map: each request stamps the entries it uses with a generation number,
+  // and when room is needed the least recently requested entries are evicted.
+  // The steady-state bound is ADVANCE_CACHE_LIMIT entries per style; a single
+  // request needing more (one 750-word flush of dense CJK text) may grow the
+  // table to ADVANCE_REQUEST_LIMIT until the next clearCache() trims it back.
+  // Entries persist across layout passes; clearPersistentCache() drops them.
   struct AdvanceEntry {
     uint32_t codepoint;
     uint16_t advanceX;  // 12.4 fixed-point
+    uint16_t lastUse;   // request generation; occupies what used to be padding
   };
-  // Per-style advance table. Sorted by codepoint for binary lookup.
-  // Bounded to ADVANCE_CACHE_LIMIT entries; persists across layout passes
-  // (across calls to clearCache()) so repeated indexing of the same font
-  // amortizes SD reads. Cleared only on font unload or clearPersistentCache().
-  static constexpr uint32_t ADVANCE_CACHE_LIMIT = 768;
-  AdvanceEntry* advanceTable_[MAX_STYLES] = {};
-  uint32_t advanceTableSize_[MAX_STYLES] = {};
-  bool advanceTableLookup(uint8_t styleIdx, uint32_t codepoint, uint16_t* outAdvance) const;
-  // Merge sortedNew (sorted by codepoint, no overlap with existing) into the
-  // advance table for styleIdx, preserving sort order; cap-truncates the tail.
-  void mergeIntoAdvanceTable(uint8_t styleIdx, const AdvanceEntry* sortedNew, uint32_t newCount);
+  static_assert(sizeof(AdvanceEntry) == 8, "AdvanceEntry must stay 8 bytes");
+  struct AdvanceTable {
+    AdvanceEntry* entries = nullptr;
+    uint32_t size = 0;
+    uint32_t capacity = 0;
+  };
+
+ public:
+  static constexpr uint32_t ADVANCE_CACHE_LIMIT = 768;     // 6 KiB per style
+  static constexpr uint32_t ADVANCE_REQUEST_LIMIT = 2048;  // 16 KiB per style, transient
+  static constexpr uint32_t ADVANCE_FETCH_BATCH = 256;     // misses per SD open
+  static constexpr uint32_t ADVANCE_INITIAL_CAPACITY = 128;
+  uint32_t advanceCacheSize(uint8_t style) const { return advance_[style & (MAX_STYLES - 1)].size; }
+  uint32_t advanceCacheCapacity(uint8_t style) const { return advance_[style & (MAX_STYLES - 1)].capacity; }
+
+ private:
+  AdvanceTable advance_[MAX_STYLES] = {};
+  uint16_t advanceGeneration_ = 0;
+
+  // Uniform-advance runs. Large intervals such as Hangul syllables (11,172
+  // glyphs) or CJK ideographs usually share one advance. When one batch misses
+  // many glyphs of such an interval, the interval's glyph records are read once,
+  // sequentially, and kept as codepoint ranges if they collapse into at most
+  // UNIFORM_MAX_RUNS_PER_INTERVAL runs; otherwise the interval is remembered as
+  // tried and the LRU table serves it. Allocated per style on first scan.
+  struct AdvanceRun {
+    uint32_t first;
+    uint32_t last;
+    uint16_t advanceX;  // 12.4 fixed-point
+  };
+  struct UniformAdvances {
+    static constexpr uint8_t MAX_RUNS = 16;
+    static constexpr uint8_t MAX_TRIED = 8;
+    AdvanceRun runs[MAX_RUNS] = {};
+    uint32_t tried[MAX_TRIED] = {};  // interval indices already scanned (kept or rejected)
+    uint8_t runCount = 0;
+    uint8_t triedCount = 0;
+  };
+  static constexpr uint32_t UNIFORM_SCAN_MIN_SPAN = 1024;
+  static constexpr uint32_t UNIFORM_SCAN_MIN_MISSES = 48;
+  static constexpr uint8_t UNIFORM_MAX_RUNS_PER_INTERVAL = 4;
+  UniformAdvances* uniform_[MAX_STYLES] = {};
+  const AdvanceRun* findUniformAdvance(uint8_t styleIdx, uint32_t codepoint) const;
+  // Cached mode only: index of the interval containing codepoint, or -1.
+  int32_t findIntervalIndex(const PerStyle& s, uint32_t codepoint) const;
+  bool intervalAt(const PerStyle& s, uint32_t index, EpdUnicodeInterval* out) const;
+  struct AdvanceRequest;
+  friend struct AdvanceRequest;
+  uint16_t beginAdvanceRequest();
+  AdvanceEntry* findAdvanceEntry(uint8_t styleIdx, uint32_t codepoint) const;
+  bool growAdvanceTable(uint8_t styleIdx, uint32_t newCapacity);
+  uint32_t evictStaleAdvances(uint8_t styleIdx, uint32_t count, uint16_t protectedGeneration);
+  uint32_t reserveAdvanceSlots(uint8_t styleIdx, uint32_t needed, uint16_t generation);
+  void insertAdvances(uint8_t styleIdx, const AdvanceEntry* sortedNew, uint32_t count);
+  void trimAdvanceCache();
+
+  // BoundedUI glyph misses read the interval table from SD. Remember the most
+  // recent misses so a page full of an unsupported symbol does not reopen the
+  // font for every occurrence and every render pass.
+  static constexpr uint8_t MISS_CACHE_SIZE = 8;
+  mutable uint32_t missCache_[MISS_CACHE_SIZE] = {};
+  mutable uint8_t missCacheCount_ = 0;
+  mutable uint8_t missCacheNext_ = 0;
+  bool recentlyMissed(uint32_t codepoint, uint8_t styleIdx) const;
+  void rememberMiss(uint32_t codepoint, uint8_t styleIdx) const;
 
   Stats stats_;
   uint32_t contentHash_ = 0;
@@ -262,9 +342,6 @@ class SdCardFont {
   void applyKernLigaturePointers(PerStyle& s, EpdFontData& data) const;
   void applyGlyphMissCallback(uint8_t styleIdx);
   int32_t findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) const;
-  int fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCount, uint8_t styleMask);
-  template <typename Iter>
-  int buildAdvanceTableRange(Iter begin, Iter end, bool includeSpace, bool includeHyphen, uint8_t styleMask);
   int prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly);
 
   // Global helpers
