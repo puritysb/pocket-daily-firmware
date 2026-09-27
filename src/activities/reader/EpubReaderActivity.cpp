@@ -10,6 +10,7 @@
 #include <JsonSettingsIO.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <ZipFile.h>
 #include <esp_system.h>
 
 #include <algorithm>
@@ -37,6 +38,7 @@
 #include "articles/ArticleStorage.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "pocket_daily/BuildFailureLog.h"
 #include "pocket_daily/ReadingProgressReader.h"
 #include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
@@ -274,6 +276,7 @@ void EpubReaderActivity::loop() {
     if (section->isBuilding()) {
       if (!section->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK)) {
         LOG_ERR("ERS", "Background section build failed");
+        recordBuildFailure();
         // Keep the reader where it is: render() reloads at nextPageNumber, which still holds
         // the page the section was opened on, not the page being read.
         nextPageNumber = section->currentPage;
@@ -945,6 +948,42 @@ void EpubReaderActivity::cycleBilingualMode() {
   requestUpdate();
 }
 
+namespace {
+namespace BuildLog = PocketDaily::BuildFailureLog;
+static_assert(static_cast<uint8_t>(Section::BuildStep::HtmlStream) == BuildLog::STEP_HTML_STREAM &&
+                  static_cast<uint8_t>(Section::BuildStep::SectionFile) == BuildLog::STEP_SECTION_FILE &&
+                  static_cast<uint8_t>(Section::BuildStep::BuildContext) == BuildLog::STEP_BUILD_CONTEXT &&
+                  static_cast<uint8_t>(Section::BuildStep::Parser) == BuildLog::STEP_PARSER &&
+                  static_cast<uint8_t>(Section::BuildStep::BeginParse) == BuildLog::STEP_BEGIN_PARSE &&
+                  static_cast<uint8_t>(Section::BuildStep::Layout) == BuildLog::STEP_LAYOUT &&
+                  static_cast<uint8_t>(Section::BuildStep::Commit) == BuildLog::STEP_COMMIT,
+              "BuildFailureLog step codes mirror Section::BuildStep");
+static_assert(static_cast<uint8_t>(ZipFile::StreamError::Window) == 5 &&
+                  static_cast<uint8_t>(ZipFile::StreamError::Method) == 9,
+              "BuildFailureLog detail names mirror ZipFile::StreamError");
+}  // namespace
+
+// Keeps the failed step and the heap it met (read before the section is released) in
+// /.crosspoint/last-build-error.bin for /api/status. Runs only on a build failure.
+void EpubReaderActivity::recordBuildFailure() const {
+  if (!epub) return;
+  BuildLog::Entry entry;
+  entry.book = static_cast<uint32_t>(std::hash<std::string>{}(epub->getPath()));
+  entry.spine = static_cast<uint16_t>(std::max(0, currentSpineIndex));
+  if (section) {
+    entry.step = static_cast<uint8_t>(section->lastBuildFailure());
+    entry.detail = section->lastBuildFailureDetail();
+  }
+  entry.freeHeap = ESP.getFreeHeap();
+  entry.largestBlock = ESP.getMaxAllocHeap();
+  entry.uptimeSec = millis() / 1000;
+  snprintf(entry.version, sizeof(entry.version), "%s", CROSSPOINT_VERSION);
+  LOG_ERR("ERS", "Section build failed: spine %d step %s (%u), free %u, largest block %u", currentSpineIndex,
+          BuildLog::stepName(entry.step), static_cast<unsigned>(entry.detail), static_cast<unsigned>(entry.freeHeap),
+          static_cast<unsigned>(entry.largestBlock));
+  if (!BuildLog::record(entry)) LOG_ERR("ERS", "Could not store the build failure record");
+}
+
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   if (isForwardTurn) {
     // Advance within the section while there are (or may still be) more pages: either a built
@@ -1003,6 +1042,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   // persistent e-ink panel showing "Indexing" indefinitely. Replace it with a
   // terminal error state so exiting and reopening is never the only feedback.
   const auto showBuildError = [this]() {
+    recordBuildFailure();
+    section.reset();
     renderer.clearScreen();
     GUI.drawPopup(renderer, tr(STR_INDEX_FAILED));
     automaticPageTurnActive = false;
@@ -1104,7 +1145,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
                                         SETTINGS.imageRendering, SETTINGS.focusReadingEnabled,
                                         SETTINGS.bilingualViewMode, popupFn)) {
           LOG_ERR("ERS", "Failed to persist page data to SD");
-          section.reset();
           showBuildError();
           return;
         }
@@ -1146,7 +1186,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
                                  viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
                                  SETTINGS.imageRendering, SETTINGS.focusReadingEnabled, SETTINGS.bilingualViewMode)) {
           LOG_ERR("ERS", "Failed to start section build");
-          section.reset();
           showBuildError();
           return;
         }
@@ -1157,7 +1196,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
           // Otherwise: build until the target page exists. loop() builds the rest behind it.
           if (!section->buildSomeMore(BUILD_PAGES_PER_CHUNK)) {
             LOG_ERR("ERS", "Failed during incremental section build");
-            section.reset();
             showBuildError();
             return;
           }
@@ -1211,7 +1249,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
                              SETTINGS.embeddedStyle, SETTINGS.imageRendering, SETTINGS.focusReadingEnabled,
                              SETTINGS.bilingualViewMode)) {
       LOG_ERR("ERS", "Failed to start partial extension build");
-      section.reset();
       showBuildError();
       return;
     }
@@ -1219,7 +1256,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     while (!section->isBuildComplete() && section->currentPage >= static_cast<int>(section->pageCount)) {
       if (!section->buildSomeMore(BUILD_PAGES_PER_CHUNK)) {
         LOG_ERR("ERS", "Failed during incremental section build");
-        section.reset();
         showBuildError();
         return;
       }
@@ -1230,7 +1266,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     while (!section->isBuildComplete() && section->currentPage >= static_cast<int>(section->pageCount)) {
       if (!section->buildSomeMore(BUILD_PAGES_PER_CHUNK)) {
         LOG_ERR("ERS", "Failed during incremental section build");
-        section.reset();
         showBuildError();
         return;
       }

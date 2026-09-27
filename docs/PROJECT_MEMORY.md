@@ -15,11 +15,20 @@ transcript. Current source and release records override dated observations.
   Now `PopupFrame::inkFor`: box = opposite of the text colour, frame = text
   colour, radius shapes only; native themes unchanged (gfx_host PopupFrame
   tests, PBMs in build/host-tests/gfx_host). Same code in v1.7.0-beta.1.
-  Open: `吾輩は猫である.epub` spine 5 (OEBPS/chapter4.xhtml) never builds on the
-  X3: no `html/5.html`, no `sections/5.bin(.part)`, pocket-reading.bin at
-  spine 5 page 0/0, so `startBuild` failed before promoting the inflated HTML
-  (zip stream: 2x8 KiB + one 32 KiB ring). Likely heap; unconfirmed, no log.
   Host-only; not on X3.
+- 2026-09-27 X3 "Failed to index" at `吾輩は猫である.epub` spine 5
+  (OEBPS/chapter4.xhtml, user-confirmed on 7191e1a7): no `html/5.html`, no
+  `sections/5.bin(.part)`, so `startBuild` failed while inflating. A host
+  replay (real Epub/Section/ZipFile/parser, PocketSansWorld_12 as the reader
+  font, device settings) builds all 123 chapters; resident heap at build start
+  ~18 KB (epub, font, advance table, CSS), same as v1.7.0-beta.1. The inflate
+  window was the one 32 KiB contiguous block in the reading loop (next largest:
+  ~17 KiB page glyph bitmaps); best-fit replay needs a 34 KB hole with it,
+  18 KB with 4x8 KiB segments (uzlib `uzlib_uncompress_init_segmented`, now
+  InflateReader's streaming mode). Diagnosis is by elimination; the device heap
+  was not measured. Failures are now recorded to
+  `/.crosspoint/last-build-error.bin` and `/api/status` `lastBuildError`
+  (docs/build-failure-log.md). Not yet on X3.
 
 - 2026-09-27 Reading-progress v1 (docs/reading-progress-v1.md; app side
   docs/READING_PROGRESS.md): Sync advertises `readingProgress: 1`; GET/POST

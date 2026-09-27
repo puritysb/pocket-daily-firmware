@@ -6,6 +6,7 @@
 #include <HalSystem.h>
 #include <WiFi.h>
 
+#include "pocket_daily/BuildFailureLog.h"
 #include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/web/UploadStreamServer.h"
 
@@ -87,6 +88,24 @@ String buildStatusJson(const StatusInputs& in) {
   } else {
     doc["crashReportAvailable"] = false;
     doc["crashReportBytes"] = 0;
+  }
+  // The last EPUB chapter the reader failed to build (docs/build-failure-log.md):
+  // one 96-byte SD read, under the same SD-diagnostics gate as the crash report.
+  // Absent when nothing was recorded or diagnostics are not affordable.
+  PocketDaily::BuildFailureLog::Entry buildFailure;
+  if (affordable && PocketDaily::BuildFailureLog::load(buildFailure)) {
+    namespace BuildLog = PocketDaily::BuildFailureLog;
+    JsonObject failure = doc["lastBuildError"].to<JsonObject>();
+    failure["book"] = buildFailure.book;
+    failure["spine"] = buildFailure.spine;
+    failure["step"] = BuildLog::stepName(buildFailure.step);
+    const char* detail = BuildLog::detailName(buildFailure.step, buildFailure.detail);
+    failure["detail"] = detail ? detail : nullptr;
+    failure["count"] = buildFailure.count;
+    failure["freeHeap"] = buildFailure.freeHeap;
+    failure["largestBlock"] = buildFailure.largestBlock;
+    failure["uptime"] = buildFailure.uptimeSec;
+    failure["version"] = buildFailure.version;
   }
   // Live Studio v1 capability advertisement. Absent on older firmware; the
   // companion treats a missing object as a legacy poll-only reader.

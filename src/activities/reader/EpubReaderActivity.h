@@ -124,6 +124,8 @@ class EpubReaderActivity final : public Activity {
   void applyOrientation(uint8_t orientation);
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
   void pageTurn(bool isForwardTurn);
+  // Stores the current section's failed build step and heap state (BuildFailureLog).
+  void recordBuildFailure() const;
   // Cycle bilingual view mode (Both → Original → Translation → Both), persist the new
   // value, drop the current section so it re-parses on next render, and surface a
   // transient popup naming the new mode. No-op on EPUBs without cp-original /
