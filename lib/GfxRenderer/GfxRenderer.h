@@ -123,6 +123,8 @@ class GfxRenderer {
   int ensureSdCardFontReady(int fontId, const char* utf8Text, uint8_t styleMask = 0x0F) const;
   int ensureSdCardFontReady(int fontId, const std::vector<std::string>& words, bool includeHyphen,
                             uint8_t styleMask = 0x0F) const;
+  // Replaces the SD font's resident glyph set with this text's glyphs. No-op (returns 0) while a
+  // FontCacheManager page prewarm is pinned; the text's glyphs then load on demand.
   int prewarmSdCardFont(int fontId, const char* utf8Text, uint8_t styleMask = 0x0F) const;
 
   // Orientation control (affects logical width/height and coordinate transforms)

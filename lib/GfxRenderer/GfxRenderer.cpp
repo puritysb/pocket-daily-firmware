@@ -86,6 +86,15 @@ int GfxRenderer::ensureSdCardFontReady(int fontId, const std::vector<std::string
 int GfxRenderer::prewarmSdCardFont(int fontId, const char* utf8Text, uint8_t styleMask) const {
   auto it = sdCardFonts_.find(fontId);
   if (it != sdCardFonts_.end()) {
+    // SdCardFont::prewarm() replaces the resident glyph set. While a page render still has
+    // passes to draw (grayscale strips after the BW frame), replacing it with a short UI string
+    // such as the status-bar chapter title forces every page glyph through the 8-slot overflow
+    // ring: one SD open/seek/read and a bitmap allocation per glyph per pass. Keep the page set
+    // and let the few UI glyphs load on demand instead.
+    if (fontCacheManager_ && fontCacheManager_->isPageGlyphSetPinned()) {
+      LOG_DBG("GFX", "prewarmSdCardFont: page glyph set pinned, loading UI glyphs on demand");
+      return 0;
+    }
     int missed = it->second->prewarm(utf8Text, styleMask, /*metadataOnly=*/false);
     if (missed > 0) {
       LOG_DBG("GFX", "prewarmSdCardFont: %d glyph(s) not found", missed);

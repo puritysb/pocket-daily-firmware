@@ -85,6 +85,7 @@ FontCacheManager::PrewarmScope::PrewarmScope(FontCacheManager& manager) : manage
 
 void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
   manager_->scanMode_ = ScanMode::None;
+  manager_->pageGlyphSetPinned_ = true;
   if (manager_->scanBuckets_.empty()) return;
 
   for (auto& [fontId, bucket] : manager_->scanBuckets_) {
@@ -104,6 +105,7 @@ void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
 FontCacheManager::PrewarmScope::~PrewarmScope() {
   if (active_) {
     endScanAndPrewarm();  // no-op if already called (scanText_ is empty)
+    manager_->pageGlyphSetPinned_ = false;
     manager_->clearCache();
   }
 }

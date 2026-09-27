@@ -16,10 +16,17 @@ transcript. Current source and release records override dated observations.
   `1.7.0-dev-main-bca376e7-wa4be8509`: sample
   `/Pocket-EPUB-check-c175a49c.epub` opened, but the user reported garbled emoji
   after “함께 읽습니다.” and input stopped after the long-section title/body
-  appeared. Sample section 3 is one ~30,000-character paragraph including ZWJ
-  emoji; this is an investigation lead, not an established cause. User rebooted
-  into Sync; status reports no crash report. USB logging was unavailable.
-  Do not publish a reading-stability claim or erase caches before diagnosis.
+  appeared. User rebooted into Sync; status reports no crash report. USB
+  logging was unavailable. Host diagnosis (real parser/layout, PocketSansWorld_12):
+  section 3 layout is fast (43 pages, ~81 KB transient peak, 5 font opens);
+  the stall is rendering. The status bar's CJK chapter title
+  (UiCjkFont reuse → prewarmSdCardFont) replaced the page glyph cache
+  mid-page, so each of the 14 X3 grayscale strip passes reloaded every glyph
+  from SD (~450 opens/pass). FontCacheManager now pins the page glyph set
+  (gfx_host SdFontPageCache test). Emoji: 👩/🏽/💻 are absent from the font and
+  draw as U+FFFD (ZWJ is zero-width). Open: >768 unique codepoints overflow
+  the advance cache, so layout falls back to per-glyph SD loads (host: 10k
+  opens for 1,600 syllables). Not yet verified on X3.
   App Apply persisted sideButtonLayout=1 (fontSize=3, rotation-follow=0), also
   retained after reboot. Physical direction/resume acceptance remains separate.
 - 2026-09-27 Transfer control: capability `transferControl: 1`, UUID-only

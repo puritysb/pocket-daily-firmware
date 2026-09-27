@@ -24,6 +24,12 @@ class FontCacheManager {
   bool isScanning() const;
   void recordText(const char* text, int fontId, EpdFontFamily::Style style);
 
+  // True between PrewarmScope::endScanAndPrewarm() and the scope's end. The page's glyph set
+  // is resident for every remaining pass of that page (BW, then each grayscale strip), so a
+  // one-off prewarm (e.g. a CJK status-bar title) must not replace it: see
+  // GfxRenderer::prewarmSdCardFont().
+  bool isPageGlyphSetPinned() const { return pageGlyphSetPinned_; }
+
   // The FontDecompressor pointer, needed by GfxRenderer::getGlyphBitmap()
   FontDecompressor* getDecompressor() const { return fontDecompressor_; }
 
@@ -51,6 +57,7 @@ class FontCacheManager {
 
   enum class ScanMode : uint8_t { None, Scanning };
   ScanMode scanMode_ = ScanMode::None;
+  bool pageGlyphSetPinned_ = false;
   struct ScanBucket {
     std::string text;
     uint32_t styleCounts[4] = {};
