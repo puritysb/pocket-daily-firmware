@@ -4,10 +4,12 @@
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
+#include <Memory.h>
 #include <WiFi.h>
 
 #include "pocket_daily/BuildFailureLog.h"
 #include "pocket_daily/PocketScreenPreview.h"
+#include "pocket_daily/ReaderPerf.h"
 #include "pocket_daily/web/UploadStreamServer.h"
 
 namespace PocketDaily::Web {
@@ -106,6 +108,29 @@ String buildStatusJson(const StatusInputs& in) {
     failure["largestBlock"] = buildFailure.largestBlock;
     failure["uptime"] = buildFailure.uptimeSec;
     failure["version"] = buildFailure.version;
+  }
+  // Reader page-turn timings (docs/reader-perf.md): one ~0.85 KB SD read under the
+  // same gate. Stage values are milliseconds in `fields` order; `recent` is newest first.
+  if (affordable) {
+    namespace Perf = PocketDaily::ReaderPerf;
+    // Heap, not stack: a snapshot is ~0.9 KB (handler stack budget).
+    auto perf = makeUniqueNoThrow<Perf::Snapshot>();
+    if (perf && Perf::load(*perf) && perf->totals.turns > 0) {
+      JsonObject rp = doc["readerPerf"].to<JsonObject>();
+      rp["format"] = Perf::FORMAT_VERSION;
+      rp["version"] = perf->version;
+      rp["turns"] = perf->totals.turns;
+      rp["fields"] = Perf::fieldNames();
+      char line[160];
+      if (Perf::formatTotals(perf->totals, false, line, sizeof(line))) rp["avg"] = line;
+      if (Perf::formatTotals(perf->totals, true, line, sizeof(line))) rp["max"] = line;
+      rp["minFreeHeap"] = perf->totals.minFreeHeap;
+      rp["minLargestBlock"] = perf->totals.minLargestBlock;
+      JsonArray recent = rp["recent"].to<JsonArray>();
+      for (size_t i = 0; const Perf::TurnRecord* record = perf->recent(i); ++i) {
+        if (Perf::formatRecord(*record, line, sizeof(line))) recent.add(line);
+      }
+    }
   }
   // Live Studio v1 capability advertisement. Absent on older firmware; the
   // companion treats a missing object as a legacy poll-only reader.

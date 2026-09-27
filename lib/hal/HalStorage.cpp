@@ -1,6 +1,7 @@
 #include "HalStorage.h"
 
 #include <FS.h>  // need to be included before SdFat.h for compatibility with FS.h's File class
+#include <HalIoCounters.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <SDCardManager.h>
@@ -150,6 +151,7 @@ HalFile HalStorage::open(const char* path, const oflag_t oflag) {
   auto impl = HalFile::allocateImpl();
   if (!impl) return {};
   impl->file = SDCard.open(path, oflag);
+  if (impl->file.isOpen()) halIoCounters.opens++;
   return HalFile(std::move(impl));
 }
 
@@ -172,6 +174,7 @@ bool HalStorage::openFileForRead(const char* moduleName, const char* path, HalFi
     return false;
   }
   const bool ok = SDCard.openFileForRead(moduleName, path, impl->file);
+  if (ok) halIoCounters.opens++;
   file = HalFile(std::move(impl));
   return ok;
 }
@@ -192,6 +195,7 @@ bool HalStorage::openFileForWrite(const char* moduleName, const char* path, HalF
     return false;
   }
   const bool ok = SDCard.openFileForWrite(moduleName, path, impl->file);
+  if (ok) halIoCounters.opens++;
   file = HalFile(std::move(impl));
   return ok;
 }
@@ -234,8 +238,22 @@ bool HalFile::seekSet(size_t offset) { HAL_FILE_WRAPPED_CALL(seekSet, false, off
 bool HalFile::preAllocate(size_t length) { HAL_FILE_WRAPPED_CALL(preAllocate, false, length); }
 int HalFile::available() const { HAL_FILE_WRAPPED_CALL(available, 0, ); }
 size_t HalFile::position() const { HAL_FILE_WRAPPED_CALL(position, 0, ); }
-int HalFile::read(void* buf, size_t count) { HAL_FILE_WRAPPED_CALL(read, -1, buf, count); }
-int HalFile::read() { HAL_FILE_WRAPPED_CALL(read, -1, ); }
+int HalFile::read(void* buf, size_t count) {
+  HalStorage::StorageLock lock;
+  if (!impl) return -1;
+  const int got = impl->file.read(buf, count);
+  halIoCounters.readCalls++;
+  if (got > 0) halIoCounters.readBytes += static_cast<uint32_t>(got);
+  return got;
+}
+int HalFile::read() {
+  HalStorage::StorageLock lock;
+  if (!impl) return -1;
+  const int value = impl->file.read();
+  halIoCounters.readCalls++;
+  if (value >= 0) halIoCounters.readBytes++;
+  return value;
+}
 size_t HalFile::write(const void* buf, size_t count) { HAL_FILE_WRAPPED_CALL(write, 0, buf, count); }
 size_t HalFile::write(uint8_t b) { HAL_FILE_WRAPPED_CALL(write, 0, b); }
 bool HalFile::rename(const char* newPath) { HAL_FILE_WRAPPED_CALL(rename, false, newPath); }
