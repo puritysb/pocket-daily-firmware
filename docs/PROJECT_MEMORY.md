@@ -5,6 +5,21 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-28 X3 on 0dcab16d (user: turns feel faster). Status-bar CJK chapter
+  title clipped at the bottom (photo, landscape CW): pre-existing since before
+  v1.7.0-beta.1 (BaseTheme/UiCjkFont unchanged since): UiCjkFont reuses the
+  reader's SD font at reader size (PocketSansWorld 12: ascender 29, descender 8)
+  but the title was placed with the small UI font's y (notosans_8: 18/5), so its
+  baseline landed at 531 on a 528-row panel. `StatusBarTitle` draws a title font
+  taller than the lane at half scale on the small text's baseline; fitting fonts
+  unchanged (gfx_host StatusBarTitle test, 4 orientations). Device readerPerf,
+  17 turns: total 2,007 ms avg; input 280, section 252 (2,907 unbuilt chapter),
+  prewarm 238, BW refresh 445 (HALF = full resync, 3,209), gray 124+227+61,
+  min free 20 KB / largest 12 KB. Second pass (docs/reader-perf.md): adaptive
+  cross-page glyph reuse (host sector loads 196 -> 116), AA cut when the next
+  turn is queued, 1-page landing build, pre-build after 150 ms, idle save
+  outside the render lock. Not yet re-measured on X3.
+
 - 2026-09-28 Page-turn telemetry and speed-ups (docs/reader-perf.md). The reader
   records each turn's stages (input, section, page, prewarm, BW render, status,
   BW refresh, gray render/refresh/sync, save, total), SD opens/reads/KiB, glyphs,

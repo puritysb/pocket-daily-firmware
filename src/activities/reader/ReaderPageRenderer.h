@@ -27,6 +27,11 @@ struct Options {
   // open per glyph from the font's 8-slot overflow ring on every draw.
   const char* statusText = nullptr;
   int statusFontId = 0;
+  // True once the reader has queued another page turn. The anti-aliasing pass is then
+  // skipped (before it starts) or cut short (between strips, followed by the controller
+  // re-sync): the page is already being left, and its gray overlay would only delay the
+  // next one by up to ~400 ms on the X3. A page the reader stays on is unaffected.
+  bool (*nextTurnQueued)(void* context) = nullptr;
 };
 
 // Host profiling: per-stage wall time in microseconds (optional).

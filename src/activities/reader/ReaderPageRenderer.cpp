@@ -167,7 +167,10 @@ void render(GfxRenderer& renderer, const Page& page, const Options& options, int
   clock.close(&Timings::bwDisplayUs);
 
   if (!needsAnyGrayscale) return;
-  Perf::addFlags(Perf::FLAG_AA);
+  const auto leaving = [&options]() {
+    return options.nextTurnQueued != nullptr && options.nextTurnQueued(options.context);
+  };
+  if (leaving()) return;  // nothing written to the gray planes yet: no re-sync needed
 
   // Tiled grayscale: render each plane band-by-band into a small scratch and
   // stream straight to the controller, leaving the BW framebuffer intact so no
@@ -188,9 +191,15 @@ void render(GfxRenderer& renderer, const Page& page, const Options& options, int
     }
     Perf::sampleHeap();
     // Bands may be streamed in any order: X4 windows each via setRamArea, X3 via PTL.
+    bool cut = false;
+    int written = 0;
     for (const bool lsbPlane : {true, false}) {
       renderer.setRenderMode(lsbPlane ? GfxRenderer::GRAYSCALE_LSB : GfxRenderer::GRAYSCALE_MSB);
-      for (int y = 0; y < gh; y += stripRows) {
+      for (int y = 0; y < gh && !cut; y += stripRows) {
+        if (leaving()) {
+          cut = true;
+          break;
+        }
         const int rows = (gh - y < stripRows) ? (gh - y) : stripRows;
         renderer.beginStripTarget(scratch.get(), y, rows);
         renderer.clearScreen(0x00);
@@ -201,18 +210,22 @@ void render(GfxRenderer& renderer, const Page& page, const Options& options, int
         }
         renderer.endStripTarget();
         renderer.writeGrayscalePlaneStrip(lsbPlane, scratch.get(), y, rows);
+        written++;
         Perf::noteStrip();
       }
     }
     renderer.setRenderMode(GfxRenderer::BW);
     Perf::mark(Perf::STAGE_GRAY_RENDER);
-    renderer.displayGrayBuffer();
+    if (!cut) {
+      Perf::addFlags(Perf::FLAG_AA);
+      renderer.displayGrayBuffer();
+    }
     Perf::mark(Perf::STAGE_GRAY_REFRESH);
     clock.close(&Timings::grayUs);
 
     // BW framebuffer is intact; re-sync controller RAM for the next
-    // differential page turn directly from it.
-    renderer.cleanupGrayscaleWithFrameBuffer();
+    // differential page turn directly from it (unless no strip reached it).
+    if (written > 0) renderer.cleanupGrayscaleWithFrameBuffer();
     Perf::mark(Perf::STAGE_GRAY_SYNC);
     clock.close(&Timings::cleanupUs);
     return;
@@ -220,6 +233,7 @@ void render(GfxRenderer& renderer, const Page& page, const Options& options, int
 
   // Fallback for a controller without strip support: save the BW frame before
   // the grayscale passes overwrite it, restore after.
+  Perf::addFlags(Perf::FLAG_AA);
   if (!renderer.storeBwBuffer()) {
     LOG_ERR("RPR", "Failed to store BW buffer for grayscale render; skipping grayscale this page");
     return;

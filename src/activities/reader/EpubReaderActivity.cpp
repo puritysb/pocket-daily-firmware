@@ -211,10 +211,19 @@ void EpubReaderActivity::onEnter() {
 
   PocketDaily::ReaderPerf::open();
   queuePerfTurn(PocketDaily::ReaderPerf::FLAG_OPEN, 0);
+  renderer.getFontCacheManager()->setRetainPolicy(&EpubReaderActivity::allowGlyphRetention, nullptr);
 
   // Trigger first update
   requestUpdate();
 }
+
+bool EpubReaderActivity::allowGlyphRetention(void* /*context*/, const uint32_t bytes) {
+  const uint32_t largest = ESP.getMaxAllocHeap();
+  return largest >= std::max<uint32_t>(RETAIN_MIN_LARGEST_BLOCK, bytes + 8 * 1024) &&
+         ESP.getFreeHeap() >= bytes + RETAIN_FREE_MARGIN;
+}
+
+void EpubReaderActivity::dropRetainedGlyphs() const { renderer.getFontCacheManager()->dropRetainedGlyphs(); }
 
 void EpubReaderActivity::queuePerfTurn(const uint8_t flags, const uint32_t inputMs) {
   perfTurnPending = true;
@@ -225,7 +234,9 @@ void EpubReaderActivity::queuePerfTurn(const uint8_t flags, const uint32_t input
 void EpubReaderActivity::onExit() {
   Activity::onExit();
 
-  flushPendingProgress();
+  flushPendingProgress(/*fromLoop=*/false);
+  renderer.getFontCacheManager()->setRetainPolicy(nullptr, nullptr);
+  dropRetainedGlyphs();
   dropBuildingPrebuild();
   prebuilt.reset();
   // Page-turn timings survive the session in one small file (docs/reader-perf.md).
@@ -292,6 +303,7 @@ void EpubReaderActivity::loop() {
     // mutation, so it flags this as always true.
     // cppcheck-suppress knownConditionTrueFalse
     if (section->isBuilding()) {
+      dropRetainedGlyphs();  // a build step gets the heap the next page's glyphs would share
       if (!section->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK)) {
         LOG_ERR("ERS", "Background section build failed");
         recordBuildFailure();
@@ -318,8 +330,7 @@ void EpubReaderActivity::loop() {
   // in a frame that carries button input, so it cannot delay the turn that input triggers.
   if (!mappedInput.wasAnyPressed() && !mappedInput.wasAnyReleased()) {
     if (progressSavePending && millis() - lastRenderDoneMs >= PROGRESS_SAVE_IDLE_MS && !RenderLock::peek()) {
-      RenderLock lock;
-      flushPendingProgress();
+      flushPendingProgress(/*fromLoop=*/true);
     }
     prebuildNextChapter();
     // Page-turn timings now and then, not on every turn (onExit saves the rest).
@@ -1020,6 +1031,7 @@ void EpubReaderActivity::recordBuildFailure() const {
 
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   queuePerfTurn(isForwardTurn ? 0 : PocketDaily::ReaderPerf::FLAG_BACK, millis());
+  turnQueued.store(true);
   if (isForwardTurn) {
     // Advance within the section while there are (or may still be) more pages: either a built
     // page ahead, or the section is still building (windowed), in which case more pages exist
@@ -1066,6 +1078,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   }
 
   namespace Perf = PocketDaily::ReaderPerf;
+  turnQueued.store(false);  // this render serves every turn queued so far
   if (perfTurnPending) {
     perfTurnPending = false;
     Perf::beginTurn(perfInputMs, perfTurnFlags);
@@ -1083,6 +1096,12 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   // A page of the current chapter never renders next to a running pre-build (only the
   // forward turn into the pre-built chapter adopts it, below).
   if (section) dropBuildingPrebuild();
+  // A retained glyph set never sits beside a chapter build either: drop it when this render
+  // may lay out pages (a new section, or a page past a building/partial section's watermark).
+  if (!section || ((section->isBuilding() || section->isPartial()) &&
+                   section->currentPage >= static_cast<int>(section->pageCount))) {
+    dropRetainedGlyphs();
+  }
 
   const auto showPendingSyncSaveError = [this]() {
     if (!pendingSyncSaveError) return;
@@ -1434,6 +1453,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     pendingSaveSpine = currentSpineIndex;
     pendingSavePage = section->currentPage;
     pendingSavePageCount = estimatedPageCount;
+    // Whole-book percent (7th byte), same math as saveProgress(), computed here on the render
+    // task so the idle write touches nothing the next render may be changing.
+    const float frac = estimatedPageCount > 0 ? static_cast<float>(section->currentPage) / estimatedPageCount : 0.0f;
+    pendingSaveBookPercent = static_cast<int>(currentSpineInfo().bookProgress(frac) * 100.0f + 0.5f);
   } else {
     progressSavePending = false;
   }
@@ -1495,16 +1518,38 @@ bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
   return EpubReaderUtils::saveProgress(*epub, spineIndex, currentPage, pageCount, bookPercent);
 }
 
-void EpubReaderActivity::flushPendingProgress() {
-  if (!progressSavePending || !epub) return;
-  progressSavePending = false;
-  const unsigned long start = millis();
-  if (saveProgress(pendingSaveSpine, pendingSavePage, pendingSavePageCount)) {
-    lastSavedSpineIndex = pendingSaveSpine;
-    lastSavedPage = pendingSavePage;
-    lastSavedPageCount = pendingSavePageCount;
+void EpubReaderActivity::flushPendingProgress(const bool fromLoop) {
+  int spine = 0, page = 0, pageCount = 0, bookPercent = -1;
+  {
+    std::optional<RenderLock> lock;
+    if (fromLoop) lock.emplace();  // onExit's caller already holds it
+    if (!progressSavePending || !epub) return;
+    progressSavePending = false;
+    spine = pendingSaveSpine;
+    page = pendingSavePage;
+    pageCount = pendingSavePageCount;
+    bookPercent = pendingSaveBookPercent;
+    lastSavedSpineIndex = spine;
+    lastSavedPage = page;
+    lastSavedPageCount = pageCount;
   }
-  PocketDaily::ReaderPerf::addToLastTurn(PocketDaily::ReaderPerf::STAGE_SAVE, millis() - start);
+  const unsigned long start = millis();
+  // Only the SD write: the percent was computed by the render that queued the save.
+  const bool saved = EpubReaderUtils::saveProgress(*epub, spine, page, pageCount, bookPercent);
+  const unsigned long elapsed = millis() - start;
+  std::optional<RenderLock> lock;
+  if (fromLoop) lock.emplace();
+  if (!saved) {
+    lastSavedSpineIndex = -1;  // retry at the next idle moment unless a newer position is queued
+    if (!progressSavePending) {
+      progressSavePending = true;
+      pendingSaveSpine = spine;
+      pendingSavePage = page;
+      pendingSavePageCount = pageCount;
+      pendingSaveBookPercent = bookPercent;
+    }
+  }
+  PocketDaily::ReaderPerf::addToLastTurn(PocketDaily::ReaderPerf::STAGE_SAVE, elapsed);
 }
 
 EpubReaderActivity::LayoutParams EpubReaderActivity::layoutParams(const uint16_t viewportWidth,
@@ -1559,7 +1604,8 @@ void EpubReaderActivity::prebuildNextChapter() {
     if (prebuildSettled || !prebuilt->isBuilding()) return;
     // Continue laying out, a few pages per tick like the current chapter's background build.
     RenderLock lock;
-    if (!prebuilt->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK)) {
+    dropRetainedGlyphs();
+    if (!prebuilt->buildSomeMore(PREBUILD_PAGES_PER_TICK)) {
       LOG_ERR("ERS", "Pre-build of section %d failed; it will build on the turn", next);
       prebuilt.reset();
       prebuildSettled = true;
@@ -1575,8 +1621,9 @@ void EpubReaderActivity::prebuildNextChapter() {
   }
 
   // Start (or restart after a layout change) for the next spine.
-  if (ESP.getMaxAllocHeap() < PREBUILD_MIN_FREE_BLOCK) return;
   RenderLock lock;
+  dropRetainedGlyphs();
+  if (ESP.getMaxAllocHeap() < PREBUILD_MIN_FREE_BLOCK) return;
   dropBuildingPrebuild();
   prebuilt.reset();
   prebuildSpine = next;
@@ -1651,6 +1698,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   options.refreshFrequency = SETTINGS.getRefreshFrequency();
   options.drawStatusBar = [](void* context) { static_cast<EpubReaderActivity*>(context)->renderStatusBar(); };
   options.context = this;
+  options.nextTurnQueued = [](void* context) { return static_cast<EpubReaderActivity*>(context)->turnQueued.load(); };
   // A CJK status-bar title is drawn with the loaded SD font (UiCjkFont reuses it when it
   // covers the text); load its glyphs with the page's instead of one SD open per glyph.
   const std::string title = statusBarTitle();

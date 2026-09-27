@@ -88,6 +88,17 @@ class SdCardFont {
   // mode reads intervals from SD (with a small negative cache).
   bool hasGlyph(uint32_t codepoint, uint8_t style) const;
 
+  // Cross-page glyph reuse. Moves the current page's resident glyph set aside (instead of
+  // freeing it) so the next prewarm copies the glyphs both pages share rather than reading
+  // them from SD again (a Japanese page shares ~45% of its glyphs with the previous one, a
+  // Latin page ~75%). The set is not used for drawing; the next prewarm consumes and frees
+  // it, dropRetainedGlyphs() frees it early. Returns the bytes now retained.
+  uint32_t retainPageGlyphs();
+  void dropRetainedGlyphs();
+  uint32_t retainedGlyphBytes() const;
+  // Bytes the current resident glyph set holds (bitmaps, records, intervals).
+  uint32_t residentGlyphBytes() const;
+
   // Free mini data for all styles and restore stub EpdFontData.
   // Preserves the persistent advance cache (trimmed back to
   // ADVANCE_CACHE_LIMIT per style) so repeated layout passes can reuse
@@ -134,6 +145,7 @@ class SdCardFont {
     uint32_t advanceFileOpens = 0;  // advance-table batch reads (one open each)
     uint32_t advanceEvictions = 0;  // advance entries evicted to stay bounded
     uint32_t uniformScans = 0;      // intervals read whole to detect uniform advances
+    uint32_t reusedGlyphs = 0;      // glyphs copied from the retained previous page set
   };
   void logStats(const char* label = "SDCF");
   void resetStats();
@@ -218,6 +230,15 @@ class SdCardFont {
     uint8_t miniKernLeftClassCount = 0;
     uint8_t miniKernRightClassCount = 0;
     int8_t* miniKernMatrix = nullptr;
+
+    // Previous page's glyph set, kept for reuse by the next prewarm (retainPageGlyphs).
+    EpdUnicodeInterval* prevIntervals = nullptr;
+    EpdGlyph* prevGlyphs = nullptr;
+    uint8_t* prevBitmap = nullptr;
+    uint32_t prevIntervalCount = 0;
+    uint32_t prevGlyphCount = 0;
+    uint32_t prevBitmapBytes = 0;
+    uint32_t miniBitmapBytes = 0;
 
     // The EpdFont whose data pointer we manage
     EpdFont epdFont{&stubData};
@@ -341,6 +362,10 @@ class SdCardFont {
 
   // Per-style helpers
   void freeStyleMiniData(PerStyle& s);
+  static void freeStylePrev(PerStyle& s);
+  // Index into s.prevGlyphs of codepoint, or -1.
+  static int32_t findPrevGlyph(const PerStyle& s, uint32_t codepoint);
+  bool prewarmOutOfMemory_ = false;  // set by prewarmStyle on an allocation failure
   void freeStyleAll(PerStyle& s);
   void freeStyleKernLigatureData(PerStyle& s);
   void freeStyleMiniKern(PerStyle& s);

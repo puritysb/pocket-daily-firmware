@@ -38,7 +38,7 @@ All durations are milliseconds.
 
 | Field | Meaning |
 |---|---|
-| `input` | button handled in `loop()` until `render()` started (render-queue wait). Polling latency before the button is seen (up to 50 ms once the CPU idles at 10 MHz after 3 s) is not included. |
+| `input` | button handled in `loop()` until `render()` started: the wait for the previous page's render to finish (typically its anti-aliasing tail) or for idle work holding the render lock (a pre-build or background layout tick). Polling latency before the button is seen (up to 50 ms once the CPU idles at 10 MHz after 3 s) is not included. |
 | `section` | opening the chapter: cached section file, or laying out pages up to the one shown (first open of a chapter) |
 | `page` | reading and decoding the page from the section file |
 | `prewarm` | scanning the page's text and loading its glyphs (and the CJK status-bar title's) from the SD font |
@@ -53,7 +53,7 @@ All durations are milliseconds.
 | `sdOpens`, `sdReads`, `sdKB` | SD file opens, `HalFile::read` calls and KiB read during the turn |
 | `glyphs` | glyphs the page prewarm loaded |
 | `strips` | grayscale strip passes (X3: 14) |
-| `flags` | bit set: 1 new chapter section, 2 layout ran during the turn, 4 backward turn, 8 HALF refresh, 16 anti-aliasing ran, 32 page has images, 64 chapter adopted from the idle pre-build, 128 first page after opening the book |
+| `flags` | bit set: 1 new chapter section, 2 layout ran during the turn, 4 backward turn, 8 HALF refresh, 16 anti-aliasing shown, 32 page has images, 64 chapter adopted from the idle pre-build, 128 first page after opening the book. Without 16, `strips` below 14 means the gray pass was cut because the next turn was already queued. |
 | `freeHeap`, `largestBlock` | lowest free heap / largest free block sampled after the prewarm and with the strip scratch allocated (the page render's peak) |
 
 Reading it: `bwRefresh + grayRefresh` is panel physics; `grayRender +
@@ -124,9 +124,9 @@ What changed:
   strip clip hoisted out of the pixel loop (`GfxRenderer::blitGlyph`).
 - **Prewarm buffers** are sized to the page (codepoints, intervals) and the
   kerning rows reuse the prewarm's open font file.
-- **Next chapter pre-build.** On a chapter's last page, after 700 ms idle and
-  with at least 32 KB contiguous heap, `loop()` lays out the next spine two
-  pages per tick; the forward turn adopts it. Any other render first discards
+- **Next chapter pre-build.** On a chapter's last page, after 150 ms idle and
+  with at least 32 KB contiguous heap, `loop()` lays out the next spine one
+  page per tick; the forward turn adopts it. Any other render first discards
   a build in progress, so a page render never overlaps it; low heap suspends
   it. Spines whose HTML still needs a >96 KB inflate are left to the turn.
 - **Deferred position save.** `progress.bin` (create, remove, rename) is written
@@ -161,6 +161,40 @@ Measured, not changed:
   keeping the previous glyph set would save ~40% of those loads, but it holds
   two glyph sets at once (+12-16 KB transient) and is left out.
 
+## X3 telemetry and second pass (2026-09-28)
+
+First device numbers (`0dcab16d`, 17 turns, landscape, AA on, PocketSansKR at
+X Large): total 2,007 ms average; input 280 (max 890), section 252 (max 2,907
+on a turn into an unbuilt chapter, ~4 ms when pre-built), prewarm 238, BW
+render 29, status 8, BW refresh 445 (3,209 on the HALF turn), gray render 124,
+gray refresh 227, gray sync 61, save up to 419; minimum free heap 20,096 B,
+minimum largest block 12,276 B. `sdReads` (~1,000) counts `HalFile::read`
+calls, mostly cached-sector copies while a page decodes; the host model puts
+physical sector loads at ~190 per turn, nearly all in the prewarm (~1.2 ms per
+single-block SD read on the X3).
+
+Changes:
+
+- **Cross-page glyph reuse, adaptive.** At the end of a page render the SD
+  glyph set stays resident when the heap has room (largest block at least
+  24 KB and the set + 8 KB; free heap at least the set + 32 KB); the next
+  prewarm copies the shared glyphs (records and bitmaps) and frees the rest.
+  It is dropped before any section build, pre-build step and on exit, and an
+  allocation failure retries without it. Host: sector loads per turn
+  196 -> 116, KiB read 15.5 -> 9.3, frames identical. A retained turn cannot
+  take free heap below ~27 KB (the 32 KB margin minus the prewarm's
+  temporaries); the gray-stage peak is unchanged.
+- **Anti-aliasing yields to a queued turn.** If the next turn is already
+  queued when the gray pass starts (or between strips), the pass is skipped or
+  cut and, when strips reached the controller, followed by the RAM re-sync.
+  A page the reader stays on is drawn exactly as before.
+- **One page before the first page.** The render path laid out 8 pages before
+  showing page 0 of an unbuilt chapter; it now lays out 1 and `loop()` the rest
+  (host: allocations on that turn 1,967 -> 523, opens 27 -> 9).
+- **The idle position save no longer holds the render lock** while it writes;
+  the position and percent are taken under a brief lock, so a turn waits at
+  most for one SD operation in flight rather than the whole write.
+
 ## Physics-bound cost (X3)
 
 From `open-x4-sdk` (unchanged): the X3 controller runs SPI at 16 MHz, so one
@@ -177,6 +211,7 @@ Estimated from those constants, anti-aliasing costs about 150-200 ms per turn
 (SPI ~105 ms, waveform ~55 ms, strip rendering) and a second visible panel
 update. Turning *Text Anti-Aliasing* off is the largest single saving left;
 it is a legibility trade-off for the reader to choose, not a default change.
-*Refresh Frequency* (HALF every 15 pages on the test reader) costs about
-0.25 s once per 15 turns. SDK-side, the post-gray re-sync also rewrites the
+*Refresh Frequency*: on the X3 a HALF refresh is a full resync (62-frame
+waveform, conditioning pass and settle), 3.2 s measured, once every 15 turns
+on the test reader (~0.18 s per turn on average); 30 pages halves that. SDK-side, the post-gray re-sync also rewrites the
 new-frame RAM that the next FAST turn rewrites anyway (~26 ms per turn).

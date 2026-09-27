@@ -21,6 +21,21 @@ void FontCacheManager::clearCache() {
   if (renderer_) renderer_->clearFallbackCache();
 }
 
+void FontCacheManager::dropRetainedGlyphs() {
+  for (auto& [id, font] : sdCardFonts_) font->dropRetainedGlyphs();
+}
+
+void FontCacheManager::retainOrClear() {
+  if (retainPolicy_) {
+    uint32_t bytes = 0;
+    for (auto& [id, font] : sdCardFonts_) bytes += font->residentGlyphBytes();
+    if (bytes > 0 && retainPolicy_(retainContext_, bytes)) {
+      for (auto& [id, font] : sdCardFonts_) font->retainPageGlyphs();
+    }
+  }
+  clearCache();  // retained sets survive it; everything else is freed as before
+}
+
 void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask, const char* extraText) {
   // SD card font prewarm path: prewarm all requested styles in one call
   auto it = sdCardFonts_.find(fontId);
@@ -134,7 +149,7 @@ FontCacheManager::PrewarmScope::~PrewarmScope() {
   if (active_) {
     endScanAndPrewarm();  // no-op if already called (scanText_ is empty)
     manager_->pageGlyphSetPinned_ = false;
-    manager_->clearCache();
+    manager_->retainOrClear();
   }
 }
 

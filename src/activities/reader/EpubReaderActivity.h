@@ -3,6 +3,7 @@
 #include <Epub/FootnoteEntry.h>
 #include <Epub/Section.h>
 
+#include <atomic>
 #include <optional>
 
 #include "BookmarkEntry.h"
@@ -112,9 +113,20 @@ class EpubReaderActivity final : public Activity {
   LayoutParams prebuildLayout;
   bool prebuildSettled = false;  // prebuildSpine needs no further idle work
   // Start only after this much idle time on the last page, with this much contiguous heap.
-  static constexpr unsigned long PREBUILD_IDLE_MS = 700;
+  // Short: fast readers leave the last page ~1 s after it appears (X3 telemetry), and a
+  // backward turn merely discards the work. One page per loop() tick keeps input responsive.
+  static constexpr unsigned long PREBUILD_IDLE_MS = 150;
+  static constexpr int PREBUILD_PAGES_PER_TICK = 1;
   static constexpr size_t PREBUILD_MIN_FREE_BLOCK = 32 * 1024;
   void prebuildNextChapter();
+  // Cross-page glyph reuse (FontCacheManager::setRetainPolicy): a page's SD glyph set stays
+  // resident until the next page only while the heap clearly has room for both sets plus
+  // the strip scratch (X3 telemetry: 27-54 KB free, 18-39 KB largest block at the render
+  // peak). It is dropped before any section build and when the reader exits.
+  static constexpr uint32_t RETAIN_MIN_LARGEST_BLOCK = 24 * 1024;
+  static constexpr uint32_t RETAIN_FREE_MARGIN = 32 * 1024;
+  static bool allowGlyphRetention(void* context, uint32_t bytes);
+  void dropRetainedGlyphs() const;
   // Frees an in-progress pre-build (keeps a finished one: it only holds the page count).
   void dropBuildingPrebuild();
 
@@ -125,11 +137,19 @@ class EpubReaderActivity final : public Activity {
   int pendingSaveSpine = 0;
   int pendingSavePage = 0;
   int pendingSavePageCount = 0;
-  void flushPendingProgress();
+  int pendingSaveBookPercent = -1;
+  // `fromLoop`: runs on the main task while the render task may start a turn, so the
+  // pending position is taken under a brief RenderLock and the SD write happens outside
+  // it (a turn then only waits for individual SD operations, never the whole write). The
+  // onExit path already holds the RenderLock.
+  void flushPendingProgress(bool fromLoop);
 
   // Page-turn telemetry (PocketDaily::ReaderPerf): the next render() records a turn that
   // started when loop() handled the button (perfInputMs, 0 for the first page).
   bool perfTurnPending = false;
+  // Set by pageTurn() (main task), read by the render task to cut a page's anti-aliasing
+  // short when the reader has already moved on (ReaderPageRenderer::Options::nextTurnQueued).
+  std::atomic<bool> turnQueued{false};
   uint8_t perfTurnFlags = 0;
   uint32_t perfInputMs = 0;
   void queuePerfTurn(uint8_t flags, uint32_t inputMs);
@@ -157,8 +177,11 @@ class EpubReaderActivity final : public Activity {
   void renderStatusBar();
   // Pages laid out per incremental-build pump: on the render path (catching up to the page
   // being shown) and per loop() tick (background build of a large chapter). Kept small so a
-  // background build chunk never noticeably delays input or a pending render.
-  static constexpr int BUILD_PAGES_PER_CHUNK = 8;
+  // background build chunk never noticeably delays input or a pending render. The render
+  // path pumps until the page it shows exists, so its chunk is one page: laying out 8 before
+  // showing page 0 put up to ~2.9 s of layout on the X3 turn into an unbuilt chapter
+  // (readerPerf 2026-09-28); loop() lays out the rest behind it.
+  static constexpr int BUILD_PAGES_PER_CHUNK = 1;
   static constexpr int BACKGROUND_BUILD_PAGES_PER_TICK = 2;
   // How many pages to keep laid out ahead of the reader for a still-building section. A page
   // turn is ~1s on e-ink and a page builds in ~30ms, so the reader can't out-click the builder
