@@ -112,6 +112,10 @@ struct uzlib_uncomp {
     unsigned int curlen;
     int lzOff;
     unsigned char *dict_ring;
+    /* Alternative to dict_ring: the window split into UZLIB_DICT_SEG_SIZE-byte
+       segments (see uzlib_uncompress_init_segmented), so a 32 KiB window never
+       needs one 32 KiB allocation. At most one of dict_ring/dict_segs is set. */
+    unsigned char **dict_segs;
     unsigned int dict_size;
     unsigned int dict_idx;
 
@@ -121,10 +125,18 @@ struct uzlib_uncomp {
 
 #include "tinf_compat.h"
 
+#define UZLIB_DICT_SEG_SHIFT 13
+#define UZLIB_DICT_SEG_SIZE (1u << UZLIB_DICT_SEG_SHIFT)
+
+/* Byte i of the sliding window, contiguous or segmented. */
+#define TINF_DICT_BYTE(d, i) \
+    (*((d)->dict_segs ? &(d)->dict_segs[(unsigned)(i) >> UZLIB_DICT_SEG_SHIFT][(unsigned)(i) & (UZLIB_DICT_SEG_SIZE - 1)] \
+                      : &(d)->dict_ring[(i)]))
+
 #define TINF_PUT(d, c) \
     { \
         *d->dest++ = c; \
-        if (d->dict_ring) { d->dict_ring[d->dict_idx++] = c; if (d->dict_idx == d->dict_size) d->dict_idx = 0; } \
+        if (d->dict_size) { TINF_DICT_BYTE(d, d->dict_idx) = c; if (++d->dict_idx == d->dict_size) d->dict_idx = 0; } \
     }
 
 unsigned char TINFCC uzlib_get_byte(TINF_DATA *d);
@@ -133,6 +145,9 @@ unsigned char TINFCC uzlib_get_byte(TINF_DATA *d);
 
 void TINFCC uzlib_init(void);
 void TINFCC uzlib_uncompress_init(TINF_DATA *d, void *dict, unsigned int dictLen);
+/* Streaming window of segCount segments of UZLIB_DICT_SEG_SIZE bytes each. The
+   segs array itself must outlive the decompression. */
+void TINFCC uzlib_uncompress_init_segmented(TINF_DATA *d, unsigned char **segs, unsigned int segCount);
 int  TINFCC uzlib_uncompress(TINF_DATA *d);
 int  TINFCC uzlib_uncompress_chksum(TINF_DATA *d);
 

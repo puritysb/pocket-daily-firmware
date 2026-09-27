@@ -1,11 +1,8 @@
 #include "InflateReader.h"
 
+#include <cstdlib>
 #include <cstring>
 #include <type_traits>
-
-namespace {
-constexpr size_t INFLATE_DICT_SIZE = 32768;
-}
 
 // Guarantee the cast pattern in the header comment is valid.
 static_assert(std::is_standard_layout<InflateReader>::value,
@@ -16,20 +13,28 @@ InflateReader::~InflateReader() { deinit(); }
 bool InflateReader::init(const bool streaming) {
   deinit();  // free any previously allocated ring buffer and reset state
 
-  if (streaming) {
-    ringBuffer = static_cast<uint8_t*>(malloc(INFLATE_DICT_SIZE));
-    if (!ringBuffer) return false;
-    memset(ringBuffer, 0, INFLATE_DICT_SIZE);
+  if (!streaming) {
+    uzlib_uncompress_init(&decomp, nullptr, 0);
+    return true;
   }
-
-  uzlib_uncompress_init(&decomp, ringBuffer, ringBuffer ? INFLATE_DICT_SIZE : 0);
+  // Separate blocks, released together by deinit(). Zeroed so a corrupt stream that
+  // references unwritten history reads zeros rather than stale heap contents.
+  for (auto& segment : dictSegments) {
+    segment = static_cast<uint8_t*>(malloc(UZLIB_DICT_SEG_SIZE));
+    if (!segment) {
+      deinit();
+      return false;
+    }
+    memset(segment, 0, UZLIB_DICT_SEG_SIZE);
+  }
+  uzlib_uncompress_init_segmented(&decomp, dictSegments, DICT_SEGMENTS);
   return true;
 }
 
 void InflateReader::deinit() {
-  if (ringBuffer) {
-    free(ringBuffer);
-    ringBuffer = nullptr;
+  for (auto& segment : dictSegments) {
+    free(segment);
+    segment = nullptr;
   }
   memset(&decomp, 0, sizeof(decomp));
 }
@@ -47,7 +52,7 @@ void InflateReader::skipZlibHeader() {
 }
 
 bool InflateReader::read(uint8_t* dest, size_t len) {
-  if (!ringBuffer) {
+  if (!decomp.dict_segs) {
     // One-shot mode: back-references use absolute offset from dest_start.
     // Valid only when read() is called once with the full output buffer.
     decomp.dest_start = dest;
@@ -61,7 +66,7 @@ bool InflateReader::read(uint8_t* dest, size_t len) {
 }
 
 InflateStatus InflateReader::readAtMost(uint8_t* dest, size_t maxLen, size_t* produced) {
-  if (!ringBuffer) {
+  if (!decomp.dict_segs) {
     // One-shot mode: back-references use absolute offset from dest_start.
     // Valid only when readAtMost() is called once with the full output buffer.
     decomp.dest_start = dest;

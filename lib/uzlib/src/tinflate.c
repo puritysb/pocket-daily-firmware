@@ -445,7 +445,7 @@ static int tinf_inflate_block_data(TINF_DATA *d, TINF_TREE *lt, TINF_TREE *dt)
         offs = tinf_read_bits(d, dist_bits[dist], dist_base[dist]);
 
         /* calculate and validate actual LZ offset to use */
-        if (d->dict_ring) {
+        if (d->dict_size) {
             if (offs > d->dict_size) {
                 return TINF_DICT_ERROR;
             }
@@ -473,8 +473,8 @@ static int tinf_inflate_block_data(TINF_DATA *d, TINF_TREE *lt, TINF_TREE *dt)
     }
 
     /* copy next byte from dict substring */
-    if (d->dict_ring) {
-        TINF_PUT(d, d->dict_ring[d->lzOff]);
+    if (d->dict_size) {
+        TINF_PUT(d, TINF_DICT_BYTE(d, d->lzOff));
         if ((unsigned)++d->lzOff == d->dict_size) {
             d->lzOff = 0;
         }
@@ -555,10 +555,18 @@ void uzlib_uncompress_init(TINF_DATA *d, void *dict, unsigned int dictLen)
    d->bitcount = 0;
    d->bfinal = 0;
    d->btype = -1;
-   d->dict_size = dictLen;
+   d->dict_size = dict ? dictLen : 0;
    d->dict_ring = dict;
+   d->dict_segs = NULL;
    d->dict_idx = 0;
    d->curlen = 0;
+}
+
+void uzlib_uncompress_init_segmented(TINF_DATA *d, unsigned char **segs, unsigned int segCount)
+{
+   uzlib_uncompress_init(d, NULL, 0);
+   d->dict_segs = segs;
+   d->dict_size = segs ? segCount << UZLIB_DICT_SEG_SHIFT : 0;
 }
 
 /* inflate next output bytes from compressed stream */
