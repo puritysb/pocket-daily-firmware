@@ -594,15 +594,62 @@ void handleCrashReport(WebServer& server) {
           static_cast<unsigned>(count), static_cast<unsigned>(reportSize));
 }
 
+// Idempotent cleanup owns only the supplied hidden UUID file. A completed
+// publication is deliberately untouched, including a staged firmware update.
+void handleTransferControl(WebServer& server, const RouteDeps& d) {
+  if (!d.stream || (d.host.httpUploadBusy && d.host.httpUploadBusy(d.host.self)) || d.stream->receiving()) {
+    server.send(409, "text/plain", "A transfer is still active; pause it before cleanup");
+    return;
+  }
+  if (!server.hasArg("plain") || server.arg("plain").length() > 512) {
+    server.send(400, "text/plain", "Invalid transfer request");
+    return;
+  }
+  JsonDocument doc;
+  if (deserializeJson(doc, server.arg("plain")) || !doc["staging"].is<const char*>() ||
+      !doc["action"].is<const char*>() || !doc["kind"].is<const char*>()) {
+    server.send(400, "text/plain", "Invalid transfer request");
+    return;
+  }
+  const String path = doc["staging"].as<const char*>();
+  const int slash = path.lastIndexOf('/');
+  const std::string_view view(path.c_str(), path.length());
+  if (path.length() > 256 || path != norm(d, path) || slash < 0 || !isTransferStagingName(view.substr(slash + 1)) ||
+      !Content::genericContentWriteAllowed(view)) {
+    server.send(400, "text/plain", "Only UUID staging files can be controlled");
+    return;
+  }
+  const std::string_view action = doc["action"].as<const char*>();
+  const std::string_view kind = doc["kind"].as<const char*>();
+  if (kind != "content" && kind != "firmware") {
+    server.send(400, "text/plain", "Invalid transfer kind");
+    return;
+  }
+  if (action == "prepare") {
+    d.stream->prepareFeedback(path, kind == "firmware" ? TransferKind::Firmware : TransferKind::Content);
+  } else if (action == "discard") {
+    if (!d.stream->discardStaging(path, kind == "firmware" ? TransferKind::Firmware : TransferKind::Content)) {
+      server.send(500, "text/plain", "Temporary file cleanup failed; retry after checking SD card");
+      return;
+    }
+  } else {
+    server.send(400, "text/plain", "Invalid transfer action");
+    return;
+  }
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
 // Pocket clients upload to a unique hidden .part file, then ask the reader
 // to verify size + CRC and atomically publish it. A dropped phone or Wi-Fi
 // link therefore never turns a valid book or update.bin into a partial file.
 void handleCommitUpload(WebServer& server, const RouteDeps& d) {
   if ((d.host.httpUploadBusy && d.host.httpUploadBusy(d.host.self)) || (d.stream && d.stream->receiving())) {
+    if (d.stream) d.stream->noteCommitFailed();
     server.send(409, "text/plain", "Another file transfer is active");
     return;
   }
   if (!server.hasArg("plain")) {
+    if (d.stream) d.stream->noteCommitFailed();
     server.send(400, "text/plain", "Missing JSON body");
     return;
   }
@@ -611,6 +658,7 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
   const DeserializationError error = deserializeJson(doc, server.arg("plain"));
   if (error || !doc["staging"].is<const char*>() || !doc["target"].is<const char*>() || !doc["size"].is<size_t>() ||
       !doc["crc32"].is<const char*>()) {
+    if (d.stream) d.stream->noteCommitFailed();
     server.send(400, "text/plain", "Invalid commit request");
     return;
   }
@@ -619,11 +667,13 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
   const String target = norm(d, doc["target"].as<const char*>());
   if (!Content::genericContentWriteAllowed({staging.c_str(), staging.length()}) ||
       !Content::genericContentWriteAllowed({target.c_str(), target.length()})) {
+    if (d.stream) d.stream->noteCommitFailed();
     server.send(403, "text/plain", "Protected or unsafe content path");
     return;
   }
   const size_t expectedSize = doc["size"].as<size_t>();
   if (!Content::contentWriteWithinBudget({target.c_str(), target.length()}, 0, expectedSize)) {
+    if (d.stream) d.stream->noteCommitFailed();
     server.send(413, "text/plain", "Content staging file exceeds 256 KiB");
     return;
   }
@@ -640,6 +690,7 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
   if (!stagingName.startsWith(".pocket-") || !stagingName.endsWith(".part") || stagingParent != targetParent ||
       targetName.isEmpty() || protectedName(d, targetName) || !crcEnd || *crcEnd != '\0' ||
       expectedCrcText.length() != 8) {
+    if (d.stream) d.stream->noteCommitFailed();
     server.send(400, "text/plain", "Unsafe commit path or checksum");
     return;
   }
@@ -649,6 +700,7 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
   const uint32_t uploadedCrc = staged.crc32 ^ 0xFFFFFFFFU;
   if (!staged.success || uploadedPath != staging || staged.size != expectedSize || uploadedCrc != expectedCrc ||
       !Storage.exists(staging.c_str())) {
+    if (d.stream) d.stream->noteCommitFailed();
     server.send(409, "text/plain", "Staged upload verification failed");
     return;
   }
@@ -657,6 +709,7 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
   const bool stagedSizeMatches = stagedFile && !stagedFile.isDirectory() && stagedFile.size() == expectedSize;
   if (stagedFile) stagedFile.close();
   if (!stagedSizeMatches) {
+    if (d.stream) d.stream->noteCommitFailed();
     server.send(409, "text/plain", "Staged file size mismatch");
     return;
   }
@@ -665,11 +718,13 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
   Storage.remove(backup.c_str());
   const bool hadTarget = Storage.exists(target.c_str());
   if (hadTarget && !renameStorageFile(target, backup)) {
+    if (d.stream) d.stream->noteCommitFailed();
     server.send(500, "text/plain", "Could not preserve existing target");
     return;
   }
   if (!renameStorageFile(staging, target)) {
     if (hadTarget) renameStorageFile(backup, target);
+    if (d.stream) d.stream->noteCommitFailed();
     server.send(500, "text/plain", "Could not publish staged upload");
     return;
   }
@@ -679,6 +734,7 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
   if (StagedFirmware::isPublishTarget(target.c_str()))
     StagedFirmware::notePublished(static_cast<uint32_t>(expectedSize), uploadedCrc);
 
+  d.stream->noteCommitted(StagedFirmware::isPublishTarget(target.c_str()));
   clearBookCache(target.c_str());
   if (Articles::isPath(target.c_str())) {
     const auto marker = Articles::donePath(target.c_str());
@@ -1146,6 +1202,10 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     handleCrashReport(*server);
   });
 
+  routes.on("/api/pocket/v1/transfer", HTTP_POST, [server = &server, deps = &d] {
+    note(*deps);
+    handleTransferControl(*server, *deps);
+  });
   routes.on("/api/pocket/v1/commit", HTTP_POST, [server = &server, deps = &d] {
     note(*deps);
     handleCommitUpload(*server, *deps);

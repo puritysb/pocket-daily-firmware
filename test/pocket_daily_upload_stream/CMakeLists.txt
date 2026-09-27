@@ -33,3 +33,7 @@ target_link_libraries(pocket_daily_display_state_test PRIVATE
 )
 
 gtest_discover_tests(pocket_daily_display_state_test)
+
+add_executable(transfer_feedback_test TransferFeedbackTest.cpp)
+target_link_libraries(transfer_feedback_test PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(transfer_feedback_test)

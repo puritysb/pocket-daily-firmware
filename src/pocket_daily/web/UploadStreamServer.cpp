@@ -45,6 +45,40 @@ void UploadStreamServer::begin(const Config& config, const Host* host) {
   }
 }
 
+void UploadStreamServer::prepareFeedback(const String& path, const TransferKind kind) {
+  const int slash = path.lastIndexOf('/');
+  staged_.path = slash == 0 ? "/" : path.substring(0, slash);
+  staged_.fileName = path.substring(slash + 1);
+  staged_.success = false;
+  feedback_ = {TransferPhase::Ready, kind, 0, 0};
+}
+
+bool UploadStreamServer::discardStaging(const String& path, const TransferKind kind) {
+  // Route admission has drained the socket; do not discard a different writer.
+  if (receiving()) return false;
+  const String stagedPath = staged_.path == "/" ? "/" + staged_.fileName : staged_.path + "/" + staged_.fileName;
+  if (path == fullPath_) reset(false);
+  if (Storage.exists(path.c_str()) && !Storage.remove(path.c_str())) {
+    LOG_ERR("PUPLOAD", "Could not remove requested staging file");
+    feedback_ = {TransferPhase::Failed, kind, 0, 0};
+    return false;
+  }
+  if (path == resume_.path) resume_.clear();
+  if (path == stagedPath) staged_.success = false;
+  // A reconnect after reboot has no in-memory ledger; show that cleanup receipt too.
+  feedback_ = {TransferPhase::Removed, kind, 0, 0};
+  return true;
+}
+
+void UploadStreamServer::noteCommitted(const bool firmware) {
+  feedback_.kind = firmware ? TransferKind::Firmware : TransferKind::Content;
+  feedback_.phase = TransferPhase::Saved;
+  feedback_.received = staged_.size;
+  feedback_.total = staged_.size;
+  // Publication consumed the hidden file; never retain a stale resume ledger.
+  resume_.clear();
+}
+
 void UploadStreamServer::stop() {
   reset(true);
   discardResume();
@@ -141,6 +175,7 @@ void UploadStreamServer::reset(const bool removePartial) {
 }
 
 void UploadStreamServer::fail(const char* message, const bool removePartial) {
+  feedback_.phase = TransferPhase::Failed;
   LOG_ERR("PUPLOAD", "%s", message);
   batch_ = nullptr;
   batchFill_ = 0;
@@ -192,6 +227,8 @@ void UploadStreamServer::suspend(const char* message) {
     if (!fullPath_.isEmpty()) Storage.remove(fullPath_.c_str());
     resume_.clear();
   }
+  feedback_.phase = flushed ? TransferPhase::Paused : TransferPhase::Failed;
+  feedback_.received = received_;
   staged_.success = false;
   staged_.error = message;
   char response[112];
@@ -294,6 +331,9 @@ bool UploadStreamServer::beginFromHeader() {
   if (host_->httpUploadBusy && host_->httpUploadBusy(host_->self))
     return false;  // A legacy HTTP upload owns the shared commit state.
   if (host_->releaseHttpUploadBuffer) host_->releaseHttpUploadBuffer(host_->self);
+  if (staged_.fileName != name || staged_.path != directory) feedback_ = {};
+  feedback_.phase = TransferPhase::Receiving;
+  feedback_.total = request.size;
   staged_.fileName = name;
   staged_.path = directory;
   staged_.size = 0;
@@ -343,6 +383,7 @@ bool UploadStreamServer::beginFromHeader() {
     }
   }
 
+  feedback_.received = received_;
   acknowledged_ = received_;
   phase_ = Phase::DATA;
   LOG_INF("PUPLOAD", "%s %s (%u/%u bytes, batch=%u)", resumed ? "Resuming" : "Receiving", normalized.c_str(),
@@ -370,6 +411,7 @@ bool UploadStreamServer::flushBatch() {
   // Only flushed bytes count toward the verified prefix a resume may reuse.
   crc32_ = PocketDaily::UploadStream::updateCrc32(crc32_, batch, count);
   received_ += count;
+  feedback_.received = received_;
   batchFill_ = 0;
   return true;
 }
@@ -406,6 +448,7 @@ void UploadStreamServer::finish() {
     return;
   }
 
+  feedback_.phase = TransferPhase::Verifying;
   const uint32_t finalizedCrc = PocketDaily::UploadStream::finalizeCrc32(crc32_);
   // Preserve a completed prefix as well: the final OK can be lost in transit.
   resume_.path = fullPath_;

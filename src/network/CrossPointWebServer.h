@@ -80,6 +80,8 @@ class CrossPointWebServer {
   // AP activity uses this timestamp to expire idle sessions without cutting
   // off a transfer that is still making progress.
   unsigned long lastClientActivityAt() const { return clientActivityAt; }
+  PocketDaily::Web::TransferFeedback transferFeedback() const { return pocketStream.feedback(); }
+  void hideTransferFeedback() { pocketStream.hideFeedback(); }
   bool receivingUpload() const { return pocketStream.receiving(); }
   bool presentationTransportIdle() const { return !pocketStream.transferActive(); }
 

@@ -26,6 +26,7 @@
 #include "pocket_daily/live_studio/LiveFrameCapture.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "util/QrUtils.h"
+#include "util/UiCjkFont.h"
 
 namespace {
 // AP Mode configuration
@@ -791,6 +792,16 @@ void CrossPointWebServerActivity::loop() {
         }
       }
       lastHandleClientTime = millis();
+      if (presentation.preparationPending() && webServer->presentationTransportIdle())
+        webServer->hideTransferFeedback();
+      const auto feedback = webServer->transferFeedback();
+      if (feedback.phase != transferDisplay.phase || feedback.kind != transferDisplay.kind ||
+          (feedback.percent() / 5 != transferDisplay.percent() / 5 && millis() - transferDisplayAt >= 2000)) {
+        RenderLock lock;
+        transferDisplay = feedback;
+        transferDisplayAt = millis();
+        requestUpdate();
+      }
       if (presentation.preparationPending() && webServer->presentationTransportIdle()) {
         RenderLock lock;
         if (presentation.service(renderer, ESP.getFreeHeap(), ESP.getMaxAllocHeap())) requestUpdate();
@@ -802,6 +813,12 @@ void CrossPointWebServerActivity::loop() {
 
 void CrossPointWebServerActivity::render(RenderLock&&) {
   completedDisplayFrame = false;
+  if (state == WebServerActivityState::SERVER_RUNNING &&
+      transferDisplay.phase != PocketDaily::Web::TransferPhase::Idle) {
+    renderTransfer();
+    renderer.displayBuffer();
+    return;
+  }
   if (state == WebServerActivityState::SERVER_RUNNING && presentation.render(renderer, mappedInput)) {
     completedDisplayFrame = presentation.canCaptureFrame();
     return;
@@ -845,6 +862,66 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
     renderer.displayBuffer();
     completedDisplayFrame = true;
   }
+}
+
+void CrossPointWebServerActivity::renderTransfer() const {
+  using PocketDaily::Web::TransferKind;
+  using PocketDaily::Web::TransferPhase;
+  renderer.clearScreen();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true);
+  const bool firmware = transferDisplay.kind == TransferKind::Firmware;
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight},
+                 firmware ? tr(STR_TRANSFER_FIRMWARE) : tr(STR_TRANSFER_CONTENT), nullptr);
+  int y = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing * 2;
+  const int step = renderer.getLineHeight(UI_10_FONT_ID) + metrics.verticalSpacing * 2;
+  const char* stateText = tr(STR_TRANSFER_READY);
+  switch (transferDisplay.phase) {
+    case TransferPhase::Idle:
+    case TransferPhase::Ready:
+      stateText = tr(STR_TRANSFER_READY);
+      break;
+    case TransferPhase::Receiving:
+      stateText = tr(STR_TRANSFER_RECEIVING);
+      break;
+    case TransferPhase::Verifying:
+      stateText = tr(STR_TRANSFER_VERIFYING);
+      break;
+    case TransferPhase::Saved:
+      stateText = firmware ? tr(STR_TRANSFER_STAGED) : tr(STR_TRANSFER_SAVED);
+      break;
+    case TransferPhase::Paused:
+      stateText = tr(STR_TRANSFER_PAUSED);
+      break;
+    case TransferPhase::Removed:
+      stateText = tr(STR_TRANSFER_REMOVED);
+      break;
+    case TransferPhase::Failed:
+      stateText = tr(STR_TRANSFER_FAILED);
+      break;
+  }
+  UITheme::drawCenteredText(renderer, safe, UiCjkFont::fontForText(renderer, stateText, UI_10_FONT_ID), y, stateText);
+  y += step;
+  if (transferDisplay.total > 0 && transferDisplay.phase != TransferPhase::Removed) {
+    char percent[12];
+    snprintf(percent, sizeof(percent), "%u%%", transferDisplay.percent());
+    UITheme::drawCenteredText(renderer, safe, UI_10_FONT_ID, y, percent);
+    y += step;
+    GUI.drawProgressBar(renderer,
+                        Rect{metrics.contentSidePadding, y, renderer.getScreenWidth() - metrics.contentSidePadding * 2,
+                             metrics.progressBarHeight},
+                        transferDisplay.received, transferDisplay.total);
+    y += metrics.progressBarHeight + step;
+  }
+  const char* storageText = firmware ? tr(STR_TRANSFER_INSTALL_LATER) : tr(STR_TRANSFER_SD_CARD);
+  UITheme::drawCenteredText(renderer, safe, UiCjkFont::fontForText(renderer, storageText, SMALL_FONT_ID), y,
+                            storageText);
+  y += step;
+  UITheme::drawCenteredText(renderer, safe,
+                            UiCjkFont::fontForText(renderer, tr(STR_TRANSFER_APP_CONTROLS), SMALL_FONT_ID), y,
+                            tr(STR_TRANSFER_APP_CONTROLS));
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
 void CrossPointWebServerActivity::renderServerRunning() const {

@@ -71,6 +71,9 @@ class CrossPointWebServerActivity final : public Activity {
   // One presentation slot: a card page or the saved Home / Daily Brief.
   PocketDaily::PresentationSlot presentation;
   PocketDaily::Content::ContentSessionInput contentInput;
+  PocketDaily::Web::TransferFeedback transferDisplay{};  // copied under RenderLock
+  unsigned long transferDisplayAt = 0;
+  void renderTransfer() const;
   bool completedDisplayFrame = false;  // accessed only under RenderLock
 
   // Server status

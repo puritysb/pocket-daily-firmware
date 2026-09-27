@@ -55,6 +55,7 @@ class SyncRoutesTest(unittest.TestCase):
         paths = re.findall(r'routes.on\("([^"]+)"', body)
         self.assertIn("/api/pocket/v1/content/present", paths)
         self.assertIn("/api/pocket/v1/commit", paths)
+        self.assertIn("/api/pocket/v1/transfer", paths)
         host = (root / "src/network/CrossPointWebServer.cpp").read_text()
         self.assertIn("if (PocketDaily::Web::dispatchPocketRoute(*server, pocketRoutes)) return;", host)
 

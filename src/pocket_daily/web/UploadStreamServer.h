@@ -11,6 +11,7 @@
 
 #include "pocket_daily/upload_stream_protocol.h"
 #include "pocket_daily/web/Host.h"
+#include "pocket_daily/web/TransferFeedback.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include "pocket_daily/web/TransferMetrics.h"
 #endif
@@ -65,6 +66,15 @@ class UploadStreamServer final {
 #ifdef ENABLE_DEV_REMOTE_FLASH
   const TransferMetrics& metrics() const { return metrics_; }
 #endif
+
+  const TransferFeedback& feedback() const { return feedback_; }
+  void prepareFeedback(const String& path, TransferKind kind);
+  bool discardStaging(const String& path, TransferKind kind);
+  void noteCommitted(bool firmware);
+  void noteCommitFailed() {
+    if (feedback_.phase == TransferPhase::Verifying) feedback_.phase = TransferPhase::Failed;
+  }
+  void hideFeedback() { feedback_.phase = TransferPhase::Idle; }
 
   const StagedUpload& staged() const { return staged_; }
   // The inherited chunked HTTP /upload path publishes its result here at
@@ -121,6 +131,7 @@ class UploadStreamServer final {
   size_t writeReply(const uint8_t* data, size_t size);
   void closeFile();
 
+  TransferFeedback feedback_{};
   Config config_{};
   const Host* host_ = nullptr;
   std::unique_ptr<NetworkServer> server_ = nullptr;

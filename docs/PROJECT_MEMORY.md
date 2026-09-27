@@ -5,6 +5,12 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-27 Transfer control: capability `transferControl: 1`, UUID-only
+  temporary-file prepare/discard, and on-reader content/firmware progress.
+  Published books and staged installation are untouched by temporary cleanup.
+  Contract: docs/transfer-control-v1.md. Combined host 441, route 11, strict
+  cppcheck 2.11 and default build pass. X3/X4 cancellation/heap acceptance
+  remains open; Sync CJK header loading still needs a physical memory check.
 - 2026-09-27 Articles: Home library lists up to 128 SD articles, tracks reading
   state, resumes EPUBs and confirms individual/read-item deletion. Companion
   originals remain local to the app. Contract: docs/articles-v1.md. Host tests
