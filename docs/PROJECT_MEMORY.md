@@ -5,6 +5,21 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-27 Missing glyphs and large-alphabet layout (host-verified, not on X3).
+  Advance cache is a bounded LRU (768/style, 2,048 for one oversized request,
+  batched 256-miss reads) plus uniform-advance runs for dense large intervals.
+  Host chapter with 1,596 distinct syllables: 10,217→3 SD opens, 21,548→2
+  seeks, byte-identical section output; mixed Hangul/Latin/kanji/bold chapter
+  2,944→6 opens, identical. Invisible codepoints (Default_Ignorable, skin tones)
+  have zero width; emoji clusters draw once; uncovered glyphs come from
+  `/.fonts/PocketSymbols/PocketSymbols_12.cpfont` (Noto Emoji/Symbols 2/Math,
+  OFL 1.1, assets/fonts/PocketSymbols) or a dotted mark. section.bin v131, TXT
+  cache v4 (font key includes the fallback identity). Host 467 tests, default
+  build; `pio check` passed mid-change, final re-run blocked by the cppcheck
+  package mirror (manual cppcheck 2.20: no new findings). X3: timing, heap,
+  fallback load and grayscale passes unverified. App should bundle/offer
+  PocketSymbols (docs/sd-card-fonts.md).
+
 - 2026-09-27 Sync SD management: `readerFiles: 1`, optional `totalHeap`,
   identity-checked paginated folder listing, reading-file deletion and bounded
   FAT16/FAT32 usage scans. System paths/firmware protected; other formats report
@@ -23,10 +38,8 @@ transcript. Current source and release records override dated observations.
   (UiCjkFont reuse → prewarmSdCardFont) replaced the page glyph cache
   mid-page, so each of the 14 X3 grayscale strip passes reloaded every glyph
   from SD (~450 opens/pass). FontCacheManager now pins the page glyph set
-  (gfx_host SdFontPageCache test). Emoji: 👩/🏽/💻 are absent from the font and
-  draw as U+FFFD (ZWJ is zero-width). Open: >768 unique codepoints overflow
-  the advance cache, so layout falls back to per-glyph SD loads (host: 10k
-  opens for 1,600 syllables). Not yet verified on X3.
+  (gfx_host SdFontPageCache test). Emoji and the advance-cache overflow are
+  addressed by the 2026-09-27 missing-glyph entry above. Not yet verified on X3.
   App Apply persisted sideButtonLayout=1 (fontSize=3, rotation-follow=0), also
   retained after reboot. Physical direction/resume acceptance remains separate.
 - 2026-09-27 Transfer control: capability `transferControl: 1`, UUID-only

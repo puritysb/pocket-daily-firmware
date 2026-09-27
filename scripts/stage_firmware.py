@@ -28,6 +28,11 @@ STAGING_DIR_NAME = "firmware"
 MAX_VERSIONED_COPIES = 5
 LEARNING_PACK_RELATIVE = os.path.join("pocket-daily", "learning", "jp-n3-ko.pdl")
 WORLD_FONT_RELATIVE = os.path.join(".fonts", "PocketSansWorld", "PocketSansWorld_12.cpfont")
+# Glyph-fallback font (emoji and symbols) with its license files; see
+# assets/fonts/PocketSymbols/README.md.
+SYMBOLS_FONT_DIR_RELATIVE = os.path.join(".fonts", "PocketSymbols")
+SYMBOLS_FONT_FILES = ("PocketSymbols_12.cpfont", "NotoEmoji-OFL.txt", "NotoSansSymbols2-OFL.txt",
+                      "NotoSansMath-OFL.txt")
 
 
 def _run_git(project_dir, args):
@@ -83,7 +88,7 @@ def prune_versioned_copies(staging_dir, prefix):
 
 
 def write_manifest(manifest_path, base_version, env_name, branch, sha, date_str, file_size, versioned_name,
-                   learning_pack_size, world_font_size):
+                   learning_pack_size, world_font_size, symbols_font_size):
     lines = [
         "Pocket Daily Firmware Staging",
         "=============================",
@@ -97,6 +102,7 @@ def write_manifest(manifest_path, base_version, env_name, branch, sha, date_str,
         f"File:         {versioned_name}",
         f"Learning:     jp-n3-ko.pdl ({learning_pack_size:,} bytes)",
         f"World font:   PocketSansWorld_12.cpfont ({world_font_size:,} bytes)",
+        f"Symbols font: PocketSymbols_12.cpfont ({symbols_font_size:,} bytes, glyph fallback)",
         "",
         "Installation (SD card)",
         "----------------------",
@@ -161,11 +167,20 @@ def stage(source, target, env):
     os.makedirs(os.path.dirname(world_font_output), exist_ok=True)
     shutil.copy2(world_font_source, world_font_output)
     world_font_size = os.path.getsize(world_font_output)
+    symbols_source_dir = os.path.join(project_dir, "assets", "fonts", "PocketSymbols")
+    symbols_output_dir = os.path.join(staging_dir, "sd-card", SYMBOLS_FONT_DIR_RELATIVE)
+    os.makedirs(symbols_output_dir, exist_ok=True)
+    for name in SYMBOLS_FONT_FILES:
+        source_path = os.path.join(symbols_source_dir, name)
+        if not os.path.isfile(source_path):
+            raise FileNotFoundError(f"glyph-fallback font file is missing: {source_path}")
+        shutil.copy2(source_path, os.path.join(symbols_output_dir, name))
+    symbols_font_size = os.path.getsize(os.path.join(symbols_output_dir, SYMBOLS_FONT_FILES[0]))
 
     file_size = os.path.getsize(update_path)
     manifest_path = os.path.join(staging_dir, "LATEST_BUILD.txt")
     write_manifest(manifest_path, base_version, env_name, branch, sha, date_str, file_size, versioned_name,
-                   learning_pack_size, world_font_size)
+                   learning_pack_size, world_font_size, symbols_font_size)
 
     extra_dir = get_custom_staging_dir(env)
     extra_msg = ""
@@ -181,6 +196,10 @@ def stage(source, target, env):
             mounted_font = os.path.join(extra_dir, WORLD_FONT_RELATIVE)
             os.makedirs(os.path.dirname(mounted_font), exist_ok=True)
             shutil.copy2(world_font_output, mounted_font)
+            mounted_symbols = os.path.join(extra_dir, SYMBOLS_FONT_DIR_RELATIVE)
+            os.makedirs(mounted_symbols, exist_ok=True)
+            for name in SYMBOLS_FONT_FILES:
+                shutil.copy2(os.path.join(symbols_output_dir, name), os.path.join(mounted_symbols, name))
             extra_msg = f"\n  → also copied to {extra_dir}/"
         except OSError as e:
             print(f"stage_firmware: could not copy to {extra_dir}: {e}", file=sys.stderr)
@@ -189,6 +208,7 @@ def stage(source, target, env):
     print(f"  update.bin ({file_size:,} bytes){extra_msg}")
     print(f"  sd-card/{LEARNING_PACK_RELATIVE} ({learning_pack_size:,} bytes)")
     print(f"  sd-card/{WORLD_FONT_RELATIVE} ({world_font_size:,} bytes)")
+    print(f"  sd-card/{SYMBOLS_FONT_DIR_RELATIVE}/{SYMBOLS_FONT_FILES[0]} ({symbols_font_size:,} bytes)")
     print(f"  {versioned_name}")
 
 
