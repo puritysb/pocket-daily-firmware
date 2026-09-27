@@ -78,6 +78,12 @@ class GfxRenderer {
   mutable int _stripRows = 0;
   mutable bool _stripActive = false;
 
+  // Ink row tracking (see beginInkRows): physical rows of the glyph and line
+  // boxes drawn outside strip mode. Mutable for the same reason as the strip target.
+  mutable bool _inkTracking = false;
+  mutable int _inkMinRow = 0;
+  mutable int _inkMaxRow = -1;
+
   // Optional glyph-fallback font supplied by the SD font system (see
   // setFallbackFontProvider). Called, not cached, so the owner may unload it.
   FallbackFontProviderFn fallbackProvider_ = nullptr;
@@ -216,6 +222,26 @@ class GfxRenderer {
   // Corners are rotated to physical, so it is orientation-aware.
   bool glyphIntersectsStrip(int x0, int y0, int x1, int y1) const;
 
+  // Ink row tracking for tiled-grayscale culling. Between beginInkRows() and
+  // endInkRows(), the box of every glyph, missing-glyph mark and line drawn
+  // outside strip mode widens a physical row range (a superset of the rows
+  // their pixels touch); endInkRows() returns it (false when nothing was
+  // drawn). Raw writers (DirectPixelWriter, fillRect, single drawPixel calls)
+  // are not tracked, so only use it around text drawing.
+  void beginInkRows() const {
+    _inkTracking = true;
+    _inkMinRow = panelHeight;
+    _inkMaxRow = -1;
+  }
+  // Widens the tracked rows by a logical box (no-op unless tracking outside strips).
+  void noteInk(int x0, int y0, int x1, int y1) const;
+  bool endInkRows(int* minRow, int* maxRow) const {
+    _inkTracking = false;
+    *minRow = _inkMinRow;
+    *maxRow = _inkMaxRow;
+    return _inkMaxRow >= _inkMinRow;
+  }
+
   // Active pixel-write target for raw writers (DirectPixelWriter) that bypass
   // drawPixel for speed. When a strip target is active these return the band
   // scratch plus its physical-row origin and extent; otherwise the full
@@ -227,6 +253,11 @@ class GfxRenderer {
 
   // Drawing
   void drawPixel(int x, int y, bool state = true) const;
+  // One glyph bitmap (packed 1-bit, or 2-bit where `mode` picks the levels drawn) with its
+  // top-left pixel at logical (x0, y0): the same pixels, clip and strip redirection as
+  // drawPixel() per pixel, with the orientation transform hoisted out of the loop.
+  void blitGlyph(const uint8_t* bitmap, bool is2Bit, int width, int height, int x0, int y0, RenderMode mode,
+                 bool pixelState) const;
   void drawLine(int x1, int y1, int x2, int y2, bool state = true) const;
   void drawLine(int x1, int y1, int x2, int y2, int lineWidth, bool state) const;
   void drawArc(int maxRadius, int cx, int cy, int xDir, int yDir, int lineWidth, bool state) const;

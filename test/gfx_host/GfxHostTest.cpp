@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <vector>
 
 #include "pocket_daily/ContentCard.h"
 #include "pocket_daily/ContentPageRenderer.h"
@@ -134,4 +135,62 @@ TEST_F(ContentPageHost, ImageCallbackIsBoundedAndFailuresCannotBecomeSuccessfulP
   EXPECT_EQ(calls, 1U);
   EXPECT_EQ(panel.presentations, 0U);
   EXPECT_TRUE(panel.guardsIntact());
+}
+
+// Tiled grayscale culls a text line from strips its BW ink rows miss
+// (ReaderPageRenderer). That is exact only if every pixel a grayscale pass
+// draws lies on a row the BW pass drew: check it for 2-bit anti-aliased glyphs
+// (black, both grays, a glyph taller than the ascender) in all four orientations.
+TEST(GfxHostInkRows, GrayscalePassesStayWithinTheBwInkRows) {
+  // 8x8 2-bit glyphs (16 B each): rows cycle through white, light, dark, black.
+  uint8_t bitmap[2 * 16];
+  for (size_t i = 0; i < sizeof(bitmap); ++i) bitmap[i] = static_cast<uint8_t>(0x1B + i * 37);
+  EpdGlyph glyphs[2] = {{8, 8, 144, 0, 6, 16, 0}, {8, 8, 144, -1, 11, 16, 16}};  // 'A', 'B' (top 11 > ascender)
+  EpdUnicodeInterval interval{'A', 'B', 0};
+  EpdFontData data{};
+  data.bitmap = bitmap;
+  data.glyph = glyphs;
+  data.intervals = &interval;
+  data.intervalCount = 1;
+  data.advanceY = 12;
+  data.ascender = 8;
+  data.is2Bit = true;
+  EpdFont font{&data};
+  const char* text = "ABBAB";
+  for (int o = 0; o < 4; ++o) {
+    HalDisplay panel(792, 528);
+    GfxRenderer renderer(panel);
+    renderer.begin();
+    renderer.insertFont(1, EpdFontFamily(&font));
+    renderer.setOrientation(static_cast<GfxRenderer::Orientation>(o));
+    renderer.beginInkRows();
+    renderer.drawText(1, 30, 100, text);
+    int first = 0, last = -1;
+    ASSERT_TRUE(renderer.endInkRows(&first, &last)) << o;
+    int grayRows = 0;
+    std::vector<uint8_t> strip(static_cast<size_t>(renderer.getDisplayWidthBytes()) * 4);
+    for (const auto mode : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
+      renderer.setRenderMode(mode);
+      for (int y = 0; y < renderer.getDisplayHeight(); y += 4) {
+        renderer.beginStripTarget(strip.data(), y, 4);
+        renderer.clearScreen(0x00);
+        renderer.drawText(1, 30, 100, text);
+        renderer.endStripTarget();
+        const bool touched = std::any_of(strip.begin(), strip.end(), [](uint8_t b) { return b != 0; });
+        if (touched) ++grayRows;
+        if (y + 3 < first || y > last) EXPECT_FALSE(touched) << "orientation " << o << " strip " << y;
+      }
+    }
+    EXPECT_GT(grayRows, 0) << "fixture must draw gray pixels";
+    renderer.setRenderMode(GfxRenderer::BW);
+    // Tracking stopped at endInkRows: later drawing does not widen the range,
+    // and a new tracking window that draws nothing reports no ink.
+    renderer.drawText(1, 30, 300, "A");
+    int again = 0, againLast = -1;
+    renderer.endInkRows(&again, &againLast);
+    EXPECT_EQ(again, first);
+    EXPECT_EQ(againLast, last);
+    renderer.beginInkRows();
+    EXPECT_FALSE(renderer.endInkRows(&again, &againLast));
+  }
 }

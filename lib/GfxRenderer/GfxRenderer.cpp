@@ -335,6 +335,7 @@ static void renderCharScaled(const GfxRenderer& renderer, const GfxRenderer::Gly
   // pixel offset from the (already-shifted) cursor position.
   const int baseX = cursorX + glyph->left / 2;
   const int baseY = cursorY - glyph->top / 2;
+  renderer.noteInk(baseX, baseY, baseX + dstW - 1, baseY + dstH - 1);
 
   if (fontData->is2Bit) {
     // 2-bit packed format: 4 pixels per byte, MSB first, 2 bits per pixel.
@@ -415,6 +416,14 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   }
 
   const uint8_t* bitmap = renderer.getGlyphBitmap(fontData, glyph);
+
+  if constexpr (rotation == TextRotation::None) {
+    // Page text: same pixels as the per-pixel loop below, transform hoisted out.
+    if (bitmap != nullptr) {
+      renderer.blitGlyph(bitmap, is2Bit, width, height, cursorX + left, cursorY - top, renderMode, pixelState);
+    }
+    return;
+  }
 
   if (bitmap != nullptr) {
     // For Normal:  outer loop advances screenY, inner loop advances screenX
@@ -505,6 +514,12 @@ static void renderMissingMark(const GfxRenderer& renderer, GfxRenderer::RenderMo
   const int height = std::max(3, std::min(advance, fontData->ascender * 2 / 3));
   const int left = pad;
   const int top = height;  // the box sits on the baseline
+  if constexpr (rotation == TextRotation::Rotated90CW) {
+    renderer.noteInk(cursorX + fontData->ascender - top, cursorY - left - (width - 1),
+                     cursorX + fontData->ascender - top + height - 1, cursorY - left);
+  } else {
+    renderer.noteInk(cursorX + left, cursorY - top, cursorX + left + width - 1, cursorY - top + height - 1);
+  }
   for (int gy = 0; gy < height; gy++) {
     for (int gx = 0; gx < width; gx++) {
       const bool edge = gy == 0 || gy == height - 1 || gx == 0 || gx == width - 1;
@@ -558,6 +573,71 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
   } else {
     target[byteIndex] |= 1 << bitPosition;  // Set bit
   }
+}
+
+void GfxRenderer::blitGlyph(const uint8_t* bitmap, const bool is2Bit, const int width, const int height, const int x0,
+                            const int y0, const RenderMode mode, const bool pixelState) const {
+  // Physical position of the glyph's top-left pixel, and the physical steps for one
+  // pixel right (+x) and one pixel down (+y) in logical space (see rotateCoordinates).
+  int rowX = 0, rowY = 0;
+  rotateCoordinates(orientation, x0, y0, &rowX, &rowY, panelWidth, panelHeight);
+  int stepXx = 1, stepXy = 0, stepYx = 0, stepYy = 1;  // LandscapeCounterClockwise
+  switch (orientation) {
+    case Portrait:
+      stepXx = 0, stepXy = -1, stepYx = 1, stepYy = 0;
+      break;
+    case LandscapeClockwise:
+      stepXx = -1, stepXy = 0, stepYx = 0, stepYy = -1;
+      break;
+    case PortraitInverted:
+      stepXx = 0, stepXy = 1, stepYx = -1, stepYy = 0;
+      break;
+    case LandscapeCounterClockwise:
+      break;
+  }
+  // drawPixel()'s target and clip: the strip scratch band while one is active.
+  uint8_t* const target = _stripActive ? _stripBuf : frameBuffer;
+  const int firstRow = _stripActive ? _stripY0 : 0;
+  const int endRow = _stripActive ? _stripY0 + _stripRows : static_cast<int>(panelHeight);
+  const int panelW = panelWidth;
+  const int panelH = panelHeight;
+  bool outside = false;
+  const auto plot = [&](const int px, const int py, const bool black) {
+    if (px < 0 || px >= panelW || py < 0 || py >= panelH) {
+      outside = true;
+      return;
+    }
+    if (py < firstRow || py >= endRow) return;
+    uint8_t& cell = target[static_cast<uint32_t>(py - firstRow) * panelWidthBytes + (px >> 3)];
+    const uint8_t mask = static_cast<uint8_t>(1U << (7 - (px & 7)));
+    if (black) {
+      cell &= static_cast<uint8_t>(~mask);
+    } else {
+      cell |= mask;
+    }
+  };
+
+  int pixelPosition = 0;
+  for (int gy = 0; gy < height; ++gy, rowX += stepYx, rowY += stepYy) {
+    int px = rowX, py = rowY;
+    for (int gx = 0; gx < width; ++gx, ++pixelPosition, px += stepXx, py += stepXy) {
+      if (!is2Bit) {
+        if ((bitmap[pixelPosition >> 3] >> (7 - (pixelPosition & 7))) & 1) plot(px, py, pixelState);
+        continue;
+      }
+      // Font value 0 white .. 3 black, flipped to 0 black, 1 dark gray, 2 light gray, 3 white
+      // (renderCharImpl). BW paints every non-white pixel; the gray planes flag theirs with 1.
+      const uint8_t bmpVal = 3 - ((bitmap[pixelPosition >> 2] >> ((3 - (pixelPosition & 3)) * 2)) & 0x3);
+      if (mode == BW) {
+        if (bmpVal < 3) plot(px, py, pixelState);
+      } else if (mode == GRAYSCALE_MSB) {
+        if (bmpVal == 1 || bmpVal == 2) plot(px, py, false);
+      } else if (bmpVal == 1) {
+        plot(px, py, false);
+      }
+    }
+  }
+  if (outside) LOG_ERR("GFX", "!! Glyph at (%d, %d) partly outside the panel", x0, y0);
 }
 
 int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontFamily::Style style,
@@ -758,6 +838,7 @@ const char* resolveVisualText(const char* text, std::string& visualBuffer, const
 
 void GfxRenderer::drawLine(int x1, int y1, int x2, int y2, const bool state) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
+  noteInk(std::min(x1, x2), std::min(y1, y2), std::max(x1, x2), std::max(y1, y2));
   if (x1 == x2) {
     if (y2 < y1) {
       std::swap(y1, y2);
@@ -1606,8 +1687,21 @@ void GfxRenderer::endStripTarget() const {
   _stripRows = 0;
 }
 
+void GfxRenderer::noteInk(const int x0, const int y0, const int x1, const int y1) const {
+  if (!_inkTracking || _stripActive) return;
+  int ax, ay, bx, by;
+  rotateCoordinates(orientation, x0, y0, &ax, &ay, panelWidth, panelHeight);
+  rotateCoordinates(orientation, x1, y1, &bx, &by, panelWidth, panelHeight);
+  const int minY = std::max(0, std::min(ay, by));
+  const int maxY = std::min(static_cast<int>(panelHeight) - 1, std::max(ay, by));
+  if (minY < _inkMinRow) _inkMinRow = minY;
+  if (maxY > _inkMaxRow) _inkMaxRow = maxY;
+}
+
 bool GfxRenderer::glyphIntersectsStrip(int x0, int y0, int x1, int y1) const {
   if (!_stripActive) {
+    // Outside strip mode every glyph box is drawn: record it for ink-row tracking.
+    noteInk(x0, y0, x1, y1);
     return true;
   }
   // Rotate the two opposite bbox corners to physical coords. For 90-degree
