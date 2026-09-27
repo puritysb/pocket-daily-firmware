@@ -273,9 +273,17 @@ TEST(ReadingProgressXPointer, FrankensteinAppPositionsResolveExactly) {
 
 // Edge cases of text()[N].offset on synthetic chapters: where the XPointer lands,
 // as the visible text that follows it.
+std::string chapter(const std::string& body) {
+  // The XHTML DOCTYPE makes expat hand HTML named entities (&nbsp;) to the default
+  // handler, as it does for real EPUB chapters.
+  return "<?xml version=\"1.0\"?>\n<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN\" "
+         "\"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">\n"
+         "<html><head><title>T</title><style>p{}</style></head><body>" +
+         body + "</body></html>";
+}
+
 std::string landing(const std::string& body, const std::string& xpointer) {
-  const std::string xhtml =
-      "<?xml version=\"1.0\"?>\n<html><head><title>T</title><style>p{}</style></head><body>" + body + "</body></html>";
+  const std::string xhtml = chapter(body);
   const auto epub = Epub::fromSpine({xhtml});
   const XPathSpineTarget target = ProgressMapper::locateInSpine(epub, 0, xpointer);
   if (!target.found) return "<not found>";
@@ -310,6 +318,25 @@ TEST(ReadingProgressXPointer, MissingOrShortTextNodesLandOnTheElement) {
   // The first step is a child of <body>, not the first match at any depth.
   EXPECT_EQ(landing("<div><p>nested</p></div><p>direct</p>", "/body/DocFragment[1]/body/p/text().0"), "direct");
   EXPECT_EQ(landing("<p>ab</p>", "/body/DocFragment[1]/body/p[4]/text().1"), "<not found>");
+}
+
+// All entities count as their decoded code points on both sides: the five XML
+// entities (&apos; included), numeric references and HTML named entities.
+TEST(ReadingProgressXPointer, EntitiesCountAsDecodedCodepoints) {
+  // i t ' s … ␠ ⍽ x ' y  (⍽ = U+00A0)
+  const std::string body = "<p>it&apos;s&hellip; &nbsp;x&apos;y</p>";
+  EXPECT_EQ(landing(body, "/body/DocFragment[1]/body/p/text().7"), "x'y");
+  EXPECT_EQ(landing(body, "/body/DocFragment[1]/body/p/text().9"), "y");
+  EXPECT_EQ(landing(body, "/body/DocFragment[1]/body/p/text().2"), "'s\xE2\x80\xA6 \xC2\xA0x");
+  EXPECT_EQ(landing("<p>&quot;&lt;&gt;&amp;&#39;&#x2019;z</p>", "/body/DocFragment[1]/body/p/text().6"), "z");
+
+  // Generated offsets count the same decoded code points.
+  const auto epub = Epub::fromSpine({chapter(body)});
+  const std::string byProgress = ChapterXPathResolver::findXPathForProgress(epub, 0, 0.65f);  // 7th of 10
+  EXPECT_EQ(byProgress, "/body/DocFragment[1]/body/p[1]/text()[1].7");
+  const std::string byParagraph = ChapterXPathResolver::findXPathForParagraphProgress(epub, 0, 1, 0.75f);
+  EXPECT_EQ(byParagraph, "/body/DocFragment[1]/body/p[1]/text()[1].7");
+  EXPECT_EQ(landing(body, byProgress), "x'y");
 }
 
 // One firmware-generated position, re-resolved by the firmware's own reader side.

@@ -109,8 +109,10 @@ without a LUT falls back to a fraction of the chapter's paragraph text.
   including U+00A0, U+2000–200A, U+3000, U+FEFF). Text inside child elements
   belongs to those children.
 - The offset counts Unicode code points from the start of that run (leading
-  whitespace included) after entity decoding (named and numeric) and XML
-  line-end normalization (CRLF/CR → LF).
+  whitespace included) after XML line-end normalization (CRLF/CR → LF) and
+  entity decoding: each of the five XML entities (`&apos;` included), a numeric
+  reference, or an HTML named entity known to `lib/Epub/Epub/htmlEntities`
+  (`&nbsp;`, `&hellip;`, …) is one decoded character, as in the app's DOM.
 - An offset past the run's end clamps to it; a missing text node lands on the
   element's start; a missing element is unresolved (percentage fallback).
 - KOReader keeps some whitespace-only inline text nodes this rule skips (for

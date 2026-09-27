@@ -13,6 +13,8 @@
 #include <utility>
 #include <vector>
 
+#include "Epub/htmlEntities.h"
+
 namespace {
 std::string stripPrefix(const XML_Char* name) {
   if (!name) {
@@ -61,6 +63,15 @@ std::string buildParagraphXPath(const int spineIndex, const std::vector<PathSegm
   return xpath;
 }
 
+// expat expands the five XML entities and numeric references itself; HTML named
+// entities (e.g. &nbsp; under an XHTML DOCTYPE) reach the default handler
+// unexpanded. Those count as their decoded text, as in the reader's layout
+// (ChapterHtmlSlimParser::defaultHandlerExpand), ProgressMapper and the app's DOM.
+const char* htmlEntityText(const XML_Char* s, const int len) {
+  if (!s || len < 3 || s[0] != '&' || s[len - 1] != ';') return nullptr;
+  return lookupHtmlEntity(s, static_cast<size_t>(len));
+}
+
 // ECMAScript \s: the class KOReader-compatible readers (and the companion app) use to
 // skip whitespace-only text nodes when numbering text()[N].
 bool isTextWhitespace(const uint32_t cp) {
@@ -96,6 +107,7 @@ class ParagraphTextCounter final : public Print {
     XML_SetUserData(parser, this);
     XML_SetElementHandler(parser, &ParagraphTextCounter::startElement, &ParagraphTextCounter::endElement);
     XML_SetCharacterDataHandler(parser, &ParagraphTextCounter::characterData);
+    XML_SetDefaultHandlerExpand(parser, &ParagraphTextCounter::entityData);
   }
 
   ~ParagraphTextCounter() override { destroyXmlParser(parser); }
@@ -143,6 +155,10 @@ class ParagraphTextCounter final : public Print {
   static void XMLCALL endElement(void* userData, const XML_Char* name) {
     auto* self = static_cast<ParagraphTextCounter*>(userData);
     self->onEndElement(name);
+  }
+
+  static void XMLCALL entityData(void* userData, const XML_Char* s, const int len) {
+    if (const char* text = htmlEntityText(s, len)) characterData(userData, text, static_cast<int>(strlen(text)));
   }
 
   static void XMLCALL characterData(void* userData, const XML_Char* data, const int len) {
@@ -348,6 +364,7 @@ class XPathProgressResolver final : public Print {
     XML_SetUserData(parser, this);
     XML_SetElementHandler(parser, &XPathProgressResolver::startElement, &XPathProgressResolver::endElement);
     XML_SetCharacterDataHandler(parser, &XPathProgressResolver::characterData);
+    XML_SetDefaultHandlerExpand(parser, &XPathProgressResolver::entityData);
   }
 
   ~XPathProgressResolver() override { destroyXmlParser(parser); }
@@ -398,6 +415,10 @@ class XPathProgressResolver final : public Print {
   static void XMLCALL endElement(void* userData, const XML_Char* name) {
     auto* self = static_cast<XPathProgressResolver*>(userData);
     self->onEndElement(name);
+  }
+
+  static void XMLCALL entityData(void* userData, const XML_Char* s, const int len) {
+    if (const char* text = htmlEntityText(s, len)) characterData(userData, text, static_cast<int>(strlen(text)));
   }
 
   static void XMLCALL characterData(void* userData, const XML_Char* data, const int len) {
@@ -556,6 +577,7 @@ class ParagraphSpanCounter final : public Print {
     XML_SetUserData(parser, this);
     XML_SetElementHandler(parser, &ParagraphSpanCounter::startElement, &ParagraphSpanCounter::endElement);
     XML_SetCharacterDataHandler(parser, &ParagraphSpanCounter::characterData);
+    XML_SetDefaultHandlerExpand(parser, &ParagraphSpanCounter::entityData);
   }
 
   ~ParagraphSpanCounter() override { destroyXmlParser(parser); }
@@ -599,6 +621,10 @@ class ParagraphSpanCounter final : public Print {
 
   static void XMLCALL endElement(void* userData, const XML_Char* name) {
     static_cast<ParagraphSpanCounter*>(userData)->onEndElement(name);
+  }
+
+  static void XMLCALL entityData(void* userData, const XML_Char* s, const int len) {
+    if (const char* text = htmlEntityText(s, len)) characterData(userData, text, static_cast<int>(strlen(text)));
   }
 
   static void XMLCALL characterData(void* userData, const XML_Char* data, const int len) {

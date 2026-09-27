@@ -11,10 +11,11 @@ transcript. Current source and release records override dated observations.
   reader computes the XPointer on book exit from the paragraph LUT (+ fraction
   into long paragraphs), streaming the cached `html/<spine>.html`; asks
   "<device>: N% · Go there?" on the next open. KOReader resolver now numbers
-  only non-whitespace direct text runs, decodes numeric entities/CRLF, parses
+  only non-whitespace direct text runs, decodes all entities (`&apos;`,
+  numeric, HTML named; app check found `&apos;` counted as 6) and CRLF, parses
   element-only paths, and `findXPathForParagraph` counts `<p>` only (matches the
   LUT). Host: app XPointers 15/15 + 114/114 exact; firmware XPointers in
-  test/reading_progress/fixtures/firmware-xpointers.json. Host 482, scripts 67,
+  test/reading_progress/fixtures/firmware-xpointers.json (app had 255/258 before the `&apos;` fix; rerun pending). Host 483, scripts 67,
   default build (+18.9 KB flash, +0 static RAM). Not on X3/X4: exit latency,
   heap, LAN/private-AP exchange with the app, prompt on both layouts.
 

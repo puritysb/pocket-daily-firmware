@@ -17,7 +17,7 @@
           "method": "progress",
           "fraction": 0.7,
           "xpointer": "/body/DocFragment[1]/body/p[3]/text()[1].12",
-          "textAt": " &apos; 는 본문"
+          "textAt": " ' 는 본문 그대로 "
         },
         {
           "sectionIndex": 0,
@@ -33,7 +33,7 @@
           "paragraph": 3,
           "fraction": 0.1,
           "xpointer": "/body/DocFragment[1]/body/p[3]/text()[1].4",
-          "textAt": " < > & \" &ap"
+          "textAt": " < > & \" ' 는"
         },
         {
           "sectionIndex": 0,
@@ -41,7 +41,7 @@
           "paragraph": 3,
           "fraction": 0.5,
           "xpointer": "/body/DocFragment[1]/body/p[3]/text()[1].21",
-          "textAt": " 본문 그대로 표시되어"
+          "textAt": "대로 표시되어야 합니다"
         },
         {
           "sectionIndex": 0,
