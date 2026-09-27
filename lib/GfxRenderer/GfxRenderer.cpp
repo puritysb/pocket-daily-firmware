@@ -1898,7 +1898,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
   // where kern/lig data was not loaded.
   auto sdIt = sdCardFonts_.find(fontId);
   if (sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
-    SdCardFont& sdFont = *sdIt->second;
+    const SdCardFont& sdFont = *sdIt->second;
     int32_t widthFP = 0;
     const uint8_t styleIdx = resolveSdCardStyle(sdFont, style);
     while (uint32_t cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text))) {

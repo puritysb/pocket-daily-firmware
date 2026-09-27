@@ -1043,13 +1043,15 @@ void SdCardFont::clearPersistentCache() {
 }
 
 uint16_t SdCardFont::beginAdvanceRequest() {
-  if (++advanceGeneration_ == 0) {
-    // Generation counter wrapped: age every entry equally so the modular age
-    // comparison below stays meaningful. Only eviction order is affected.
+  if (advanceGeneration_ == UINT16_MAX) {
+    // Generation counter would wrap: age every entry equally so the modular
+    // age comparison below stays meaningful. Only eviction order is affected.
     for (auto& table : advance_) {
       for (uint32_t i = 0; i < table.size; i++) table.entries[i].lastUse = 0;
     }
     advanceGeneration_ = 1;
+  } else {
+    advanceGeneration_++;
   }
   return advanceGeneration_;
 }
@@ -1128,7 +1130,7 @@ uint32_t SdCardFont::evictStaleAdvances(uint8_t styleIdx, uint32_t count, uint16
 // only a request whose own working set exceeds the limit grows the table
 // further, up to ADVANCE_REQUEST_LIMIT.
 uint32_t SdCardFont::reserveAdvanceSlots(uint8_t styleIdx, uint32_t needed, uint16_t generation) {
-  AdvanceTable& table = advance_[styleIdx];
+  const AdvanceTable& table = advance_[styleIdx];  // grown/evicted through the helpers below
   const uint32_t target = table.size + needed;
   if (target > table.capacity && table.capacity < ADVANCE_CACHE_LIMIT) {
     uint32_t grown = table.capacity ? table.capacity * 2 : ADVANCE_INITIAL_CAPACITY;
@@ -1210,7 +1212,7 @@ const SdCardFont::AdvanceRun* SdCardFont::findUniformAdvance(uint8_t styleIdx, u
   return nullptr;
 }
 
-bool SdCardFont::intervalAt(const PerStyle& s, uint32_t index, EpdUnicodeInterval* out) const {
+bool SdCardFont::intervalAt(const PerStyle& s, uint32_t index, EpdUnicodeInterval* out) {
   if (index >= s.header.intervalCount) return false;
   if (s.intervalsAreBmp16 && s.bmpIntervals) {
     *out = {s.bmpIntervals[index].first, s.bmpIntervals[index].last, s.bmpIntervals[index].offset};
@@ -1223,7 +1225,7 @@ bool SdCardFont::intervalAt(const PerStyle& s, uint32_t index, EpdUnicodeInterva
   return false;  // BoundedUI keeps intervals on SD
 }
 
-int32_t SdCardFont::findIntervalIndex(const PerStyle& s, uint32_t codepoint) const {
+int32_t SdCardFont::findIntervalIndex(const PerStyle& s, uint32_t codepoint) {
   int left = 0;
   int right = static_cast<int>(s.header.intervalCount) - 1;
   EpdUnicodeInterval interval{};

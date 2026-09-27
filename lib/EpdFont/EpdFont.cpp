@@ -25,9 +25,8 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&string)))) {
     if (utf8IsInvisible(cp)) continue;  // zero width, never drawn (see GfxRenderer::drawText)
     const bool isCombining = utf8IsCombiningMark(cp);
-    if (!isCombining) utf8SkipEmojiClusterTail(reinterpret_cast<const unsigned char**>(&string), cp);
-
     if (!isCombining) {
+      utf8SkipEmojiClusterTail(reinterpret_cast<const unsigned char**>(&string), cp);
       cp = applyLigatures(cp, string);
     }
 

@@ -299,8 +299,8 @@ class SdCardFont {
   UniformAdvances* uniform_[MAX_STYLES] = {};
   const AdvanceRun* findUniformAdvance(uint8_t styleIdx, uint32_t codepoint) const;
   // Cached mode only: index of the interval containing codepoint, or -1.
-  int32_t findIntervalIndex(const PerStyle& s, uint32_t codepoint) const;
-  bool intervalAt(const PerStyle& s, uint32_t index, EpdUnicodeInterval* out) const;
+  static int32_t findIntervalIndex(const PerStyle& s, uint32_t codepoint);
+  static bool intervalAt(const PerStyle& s, uint32_t index, EpdUnicodeInterval* out);
   struct AdvanceRequest;
   friend struct AdvanceRequest;
   uint16_t beginAdvanceRequest();
