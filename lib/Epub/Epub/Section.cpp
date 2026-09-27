@@ -5,6 +5,7 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <Serialization.h>
+#include <ZipFile.h>
 
 #include "Epub/css/CssParser.h"
 #include "Page.h"
@@ -263,6 +264,8 @@ bool Section::startBuild(const int fontId, const float lineCompression, const bo
     LOG_ERR("SCT", "startBuild called while a build is already active");
     return false;
   }
+  failedStep_ = BuildStep::None;
+  failedDetail_ = 0;
   buildComplete_ = false;
   builtPageCount_ = 0;
   // Pages from a loaded partial stay readable (from filePath) while this build writes
@@ -304,6 +307,8 @@ bool Section::startBuild(const int fontId, const float lineCompression, const bo
     // Retry logic for SD card timing issues
     bool streamed = false;
     uint32_t fileSize = 0;
+    // Open failures of the temp file are reported as a write error.
+    ZipFile::StreamError streamError = ZipFile::StreamError::Write;
     for (int attempt = 0; attempt < 3 && !streamed; attempt++) {
       if (attempt > 0) {
         LOG_DBG("SCT", "Retrying stream (attempt %d)...", attempt + 1);
@@ -323,6 +328,7 @@ bool Section::startBuild(const int fontId, const float lineCompression, const bo
       // single-spine novel into ~570 tiny writes (multi-second). 8KB keeps the transient buffers
       // small while cutting the write count 8x.
       streamed = epub->readItemContentsToStream(localPath, tmpHtml, 8192);
+      streamError = ZipFile::lastStreamError();
       fileSize = tmpHtml.size();
       // Explicitly close() file before calling Storage.remove()
       tmpHtml.close();
@@ -335,8 +341,9 @@ bool Section::startBuild(const int fontId, const float lineCompression, const bo
     }
 
     if (!streamed) {
-      LOG_ERR("SCT", "Failed to stream item contents to temp file after retries");
-      return false;
+      LOG_ERR("SCT", "Failed to stream item contents to temp file after retries (zip error %u)",
+              static_cast<unsigned>(streamError));
+      return buildFailed(BuildStep::HtmlStream, static_cast<uint8_t>(streamError));
     }
 
     LOG_DBG("SCT", "Streamed temp HTML to %s (%d bytes)", tmpHtmlPath.c_str(), fileSize);
@@ -353,7 +360,7 @@ bool Section::startBuild(const int fontId, const float lineCompression, const bo
 
   if (!Storage.openFileForWrite("SCT", binTmpPath(), file)) {
     if (!reusedHtml) Storage.remove(tmpHtmlPath.c_str());
-    return false;
+    return buildFailed(BuildStep::SectionFile);
   }
   // Header is written with the incomplete-version sentinel; finalizeBuild() commits it.
   writeSectionFileHeader(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
@@ -366,7 +373,7 @@ bool Section::startBuild(const int fontId, const float lineCompression, const bo
     file.close();
     Storage.remove(binTmpPath().c_str());
     if (!reusedHtml) Storage.remove(tmpHtmlPath.c_str());
-    return false;
+    return buildFailed(BuildStep::BuildContext);
   }
   // htmlCached == "htmlPath is the live cache" (reused, or just promoted). finalizeBuild/abandonBuild
   // then leave the cached HTML alone; only an un-promoted temp (rename failed) is theirs to clean up.
@@ -420,7 +427,7 @@ bool Section::startBuild(const int fontId, const float lineCompression, const bo
     file.close();
     Storage.remove(binTmpPath().c_str());
     if (!reusedHtml) Storage.remove(tmpHtmlPath.c_str());
-    return false;
+    return buildFailed(BuildStep::Parser);
   }
 
   Hyphenator::setPreferredLanguage(epub->getLanguage());
@@ -429,7 +436,7 @@ bool Section::startBuild(const int fontId, const float lineCompression, const bo
   if (!build_->parser->beginParse()) {
     LOG_ERR("SCT", "Failed to begin parse");
     abandonBuild();
-    return false;
+    return buildFailed(BuildStep::BeginParse);
   }
   build_->totalBytes = build_->parser->parseTotalBytes();
   return true;
@@ -438,7 +445,7 @@ bool Section::startBuild(const int fontId, const float lineCompression, const bo
 bool Section::buildSomeMore(const int maxPages) {
   if (!build_ || !build_->parser) {
     LOG_ERR("SCT", "buildSomeMore with no active build");
-    return false;
+    return buildFailed(BuildStep::Layout);
   }
   // Pace on pages laid out by THIS build, not pageCount: during a rebuild over a partial,
   // pageCount stays pinned at the partial's watermark until the build passes it, which
@@ -448,8 +455,9 @@ bool Section::buildSomeMore(const int maxPages) {
     const auto status = build_->parser->parseStep();
     if (status == ChapterHtmlSlimParser::ParseStatus::Error) {
       LOG_ERR("SCT", "Parse error during incremental build");
+      const uint8_t outOfMemory = build_->parser->hitOutOfMemory() ? 1 : 0;
       abandonBuild();
-      return false;
+      return buildFailed(BuildStep::Layout, outOfMemory);
     }
     if (status == ChapterHtmlSlimParser::ParseStatus::Done) {
       return finalizeBuild();
@@ -634,7 +642,7 @@ bool Section::finalizeBuild() {
   if (!build_->parser->finishParse()) {
     LOG_ERR("SCT", "Layout failed while finalizing; abandoning build");
     abandonBuild();
-    return false;
+    return buildFailed(BuildStep::Layout, 1);  // finishParse fails only on layout OOM
   }
 
   if (!build_->reusedHtml) {
@@ -655,7 +663,7 @@ bool Section::finalizeBuild() {
     partialPageCount_ = 0;
     pageCount = 0;
     builtPageCount_ = 0;
-    return false;
+    return buildFailed(BuildStep::Commit);
   }
   buildComplete_ = true;
   partial_ = false;

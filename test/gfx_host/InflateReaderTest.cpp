@@ -55,7 +55,7 @@ struct StreamCtx {
   InflateReader reader;
   const Bytes* input = nullptr;
   size_t offset = 0;
-  uint8_t buffer[97];
+  uint8_t buffer[97] = {};
 };
 
 int feed(uzlib_uncomp* uncomp) {
@@ -88,6 +88,8 @@ TEST(InflateReaderStreaming, FarBackReferencesDecodeAcrossSegmentsAndWrap) {
   ASSERT_LT(compressed.size(), original.size());
 
   StreamCtx ctx;
+  // Read by feed() through the uzlib struct cast, which cppcheck cannot follow.
+  // cppcheck-suppress unreadVariable
   ctx.input = &compressed;
   ASSERT_TRUE(ctx.reader.init(true));
   ctx.reader.setReadCallback(feed);

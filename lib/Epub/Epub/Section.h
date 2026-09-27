@@ -80,6 +80,20 @@ class Section {
   std::unique_ptr<Page> loadPageDuringBuild(int page);
 
  public:
+  // Where the most recent failed build of this section stopped (diagnostics).
+  enum class BuildStep : uint8_t {
+    None = 0,
+    HtmlStream,    // inflating the chapter into html/<spine>.html (detail: ZipFile::StreamError)
+    SectionFile,   // opening sections/<spine>.bin.part for writing
+    BuildContext,  // OOM: build state
+    Parser,        // OOM: chapter parser
+    BeginParse,    // opening the cached/temp HTML or starting expat
+    Layout,        // parse or layout error while building pages (detail 1: layout ran out of heap)
+    Commit,        // writing the LUTs or moving the section file into place
+  };
+  BuildStep lastBuildFailure() const { return failedStep_; }
+  uint8_t lastBuildFailureDetail() const { return failedDetail_; }
+
   uint16_t pageCount = 0;
   int currentPage = 0;
   // True when this chapter contains no bilingual role markers, i.e. it renders identically
@@ -186,4 +200,13 @@ class Section {
   // way in a single file read. False when the LUT is missing (e.g. a partial build).
   bool getParagraphRunForPage(uint16_t page, uint16_t& paragraph, uint16_t& first, uint16_t& last,
                               uint16_t maxSpan = 64) const;
+
+ private:
+  BuildStep failedStep_ = BuildStep::None;
+  uint8_t failedDetail_ = 0;
+  bool buildFailed(BuildStep step, uint8_t detail = 0) {
+    failedStep_ = step;
+    failedDetail_ = detail;
+    return false;
+  }
 };

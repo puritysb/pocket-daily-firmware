@@ -71,6 +71,30 @@ class ZipFile {
   uint8_t* readFileToMemory(const char* filename, size_t* size = nullptr, bool trailingNullByte = false);
   bool readFileToStream(const char* filename, Print& out, size_t chunkSize);
 
+  // Why the most recent readFileToStream() on any ZipFile failed (None after a success).
+  // Diagnostics only: shared by every instance, so read it right after the call.
+  enum class StreamError : uint8_t {
+    None = 0,
+    Open,          // zip could not be opened
+    Entry,         // entry missing or its local header unreadable
+    ReadBuffer,    // OOM: compressed read buffer
+    OutputBuffer,  // OOM: inflated output buffer
+    Window,        // OOM: deflate window segments
+    Inflate,       // corrupt deflate data or size mismatch
+    Read,          // SD read returned no data
+    Write,         // destination accepted fewer bytes
+    Method,        // unsupported compression method
+  };
+  static StreamError lastStreamError() { return lastStreamError_; }
+
+ private:
+  inline static StreamError lastStreamError_ = StreamError::None;
+  static bool streamFailed(StreamError error) {
+    lastStreamError_ = error;
+    return false;
+  }
+
+ public:
   template <typename F>
   bool enumerateFilePaths(F&& callback) {
     if (!fileStatSlimCache.empty()) {
