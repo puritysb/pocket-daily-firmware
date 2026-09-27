@@ -21,11 +21,11 @@ void FontCacheManager::clearCache() {
   if (renderer_) renderer_->clearFallbackCache();
 }
 
-void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask) {
+void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask, const char* extraText) {
   // SD card font prewarm path: prewarm all requested styles in one call
   auto it = sdCardFonts_.find(fontId);
   if (it != sdCardFonts_.end()) {
-    int missed = it->second->prewarm(utf8Text, styleMask);
+    int missed = it->second->prewarm(utf8Text, styleMask, /*metadataOnly=*/false, extraText);
     if (missed > 0) {
       LOG_DBG("FCM", "prewarmCache(SD): %d glyph(s) not found (styleMask=0x%02X)", missed, styleMask);
     }
@@ -35,6 +35,14 @@ void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t st
   // Standard compressed font prewarm path: loop over all requested styles
   if (!fontDecompressor_ || fontMap_.count(fontId) == 0) return;
 
+  // Flash fonts have static kerning, so extra text simply joins the page text.
+  std::string combined;
+  if (extraText && *extraText) {
+    combined.reserve(strlen(utf8Text) + strlen(extraText));
+    combined = utf8Text;
+    combined += extraText;
+    utf8Text = combined.c_str();
+  }
   for (uint8_t i = 0; i < 4; i++) {
     if (!(styleMask & (1 << i))) continue;
     auto style = static_cast<EpdFontFamily::Style>(i);
@@ -76,6 +84,11 @@ void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::S
   bucket.styleCounts[baseStyle] += cpCount;
 }
 
+void FontCacheManager::recordExtraText(const char* text, int fontId) {
+  if (!text || !*text || scanMode_ != ScanMode::Scanning) return;
+  scanBuckets_[fontId].extraText += text;
+}
+
 // --- PrewarmScope implementation ---
 
 FontCacheManager::PrewarmScope::PrewarmScope(FontCacheManager& manager) : manager_(&manager) {
@@ -91,14 +104,15 @@ void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
   if (manager_->scanBuckets_.empty()) return;
 
   for (auto& [fontId, bucket] : manager_->scanBuckets_) {
-    if (bucket.text.empty()) continue;
+    if (bucket.text.empty() && bucket.extraText.empty()) continue;
     // Build style bitmask from all styles that appeared during the scan for this font.
     uint8_t styleMask = 0;
     for (uint8_t i = 0; i < 4; i++) {
       if (bucket.styleCounts[i] > 0) styleMask |= (1 << i);
     }
-    if (styleMask == 0) styleMask = 1;  // default to regular
-    manager_->prewarmCache(fontId, bucket.text.c_str(), styleMask);
+    if (styleMask == 0) styleMask = 1;  // default to regular (extra UI text draws regular)
+    manager_->prewarmCache(fontId, bucket.text.c_str(), styleMask,
+                           bucket.extraText.empty() ? nullptr : bucket.extraText.c_str());
   }
 
   // Glyphs no page font covers come from the fallback font. Prewarm them all

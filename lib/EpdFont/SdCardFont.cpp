@@ -240,8 +240,14 @@ static uint8_t miniLookupKernClass(const EpdKernClassEntry* entries, uint16_t co
 // the mini versions together in applyKernLigaturePointers, so a codepoint not
 // on this page simply returns class 0 (no kerning), which was the pre-existing
 // behavior for any codepoint outside the kern classes.
-bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, uint32_t cpCount) {
+bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, uint32_t cpCount,
+                                     const uint32_t* excluded, uint32_t excludedCount, HalFile& file) {
   freeStyleMiniKern(s);
+  // Extra (UI) codepoints are resident but keep the "not on this page" kerning
+  // (class 0) they get from the on-demand overflow path.
+  const auto kerned = [&](const uint32_t cp) {
+    return !excluded || excludedCount == 0 || !std::binary_search(excluded, excluded + excludedCount, cp);
+  };
   if (!s.kernLeftClasses || !s.kernRightClasses || s.header.kernLeftEntryCount == 0 ||
       s.header.kernRightEntryCount == 0) {
     return true;  // font has no kern classes — nothing to build
@@ -251,6 +257,7 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
   bool usedLeft[256] = {};
   bool usedRight[256] = {};
   for (uint32_t i = 0; i < cpCount; i++) {
+    if (!kerned(codepoints[i])) continue;
     uint8_t lc = miniLookupKernClass(s.kernLeftClasses, s.header.kernLeftEntryCount, codepoints[i]);
     if (lc) usedLeft[lc] = true;
     uint8_t rc = miniLookupKernClass(s.kernRightClasses, s.header.kernRightEntryCount, codepoints[i]);
@@ -285,6 +292,7 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
   uint16_t miniLeftCount = 0;
   uint16_t miniRightCount = 0;
   for (uint32_t i = 0; i < cpCount; i++) {
+    if (!kerned(codepoints[i])) continue;
     if (miniLookupKernClass(s.kernLeftClasses, s.header.kernLeftEntryCount, codepoints[i]) != 0) miniLeftCount++;
     if (miniLookupKernClass(s.kernRightClasses, s.header.kernRightEntryCount, codepoints[i]) != 0) miniRightCount++;
   }
@@ -308,7 +316,7 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
   uint16_t lIdx = 0, rIdx = 0;
   for (uint32_t i = 0; i < cpCount; i++) {
     uint32_t cp = codepoints[i];
-    if (cp > 0xFFFF) continue;  // kern class entries are uint16_t
+    if (cp > 0xFFFF || !kerned(cp)) continue;  // kern class entries are uint16_t
     uint8_t lc = miniLookupKernClass(s.kernLeftClasses, s.header.kernLeftEntryCount, cp);
     if (lc) {
       s.miniKernLeftClasses[lIdx].codepoint = static_cast<uint16_t>(cp);
@@ -325,9 +333,9 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
 
   // Step 6: read the full matrix's rows for each used left class, keep only
   // columns for used right classes. One SD seek + one read per used left class;
-  // a row is kernRightClassCount bytes (~200 for Literata).
-  HalFile file;
-  if (!Storage.openFileForRead("SDCF", filePath_, file)) {
+  // a row is kernRightClassCount bytes (~200 for Literata). Reuses the caller's open handle
+  // (the page prewarm's), saving a FAT path walk per page.
+  if (!file && !Storage.openFileForRead("SDCF", filePath_, file)) {
     LOG_ERR("SDCF", "Failed to open .cpfont for mini kern: %s", filePath_);
     freeStyleMiniKern(s);
     return false;
@@ -686,7 +694,7 @@ int32_t SdCardFont::findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) 
 
 // --- Prewarm ---
 
-int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOnly) {
+int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOnly, const char* extraText) {
   if (!loaded_) return -1;
   if (loadMode_ == LoadMode::BoundedUI) return checkBoundedText(utf8Text, styleMask);
   styleMask = resolveStyleMask(styleMask);
@@ -699,16 +707,30 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
   // = ~131K comparisons, but in practice pages contain far fewer unique codepoints so the
   // actual cost is much lower. This is dwarfed by SD I/O that follows. Alternatives (hash
   // set, bitmap) exceed the 256-byte stack limit or add template bloat.
-  // Heap-allocated: MAX_PAGE_GLYPHS * 4 = 2048 bytes, too large for stack (limit < 256 bytes)
-  std::unique_ptr<uint32_t[]> codepoints(new (std::nothrow) uint32_t[MAX_PAGE_GLYPHS]);
+  // Heap-allocated, too large for the stack (limit < 256 bytes). Sized to what this text can
+  // need, at most MAX_PAGE_GLYPHS * 4 = 2048 bytes: a CJK page decodes to a few hundred
+  // codepoints, and this buffer is live at the page render's prewarm memory peak.
+  uint32_t capacity = 1;  // replacement glyph
+  for (const unsigned char* q = reinterpret_cast<const unsigned char*>(utf8Text);
+       capacity < MAX_PAGE_GLYPHS && utf8NextCodepoint(&q) != 0;) {
+    capacity++;
+  }
+  if (extraText && !metadataOnly) capacity += MAX_EXTRA_GLYPHS;
+  if (!metadataOnly) {
+    for (uint8_t si = 0; si < MAX_STYLES; si++) {
+      if ((styleMask & (1 << si)) && styles_[si].present) capacity += styles_[si].header.ligaturePairCount;
+    }
+  }
+  if (capacity > MAX_PAGE_GLYPHS) capacity = MAX_PAGE_GLYPHS;
+  std::unique_ptr<uint32_t[]> codepoints(new (std::nothrow) uint32_t[capacity]);
   if (!codepoints) {
-    LOG_ERR("SDCF", "Failed to allocate codepoint buffer (%u bytes)", MAX_PAGE_GLYPHS * 4);
+    LOG_ERR("SDCF", "Failed to allocate codepoint buffer (%u bytes)", static_cast<unsigned>(capacity * 4));
     return -1;
   }
   uint32_t cpCount = 0;
 
   const unsigned char* p = reinterpret_cast<const unsigned char*>(utf8Text);
-  while (*p && cpCount < MAX_PAGE_GLYPHS) {
+  while (*p && cpCount < capacity) {
     uint32_t cp = utf8NextCodepoint(&p);
     if (cp == 0) break;
 
@@ -733,7 +755,7 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
         break;
       }
     }
-    if (!hasReplacement && cpCount < MAX_PAGE_GLYPHS) {
+    if (!hasReplacement && cpCount < capacity) {
       codepoints[cpCount++] = REPLACEMENT_GLYPH;
     }
   }
@@ -749,7 +771,7 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
 
       loadStyleKernLigatureData(s);
       if (s.ligaturePairs && s.header.ligaturePairCount > 0) {
-        for (uint8_t li = 0; li < s.header.ligaturePairCount && cpCount < MAX_PAGE_GLYPHS; li++) {
+        for (uint8_t li = 0; li < s.header.ligaturePairCount && cpCount < capacity; li++) {
           uint32_t leftCp = s.ligaturePairs[li].pair >> 16;
           uint32_t rightCp = s.ligaturePairs[li].pair & 0xFFFF;
           uint32_t outCp = s.ligaturePairs[li].ligatureCp;
@@ -777,6 +799,24 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
     }
   }
 
+  // Extra UI codepoints go last, so page glyphs keep priority under MAX_PAGE_GLYPHS.
+  // Stack array: MAX_EXTRA_GLYPHS * 4 = 128 bytes.
+  uint32_t extras[MAX_EXTRA_GLYPHS];
+  uint32_t extraCount = 0;
+  if (extraText && !metadataOnly) {
+    const unsigned char* e = reinterpret_cast<const unsigned char*>(extraText);
+    while (*e && cpCount < capacity && extraCount < MAX_EXTRA_GLYPHS) {
+      const uint32_t cp = utf8NextCodepoint(&e);
+      if (cp == 0) break;
+      bool onPage = false;
+      for (uint32_t i = 0; i < cpCount && !onPage; i++) onPage = codepoints[i] == cp;
+      if (onPage) continue;
+      codepoints[cpCount++] = cp;
+      extras[extraCount++] = cp;
+    }
+    std::sort(extras, extras + extraCount);
+  }
+
   // Sort codepoints for ordered interval building
   std::sort(codepoints.get(), codepoints.get() + cpCount);
 
@@ -784,14 +824,15 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
   int totalMissed = 0;
   for (uint8_t si = 0; si < MAX_STYLES; si++) {
     if (!(styleMask & (1 << si)) || !styles_[si].present) continue;
-    totalMissed += prewarmStyle(si, codepoints.get(), cpCount, metadataOnly);
+    totalMissed += prewarmStyle(si, codepoints.get(), cpCount, metadataOnly, extras, extraCount);
   }
 
   stats_.prewarmTotalMs = millis() - startMs;
   return totalMissed;
 }
 
-int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly) {
+int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly,
+                             const uint32_t* kernExcluded, uint32_t kernExcludedCount) {
   auto& s = styles_[styleIdx];
 
   // Map codepoints to global glyph indices for this style
@@ -826,7 +867,11 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   // Build mini intervals from sorted codepoints
   freeStyleMiniData(s);
 
-  uint32_t intervalCapacity = validCount;
+  // One interval per run of consecutive codepoints (the table stays resident for the page).
+  uint32_t intervalCapacity = 1;
+  for (uint32_t i = 1; i < validCount; i++) {
+    if (mappings[i].codepoint != mappings[i - 1].codepoint + 1) intervalCapacity++;
+  }
   s.miniIntervals = new (std::nothrow) EpdUnicodeInterval[intervalCapacity];
   if (!s.miniIntervals) {
     LOG_ERR("SDCF", "Failed to allocate mini intervals for style %u", styleIdx);
@@ -983,7 +1028,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   bool kernLigOk = false;
   if (!metadataOnly) {
     if (loadStyleKernLigatureData(s)) {
-      kernLigOk = buildMiniKernMatrix(s, codepoints, cpCount);
+      kernLigOk = buildMiniKernMatrix(s, codepoints, cpCount, kernExcluded, kernExcludedCount, file);
     }
   }
 

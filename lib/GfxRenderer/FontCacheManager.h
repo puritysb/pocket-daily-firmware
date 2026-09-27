@@ -20,13 +20,19 @@ class FontCacheManager {
   void attachRenderer(const GfxRenderer* renderer) { renderer_ = renderer; }
 
   void clearCache();
-  void prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask = 0x0F);
+  // `extraText` (optional) loads with the page's glyphs but stays out of the SD font's
+  // per-page kerning classes, so it renders exactly as if loaded on demand.
+  void prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask = 0x0F, const char* extraText = nullptr);
   void logStats(const char* label = "render");
   void resetStats();
 
   // Scan-mode API: called by GfxRenderer::drawText() during scan pass
   bool isScanning() const;
   void recordText(const char* text, int fontId, EpdFontFamily::Style style);
+  // UI text drawn after the page with fontId (e.g. the status-bar chapter title): its
+  // glyphs join the page's resident set so drawing it needs no per-glyph SD loads.
+  // Call during the scan pass; kerning stays as for on-demand glyphs.
+  void recordExtraText(const char* text, int fontId);
 
   // True between PrewarmScope::endScanAndPrewarm() and the scope's end. The page's glyph set
   // is resident for every remaining pass of that page (BW, then each grayscale strip), so a
@@ -65,6 +71,7 @@ class FontCacheManager {
   bool pageGlyphSetPinned_ = false;
   struct ScanBucket {
     std::string text;
+    std::string extraText;
     uint32_t styleCounts[4] = {};
   };
   std::map<int, ScanBucket> scanBuckets_;

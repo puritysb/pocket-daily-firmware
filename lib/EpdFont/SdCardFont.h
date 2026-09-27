@@ -1,5 +1,7 @@
 #pragma once
 
+#include <HalStorage.h>
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -51,7 +53,12 @@ class SdCardFont {
   // Default 0x0F = all present styles.
   // When metadataOnly=true, only glyph metrics are loaded (no bitmap data).
   // Returns number of glyphs that couldn't be loaded (0 on full success).
-  int prewarm(const char* utf8Text, uint8_t styleMask = 0x0F, bool metadataOnly = false);
+  // extraText (optional): up to MAX_EXTRA_GLYPHS further codepoints (UI text such as the
+  // status-bar title) whose glyphs load with the page's but stay out of the per-page
+  // kerning classes, so they render exactly as the on-demand overflow path draws them.
+  int prewarm(const char* utf8Text, uint8_t styleMask = 0x0F, bool metadataOnly = false,
+              const char* extraText = nullptr);
+  static constexpr uint8_t MAX_EXTRA_GLYPHS = 32;
 
   // Prepare advance widths for layout measurement. Every glyph the request
   // needs is resident when the call returns (bounded LRU, see
@@ -338,11 +345,15 @@ class SdCardFont {
   void freeStyleKernLigatureData(PerStyle& s);
   void freeStyleMiniKern(PerStyle& s);
   bool loadStyleKernLigatureData(PerStyle& s);
-  bool buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, uint32_t cpCount);
+  // `excluded` (sorted, may be null) lists codepoints kept out of the kerning classes.
+  // `file` is the font file when the caller has it open (otherwise opened here).
+  bool buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, uint32_t cpCount, const uint32_t* excluded,
+                           uint32_t excludedCount, HalFile& file);
   void applyKernLigaturePointers(PerStyle& s, EpdFontData& data) const;
   void applyGlyphMissCallback(uint8_t styleIdx);
   int32_t findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) const;
-  int prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly);
+  int prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly,
+                   const uint32_t* kernExcluded, uint32_t kernExcludedCount);
 
   // Global helpers
   void freeAll();

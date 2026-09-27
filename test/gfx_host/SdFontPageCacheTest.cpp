@@ -105,3 +105,117 @@ TEST_F(SdFontPageCache, UiPrewarmOutsidePageRenderStillMakesGlyphsResident) {
   ASSERT_NE(title, nullptr);
   EXPECT_FALSE(font.isOverflowGlyph(title));
 }
+
+// The reader records the CJK status-bar title with the page scan
+// (ReaderPageRenderer, FontCacheManager::recordExtraText): the title's glyphs
+// then load with the page's sorted batch instead of one SD open per glyph per
+// draw through the overflow ring, and stay resident for the whole page render.
+TEST_F(SdFontPageCache, StatusTextRecordedWithTheScanLoadsWithThePageGlyphs) {
+  {
+    auto page = cache.createPrewarmScope();
+    renderer.drawText(FONT_ID, 0, 20, PAGE_TEXT);  // scan pass
+    cache.recordExtraText(TITLE, FONT_ID);
+    page.endScanAndPrewarm();
+    const EpdGlyph* title = glyph(0xAC00);
+    ASSERT_NE(title, nullptr);
+    EXPECT_FALSE(font.isOverflowGlyph(title));
+    EXPECT_EQ(title->advanceX, 48);
+    for (const char* c = PAGE_TEXT; *c; ++c) {
+      const EpdGlyph* g = glyph(static_cast<uint8_t>(*c));
+      ASSERT_NE(g, nullptr);
+      EXPECT_FALSE(font.isOverflowGlyph(g)) << *c;
+    }
+  }
+  // Outside a scan the call is ignored.
+  cache.recordExtraText(TITLE, FONT_ID);
+  EXPECT_EQ(glyph(0xAC00) != nullptr && !font.isOverflowGlyph(glyph(0xAC00)), false);
+}
+
+namespace {
+// Same font plus one kerning pair, A (left class 1) before B (right class 1): -3.
+Bytes kernedFontFile() {
+  Bytes bytes(64 + 24 + 11 * 16 + 3 + 3 + 1 + 11, 0);
+  memcpy(bytes.data(), "CPFONT", 6);
+  bytes[8] = 4;
+  bytes[12] = 1;
+  put32(bytes, 36, 2);
+  put32(bytes, 40, 11);
+  bytes[44] = 12;
+  bytes[45] = 10;
+  bytes[49] = 1;  // kernLeftEntryCount
+  bytes[51] = 1;  // kernRightEntryCount
+  bytes[53] = 1;  // kernLeftClassCount
+  bytes[54] = 1;  // kernRightClassCount
+  put32(bytes, 56, 64);
+  put32(bytes, 64, 'A');
+  put32(bytes, 68, 'J');
+  put32(bytes, 76, 0xAC00);
+  put32(bytes, 80, 0xAC00);
+  put32(bytes, 84, 10);
+  for (size_t i = 0; i < 11; ++i) {
+    EpdGlyph glyph{};
+    glyph.width = 2;
+    glyph.height = 2;
+    glyph.advanceX = 48;
+    glyph.dataLength = 1;
+    glyph.dataOffset = static_cast<uint32_t>(i);
+    memcpy(bytes.data() + 88 + i * 16, &glyph, sizeof(glyph));
+  }
+  const size_t kern = 88 + 11 * 16;
+  bytes[kern + 0] = 'A';  // left entry: codepoint (LE 16) + class
+  bytes[kern + 2] = 1;
+  bytes[kern + 3] = 'B';  // right entry
+  bytes[kern + 5] = 1;
+  bytes[kern + 6] = static_cast<uint8_t>(-3);  // 1x1 matrix
+  for (size_t i = 0; i < 11; ++i) bytes[kern + 7 + i] = static_cast<uint8_t>(0x80 + i);
+  return bytes;
+}
+
+class SdFontExtraKerning : public testing::Test {
+ protected:
+  void SetUp() override {
+    ASSERT_TRUE(font.load("/kern.cpfont"));
+    renderer.begin();
+    renderer.setFontCacheManager(&cache);
+    renderer.registerSdCardFont(FONT_ID, &font);
+    renderer.insertFont(FONT_ID, EpdFontFamily(font.getEpdFont(0)));
+  }
+  int8_t kernAB() const { return renderer.getFontMap().at(FONT_ID).getKerning('A', 'B'); }
+
+  const Bytes bytes = kernedFontFile();
+  const Asset assets[1]{{"/kern.cpfont", bytes}};
+  const AssetScope scope{assets};
+  SdCardFont font;
+  HalDisplay panel;
+  GfxRenderer renderer{panel};
+  FontCacheManager cache{renderer.getFontMap(), renderer.getSdCardFonts()};
+};
+}  // namespace
+
+// Kerning is built per page from the page's codepoints; a glyph that is not on
+// the page gets none. Extra (status-bar) text must not change that, or the
+// title would shift by a kern pair depending on how it was loaded.
+TEST_F(SdFontExtraKerning, ExtraTextGlyphsKeepTheirOnDemandKerning) {
+  {
+    auto page = cache.createPrewarmScope();
+    renderer.drawText(FONT_ID, 0, 20, "AB");
+    page.endScanAndPrewarm();
+    EXPECT_EQ(kernAB(), -3);  // both on the page: kerned
+  }
+  {
+    auto page = cache.createPrewarmScope();
+    renderer.drawText(FONT_ID, 0, 20, "BCD");
+    page.endScanAndPrewarm();
+    EXPECT_EQ(kernAB(), 0);  // A not on the page (drawn on demand): unkerned
+  }
+  {
+    auto page = cache.createPrewarmScope();
+    renderer.drawText(FONT_ID, 0, 20, "BCD");
+    cache.recordExtraText("A", FONT_ID);
+    page.endScanAndPrewarm();
+    const EpdGlyph* a = renderer.getFontMap().at(FONT_ID).getGlyph('A');
+    ASSERT_NE(a, nullptr);
+    EXPECT_FALSE(font.isOverflowGlyph(a));  // resident now...
+    EXPECT_EQ(kernAB(), 0);                 // ...with the same (absent) kerning
+  }
+}
