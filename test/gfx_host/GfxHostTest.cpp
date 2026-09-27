@@ -6,6 +6,7 @@
 #include <climits>
 #include <vector>
 
+#include "components/themes/StatusBarTitle.h"
 #include "pocket_daily/ContentCard.h"
 #include "pocket_daily/ContentPageRenderer.h"
 #include "pocket_daily/home/HomeDrawing.h"
@@ -192,5 +193,100 @@ TEST(GfxHostInkRows, GrayscalePassesStayWithinTheBwInkRows) {
     EXPECT_EQ(againLast, last);
     renderer.beginInkRows();
     EXPECT_FALSE(renderer.endInkRows(&again, &againLast));
+  }
+}
+
+namespace {
+// Logical pixel (x, y) is black, for every orientation (GfxRenderer::rotateCoordinates).
+bool blackAt(const GfxRenderer& r, const int x, const int y) {
+  const int w = r.getDisplayWidth(), h = r.getDisplayHeight();
+  int px = x, py = y;
+  switch (r.getOrientation()) {
+    case GfxRenderer::Portrait:
+      px = y, py = h - 1 - x;
+      break;
+    case GfxRenderer::LandscapeClockwise:
+      px = w - 1 - x, py = h - 1 - y;
+      break;
+    case GfxRenderer::PortraitInverted:
+      px = w - 1 - y, py = x;
+      break;
+    case GfxRenderer::LandscapeCounterClockwise:
+      break;
+  }
+  return (r.getFrameBuffer()[py * r.getDisplayWidthBytes() + px / 8] & (0x80 >> (px & 7))) == 0;
+}
+
+int inkIn(const GfxRenderer& r, const int yFrom, const int yTo) {
+  int ink = 0;
+  for (int y = std::max(0, yFrom); y < std::min(r.getScreenHeight(), yTo); ++y)
+    for (int x = 0; x < r.getScreenWidth(); ++x) ink += blackAt(r, x, y);
+  return ink;
+}
+
+// Two 2-bit fonts with the device's metrics: the status bar's small UI font
+// (notosans_8: ascender 18, descender 5) and a reader-size CJK SD font
+// (PocketSansWorld 12: ascender 29, descender 8) whose glyphs fill that box.
+struct StatusFonts {
+  uint8_t smallBits[5 * 23 / 4 + 1];
+  uint8_t bigBits[30 * 37 / 4 + 1];
+  EpdGlyph smallGlyph{5, 23, 112, 0, 18, sizeof(smallBits), 0};
+  EpdGlyph bigGlyph{30, 37, 512, 0, 29, sizeof(bigBits), 0};
+  EpdUnicodeInterval smallInterval{'A', 'A', 0};
+  EpdUnicodeInterval bigInterval{0x4E8C, 0x4E8C, 0};  // 二
+  EpdFontData smallData{}, bigData{};
+  EpdFont smallFont{&smallData}, bigFont{&bigData};
+  StatusFonts() {
+    std::fill(std::begin(smallBits), std::end(smallBits), 0xFF);
+    std::fill(std::begin(bigBits), std::end(bigBits), 0xFF);
+    smallData = {smallBits, &smallGlyph, &smallInterval, 1, 23, 18, -5, true};
+    bigData = {bigBits, &bigGlyph, &bigInterval, 1, 37, 29, -8, true};
+  }
+};
+}  // namespace
+
+// Classic's status bar draws small text at textY = height - 19 - bottom margin - 4. A CJK
+// title in the reader's SD font used the same y, so its baseline (y + 29) fell below the
+// panel edge in landscape (X3 photo, 2026-09-28). It must stay inside the status lane,
+// unclipped, in every orientation; a title font that fits keeps its old placement.
+TEST(GfxHostStatusBarTitle, ReaderSizeCjkTitleStaysInsideTheStatusLane) {
+  StatusFonts fonts;
+  constexpr int SMALL = 1, BIG = 2;
+  for (int o = 0; o < 4; ++o) {
+    HalDisplay panel(792, 528);
+    GfxRenderer renderer(panel);
+    renderer.begin();
+    renderer.insertFont(SMALL, EpdFontFamily(&fonts.smallFont));
+    renderer.insertFont(BIG, EpdFontFamily(&fonts.bigFont));
+    renderer.setOrientation(static_cast<GfxRenderer::Orientation>(o));
+    int top, right, bottom, left;
+    renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
+    const int laneBottom = renderer.getScreenHeight() - bottom;
+    const int textY = laneBottom - 19 - 4;
+
+    // Before the fix: the title ran off the viewable area.
+    renderer.clearScreen();
+    renderer.drawText(BIG, 100, textY, "\xE4\xBA\x8C");
+    EXPECT_GT(inkIn(renderer, laneBottom, renderer.getScreenHeight() + 64), 0) << o;
+
+    const auto fit = StatusBarTitle::place(renderer, BIG, SMALL, textY);
+    EXPECT_EQ(fit.scale, 2);
+    renderer.clearScreen();
+    renderer.drawText(BIG, 100, fit.y, "\xE4\xBA\x8C", true, fit.style);
+    const int ink = inkIn(renderer, 0, renderer.getScreenHeight());
+    ASSERT_GT(ink, 0) << o;
+    EXPECT_EQ(inkIn(renderer, textY, laneBottom), ink) << "title outside the status lane, orientation " << o;
+    // Nothing was clipped: the same title drawn mid-screen has the same ink.
+    renderer.clearScreen();
+    renderer.drawText(BIG, 100, 200, "\xE4\xBA\x8C", true, fit.style);
+    EXPECT_EQ(inkIn(renderer, 0, renderer.getScreenHeight()), ink) << o;
+    EXPECT_EQ(StatusBarTitle::width(renderer, BIG, "\xE4\xBA\x8C", fit),
+              (renderer.getTextWidth(BIG, "\xE4\xBA\x8C") + 1) / 2);
+
+    // A font whose line box fits the lane (the small font itself, or any flash title font) is unchanged.
+    const auto same = StatusBarTitle::place(renderer, SMALL, SMALL, textY);
+    EXPECT_EQ(same.y, textY);
+    EXPECT_EQ(same.scale, 1);
+    EXPECT_EQ(same.style, EpdFontFamily::REGULAR);
   }
 }

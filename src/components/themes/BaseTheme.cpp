@@ -13,6 +13,7 @@
 #include "I18n.h"
 #include "PopupFrame.h"
 #include "RecentBooksStore.h"
+#include "StatusBarTitle.h"
 #include "components/UITheme.h"
 #include "components/icons/bookmark.h"
 #include "fontIds.h"
@@ -918,23 +919,24 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     int titleMarginLeftAdjusted = std::max(titleMarginLeft, titleMarginRight);
     int availableTitleSpace = rendererableScreenWidth - 2 * titleMarginLeftAdjusted;
 
-    int titleWidth;
     const int titleFont = UiCjkFont::fontForText(renderer, title.c_str(), SMALL_FONT_ID);
-    titleWidth = renderer.getTextWidth(titleFont, title.c_str());
+    // A CJK title may come in the reader's SD font, taller than this lane: fit it (StatusBarTitle).
+    const StatusBarTitle::Placement fit = StatusBarTitle::place(renderer, titleFont, SMALL_FONT_ID, textY);
+    int titleWidth = StatusBarTitle::width(renderer, titleFont, title.c_str(), fit);
     if (titleWidth > availableTitleSpace) {
       // Not enough space to center on the screen, center it within the remaining space instead
       availableTitleSpace = rendererableScreenWidth - titleMarginLeft - titleMarginRight;
       titleMarginLeftAdjusted = titleMarginLeft;
     }
     if (titleWidth > availableTitleSpace) {
-      title = renderer.truncatedText(titleFont, title.c_str(), availableTitleSpace);
-      titleWidth = renderer.getTextWidth(titleFont, title.c_str());
+      title = renderer.truncatedText(titleFont, title.c_str(), availableTitleSpace * fit.scale);
+      titleWidth = StatusBarTitle::width(renderer, titleFont, title.c_str(), fit);
     }
 
     renderer.drawText(titleFont,
                       titleMarginLeftAdjusted + metrics.statusBarHorizontalMargin + orientedMarginLeft +
                           (availableTitleSpace - titleWidth) / 2,
-                      textY, title.c_str());
+                      fit.y, title.c_str(), true, fit.style);
   }
 }
 
