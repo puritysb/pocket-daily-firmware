@@ -51,3 +51,31 @@ inline bool utf8IsCombiningMark(const uint32_t cp) {
          || (cp >= 0x20D0 && cp <= 0x20FF)   // Combining Diacritical Marks for Symbols
          || (cp >= 0xFE20 && cp <= 0xFE2F);  // Combining Half Marks
 }
+
+// Unicode Default_Ignorable_Code_Point (DerivedCoreProperties.txt): format and
+// joiner controls, variation selectors, tags, fillers and bidi controls. These
+// carry no ink; renderers give them zero width and draw nothing. Source text
+// (and text offsets derived from it) is never altered.
+bool utf8IsDefaultIgnorable(uint32_t cp);
+
+// Emoji modifiers (Fitzpatrick skin tones U+1F3FB..U+1F3FF).
+inline bool utf8IsEmojiModifier(const uint32_t cp) { return cp >= 0x1F3FB && cp <= 0x1F3FF; }
+
+// Regional indicator symbols (flag halves U+1F1E6..U+1F1FF).
+inline bool utf8IsRegionalIndicator(const uint32_t cp) { return cp >= 0x1F1E6 && cp <= 0x1F1FF; }
+
+// True for codepoints a renderer must neither draw nor advance over: every
+// Default_Ignorable_Code_Point plus stray emoji skin-tone modifiers.
+inline bool utf8IsInvisible(const uint32_t cp) { return utf8IsDefaultIgnorable(cp) || utf8IsEmojiModifier(cp); }
+
+// Extended_Pictographic (emoji-data.txt) plus regional indicators: the
+// codepoints that can start a multi-codepoint emoji cluster.
+bool utf8IsEmojiBase(uint32_t cp);
+
+// Called after reading an emoji base `base`: consumes the rest of its grapheme
+// cluster from *string (variation selectors, skin tones, tag sequences, keycap
+// mark, a paired regional indicator, and every ZWJ-joined pictograph) so that
+// the whole sequence renders as one glyph. A ZWJ that is not followed by a
+// pictograph is consumed as invisible and the following codepoint is left for
+// the caller. No-op for non-emoji bases.
+void utf8SkipEmojiClusterTail(const unsigned char** string, uint32_t base);

@@ -178,3 +178,94 @@ void utf8TruncateChars(std::string& str, const size_t numChars) {
     utf8RemoveLastChar(str);
   }
 }
+
+namespace {
+struct Utf8Range {
+  uint32_t first;
+  uint32_t last;
+};
+
+bool inRanges(const uint32_t cp, const Utf8Range* ranges, const size_t count) {
+  size_t lo = 0;
+  size_t hi = count;
+  while (lo < hi) {
+    const size_t mid = lo + (hi - lo) / 2;
+    if (cp < ranges[mid].first) {
+      hi = mid;
+    } else if (cp > ranges[mid].last) {
+      lo = mid + 1;
+    } else {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Unicode 16.0 DerivedCoreProperties.txt, Default_Ignorable_Code_Point. Sorted.
+constexpr Utf8Range kDefaultIgnorable[] = {
+    {0x00AD, 0x00AD}, {0x034F, 0x034F}, {0x061C, 0x061C},   {0x115F, 0x1160},   {0x17B4, 0x17B5},   {0x180B, 0x180F},
+    {0x200B, 0x200F}, {0x202A, 0x202E}, {0x2060, 0x206F},   {0x3164, 0x3164},   {0xFE00, 0xFE0F},   {0xFEFF, 0xFEFF},
+    {0xFFA0, 0xFFA0}, {0xFFF0, 0xFFF8}, {0x1BCA0, 0x1BCA3}, {0x1D173, 0x1D17A}, {0xE0000, 0xE0FFF},
+};
+
+// Unicode 16.0 emoji-data.txt, Extended_Pictographic (merged ranges). Sorted.
+constexpr Utf8Range kExtendedPictographic[] = {
+    {0x00A9, 0x00A9},   {0x00AE, 0x00AE},   {0x203C, 0x203C},   {0x2049, 0x2049},   {0x2122, 0x2122},
+    {0x2139, 0x2139},   {0x2194, 0x2199},   {0x21A9, 0x21AA},   {0x231A, 0x231B},   {0x2328, 0x2328},
+    {0x2388, 0x2388},   {0x23CF, 0x23CF},   {0x23E9, 0x23F3},   {0x23F8, 0x23FA},   {0x24C2, 0x24C2},
+    {0x25AA, 0x25AB},   {0x25B6, 0x25B6},   {0x25C0, 0x25C0},   {0x25FB, 0x25FE},   {0x2600, 0x2605},
+    {0x2607, 0x2612},   {0x2614, 0x2685},   {0x2690, 0x2705},   {0x2708, 0x2712},   {0x2714, 0x2714},
+    {0x2716, 0x2716},   {0x271D, 0x271D},   {0x2721, 0x2721},   {0x2728, 0x2728},   {0x2733, 0x2734},
+    {0x2744, 0x2744},   {0x2747, 0x2747},   {0x274C, 0x274C},   {0x274E, 0x274E},   {0x2753, 0x2755},
+    {0x2757, 0x2757},   {0x2763, 0x2767},   {0x2795, 0x2797},   {0x27A1, 0x27A1},   {0x27B0, 0x27B0},
+    {0x27BF, 0x27BF},   {0x2934, 0x2935},   {0x2B05, 0x2B07},   {0x2B1B, 0x2B1C},   {0x2B50, 0x2B50},
+    {0x2B55, 0x2B55},   {0x3030, 0x3030},   {0x303D, 0x303D},   {0x3297, 0x3297},   {0x3299, 0x3299},
+    {0x1F000, 0x1F0FF}, {0x1F10D, 0x1F10F}, {0x1F12F, 0x1F12F}, {0x1F16C, 0x1F171}, {0x1F17E, 0x1F17F},
+    {0x1F18E, 0x1F18E}, {0x1F191, 0x1F19A}, {0x1F1AD, 0x1F1E5}, {0x1F201, 0x1F20F}, {0x1F21A, 0x1F21A},
+    {0x1F22F, 0x1F22F}, {0x1F232, 0x1F23A}, {0x1F23C, 0x1F23F}, {0x1F249, 0x1F3FA}, {0x1F400, 0x1F53D},
+    {0x1F546, 0x1F64F}, {0x1F680, 0x1F6FF}, {0x1F774, 0x1F77F}, {0x1F7D5, 0x1F7FF}, {0x1F80C, 0x1F80F},
+    {0x1F848, 0x1F84F}, {0x1F85A, 0x1F85F}, {0x1F888, 0x1F88F}, {0x1F8AE, 0x1F8FF}, {0x1F90C, 0x1F93A},
+    {0x1F93C, 0x1F945}, {0x1F947, 0x1FAFF}, {0x1FC00, 0x1FFFD},
+};
+
+constexpr uint32_t ZERO_WIDTH_JOINER = 0x200D;
+constexpr uint32_t COMBINING_ENCLOSING_KEYCAP = 0x20E3;
+
+bool extendsEmojiCluster(const uint32_t cp) {
+  return cp == 0xFE0E || cp == 0xFE0F || utf8IsEmojiModifier(cp) || (cp >= 0xE0020 && cp <= 0xE007F) ||
+         cp == COMBINING_ENCLOSING_KEYCAP;
+}
+}  // namespace
+
+bool utf8IsDefaultIgnorable(const uint32_t cp) {
+  if (cp < 0x00AD) return false;  // fast path for ASCII and most Latin-1
+  return inRanges(cp, kDefaultIgnorable, sizeof(kDefaultIgnorable) / sizeof(kDefaultIgnorable[0]));
+}
+
+bool utf8IsEmojiBase(const uint32_t cp) {
+  if (cp < 0x00A9) return false;
+  if (utf8IsRegionalIndicator(cp)) return true;
+  return inRanges(cp, kExtendedPictographic, sizeof(kExtendedPictographic) / sizeof(kExtendedPictographic[0]));
+}
+
+void utf8SkipEmojiClusterTail(const unsigned char** string, const uint32_t base) {
+  if (!string || !*string || !utf8IsEmojiBase(base)) return;
+  bool expectRegionalPair = utf8IsRegionalIndicator(base);
+  while (**string) {
+    const unsigned char* const beforeNext = *string;
+    const uint32_t next = utf8NextCodepoint(string);
+    if (expectRegionalPair) {
+      expectRegionalPair = false;
+      if (utf8IsRegionalIndicator(next)) continue;
+    }
+    if (extendsEmojiCluster(next)) continue;
+    if (next == ZERO_WIDTH_JOINER) {
+      const unsigned char* const afterJoiner = *string;
+      if (**string && utf8IsEmojiBase(utf8NextCodepoint(string))) continue;
+      *string = afterJoiner;  // the joiner itself is invisible; the next codepoint stands alone
+      return;
+    }
+    *string = beforeNext;
+    return;
+  }
+}
