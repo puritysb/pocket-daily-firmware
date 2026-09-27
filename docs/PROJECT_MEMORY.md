@@ -5,6 +5,22 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-28 Page-turn telemetry and speed-ups (docs/reader-perf.md). The reader
+  records each turn's stages (input, section, page, prewarm, BW render, status,
+  BW refresh, gray render/refresh/sync, save, total), SD opens/reads/KiB, glyphs,
+  strips, flags and heap minima in a 16-turn ring + per-stage avg/max,
+  `/.crosspoint/reader-perf.bin`, `/api/status` `readerPerf` (lastBuildError
+  gate, so File Transfer, not Sync). Host profiler (real parser/layout/renderer,
+  PocketSansWorld 12, device settings, neko): opens per turn 29.5 -> 1.9 (the CJK
+  status-bar title loaded glyph by glyph through the SD font's overflow ring),
+  sector loads 254 -> 196, CPU 0.95 -> 0.45 ms host (line-culled gray strips,
+  hoisted glyph blitter), next chapter pre-built while idle on the last page
+  (turn into it: 26.6 -> 3 opens, no layout), position save deferred to idle.
+  Frames byte-identical (4 orientations, AA on/off, 10 test EPUBs); page-render
+  peak within +0.4 KB (39/217 turns) / lower on 137; recorder ~0.9 KB heap only
+  while reading. Not measured on X3 yet: the telemetry is how to get the real
+  numbers. Estimated from SDK constants, AA costs ~150-200 ms per turn.
+
 - 2026-09-27 X3 black popup (`1.7.0-dev-feat-reader-support-75df8f0e`,
   Classic + active pack `studio-6c134a9368a44871`: popupCornerRadius 8,
   popupTextBold 1). `BaseTheme::drawPopup` let the corner radius pick the fill

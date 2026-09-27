@@ -78,9 +78,83 @@ class EpubReaderActivity final : public Activity {
   int lastSavedPage = -1;
   int lastSavedPageCount = -1;
 
+  // Everything a section's layout depends on besides the book (the section file header).
+  struct LayoutParams {
+    int fontId = 0;
+    float lineCompression = 0;
+    bool extraParagraphSpacing = false;
+    uint8_t paragraphAlignment = 0;
+    uint16_t viewportWidth = 0;
+    uint16_t viewportHeight = 0;
+    bool hyphenationEnabled = false;
+    bool embeddedStyle = false;
+    uint8_t imageRendering = 0;
+    bool focusReadingEnabled = false;
+    uint8_t bilingualViewMode = 0;
+    bool operator==(const LayoutParams&) const = default;
+  };
+  LayoutParams layoutParams(uint16_t viewportWidth, uint16_t viewportHeight) const;
+  static bool loadSection(Section& target, const LayoutParams& params);
+  static bool startSectionBuild(Section& target, const LayoutParams& params);
+  // Params of the section on screen (valid once a section was opened).
+  LayoutParams shownLayout;
+  bool shownLayoutValid = false;
+  unsigned long lastRenderDoneMs = 0UL;
+
+  // Idle pre-build of the next chapter. While the reader sits on a chapter's last page,
+  // loop() lays out the next spine a few pages per tick, so the forward turn into it adopts
+  // the section instead of inflating and laying out the chapter on the turn. Only one build
+  // runs at a time and it is dropped before any other render, so a page render never
+  // overlaps it; at the turn the adopted build has the same footprint as a normal chapter
+  // build. See docs/reader-perf.md.
+  std::unique_ptr<Section> prebuilt;
+  int prebuildSpine = -1;
+  LayoutParams prebuildLayout;
+  bool prebuildSettled = false;  // prebuildSpine needs no further idle work
+  // Start only after this much idle time on the last page, with this much contiguous heap.
+  static constexpr unsigned long PREBUILD_IDLE_MS = 700;
+  static constexpr size_t PREBUILD_MIN_FREE_BLOCK = 32 * 1024;
+  void prebuildNextChapter();
+  // Frees an in-progress pre-build (keeps a finished one: it only holds the page count).
+  void dropBuildingPrebuild();
+
+  // Reading-position writes are deferred to idle time (loop()) instead of every render:
+  // a turn no longer waits on the SD create/remove/rename, and rapid turns write once.
+  static constexpr unsigned long PROGRESS_SAVE_IDLE_MS = 1500;
+  bool progressSavePending = false;
+  int pendingSaveSpine = 0;
+  int pendingSavePage = 0;
+  int pendingSavePageCount = 0;
+  void flushPendingProgress();
+
+  // Page-turn telemetry (PocketDaily::ReaderPerf): the next render() records a turn that
+  // started when loop() handled the button (perfInputMs, 0 for the first page).
+  bool perfTurnPending = false;
+  uint8_t perfTurnFlags = 0;
+  uint32_t perfInputMs = 0;
+  void queuePerfTurn(uint8_t flags, uint32_t inputMs);
+
+  // Per-spine values the status bar and progress save need on every turn, read once per
+  // chapter instead of re-reading book.bin spine/TOC entries (4-6 SD seeks+reads a turn).
+  struct SpineInfo {
+    int spineIndex = -1;
+    size_t bookSize = 0;
+    size_t previousCumulative = 0;
+    size_t cumulative = 0;
+    std::string tocTitle;  // empty when the spine has no TOC entry
+    bool hasTocEntry = false;
+    // Same arithmetic as Epub::calculateProgress.
+    float bookProgress(float spineRead) const;
+  };
+  SpineInfo spineInfo;
+  const SpineInfo& currentSpineInfo();
+  // Chapter-title text the status bar draws, and whether that happens with the loaded SD
+  // font (CJK titles, see UiCjkFont): such text is prewarmed with the page's glyphs.
+  std::string statusBarTitle();
+
   void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);
-  void renderStatusBar() const;
+  void renderStatusBar();
   // Pages laid out per incremental-build pump: on the render path (catching up to the page
   // being shown) and per loop() tick (background build of a large chapter). Kept small so a
   // background build chunk never noticeably delays input or a pending render.
