@@ -264,7 +264,16 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
       // open. Merge those into the new style so the first child in a container inherits
       // the container's vertical spacing.
       const auto style = currentTextBlock->getBlockStyle();
-      currentTextBlock->setBlockStyle(style.getCombinedBlockStyle(blockStyle, BlockStyle::CombineAxis::Vertical));
+      BlockStyle incoming = blockStyle;
+      if (style.fromBrElement) {
+        // The empty block was created by a <br> section separator. Inject a full line of
+        // blank space before the following paragraph so the scene/section break is visible.
+        // This only fires when the <br> block stayed empty (i.e. no inline text was added).
+        const int16_t lineHeight = static_cast<int16_t>(renderer.getLineHeight(fontId) * lineCompression + 0.5f);
+        incoming.marginTop = static_cast<int16_t>(incoming.marginTop + lineHeight);
+      }
+
+      currentTextBlock->setBlockStyle(style.getCombinedBlockStyle(incoming, BlockStyle::CombineAxis::Vertical));
 
       flushPendingAnchor();
       return;
@@ -623,14 +632,22 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
               extractSuccess = self->epub->readItemContentsToStream(resolvedPath, cachedImageFile, 4096);
               cachedImageFile.flush();
               cachedImageFile.close();
-              delay(50);  // Give SD card time to sync
             }
 
             if (extractSuccess) {
-              // Get image dimensions
+              // Get image dimensions, retrying to absorb SD-card sync latency on slow
+              // cards. Replaces a blanket delay(50) that cost ~50ms on every image, and
+              // closes the silent-drop bug where a single getDimensions failure was fatal.
               ImageDimensions dims = {0, 0};
               ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(cachedImagePath);
-              if (decoder && decoder->getDimensions(cachedImagePath, dims)) {
+              bool gotDimensions = false;
+              for (int attempt = 0; attempt < 3 && !gotDimensions; attempt++) {
+                if (attempt > 0) {
+                  delay(50);  // Give a slow SD card time to finish syncing before retrying
+                }
+                gotDimensions = decoder && decoder->getDimensions(cachedImagePath, dims);
+              }
+              if (gotDimensions) {
                 LOG_DBG("EHP", "Image dimensions: %dx%d", dims.width, dims.height);
 
                 int displayWidth = 0;
@@ -946,7 +963,14 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
         // flush word preceding <br/> to currentTextBlock before calling startNewTextBlock
         self->flushPartWordBuffer();
       }
-      self->startNewTextBlock(self->blockStyleStack.back().withoutBottom());
+      // Tag the new block so startNewTextBlock can inject a full line-height gap if
+      // the block remains empty (i.e. <br> is a section separator between paragraphs).
+      // If the block gets text added before the next block opens it becomes non-empty,
+      // goes through makePages() normally, and the flag has no effect (inline <br> case).
+      BlockStyle brStyle =
+          self->currentTextBlock ? self->currentTextBlock->getBlockStyle() : self->blockStyleStack.back();
+      brStyle.fromBrElement = true;
+      self->startNewTextBlock(brStyle);
     } else {
       self->currentCssStyle = cssStyle;
       const auto accumulated = self->blockStyleStack.back().getCombinedBlockStyle(userAlignmentBlockStyle,

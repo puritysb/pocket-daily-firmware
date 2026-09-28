@@ -12,6 +12,22 @@ transcript. Current source and release records override dated observations.
   label, so the Sync presenter shows it and the app preview will after the next
   `PocketUIHost.xcframework` sync). Guard: `test_sync_routes.py`. Host tests and
   the default build pass; not on X3/X4.
+- 2026-09-29 Upstream state and ports (branch chore/upstream-1.6.5-merge). Fork
+  merge-base is still CrossPoint 1.4.1 (2754a5ff, 2026-06-29); upstream/master is
+  1.6.5, 370 commits ahead (190 fix, 86 feat, 20 perf). A dry `git merge
+  upstream/master` conflicts in 106 files (all of lib/Epub, lib/EpdFont,
+  GfxRenderer, hal, reader/home/network activities, main.cpp, AGENTS.md), so the
+  merge needs a dedicated reconciliation sprint, not a sync-upstream.sh run.
+  Meanwhile 30 upstream fix/perf commits that apply cleanly were cherry-picked
+  with -x (EPUB open perf #2433-#2441, guide-text fix #2716, SdFat SPI batching
+  #3501, progressive JPEG #2925, ligature cache release #3581, watchdog reset
+  as panic #2830, strongest-AP join #2655, ZipFile underflow #3244, translation
+  and sleep-screen fixes). Dropped for missing upstream helpers: #2692, #2831,
+  #3094, #3632; already present: #2526 FontDecompressor OOM, #3122 &apos;.
+  Not portable without hand work (fork rewrote the files): font-cache
+  fragmentation #3521/#3527/#3126, Korean justify #3700, dropped presses #3534,
+  KOSync precision #3174, SD-font release on reader exit #3699, Wi-Fi teardown
+  #3613. Host 527 tests and default build pass (+6.2 KB flash); not on X3/X4.
 - 2026-09-29 X3 acceptance of exact positions (cf195984): page 35/45 of the EPUB
   check book's chapter 3 recorded `.../p[1]/text()[1].22795`, which resolves to the
   photographed first line ("라 English & 기호 < > ..."); reopening restored the

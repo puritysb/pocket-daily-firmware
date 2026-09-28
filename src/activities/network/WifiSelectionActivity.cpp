@@ -5,6 +5,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <WiFi.h>
+#include <esp_mac.h>
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
@@ -36,12 +37,19 @@ void WifiSelectionActivity::onEnter() {
   forgetPromptSelection = 0;
   autoConnecting = false;
 
-  // Cache MAC address for display
-  uint8_t mac[6];
-  WiFi.macAddress(mac);
+  // Read the hardware-derived station MAC directly. WiFi.macAddress() depends
+  // on the STA netif already existing, but this screen is entered while WiFi
+  // is often still off (notably after an X4 Pro WiFi session).
+  uint8_t mac[6] = {};
   char macStr[64];
-  snprintf(macStr, sizeof(macStr), "%s %02x-%02x-%02x-%02x-%02x-%02x", tr(STR_MAC_ADDRESS), mac[0], mac[1], mac[2],
-           mac[3], mac[4], mac[5]);
+  const esp_err_t macResult = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  if (macResult == ESP_OK) {
+    snprintf(macStr, sizeof(macStr), "%s %02x-%02x-%02x-%02x-%02x-%02x", tr(STR_MAC_ADDRESS), mac[0], mac[1], mac[2],
+             mac[3], mac[4], mac[5]);
+  } else {
+    LOG_ERR("WIFI", "Failed to read station MAC (err=%d)", static_cast<int>(macResult));
+    snprintf(macStr, sizeof(macStr), "%s --", tr(STR_MAC_ADDRESS));
+  }
   cachedMacAddress = std::string(macStr);
 
   // Trigger first update to show scanning message
@@ -216,11 +224,22 @@ void WifiSelectionActivity::attemptConnection() {
   WiFi.disconnect(true, true);  // Abort any in-progress SDK auto-connect and clear NVS-saved SSID
   delay(100);
 
+  // Scan all channels so networks with multiple APs use the strongest matching
+  // BSSID instead of the first match found by the framework's default fast scan.
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+
   // Set hostname so routers show "CrossPoint-Reader-AABBCCDDEEFF" instead of "esp32-XXXXXXXXXXXX"
-  String mac = WiFi.macAddress();
-  mac.replace(":", "");
-  String hostname = "CrossPoint-Reader-" + mac;
-  WiFi.setHostname(hostname.c_str());
+  uint8_t mac[6] = {};
+  const esp_err_t macResult = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  if (macResult == ESP_OK) {
+    char hostname[sizeof("CrossPoint-Reader-") + 12];
+    snprintf(hostname, sizeof(hostname), "CrossPoint-Reader-%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3],
+             mac[4], mac[5]);
+    WiFi.setHostname(hostname);
+  } else {
+    LOG_ERR("WIFI", "Failed to read station MAC for hostname (err=%d)", static_cast<int>(macResult));
+  }
 
   if (selectedRequiresPassword && !enteredPassword.empty()) {
     WiFi.begin(selectedSSID.c_str(), enteredPassword.c_str());
@@ -243,6 +262,16 @@ void WifiSelectionActivity::checkConnectionStatus() {
     snprintf(ipStr, sizeof(ipStr), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
     connectedIP = ipStr;
     autoConnecting = false;
+
+#if defined(ENABLE_SERIAL_LOG) && LOG_LEVEL >= 2
+    uint8_t connectedBssid[6] = {};
+    WiFi.BSSID(connectedBssid);
+    LOG_DBG("WIFI", "Connected BSSID: %02x:%02x:%02x:%02x:%02x:%02x, channel: %d, RSSI: %d dBm",
+            static_cast<unsigned>(connectedBssid[0]), static_cast<unsigned>(connectedBssid[1]),
+            static_cast<unsigned>(connectedBssid[2]), static_cast<unsigned>(connectedBssid[3]),
+            static_cast<unsigned>(connectedBssid[4]), static_cast<unsigned>(connectedBssid[5]), WiFi.channel(),
+            WiFi.RSSI());
+#endif
 
     // Sync RTC from NTP on the first successful WiFi connection only. The DS3231
     // drifts ~2 ppm so one sync is enough; users can force a re-sync from
