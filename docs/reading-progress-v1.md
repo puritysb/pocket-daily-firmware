@@ -75,19 +75,44 @@ deleted after either answer. An offer that is not further, or is damaged, is
 deleted silently. If the reader sleeps or exits during the question, the offer
 remains and is asked again on the next open.
 
+Confirming moves to the page that holds the offered XPointer's character, not an
+estimate: `ChapterXPathResolver::findTextOffsetForXPath` turns the XPointer into a
+chapter text offset (below), and once the section is laid out far enough
+`Section::findPageForTextOffset` picks the last page starting at or before it
+(`EpubReaderActivity::resolvePendingTextOffset`, which keeps building a partial or
+in-progress section until a later page exists). Without a laid-out page with an
+offset (an XPointer the resolver cannot place) the percentage estimate of
+`toCrossPoint` stays.
+
+### Chapter text offsets (since 2026-09-29, section cache v132)
+
+A chapter text offset is a 0-based code point index into the character data
+expat delivers inside the spine item's `<body>`: whitespace, the text of hidden
+(`display:none`) elements and every element's text count; HTML named entities
+count as their decoded text; text outside `<body>` does not count. This is the
+DOM text the XPointer offsets below index. While laying out a section,
+`ChapterHtmlSlimParser` tracks it per word (`ParsedText` keeps a 2-byte distance
+per pending word, bounded by the ~750-word layout batch, not by paragraph
+length) and stamps every page with the offset of its first character
+(`Page::textOffset`: the first word of its first line, including the remainder
+of a hyphenated word, or the text position of a leading image or rule). The
+offset is the first field of each page record in `sections/<spine>.bin`.
+
 When a book is left (`EpubReaderActivity::onExit`, which also runs before deep
 sleep), the reader records the page:
 
-1. While the Section is loaded it reads its paragraph LUT around the page once
-   (`Section::getParagraphRunForPage`): the previous page's entry is the `<p>` the
-   page starts in, and the run of pages ending inside that paragraph gives the
-   fraction into it (`(page − first − 0.5) / (last − first + 1)`, i.e. text spread
-   evenly with half-filled first and last pages).
-2. The Section is released, then the XPointer is resolved
-   (`ChapterXPathResolver::findXPathForParagraphProgress`, two streams of the
-   chapter; fallback `findXPathForProgress(page / pageCount)`). Page 0 is the
-   chapter start `/body/DocFragment[N]/body`. Nothing is written when the page
-   is unchanged.
+1. While the Section is loaded it reads the page's text offset from its record
+   (`Section::getPageTextOffset`, one 4-byte read; also from a building or
+   partial section).
+2. The Section is released, then `ChapterXPathResolver::findXPathForTextOffset`
+   streams the chapter once and returns the XPointer of exactly that character.
+   Page 0 is the chapter start `/body/DocFragment[N]/body`. Nothing is written
+   when the page is unchanged and the stored XPointer is already exact (record
+   flag bit 0); a record estimated by older firmware is recomputed once.
+3. Fallback when no page offset exists (for example the pre-footnote position):
+   the paragraph LUT estimate (`Section::getParagraphRunForPage`, fraction
+   `(page − first − 0.5) / (last − first + 1)` into the paragraph,
+   `findXPathForParagraphProgress`), then `findXPathForProgress(page / pageCount)`.
 3. The chapter streams from the reader's inflated copy
    `<cache>/html/<spine>.html` when present (1 KiB buffer + expat), otherwise
    from the ZIP, which needs the 32 KiB inflate window. The XPointer is skipped
@@ -95,15 +120,22 @@ sleep), the reader records the page:
    ≥ 40 KiB (ZIP). The log line `RPS Recorded … in N ms (heap, block)` is the
    hardware evidence for cost and heap.
 
-Precision: character-accurate inside a paragraph when the LUT exists, estimated
-proportionally for pages inside a long paragraph; a building (partial) section
-without a LUT falls back to a fraction of the chapter's paragraph text.
+Precision: the recorded XPointer is the page's first character in both
+directions. Known limits: inside a word stored in decomposed form (NFD), which
+the layout composes, a page that starts mid-word (hyphenation, CJK) can point up
+to the absorbed combining marks early; a comment or CDATA section inside a text
+run is not a run boundary here (as before). Measured on the host fixture's
+29,972-code-point paragraph (EPUB/section-3.xhtml, 22 host pages): page 10
+starts at `text()[1].14061`; the old estimate recorded `.12942`.
 
 ## XPointer rules (shared with the app's `xpointer.js`)
 
 - `/body/DocFragment[N]` is the 1-based spine index; element steps count
   same-name siblings. The firmware writes every index (`p[1]`, `text()[1]`);
   it reads the app's form that omits `[1]`, and element-only paths.
+- Any element's text can be the target (`h1[1]/text()[1].0`, `div[2]/b[1]/…`),
+  including a run directly in `<body>` (`/body/DocFragment[N]/body/text()[1].5`),
+  which the app's `xpointer.js` resolves like any other step.
 - `text()[N]` counts only the element's direct text runs (split by its child
   elements) that contain a non-whitespace character (ECMAScript `\s` class,
   including U+00A0, U+2000–200A, U+3000, U+FEFF). Text inside child elements
@@ -124,7 +156,8 @@ without a LUT falls back to a fraction of the chapter's paragraph text.
 Little-endian, CRC-32 over everything before the trailing CRC; decoders reject
 any bad field. Moving or clearing a book's cache takes them along.
 
-- `pocket-reading.bin` (`"PDRP"`, version 1): reserved u8, spine u16, page u16,
+- `pocket-reading.bin` (`"PDRP"`, version 1): flags u8 (bit 0: the XPointer is
+  the page's exact first character; older firmware wrote 0), spine u16, page u16,
   page count u16, percentage f32, seq u32, updated u32, file size u32, digest
   length u8 (0 or 32) + digest, XPointer length u16 (≤ 512) + XPointer, CRC u32.
   Written to `.tmp` and renamed.
@@ -141,11 +174,20 @@ Host (`test/reading_progress`):
   compares the visible text there with the app's `textAt`: Korean sample 15/15,
   Standard Ebooks Frankenstein 114/114 exact. Fixtures:
   `fixtures/app-xpointers-*.json`, EPUBs rebuilt by `fixtures/make_fixtures.py`.
-- The same test generates firmware XPointers (paragraph + fraction and chapter
-  fraction) for every spine item of both books, round-trips them, and writes
-  `fixtures/firmware-xpointers.json` (258 positions with `textAt`) for the app
+- The same test generates firmware XPointers (paragraph + fraction, chapter
+  fraction, and chapter text offsets — `"method": "offset"`, what the reader
+  now records) for every spine item of both books, round-trips them, and writes
+  `fixtures/firmware-xpointers.json` (430 positions with `textAt`) for the app
   to resolve with its own engine. `READING_PROGRESS_UPDATE_GOLDEN=1` rewrites it;
-  a change fails the test until the app re-verifies it.
+  a change fails the test until the app re-verifies it (2026-09-29: 430/430,
+  app MacTests `testFirmwareXPointersResolveToTheSameText`).
+- `reader_layout/reading_position_layout_test` lays out both fixture books with
+  the real parser and layout (plain, hyphenated at 180 px, focus reading) and
+  checks every page: the stamped offset is the page's first word, the recorded
+  XPointer lands there through `ProgressMapper::locateInSpine` and reads back to
+  the same offset, the first and last character of each page map to it, the
+  app's fixture XPointers map to the page holding their character, and a
+  building section asks for more pages past its watermark.
 - `reading_progress_format_test`: record/offer codecs, body validation limits,
   list JSON and budget, SD store and sequence counter (fake SD).
 - `scripts/test_sync_routes.py`: routes in the Sync block, no chapter streaming

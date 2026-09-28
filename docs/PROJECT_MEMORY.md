@@ -5,6 +5,22 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-29 Exact reading positions (branch feat/exact-page-offsets; contract
+  docs/reading-progress-v1.md "Chapter text offsets"). Section cache v132: each
+  page record starts with `u32 textOffset`, the code point offset of its first
+  character in the `<body>` character data; `ParsedText` carries a 2-byte
+  distance per pending word (bounded by the 750-word batch), no extra pass.
+  Exit records `findXPathForTextOffset` (exact; record flag bit 0 refreshes
+  old estimated records once); an accepted offer maps its XPointer back with
+  `findTextOffsetForXPath` + `Section::findPageForTextOffset`. X3 evidence that
+  prompted it: chapter 3 of test/reading_progress/fixtures/
+  pocket-daily-epub-check.epub (one 29,972-code-point paragraph), page 10/35
+  saved `.../p[1]/text()[1].6369`, ~1.5 pages early. Host (22-page layout):
+  page 10 exact `.14061` vs old estimate `.12942`; every page of both fixture
+  books (plain, hyphenated, focus) lands on its first word; golden 258 -> 430
+  positions, app 430/430. Host 523 tests; default build +6.2 KB flash, +0
+  static RAM. Not on X3/X4: record/offer on hardware, heap during layout.
+
 - 2026-09-28 X3 on 0dcab16d (user: turns feel faster). Status-bar CJK chapter
   title clipped at the bottom (photo, landscape CW): pre-existing since before
   v1.7.0-beta.1 (BaseTheme/UiCjkFont unchanged since): UiCjkFont reuses the
