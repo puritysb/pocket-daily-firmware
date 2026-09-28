@@ -85,6 +85,25 @@ TEST(ReadingProgressFormat, RecordRoundTripsAndRejectsDamage) {
   EXPECT_EQ(Reading::encodeRecord(record, bytes, size - 1), 0u);
 }
 
+// The header byte after the version carries the record flags; older firmware wrote 0 there,
+// which reads as "XPointer estimated" so the next exit recomputes it exactly.
+TEST(ReadingProgressFormat, RecordFlagsRoundTripInTheHeaderByte) {
+  uint8_t bytes[Reading::MAX_RECORD_BYTES];
+  auto record = sampleRecord();
+  record.flags = Reading::RECORD_FLAG_EXACT_XPOINTER;
+  const size_t size = Reading::encodeRecord(record, bytes, sizeof(bytes));
+  ASSERT_GT(size, 6u);
+  EXPECT_EQ(bytes[5], Reading::RECORD_FLAG_EXACT_XPOINTER);  // "PDRP", version, flags
+  Reading::Record decoded;
+  ASSERT_TRUE(Reading::decodeRecord(bytes, size, decoded));
+  EXPECT_EQ(decoded.flags, Reading::RECORD_FLAG_EXACT_XPOINTER);
+
+  record.flags = 0;
+  const size_t legacySize = Reading::encodeRecord(record, bytes, sizeof(bytes));
+  ASSERT_TRUE(Reading::decodeRecord(bytes, legacySize, decoded));
+  EXPECT_EQ(decoded.flags, 0);
+}
+
 TEST(ReadingProgressFormat, RecordWithoutXPointerOrDigestIsValid) {
   Reading::Record record = sampleRecord();
   record.xpointer[0] = '\0';

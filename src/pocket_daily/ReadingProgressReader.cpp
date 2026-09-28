@@ -50,13 +50,21 @@ bool copyText(const std::string& text, char* out, const size_t capacity) {
   return true;
 }
 
-std::string xpointerFor(const std::shared_ptr<Epub>& epub, const ExitPosition& position) {
+// `exact` reports an XPointer at the page's first character (not an estimate).
+std::string xpointerFor(const std::shared_ptr<Epub>& epub, const ExitPosition& position, bool& exact) {
+  exact = false;
   if (position.page == 0) {
     // The top of the chapter; the body pointer is exact there.
+    exact = true;
     return "/body/DocFragment[" + std::to_string(position.spine + 1) + "]/body";
   }
   std::string xpath;
-  if (position.hasParagraph) {
+  if (position.hasTextOffset) {
+    // The character the page starts with (one stream of the chapter).
+    xpath = ChapterXPathResolver::findXPathForTextOffset(epub, position.spine, position.textOffset);
+    exact = !xpath.empty();
+  }
+  if (xpath.empty() && position.hasParagraph) {
     xpath = ChapterXPathResolver::findXPathForParagraphProgress(epub, position.spine, position.paragraph,
                                                                 position.withinParagraph);
   }
@@ -68,17 +76,24 @@ std::string xpointerFor(const std::shared_ptr<Epub>& epub, const ExitPosition& p
 }
 }  // namespace
 
-ExitPosition capturePosition(const Section* section, const int spine, int page, const int pageCount) {
+ExitPosition capturePosition(Section* section, const int spine, int page, const int pageCount) {
   ExitPosition position;
   if (page < 0 || page == UINT16_MAX) page = 0;
   if (pageCount > 0 && page >= pageCount) page = pageCount - 1;
   position.spine = spine;
   position.page = page;
   position.pageCount = std::max(0, pageCount);
+  if (section && page > 0) {
+    if (const auto offset = section->getPageTextOffset(page)) {
+      position.hasTextOffset = true;
+      position.textOffset = *offset;
+      return position;
+    }
+  }
   uint16_t paragraph = 0;
   uint16_t first = 0;
   uint16_t last = 0;
-  // The LUT holds the paragraph open at the end of each page, so the entry of the
+  // Fallback estimate. The LUT holds the paragraph open at the end of each page, so the entry of the
   // previous page is the paragraph this page starts in. Pages [first, last] all end
   // inside it; assuming its text spreads evenly and its first and last pages are
   // half filled, this page starts (page - first - 0.5) / (last - first + 1) into it.
@@ -104,8 +119,12 @@ void recordPosition(const std::shared_ptr<Epub>& epub, const ExitPosition& posit
   const char* cachePath = epub->getCachePath().c_str();
   const bool hadRecord = loadRecord(cachePath, work->previous, work->scratch);
   const bool atEnd = position.spine >= epub->getSpineItemsCount();
+  // A record whose XPointer was estimated is refreshed once an exact one can be computed.
+  const bool previousExact = (work->previous.flags & RECORD_FLAG_EXACT_XPOINTER) != 0;
+  const bool canBeExact = position.page == 0 || position.hasTextOffset;
   if (hadRecord && work->previous.spine == position.spine && work->previous.page == position.page &&
-      work->previous.pageCount == position.pageCount && (work->previous.xpointer[0] || atEnd)) {
+      work->previous.pageCount == position.pageCount && (work->previous.xpointer[0] || atEnd) &&
+      (previousExact || !canBeExact || atEnd)) {
     return;  // Unchanged: no SD write, no chapter stream.
   }
 
@@ -130,9 +149,11 @@ void recordPosition(const std::shared_ptr<Epub>& epub, const ExitPosition& posit
     const size_t needed = chapterHtmlCached(*epub, position.spine) ? XPOINTER_BLOCK_CACHED : XPOINTER_BLOCK_ZIPPED;
     const size_t block = ESP.getMaxAllocHeap();
     if (block >= needed) {
-      const std::string xpath = xpointerFor(epub, position);
+      bool exact = false;
+      const std::string xpath = xpointerFor(epub, position, exact);
       if (!xpath.empty() && xpath.size() <= MAX_XPOINTER_BYTES && validXPointer(xpath.c_str(), xpath.size())) {
         memcpy(next.xpointer, xpath.c_str(), xpath.size() + 1);
+        if (exact) next.flags |= RECORD_FLAG_EXACT_XPOINTER;
       }
     } else {
       LOG_INF("RPS", "Reading position kept without XPointer: largest block %u B < %u B", static_cast<unsigned>(block),

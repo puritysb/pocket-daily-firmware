@@ -99,8 +99,10 @@ class Reader {
   size_t used = 0;
 };
 
-// Checks size, trailing CRC, magic and version; leaves `reader` after the header.
-bool openRecord(const uint8_t* bytes, const size_t size, const char (&magic)[4], Reader& reader) {
+// Checks size, trailing CRC, magic and version; leaves `reader` after the header. The byte
+// after the version is returned in `flags` (records) and ignored by offers.
+bool openRecord(const uint8_t* bytes, const size_t size, const char (&magic)[4], Reader& reader,
+                uint8_t* flags = nullptr) {
   if (!bytes || size < 4 + 2 + CRC_BYTES) return false;
   const uint8_t* crcBytes = bytes + size - CRC_BYTES;
   const uint32_t stored = static_cast<uint32_t>(crcBytes[0]) | (static_cast<uint32_t>(crcBytes[1]) << 8) |
@@ -109,8 +111,10 @@ bool openRecord(const uint8_t* bytes, const size_t size, const char (&magic)[4],
   char header[4];
   uint8_t version = 0;
   uint8_t reserved = 0;
-  return reader.bytes(header, 4) && memcmp(header, magic, 4) == 0 && reader.u8(version) && version == VERSION &&
-         reader.u8(reserved);
+  const bool ok = reader.bytes(header, 4) && memcmp(header, magic, 4) == 0 && reader.u8(version) &&
+                  version == VERSION && reader.u8(reserved);
+  if (ok && flags) *flags = reserved;
+  return ok;
 }
 
 bool hexDigit(const char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }
@@ -197,7 +201,7 @@ size_t encodeRecord(const Record& record, uint8_t* out, const size_t capacity) {
   Writer w(out, capacity);
   w.bytes(RECORD_MAGIC, 4);
   w.u8(VERSION);
-  w.u8(0);
+  w.u8(record.flags);
   w.u16(record.spine);
   w.u16(record.page);
   w.u16(record.pageCount);
@@ -219,7 +223,7 @@ bool decodeRecord(const uint8_t* bytes, const size_t size, Record& record) {
   uint16_t xpointerLength = 0;
   Record decoded;
   const bool ok =
-      openRecord(bytes, size, RECORD_MAGIC, r) && r.u16(decoded.spine) && r.u16(decoded.page) &&
+      openRecord(bytes, size, RECORD_MAGIC, r, &decoded.flags) && r.u16(decoded.spine) && r.u16(decoded.page) &&
       r.u16(decoded.pageCount) && r.f32(decoded.percentage) && r.u32(decoded.seq) && r.u32(decoded.updated) &&
       r.u32(decoded.fileSize) && r.u8(documentLength) && (documentLength == 0 || documentLength == DIGEST_HEX) &&
       r.text(decoded.document, documentLength, sizeof(decoded.document)) && r.u16(xpointerLength) &&

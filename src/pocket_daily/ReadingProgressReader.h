@@ -11,17 +11,20 @@ class Section;
 // Reader side of reading-progress v1 (docs/reading-progress-v1.md), called from
 // EpubReaderActivity hooks. Nothing here runs in the HTTP handler.
 namespace PocketDaily::ReadingProgress {
-// Where the book was left, captured while the Section is still loaded: its
-// paragraph LUT tells which paragraph the page starts in and how far into it.
+// Where the book was left, captured while the Section is still loaded: the page
+// record's text offset is its exact first character. Sections without one (no
+// Section, or a page not laid out) fall back to the paragraph LUT estimate.
 struct ExitPosition {
   int spine = 0;
   int page = 0;
   int pageCount = 0;
+  bool hasTextOffset = false;
+  uint32_t textOffset = 0;  // chapter text offset of the page's first character
   bool hasParagraph = false;
   uint16_t paragraph = 0;  // 1-based <p> the page starts in
   float withinParagraph = 0.0f;
 };
-ExitPosition capturePosition(const Section* section, int spine, int page, int pageCount);
+ExitPosition capturePosition(Section* section, int spine, int page, int pageCount);
 
 // Persists a record (XPointer, start-of-page percentage, sequence) for the
 // companion. Skips unchanged positions; skips the XPointer (reported as null)

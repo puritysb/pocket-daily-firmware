@@ -22,7 +22,13 @@ inline constexpr float FURTHER_MARGIN = 0.004f;
 
 // What the reader last recorded for one book (<cache>/pocket-reading.bin).
 // ~570 B: allocate on the heap, never on a task stack.
+// Record flag: the XPointer points at the page's exact first character (Page::textOffset),
+// not a paragraph-fraction estimate. An older record without it is recomputed on the next
+// exit even when the page is unchanged.
+inline constexpr uint8_t RECORD_FLAG_EXACT_XPOINTER = 0x01;
+
 struct Record {
+  uint8_t flags = 0;  // RECORD_FLAG_*; stored in the header byte older firmware wrote as 0
   uint16_t spine = 0;
   uint16_t page = 0;
   uint16_t pageCount = 0;
