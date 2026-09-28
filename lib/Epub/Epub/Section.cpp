@@ -7,6 +7,10 @@
 #include <Serialization.h>
 #include <ZipFile.h>
 
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+
 #include "Epub/css/CssParser.h"
 #include "Page.h"
 #include "hyphenation/Hyphenator.h"
@@ -32,7 +36,9 @@ namespace {
 // re-lays out affected sections.
 // v132: same binary layout. Long paragraphs are laid out in 192-word chunks instead of
 // 750 (bounded word-buffer allocations), which can move line breaks inside them.
-constexpr uint8_t SECTION_FILE_VERSION = 132;
+// v133: every page record starts with a u32 chapter text offset (Page::textOffset), the
+// exact position reading-progress XPointers are computed from and mapped back to.
+constexpr uint8_t SECTION_FILE_VERSION = 133;
 
 // Written into the version field while a build is in progress and replaced only after
 // every table has been committed. A crash-interrupted .part file is therefore rejected.
@@ -945,6 +951,75 @@ std::optional<uint16_t> Section::getParagraphIndexForPage(const uint16_t page) c
   uint16_t pIdx;
   serialization::readPod(f, pIdx);
   return pIdx;
+}
+
+bool Section::readPageTextOffset(const int page, HalFile& committed, uint32_t& offset) {
+  uint8_t bytes[sizeof(uint32_t)];
+  if (build_ && page < static_cast<int>(build_->lut.size())) {
+    // Laid out by the active build: read its tmp .bin, then restore the write cursor.
+    const uint32_t pos = build_->lut[page].fileOffset;
+    if (!file || pos == 0) return false;
+    const uint32_t writePos = file.position();
+    file.seek(pos);
+    const bool read = file.read(bytes, sizeof(bytes)) == static_cast<int>(sizeof(bytes));
+    file.seek(writePos);
+    if (!read) return false;
+  } else {
+    const int onDisk = partial_ ? partialPageCount_ : (build_ ? 0 : pageCount);
+    if (page >= onDisk) return false;
+    if (!committed && !Storage.openFileForRead("SCT", filePath, committed)) return false;
+    const uint32_t fileSize = committed.size();
+    uint32_t lutOffset = 0;
+    committed.seek(HEADER_SIZE - sizeof(uint32_t) * 4);
+    serialization::readPod(committed, lutOffset);
+    const uint32_t entry = lutOffset + sizeof(uint32_t) * static_cast<uint32_t>(page);
+    if (lutOffset < HEADER_SIZE || entry + sizeof(uint32_t) > fileSize) return false;
+    uint32_t pagePos = 0;
+    committed.seek(entry);
+    serialization::readPod(committed, pagePos);
+    if (pagePos < HEADER_SIZE || pagePos + sizeof(uint32_t) > fileSize) return false;
+    committed.seek(pagePos);
+    if (committed.read(bytes, sizeof(bytes)) != static_cast<int>(sizeof(bytes))) return false;
+  }
+  memcpy(&offset, bytes, sizeof(offset));  // little-endian, as writePod stored it
+  return offset != Page::NO_TEXT_OFFSET;
+}
+
+std::optional<uint32_t> Section::getPageTextOffset(const int page) {
+  if (page < 0) return std::nullopt;
+  HalFile committed;
+  uint32_t offset = 0;
+  if (!readPageTextOffset(page, committed, offset)) return std::nullopt;
+  return offset;
+}
+
+Section::TextOffsetLookup Section::findPageForTextOffset(const uint32_t offset, uint16_t& page) {
+  const int built = build_ ? static_cast<int>(build_->lut.size()) : 0;
+  const int onDisk = partial_ ? partialPageCount_ : (build_ ? 0 : pageCount);
+  const int available = std::max(built, onDisk);
+  if (available <= 0) return build_ ? TextOffsetLookup::NeedMorePages : TextOffsetLookup::Unavailable;
+
+  // Page start offsets never decrease: find the last page starting at or before `offset`
+  // in O(log n) record reads.
+  HalFile committed;
+  int low = 0;
+  int high = available - 1;
+  uint32_t start = 0;
+  if (!readPageTextOffset(0, committed, start)) return TextOffsetLookup::Unavailable;
+  while (low < high) {
+    const int mid = low + (high - low + 1) / 2;
+    if (!readPageTextOffset(mid, committed, start)) return TextOffsetLookup::Unavailable;
+    if (start <= offset) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+  // The last known page may continue past `offset` only once no later page can exist.
+  const bool complete = !build_ && !partial_;
+  if (low == available - 1 && !complete) return TextOffsetLookup::NeedMorePages;
+  page = static_cast<uint16_t>(low);
+  return TextOffsetLookup::Found;
 }
 
 bool Section::getParagraphRunForPage(const uint16_t page, uint16_t& paragraph, uint16_t& first, uint16_t& last,

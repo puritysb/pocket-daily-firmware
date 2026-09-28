@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -82,6 +83,9 @@ class Section {
   // partial/finalized file stays readable while a rebuild is in progress.
   std::string binTmpPath() const { return filePath + ".part"; }
   std::unique_ptr<Page> loadPageAt(int page) const;
+  // Page::textOffset of `page` from its record, without loading the page. `committed` is
+  // opened on first use for pages served from the committed file. False when unknown.
+  bool readPageTextOffset(int page, HalFile& committed, uint32_t& offset);
   // Read a page already laid out by the in-progress build (page < build LUT size), from
   // the partially-written tmp .bin without disturbing the build's write cursor.
   std::unique_ptr<Page> loadPageDuringBuild(int page);
@@ -201,6 +205,16 @@ class Section {
 
   // Look up the synthetic paragraph index for the given rendered page.
   std::optional<uint16_t> getParagraphIndexForPage(uint16_t page) const;
+
+  // Chapter text offset where `page` starts (Page::textOffset), from the active build or the
+  // committed file. nullopt for a page not laid out yet or a record without one.
+  std::optional<uint32_t> getPageTextOffset(int page);
+
+  // The page holding chapter text offset `offset` (see ChapterHtmlSlimParser::textOffset):
+  // the last page starting at or before it. NeedMorePages when that is the last page laid out
+  // so far and the chapter may continue (build or partial); Unavailable on a read failure.
+  enum class TextOffsetLookup : uint8_t { Found, NeedMorePages, Unavailable };
+  TextOffsetLookup findPageForTextOffset(uint32_t offset, uint16_t& page);
 
   // The pages around `page` whose paragraph LUT entry equals page's own (pages ending
   // inside one long paragraph): [first, last], scanning at most `maxSpan` entries each

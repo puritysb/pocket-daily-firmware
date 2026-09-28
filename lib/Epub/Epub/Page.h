@@ -2,6 +2,8 @@
 #include <HalStorage.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
@@ -73,6 +75,11 @@ class PageHorizontalRule final : public PageElement {
 
 class Page {
  public:
+  static constexpr uint32_t NO_TEXT_OFFSET = UINT32_MAX;
+  // Chapter text offset of the page's first character (ChapterHtmlSlimParser::textOffset):
+  // the start of its first line, or the text position of a leading image or rule. Serialized
+  // first in the page record so Section can read it without loading the page.
+  uint32_t textOffset = NO_TEXT_OFFSET;
   // the list of block index and line numbers on this page
   std::vector<std::shared_ptr<PageElement>> elements;
   std::vector<FootnoteEntry> footnotes;

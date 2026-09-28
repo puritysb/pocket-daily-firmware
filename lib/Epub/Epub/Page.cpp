@@ -117,6 +117,7 @@ void Page::renderImages(GfxRenderer& renderer, const int fontId, const int xOffs
 }
 
 bool Page::serialize(HalFile& file) const {
+  serialization::writePod(file, textOffset);
   const uint16_t count = elements.size();
   serialization::writePod(file, count);
 
@@ -147,6 +148,7 @@ bool Page::serialize(HalFile& file) const {
 std::unique_ptr<Page> Page::deserialize(HalFile& file) {
   auto page = std::unique_ptr<Page>(new Page());
 
+  serialization::readPod(file, page->textOffset);
   uint16_t count;
   serialization::readPod(file, count);
   // Exact capacity for a sane page (a malformed count fails below, element by element).

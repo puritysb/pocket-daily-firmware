@@ -4,6 +4,7 @@
 #include <expat.h>
 
 #include <climits>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -94,6 +95,16 @@ class ChapterHtmlSlimParser {
   uint16_t xpathParagraphIndex = 0;
   uint16_t xpathListItemIndex = 0;
 
+  // Chapter text offset: code points of the character data expat delivers inside <body>
+  // (HTML named entities as their decoded text, whitespace and hidden elements included),
+  // i.e. the DOM text the app's XPointers index. ChapterXPathResolver counts the same way,
+  // so the offset stamped on each page (Page::textOffset) converts to an exact XPointer.
+  uint32_t textOffset = 0;
+  bool insideBody = false;
+  bool sourceChunk = false;     // characterData is reading document text (not synthesized labels)
+  uint32_t wordTextOffset = 0;  // where the word in partWordBuffer starts
+  uint32_t lastPageTextOffset = 0;
+
   // Footnote link tracking
   bool insideFootnoteLink = false;
   int footnoteLinkDepth = -1;
@@ -121,11 +132,14 @@ class ChapterHtmlSlimParser {
   void flushPendingAnchor();
   void flushPartWordBuffer();
   void makePages();
+  // Hands the finished page to completePageFn (stamping its text offset if nothing did).
+  void completeCurrentPage();
   static void applyDirectionToEntry(StyleStackEntry& entry, const CssStyle& css);
   void emitHorizontalRule(const BlockStyle& blockStyle);
   // XML callbacks
   static void XMLCALL startElement(void* userData, const XML_Char* name, const XML_Char** atts);
   static void XMLCALL characterData(void* userData, const XML_Char* s, int len);
+  static void XMLCALL documentCharacterData(void* userData, const XML_Char* s, int len);
   static void XMLCALL defaultHandlerExpand(void* userData, const XML_Char* s, int len);
   static void XMLCALL endElement(void* userData, const XML_Char* name);
 
@@ -182,7 +196,7 @@ class ChapterHtmlSlimParser {
   // True when layout ran out of heap. The caller must treat the section as failed rather
   // than commit a cache that is missing content.
   bool hitOutOfMemory() const { return outOfMemory_; }
-  void addLineToPage(std::shared_ptr<TextBlock> line);
+  void addLineToPage(std::shared_ptr<TextBlock> line, uint32_t lineTextOffset);
   const std::vector<std::pair<std::string, uint16_t>>& getAnchors() const { return anchorData; }
 
   // Byte progress of the in-flight parse, used to estimate a still-building section's total page

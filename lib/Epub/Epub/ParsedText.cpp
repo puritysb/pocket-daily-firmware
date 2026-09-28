@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <limits>
 #include <vector>
@@ -57,6 +58,15 @@ uint32_t lastCodepoint(const std::string& word) {
 }
 
 bool containsSoftHyphen(const std::string& word) { return word.find(SOFT_HYPHEN_UTF8) != std::string::npos; }
+
+// Code points in a UTF-8 run: every byte that is not a continuation byte starts one.
+uint32_t codepointCount(const char* text, const size_t bytes) {
+  uint32_t count = 0;
+  for (size_t i = 0; i < bytes; ++i) {
+    if ((static_cast<uint8_t>(text[i]) & 0xC0) != 0x80) count++;
+  }
+  return count;
+}
 
 bool isNoBreakBeforeCjkPunctuation(const uint32_t cp) {
   switch (cp) {
@@ -253,8 +263,27 @@ bool isWordCharacter(uint32_t cp) {
 
 }  // namespace
 
+// Records where the token just appended to `words` starts in the chapter text.
+void ParsedText::pushSourceOffset(const uint32_t offset) {
+  if (wordSourceDelta.size() + 1 == words.size() && !wordSourceDelta.empty()) {
+    const uint32_t delta = offset > lastSourceOffset ? offset - lastSourceOffset : 0;
+    wordSourceDelta.push_back(static_cast<uint16_t>(std::min<uint32_t>(delta, UINT16_MAX)));
+  } else {
+    // First pending token: it is the base the deltas count from.
+    wordSourceDelta.assign(1, 0);
+    sourceBase = offset;
+  }
+  lastSourceOffset = offset;
+}
+
+uint32_t ParsedText::sourceOffsetAt(const size_t wordIndex) const {
+  uint32_t offset = sourceBase;
+  for (size_t i = 1; i <= wordIndex && i < wordSourceDelta.size(); ++i) offset += wordSourceDelta[i];
+  return offset;
+}
+
 void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle, const bool underline,
-                         const bool attachToPrevious) {
+                         const bool attachToPrevious, const uint32_t textOffset) {
   if (word.empty()) return;
 
   // The device fonts carry no combining-mark positioning, so EPUB text stored in NFD
@@ -272,6 +301,15 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   const bool wordStartsRtl = !hasRtlWord && mayContainRtlBytes(word.c_str()) &&
                              BidiUtils::startsWithRtl(word.c_str(), RTL_PER_WORD_PROBE_DEPTH);
 
+  // Tokens split from one word start where the previous token's code points end. NFC
+  // composition above can shorten a decomposed word, so offsets inside such a word may
+  // run ahead of the source by the marks it absorbed; the next word is exact again.
+  uint32_t tokenOffset = textOffset;
+  const auto recordToken = [&]() {
+    pushSourceOffset(tokenOffset);
+    tokenOffset += codepointCount(words.back().data(), words.back().size());
+  };
+
   const auto pushToken = [&](std::string token, const bool continues, const bool noSpaceBefore,
                              const bool isFocusSuffix) {
     words.push_back(std::move(token));
@@ -279,6 +317,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     wordContinues.push_back(continues);
     wordNoSpaceBefore.push_back(noSpaceBefore);
     wordIsFocusSuffix.push_back(isFocusSuffix);
+    recordToken();
   };
 
   bool effectiveAttachToPrevious = attachToPrevious;
@@ -351,6 +390,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     }
 
     words.reserve(newCapacity);
+    wordSourceDelta.reserve(newCapacity);
     wordStyles.reserve(newCapacity);
     wordContinues.reserve(newCapacity);
     wordNoSpaceBefore.reserve(newCapacity);
@@ -367,6 +407,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
       wordContinues.push_back(attach);
       wordNoSpaceBefore.push_back(noSpaceBefore);
       wordIsFocusSuffix.push_back(false);
+      recordToken();
     } else {
       size_t charCount = 0;
       const unsigned char* countPtr = reinterpret_cast<const unsigned char*>(segment.data());
@@ -389,6 +430,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
         wordContinues.push_back(attach);
         wordNoSpaceBefore.push_back(noSpaceBefore);
         wordIsFocusSuffix.push_back(false);
+        recordToken();
       } else {
         countPtr = reinterpret_cast<const unsigned char*>(segment.data());
         for (size_t i = 0; i < targetBoldChars; ++i) {
@@ -402,6 +444,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
         wordContinues.push_back(attach);
         wordNoSpaceBefore.push_back(noSpaceBefore);
         wordIsFocusSuffix.push_back(false);
+        recordToken();
 
         // Regular suffix - marked so extractLine can merge it back into single TextBlock entry
         words.emplace_back(segment.substr(splitByteOffset));
@@ -409,6 +452,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
         wordContinues.push_back(true);
         wordNoSpaceBefore.push_back(false);
         wordIsFocusSuffix.push_back(true);
+        recordToken();
       }
     }
   };
@@ -526,7 +570,17 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
   }
   const size_t lineCount = includeLastLine ? lineBreakIndices.size() : lineBreakIndices.size() - 1;
 
+  // Lines are handed out in order, so each line's start offset continues the running sum.
+  uint32_t runningOffset = sourceBase;
+  size_t runningIndex = 0;
+  const auto advanceOffsetTo = [&](const size_t index) {
+    while (runningIndex < index && runningIndex + 1 < wordSourceDelta.size()) {
+      runningOffset += wordSourceDelta[++runningIndex];
+    }
+  };
   for (size_t i = 0; i < lineCount; ++i) {
+    advanceOffsetTo(i > 0 ? lineBreakIndices[i - 1] : 0);
+    lineSourceOffset = runningOffset;
     extractLine(i, pageWidth, wordWidths, wordContinues, wordNoSpaceBefore, lineBreakIndices, processLine, renderer,
                 fontId);
   }
@@ -534,6 +588,14 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
   // Remove consumed words so size() reflects only remaining words
   if (lineCount > 0) {
     const size_t consumed = lineBreakIndices[lineCount - 1];
+    if (consumed < wordSourceDelta.size()) {
+      advanceOffsetTo(consumed);
+      sourceBase = runningOffset;  // the first remaining word becomes the base
+      wordSourceDelta.erase(wordSourceDelta.begin(), wordSourceDelta.begin() + consumed);
+      wordSourceDelta[0] = 0;
+    } else {
+      wordSourceDelta.clear();
+    }
     words.erase(words.begin(), words.begin() + consumed);
     wordStyles.erase(wordStyles.begin(), wordStyles.begin() + consumed);
     wordContinues.erase(wordContinues.begin(), wordContinues.begin() + consumed);
@@ -801,6 +863,20 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   words[wordIndex].resize(chosenOffset);
   if (chosenNeedsHyphen) {
     words[wordIndex].push_back('-');
+  }
+
+  // The remainder starts where the prefix's code points (soft hyphens included) end; the word
+  // after it keeps its absolute offset, so its distance shrinks by the same amount.
+  if (wordIndex < wordSourceDelta.size()) {
+    const uint16_t prefixCodepoints =
+        static_cast<uint16_t>(std::min<uint32_t>(codepointCount(word.data(), chosenOffset), UINT16_MAX));
+    if (wordIndex + 1 < wordSourceDelta.size()) {
+      uint16_t& next = wordSourceDelta[wordIndex + 1];
+      next = next > prefixCodepoints ? static_cast<uint16_t>(next - prefixCodepoints) : 0;
+    } else {
+      lastSourceOffset = sourceOffsetAt(wordIndex) + prefixCodepoints;
+    }
+    wordSourceDelta.insert(wordSourceDelta.begin() + wordIndex + 1, prefixCodepoints);
   }
 
   // Insert the remainder word (with matching style and continuation flag) directly after the prefix.

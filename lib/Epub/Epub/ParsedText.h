@@ -2,6 +2,7 @@
 
 #include <EpdFontFamily.h>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -18,6 +19,14 @@ class ParsedText {
   std::vector<bool> wordContinues;      // true = word attaches to previous with no break
   std::vector<bool> wordNoSpaceBefore;  // true = may break before token, but no synthetic space when joined
   std::vector<bool> wordIsFocusSuffix;  // true = token is the regular tail of a focus bold-prefix split
+  // Chapter text offset of each token (see ChapterHtmlSlimParser::textOffset), stored as the
+  // distance from the previous token so it fits 2 bytes: words[0] starts at sourceBase and
+  // words[i] at sourceBase + sum(wordSourceDelta[1..i]). Only the pending words of this block
+  // are held (the parser lays out and drops them every ~750 words), not the paragraph.
+  std::vector<uint16_t> wordSourceDelta;
+  uint32_t sourceBase = 0;
+  uint32_t lastSourceOffset = 0;  // offset of words.back()
+  uint32_t lineSourceOffset = 0;  // offset of the first word of the line being handed out
   BlockStyle blockStyle;
   bool extraParagraphSpacing;
   bool hyphenationEnabled;
@@ -47,6 +56,8 @@ class ParsedText {
                    const std::function<void(std::shared_ptr<TextBlock>)>& processLine, const GfxRenderer& renderer,
                    int fontId);
   std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer, int fontId);
+  void pushSourceOffset(uint32_t offset);
+  uint32_t sourceOffsetAt(size_t wordIndex) const;
 
  public:
   explicit ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled = false,
@@ -59,7 +70,9 @@ class ParsedText {
         hasRtlWord(false) {}
   ~ParsedText() = default;
 
-  void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false);
+  // `textOffset` is where the word starts in the chapter's text (ChapterHtmlSlimParser::textOffset).
+  void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
+               uint32_t textOffset = 0);
   void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
@@ -77,4 +90,6 @@ class ParsedText {
   void layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
                              const std::function<void(std::shared_ptr<TextBlock>)>& processLine,
                              bool includeLastLine = true);
+  // Chapter text offset of the first word of the line processLine is receiving.
+  uint32_t currentLineTextOffset() const { return lineSourceOffset; }
 };
