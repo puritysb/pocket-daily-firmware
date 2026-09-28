@@ -191,7 +191,13 @@ void finishStart() {
 // OPEN: serve the bonded phone.
 void serve() {
   Service& service = runtime->service;
-  Stats::sample(stats, ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  const uint32_t freeHeap = ESP.getFreeHeap();
+  Stats::sample(stats, freeHeap, ESP.getMaxAllocHeap());
+  if (freeHeap < BLE_WINDOW_RUNNING_MIN_FREE) {
+    LOG_ERR("RSYNC", "window closing: heap %lu below the running floor", static_cast<unsigned long>(freeHeap));
+    close(CloseReason::LOW_MEMORY);
+    return;
+  }
   // A connection whose private address the controller could not resolve must
   // re-encrypt with a bond within the grace period (NearbySyncService admission).
   if (service.isConnected() && !service.isAuthenticated() &&

@@ -29,9 +29,14 @@ inline constexpr uint32_t UNBONDED_GRACE_MS = 5000;
 // the controller, host task and GATT tables are allocated in several pieces.
 inline constexpr uint32_t BLE_WINDOW_MIN_BLOCK = 40U * 1024U;
 inline constexpr uint32_t BLE_WINDOW_MIN_FREE = 64U * 1024U;
-// After NimBLE is up: the Nearby Sync screen's ready gate.
-inline constexpr uint32_t BLE_WINDOW_READY_MIN_FREE = 20U * 1024U;
-inline constexpr uint32_t BLE_WINDOW_READY_MIN_BLOCK = 8U * 1024U;
+// After NimBLE is up. The Nearby Sync screen asks 20 KB / 8 KB, but its screen holds
+// less than Home. Measured on the X3 at Home after a wake (2026-09-29, readSync in /api/status):
+// 82.9 KB free / 77.8 KB block before NimBLE, 13.7 KB / 11.3 KB once advertising.
+// An exchange allocates at most ~3.7 KB (one offer) with nothrow. The window closes
+// if the heap falls below the running floor while it is open.
+inline constexpr uint32_t BLE_WINDOW_READY_MIN_FREE = 10U * 1024U;
+inline constexpr uint32_t BLE_WINDOW_READY_MIN_BLOCK = 6U * 1024U;
+inline constexpr uint32_t BLE_WINDOW_RUNNING_MIN_FREE = 6U * 1024U;
 // The window needs battery strictly above this.
 inline constexpr uint16_t MIN_BATTERY_PERCENT = 10;
 
