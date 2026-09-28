@@ -36,6 +36,7 @@ Strings deviceStrings() {
   s.today = tr(STR_POCKET_TODAY);
   s.library = tr(STR_POCKET_LIBRARY);
   s.select = tr(STR_SELECT);
+  s.articles = tr(STR_ARTICLES);
   s.sync = tr(STR_POCKET_SYNC);
   return s;
 }

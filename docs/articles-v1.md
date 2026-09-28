@@ -3,7 +3,9 @@
 2026-09-27. Companion-owned design and wire layout:
 [Articles](../../pocket-daily/docs/ARTICLES.md).
 
-Firmware owns Home → Articles, bounded EPUB metadata scanning, existing EPUB
+Firmware owns Pocket Reader → Articles (the Left front button on Pocket Daily's
+Home; the stock CrossPoint Home menu gains only the Pocket Reader entry),
+bounded EPUB metadata scanning, existing EPUB
 reader integration, read markers and explicit reader-copy deletion. The app owns
 browser sharing, page extraction, local source retention and explicit transfers.
 No reader-side web client, RSS fetcher, background sync or new network endpoint.

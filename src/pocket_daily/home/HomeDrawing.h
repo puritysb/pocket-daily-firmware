@@ -37,7 +37,7 @@ void drawPocketSideChevrons(GfxRenderer& renderer, bool isX3);
 // frame the caller draws. Pure line drawing: no SD access, no allocation.
 void drawCoverPlaceholder(const GfxRenderer& renderer, int x, int y, int width, int height);
 void drawPocketActionStrip(GfxRenderer& renderer, bool isX3, const FontResolver& fonts, const char* first,
-                           const char* second, const char* fourth);
+                           const char* second, const char* third, const char* fourth);
 bool formatWeatherSnapshotDate(char* out, size_t cap, const PocketDaily::Weather& weather);
 // Older than 36 hours at `now` (and the clock is plausible).
 bool snapshotIsStale(uint32_t savedEpoch, time_t now);

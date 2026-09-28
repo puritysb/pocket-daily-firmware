@@ -312,9 +312,10 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
 
   if (sidePaging) HomeDraw::drawPocketSideChevrons(renderer, view.isX3);
 
-  // Confirm selects the current carousel item. Right opens Pocket's account-free
-  // nearby transport, where the companion sends cards and the glance.
-  HomeDraw::drawPocketActionStrip(renderer, view.isX3, env.labels, s.library, s.select, s.sync);
+  // Confirm selects the current carousel item. Left opens the Articles library;
+  // Right opens Pocket's account-free nearby transport, where the companion
+  // sends cards and the glance.
+  HomeDraw::drawPocketActionStrip(renderer, view.isX3, env.labels, s.library, s.select, s.articles, s.sync);
 }
 
 void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {

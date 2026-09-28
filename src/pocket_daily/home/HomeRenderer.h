@@ -80,6 +80,7 @@ struct Strings {
   const char* today = "Today";
   const char* library = "Library";
   const char* select = "Select";
+  const char* articles = "Articles";
   const char* sync = "Sync";
 };
 

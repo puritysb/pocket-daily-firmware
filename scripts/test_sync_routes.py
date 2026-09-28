@@ -21,6 +21,19 @@ class SyncRoutesTest(unittest.TestCase):
         for path in ("src/games/GameModels.h", "src/activities/games/GamesActivity.cpp"):
             self.assertFalse((root / path).exists())
 
+    def test_articles_live_under_pocket_reader_not_home(self):
+        # Home stays the stock CrossPoint menu plus the single Pocket Reader
+        # entry; the Articles library is reached from Pocket Daily's Home.
+        root = Path(__file__).resolve().parents[1]
+        home = (root / "src/activities/home/HomeActivity.cpp").read_text()
+        manager = (root / "src/activities/ActivityManager.h").read_text()
+        pocket = (root / "src/activities/pocket_daily/PocketDailyActivity.cpp").read_text()
+        articles = (root / "src/activities/home/ArticlesActivity.cpp").read_text()
+        self.assertNotIn("STR_ARTICLES", home)
+        self.assertNotIn("HomeMenuItem::ARTICLES", manager)
+        self.assertIn("activityManager.goToArticles()", pocket)
+        self.assertIn("activityManager.goToPocketDaily()", articles)
+
     def test_pocket_connection_guidance_is_separate_from_browser_transfer(self):
         root = Path(__file__).resolve().parents[1]
         chooser = (root / "src/activities/network/NetworkModeSelectionActivity.cpp").read_text()

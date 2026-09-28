@@ -143,6 +143,9 @@ class PocketDailyActivity final : public Activity {
   // Confirm on the Daily Brief: onExit restarts into the reader
   // (silentRestartToReader) instead of Home.
   bool exitToReader = false;
+  // Left on the Overview opens the Articles library (companion-sent EPUBs on
+  // SD). A plain activity switch while the radio is off, like resume reading.
+  bool exitToArticles = false;
   bool exitToNearbySync = false;
   bool sleepFramePending = false;  // render() must paint the sleep Daily Brief
 };

@@ -99,6 +99,7 @@ void PocketDailyActivity::onEnter() {
 
   exitRequested = false;
   exitToReader = false;
+  exitToArticles = false;
   exitToNearbySync = false;
   viewMode = ViewMode::Overview;
   glanceReason = GlanceReason::Ambient;
@@ -138,6 +139,14 @@ void PocketDailyActivity::loop() {
     activityManager.goToReader(APP_STATE.openEpubPath);
     return;
   }
+  // Left opens the Articles library the same way. With the radio unexpectedly
+  // up, finish() below takes onExit's defrag restart to Home instead.
+  if (exitToArticles && WiFi.getMode() == WIFI_MODE_NULL) {
+    exitToArticles = false;
+    activityManager.goToArticles();
+    return;
+  }
+  exitToArticles = false;
   finish();
 }
 
@@ -373,6 +382,13 @@ void PocketDailyActivity::handleButtons() {
       viewMode = ViewMode::Card;
       requestUpdate();
     }
+    return;
+  }
+  // Left opens the Articles library: the companion's articles on SD, listed
+  // and tidied on the reader (docs/articles-v1.md). Home stays stock CrossPoint.
+  if (gpio.wasReleased(HalGPIO::BTN_LEFT)) {
+    exitToArticles = true;
+    exitRequested = true;
     return;
   }
   // Sync opens Pocket Nearby Sync, where the companion sends cards, the
@@ -666,9 +682,13 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
     // with a full waveform (it is painted once, at power-off).
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);
   } else {
-    // Confirm resumes the open book — label it only when there is one.
-    const auto labels = mappedInput.mapLabels(tr(STR_POCKET_LIBRARY),
-                                              APP_STATE.openEpubPath.empty() ? "" : tr(STR_POCKET_READ), "", "");
+    // Confirm resumes the open book — label it only when there is one. Left
+    // and Right are physical positions here (handleButtons reads raw gpio), so
+    // they bypass the front-button remap the mapped labels follow.
+    auto labels = mappedInput.mapLabels(tr(STR_POCKET_LIBRARY),
+                                        APP_STATE.openEpubPath.empty() ? "" : tr(STR_POCKET_READ), "", "");
+    labels.btn3 = tr(STR_ARTICLES);
+    labels.btn4 = tr(STR_POCKET_SYNC);
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer();
   }

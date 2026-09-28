@@ -149,7 +149,9 @@ void ArticlesActivity::promptDelete(bool readOnly) {
 }
 void ArticlesActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    onGoHome(HomeMenuItem::ARTICLES);
+    // Articles is reached from Pocket Daily (Left on its Home), so Back returns
+    // there rather than to the stock CrossPoint Home.
+    activityManager.goToPocketDaily();
     return;
   }
   if (!state) return;

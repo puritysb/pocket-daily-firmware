@@ -466,7 +466,7 @@ bool snapshotIsStale(uint32_t savedEpoch, const time_t now) {
 }
 
 void drawPocketActionStrip(GfxRenderer& renderer, const bool isX3, const FontResolver& fonts, const char* first,
-                           const char* second, const char* fourth) {
+                           const char* second, const char* third, const char* fourth) {
   // Pocket's front controls are physical objects, not virtual rounded buttons.
   // Four edge ticks align with their real centers; labels float above only for
   // actions that exist in this context, leaving the content visually open.
@@ -474,7 +474,7 @@ void drawPocketActionStrip(GfxRenderer& renderer, const bool isX3, const FontRes
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
   const int h = renderer.getScreenHeight();
   const PocketHardwareGeometry& hardware = pocketHardwareGeometry(isX3);
-  const char* labels[] = {first, second, "", fourth};
+  const char* labels[] = {first, second, third, fourth};
   for (int i = 0; i < 4; i++) {
     const int cx = hardware.frontCenters[i];
     renderer.drawLine(cx - 8, h - 3, cx + 8, h - 3, 2, true);

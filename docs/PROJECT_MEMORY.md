@@ -5,6 +5,13 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-29 Home menu is stock CrossPoint plus one entry. Articles moved from
+  the Home menu into Pocket Reader: the Left front button on Pocket Daily's Home
+  opens the Articles library and Back from Articles returns to Pocket Daily
+  (`HomeMenuItem::ARTICLES` removed; `drawPocketActionStrip` gained the third
+  label, so the Sync presenter shows it and the app preview will after the next
+  `PocketUIHost.xcframework` sync). Guard: `test_sync_routes.py`. Host tests and
+  the default build pass; not on X3/X4.
 - 2026-09-29 X3 acceptance of exact positions (cf195984): page 35/45 of the EPUB
   check book's chapter 3 recorded `.../p[1]/text()[1].22795`, which resolves to the
   photographed first line ("라 English & 기호 < > ..."); reopening restored the
