@@ -161,6 +161,15 @@ JSON, no allocation), as in v1.
 
 ## Memory
 
+The same figures are kept in RTC_NOINIT memory (`nearby_sync/ReadSyncStats`) and
+reported by `GET /api/status` as `readSync` once any window was attempted since
+power-on: counts (`opened`, `skipped`, `refused`, `connections`, `lists`,
+`offers`), the last `lastTrigger`/`lastGate`/`lastClose`, and heap/largest block
+before NimBLE (`startFree`/`startBlock`), once advertising (`openFree`/`openBlock`),
+the lowest while open (`minFree`/`minBlock`) and after deinit
+(`closedFree`/`closedBlock`). They survive the restart into a Wi-Fi mode, so a
+reader put into Same Wi-Fi after a test shows the last window.
+
 `BLE_WINDOW_MIN_BLOCK` = **40 KiB** (provisional; `ExchangeWindowPolicy.h`),
 with a 64 KiB free-heap gate beside it. Not yet measured on X3/X4: this build
 was not installed. Each window logs what the measurement needs:

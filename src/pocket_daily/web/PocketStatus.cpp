@@ -10,6 +10,7 @@
 #include "pocket_daily/BuildFailureLog.h"
 #include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/ReaderPerf.h"
+#include "pocket_daily/nearby_sync/ExchangeWindow.h"
 #include "pocket_daily/web/UploadStreamServer.h"
 
 namespace PocketDaily::Web {
@@ -61,6 +62,28 @@ String buildStatusJson(const StatusInputs& in) {
   // no crash report was written (clean returnToLaunchOrigin).
   doc["lastBootBreadcrumb"] = HalSystem::getPreviousBootBreadcrumb();
   doc["lastResetReason"] = HalSystem::getResetReasonName();
+  // Reading-sync exchange windows since power-on (docs/reading-sync-ble-v1.md, "Memory").
+  if (const auto* sync = Pocket::NearbySync::Window::statistics()) {
+    using namespace Pocket::NearbySync::Window;
+    JsonObject w = doc["readSync"].to<JsonObject>();
+    w["opened"] = sync->opened;
+    w["skipped"] = sync->skipped;
+    w["refused"] = sync->refused;
+    w["connections"] = sync->connections;
+    w["lists"] = sync->lists;
+    w["offers"] = sync->offers;
+    w["lastTrigger"] = triggerName(static_cast<Trigger>(sync->lastTrigger));
+    w["lastGate"] = gateName(static_cast<Gate>(sync->lastGate));
+    w["lastClose"] = closeReasonName(static_cast<CloseReason>(sync->lastClose));
+    w["startFree"] = sync->startFree;
+    w["startBlock"] = sync->startBlock;
+    w["openFree"] = sync->openFree;
+    w["openBlock"] = sync->openBlock;
+    w["minFree"] = sync->minFree;
+    w["minBlock"] = sync->minBlock;
+    w["closedFree"] = sync->closedFree;
+    w["closedBlock"] = sync->closedBlock;
+  }
   if (in.stream && in.stream->listening()) {
     doc["uploadStreamPort"] = in.stream->port();
     // The stream keeps an interrupted staging file and accepts `Resume: 1`.

@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "ExchangeWindowPolicy.h"
+#include "ReadSyncStats.h"
 
 // Owner of Pocket Reading Sync exchange windows (docs/reading-sync-ble-v1.md):
 // applies ExchangeWindowPolicy to NimBLE. Everything is called from the
@@ -23,6 +24,8 @@ void loop(bool shellActive, uint32_t renderCount);
 void close(CloseReason reason);
 // NimBLE is starting or up: the loop must keep the CPU at normal speed.
 bool active();
+// Heap and outcome figures of recent windows (kept across restarts), or null.
+const Stats::Record* statistics();
 // The 20 s window after the sleep screen is drawn; returns when it closed
 // (time up, a button press, or a gate refused it). Extends an open window.
 void runBeforeDeepSleep(uint32_t renderCount);

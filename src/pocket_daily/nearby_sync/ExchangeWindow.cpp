@@ -16,6 +16,7 @@
 
 #include "CrossPointSettings.h"
 #include "NearbySyncService.h"
+#include "ReadSyncStats.h"
 #include "ReadingSyncSession.h"
 
 namespace Pocket::NearbySync::Window {
@@ -34,7 +35,11 @@ struct Runtime {
   ReadingSyncSession session{service};
   const char* model = "X4";
   uint32_t graceGeneration = 0;  // the connection already dropped for no bond
+  uint32_t openGeneration = 0;   // connections counted from here
 };
+
+// Survives the restart into a Wi-Fi mode, so /api/status can report it.
+RTC_NOINIT_ATTR Stats::Record stats;
 
 Controller controller;
 std::unique_ptr<Runtime> runtime;
@@ -92,12 +97,22 @@ void stopRadio() {
     }
   }
   startState.store(StartState::IDLE, std::memory_order_release);
+  uint16_t connections = 0, lists = 0, offers = 0;
   if (runtime) {
     LOG_INF("RSYNC", "window closed (%s): %u list(s), %u offer(s)", closeReasonName(controller.lastCloseReason()),
             static_cast<unsigned>(runtime->session.listsSent()),
             static_cast<unsigned>(runtime->session.offersStored()));
+    const uint32_t served = runtime->service.connectionGeneration() - runtime->openGeneration;
+    connections = served > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(served);
+    lists = runtime->session.listsSent();
+    offers = runtime->session.offersStored();
   }
+  const bool wasOpen = static_cast<bool>(runtime);
   releaseRuntime();
+  if (wasOpen) {
+    Stats::closed(stats, static_cast<uint8_t>(controller.lastCloseReason()), connections, lists, offers,
+                  ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  }
   controller.stopped();
   HalSystem::setCrashBreadcrumb("readsync:window-closed");
 }
@@ -111,6 +126,8 @@ void start() {
   input.freeHeap = ESP.getFreeHeap();
   input.largestBlock = ESP.getMaxAllocHeap();
   const Gate gate = evaluate(input);
+  Stats::startAttempt(stats, static_cast<uint8_t>(controller.trigger()), static_cast<uint8_t>(gate), input.freeHeap,
+                      input.largestBlock, gate == Gate::OPEN);
   if (gate != Gate::OPEN) {
     // Skipped silently for the person; one log line per skip for hardware runs.
     LOG_INF("RSYNC", "window %s skipped: %s (heap %lu, block %lu, battery %u%%)", triggerName(controller.trigger()),
@@ -153,6 +170,7 @@ void finishStart() {
   }
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t largestBlock = ESP.getMaxAllocHeap();
+  Stats::ready(stats, freeHeap, largestBlock, readyAllowed(freeHeap, largestBlock));
   if (!readyAllowed(freeHeap, largestBlock)) {
     LOG_ERR("RSYNC", "window ready refused: heap %lu, block %lu", static_cast<unsigned long>(freeHeap),
             static_cast<unsigned long>(largestBlock));
@@ -163,6 +181,7 @@ void finishStart() {
   }
   controller.started(true, millis());
   runtime->graceGeneration = runtime->service.connectionGeneration();
+  runtime->openGeneration = runtime->graceGeneration;
   HalSystem::setCrashBreadcrumb("readsync:window-open");
   LOG_INF("RSYNC", "window open for %lu ms (heap %lu, block %lu)",
           static_cast<unsigned long>(controller.remainingMs(millis())), static_cast<unsigned long>(freeHeap),
@@ -172,6 +191,7 @@ void finishStart() {
 // OPEN: serve the bonded phone.
 void serve() {
   Service& service = runtime->service;
+  Stats::sample(stats, ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   // A connection whose private address the controller could not resolve must
   // re-encrypt with a bond within the grace period (NearbySyncService admission).
   if (service.isConnected() && !service.isAuthenticated() &&
@@ -234,6 +254,8 @@ void close(const CloseReason reason) {
 }
 
 bool active() { return controller.radioUp(); }
+
+const Stats::Record* statistics() { return Stats::valid(stats) ? &stats : nullptr; }
 
 void runBeforeDeepSleep(const uint32_t renderCount) {
   arm(Trigger::SLEEP, renderCount);

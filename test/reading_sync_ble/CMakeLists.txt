@@ -2,12 +2,14 @@
 
 set(READING_SYNC_PURE_SOURCES
   ${REPO_ROOT}/src/pocket_daily/nearby_sync/ReadingSyncProtocol.cpp
-  ${REPO_ROOT}/src/pocket_daily/nearby_sync/ExchangeWindowPolicy.cpp)
+  ${REPO_ROOT}/src/pocket_daily/nearby_sync/ExchangeWindowPolicy.cpp
+  ${REPO_ROOT}/src/pocket_daily/nearby_sync/ReadSyncStats.cpp)
 
 # Record grammar, chunking/CRC, offer reassembly, callback queue, window policy.
 add_executable(reading_sync_ble_protocol_test
   ReadingSyncProtocolTest.cpp
   ExchangeWindowPolicyTest.cpp
+  ReadSyncStatsTest.cpp
   ${READING_SYNC_PURE_SOURCES})
 target_link_libraries(reading_sync_ble_protocol_test PRIVATE crosspoint_test_common GTest::gtest_main)
 gtest_discover_tests(reading_sync_ble_protocol_test)
