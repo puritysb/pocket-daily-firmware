@@ -21,7 +21,7 @@ hash, a new cache, and **lost reading progress**. That is expected behaviour, no
 |---|---|
 | `book.bin` | **7** (metadata structure) |
 | `section.bin` — incremental upstream baseline | **28** (layout structure) |
-| `section.bin` — **this fork** | **132** |
+| `section.bin` — **this fork** | **133** |
 
 The fork adds a `bilingualViewMode` header field and numbers itself in the **reserved 128–255
 range** rather than `upstream + 1`. Upstream keeps incrementing 27→28→…; a
@@ -53,11 +53,13 @@ width, emoji clusters measure once, uncovered glyphs come from the glyph-fallbac
 missing-glyph mark, and the header's font field is `fontId ^ GfxRenderer::glyphLayoutKey()`
 so installing or removing `/.fonts/PocketSymbols` re-lays out cached sections.
 
-v132 starts every page record with a `u32` chapter text offset (`Page::textOffset`, the
+v132 lays long paragraphs out in 192-word chunks (bounded word buffers).
+
+v133 starts every page record with a `u32` chapter text offset (`Page::textOffset`, the
 page's first character; see docs/reading-progress-v1.md), read by
 `Section::getPageTextOffset`/`findPageForTextOffset` straight from the record.
 
-The next fork-specific finalized format must use `133`, not an upstream version number or
+The next fork-specific finalized format must use `134`, not an upstream version number or
 the `0xFF` partial sentinel.
 
 ## What else invalidates a cache

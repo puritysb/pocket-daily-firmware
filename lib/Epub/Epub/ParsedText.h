@@ -22,7 +22,7 @@ class ParsedText {
   // Chapter text offset of each token (see ChapterHtmlSlimParser::textOffset), stored as the
   // distance from the previous token so it fits 2 bytes: words[0] starts at sourceBase and
   // words[i] at sourceBase + sum(wordSourceDelta[1..i]). Only the pending words of this block
-  // are held (the parser lays out and drops them every ~750 words), not the paragraph.
+  // are held (the parser lays out and drops them every ~192 words), not the paragraph.
   std::vector<uint16_t> wordSourceDelta;
   uint32_t sourceBase = 0;
   uint32_t lastSourceOffset = 0;  // offset of words.back()

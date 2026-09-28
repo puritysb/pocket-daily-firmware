@@ -84,7 +84,7 @@ in-progress section until a later page exists). Without a laid-out page with an
 offset (an XPointer the resolver cannot place) the percentage estimate of
 `toCrossPoint` stays.
 
-### Chapter text offsets (since 2026-09-29, section cache v132)
+### Chapter text offsets (since 2026-09-29, section cache v133)
 
 A chapter text offset is a 0-based code point index into the character data
 expat delivers inside the spine item's `<body>`: whitespace, the text of hidden
@@ -92,7 +92,7 @@ expat delivers inside the spine item's `<body>`: whitespace, the text of hidden
 count as their decoded text; text outside `<body>` does not count. This is the
 DOM text the XPointer offsets below index. While laying out a section,
 `ChapterHtmlSlimParser` tracks it per word (`ParsedText` keeps a 2-byte distance
-per pending word, bounded by the ~750-word layout batch, not by paragraph
+per pending word, bounded by the ~192-word layout batch, not by paragraph
 length) and stamps every page with the offset of its first character
 (`Page::textOffset`: the first word of its first line, including the remainder
 of a hyphenated word, or the text position of a leading image or rule). The

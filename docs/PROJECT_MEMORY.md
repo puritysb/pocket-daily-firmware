@@ -6,10 +6,10 @@ transcript. Current source and release records override dated observations.
 ## Repository split
 
 - 2026-09-29 Exact reading positions (branch feat/exact-page-offsets; contract
-  docs/reading-progress-v1.md "Chapter text offsets"). Section cache v132: each
+  docs/reading-progress-v1.md "Chapter text offsets"). Section cache v133: each
   page record starts with `u32 textOffset`, the code point offset of its first
   character in the `<body>` character data; `ParsedText` carries a 2-byte
-  distance per pending word (bounded by the 750-word batch), no extra pass.
+  distance per pending word (bounded by the 192-word batch), no extra pass.
   Exit records `findXPathForTextOffset` (exact; record flag bit 0 refreshes
   old estimated records once); an accepted offer maps its XPointer back with
   `findTextOffsetForXPath` + `Section::findPageForTextOffset`. X3 evidence that
