@@ -5,7 +5,16 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
-- 2026-09-29 Exact reading positions (branch feat/exact-page-offsets; contract
+- 2026-09-29 X3 acceptance of exact positions (cf195984): page 35/45 of the EPUB
+  check book's chapter 3 recorded `.../p[1]/text()[1].22795`, which resolves to the
+  photographed first line ("라 English & 기호 < > ..."); reopening restored the
+  page. A v132 partial cache had been read as v133 (book reopened at the chapter
+  start) until partials carried a format tag.
+- 2026-09-29 Reading sync over BLE (branch feat/ble-reading-sync) is held, not on
+  main. X3 readSync: window opens at Home (83 KB free before NimBLE, 13.5 KB after;
+  low water 6.9 KB free / 2 KB block), but no phone connected in the field test
+  (the app side had not registered the reader). Resume from that branch.
+- 2026-09-29 Exact reading positions (merged to main; contract
   docs/reading-progress-v1.md "Chapter text offsets"). Section cache v133: each
   page record starts with `u32 textOffset`, the code point offset of its first
   character in the `<body>` character data; `ParsedText` carries a 2-byte
