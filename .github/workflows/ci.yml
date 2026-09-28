@@ -96,8 +96,12 @@ jobs:
           make -C build/cppcheck-source -j2 MATCHCOMPILER=yes
           build/cppcheck-source/cppcheck --version
 
+      # The restored cache can hold PlatformIO's bundled tool-cppcheck 2.11,
+      # which exits 127 on this runner. A package with that name blocks the
+      # native adapter from installing, so drop it before the check.
       - name: Run cppcheck
         run: |
+          rm -rf ~/.platformio/packages/tool-cppcheck*
           python -m unittest discover -s scripts -p test_check_firmware.py
           python scripts/check_firmware.py --cppcheck build/cppcheck-source/cppcheck
 
