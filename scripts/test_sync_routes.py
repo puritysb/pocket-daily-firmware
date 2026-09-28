@@ -230,21 +230,28 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertIn('routes.on("/api/pocket/v1/reading", HTTP_POST', sync)
         status = (root / "src/pocket_daily/web/PocketStatus.cpp").read_text()
         self.assertIn('if (isSyncProfile(in.profile)) doc["readingProgress"] = 1;', status)
-        handlers = source[source.index("struct ReadingWork {"):source.index("void handleTransferControl(")]
-        # No chapter streaming or position mapping while serving HTTP: the reader
-        # computes XPointers when a book is left (ReadingProgressReader).
+        handlers = source[source.index("void handleReadingList("):source.index("void handleTransferControl(")]
+        # HTTP and BLE (READ_LIST / OFFER) share one exchange implementation.
+        exchange = (root / "src/pocket_daily/ReadingExchange.cpp").read_text()
+        # No chapter streaming or position mapping while serving an exchange: the
+        # reader computes XPointers when a book is left (ReadingProgressReader).
         for heavy in ("ChapterXPathResolver", "ProgressMapper", "readSpineItemToStream", "readItemContentsToStream",
-                      ".load(", "O_WRITE", "saveProgress("):
+                      ".load(", "O_WRITE", "saveProgress(", "saveRecord("):
             self.assertNotIn(heavy, handlers)
+            self.assertNotIn(heavy, exchange)
         listing = handlers[handlers.index("void handleReadingList("):handlers.index("void handleReadingOffer(")]
         self.assertIn("admitContentOperation(server, d, deviceId)", listing)
-        self.assertIn("Reading::MAX_LIST_BYTES", listing)
+        self.assertIn("Reading::ListStream stream(deviceId, true, *work)", listing)
         self.assertNotIn("saveOffer", listing)
+        composer = (root / "src/pocket_daily/ReadingProgress.cpp").read_text()
+        self.assertIn("MAX_LIST_BYTES", composer[composer.index("size_t ListComposer::entry("):])
         offer = handlers[handlers.index("void handleReadingOffer("):]
         # Parsed and identity-checked before anything is stored; never touches progress.bin.
         self.assertLess(offer.index("Reading::parseOfferJson("), offer.index("admitOperationFor("))
-        self.assertLess(offer.index("admitOperationFor("), offer.index("Reading::saveOffer("))
+        self.assertLess(offer.index("admitOperationFor("), offer.index("Reading::storeOffer("))
         self.assertNotIn("saveProgress(", offer)
+        store = exchange[exchange.index("OfferStoreResult storeOffer("):]
+        self.assertIn("saveOffer(", store)
         reader = (root / "src/activities/reader/EpubReaderActivity.cpp").read_text()
         exit_hook = reader[reader.index("void EpubReaderActivity::onExit()"):reader.index("void EpubReaderActivity::loop()")]
         self.assertLess(exit_hook.index("capturePosition("), exit_hook.index("section.reset();"))

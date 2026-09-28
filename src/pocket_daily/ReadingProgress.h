@@ -76,10 +76,11 @@ bool decodeOffer(const uint8_t* bytes, size_t size, Offer& offer);
 // unknown keys are ignored. `error` receives a short static reason.
 bool parseOfferJson(const char* json, size_t length, OfferRequest& out, const char*& error, bool& outOfMemory);
 
-// One list entry; `progress` null when `xpointer` is empty. Returns the bytes
+// One list entry; `progress` null when `xpointer` is empty. A null `path`
+// omits the member (the BLE list never carries file names). Returns the bytes
 // written (no terminator), or 0 when it does not fit.
 struct ListEntry {
-  const char* path = "";
+  const char* path = nullptr;
   const char* document = "";
   const char* filenameDocument = "";
   const char* xpointer = "";
@@ -91,4 +92,26 @@ size_t writeListEntry(const ListEntry& entry, char* out, size_t capacity);
 // `{"v":1,"deviceID":"…","books":[` and `]}`.
 size_t writeListHead(const char* deviceId, char* out, size_t capacity);
 inline constexpr char LIST_TAIL[] = "]}";
+
+// The reading-list body piece by piece within MAX_BOOKS and MAX_LIST_BYTES,
+// dropping the oldest books first. Shared by GET /api/pocket/v1/reading and the
+// BLE READ_LIST stream so both produce the same bytes (minus `path`).
+class ListComposer {
+ public:
+  // `{"v":1,"deviceID":"…","books":[`, or 0 when it does not fit `capacity`.
+  size_t head(const char* deviceId, char* out, size_t capacity);
+  // The entry, comma-prefixed after the first. 0 when it cannot be serialized
+  // (skip it) or would not fit the budget with the tail (full() is then true).
+  size_t entry(const ListEntry& book, char* out, size_t capacity);
+  // `]}`.
+  size_t tail(char* out, size_t capacity);
+  bool full() const { return isFull; }
+  size_t listed() const { return books; }
+  size_t total() const { return bytes; }
+
+ private:
+  size_t books = 0;
+  size_t bytes = 0;
+  bool isFull = false;
+};
 }  // namespace PocketDaily::ReadingProgress
