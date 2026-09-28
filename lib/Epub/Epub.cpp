@@ -16,9 +16,7 @@
 
 namespace {
 
-bool containsReplacementChar(const std::string& text) {
-  return text.find("\xEF\xBF\xBD") != std::string::npos;
-}
+bool containsReplacementChar(const std::string& text) { return text.find("\xEF\xBF\xBD") != std::string::npos; }
 
 std::string titleFromPath(const std::string& path) {
   const size_t slash = path.find_last_of('/');
