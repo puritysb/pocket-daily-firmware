@@ -81,6 +81,7 @@ class HomeActivity final : public Activity {
                         HomeMenuItem initialMenuItemValue = HomeMenuItem::NONE)
       : Activity("Home", renderer, mappedInput), initialMenuItem(initialMenuItemValue) {}
   void onEnter() override;
+  bool allowsExchangeWindow() const override { return true; }
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;

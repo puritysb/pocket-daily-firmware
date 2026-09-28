@@ -32,6 +32,7 @@ class RecentBooksActivity final : public Activity {
   explicit RecentBooksActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("RecentBooks", renderer, mappedInput) {}
   void onEnter() override;
+  bool allowsExchangeWindow() const override { return true; }
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;

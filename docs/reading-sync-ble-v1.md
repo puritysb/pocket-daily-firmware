@@ -5,7 +5,9 @@ Automatic, account-free exchange of reading places between a Pocket Daily reader
 the bonded Nearby Sync service (`nearby-sync-v1.md`) as its transport and the
 reading-progress v1 records (`reading-progress-v1.md`) as its payload.
 
-Status: contract for implementation (2026-09-29). Not yet hardware verified.
+Status: contract (2026-09-29); reader side implemented 2026-09-29 on
+`feat/ble-reading-sync`, host-verified only. Not yet hardware verified; the
+memory figure below is provisional until measured on X3.
 
 ## Experience
 
@@ -46,6 +48,38 @@ Rules:
 - One connection at a time; after the exchange the phone disconnects and the reader
   keeps advertising until the window ends (another bonded phone may come).
 - A small status line may show "Synced with iPhone" on Home; no modal UI.
+  (Not implemented in the first reader build.)
+
+Reader implementation notes (2026-09-29):
+
+- The setting is Settings → System → "Sync places with your phone"
+  (`pocketReadingSync` in `settings.json`, default on). "At least one bond" is
+  read from NimBLE's NVS store (`nimble_bond`, `peer_sec_<n>`) without starting
+  the controller.
+- Gates, in order: setting on, a bond stored, battery > 10 %, Wi-Fi off, free
+  heap ≥ 64 KiB and largest block ≥ `BLE_WINDOW_MIN_BLOCK` before NimBLE starts
+  (the free figure is the Nearby Sync screen's proven preflight), then free heap
+  ≥ 20 KiB and largest block ≥ 8 KiB once it is up (else the window closes).
+- Book-closed and wake windows start after the shell's next frame has been
+  drawn (render counter; at most 5 s wait). The wake trigger is a power-button
+  wake onto the shell (not a silent restart, crash, recovery or developer boot).
+  A sleep trigger during an open window keeps it open for exactly 20 s more.
+- The window closes before any screen other than Home, Pocket Daily, Library,
+  Recent Books or the sleep screen is entered (a book, Settings, a dialog, a
+  Wi-Fi mode, the Nearby Sync restart), so NimBLE's memory is back before that
+  screen allocates. A button press during the sleep window ends it and the
+  reader sleeps. NimBLE is fully deinitialized (`deinit(true)`) at every close.
+- NimBLE starts in a worker task (the Nearby Sync screen's 6 KiB start task) so
+  buttons stay responsive; a close during start waits for it to finish.
+- In a window the reader uses no-input/no-output IO capability with bonding off
+  and MITM required, so no pairing can succeed or store anything (a stranger can
+  never evict the person's bond) and no passkey exists. A connecting peer whose
+  identity address is not bonded is disconnected in `onConnect`; a peer with an
+  unresolved resolvable private address gets 5 s to re-encrypt with its bond.
+  Commands are accepted only on an encrypted, authenticated, bonded link.
+- Advertising continues after a disconnect until the window ends.
+- READ_LIST / OFFER / W are also served on the Nearby Sync screen (`WIN=0`),
+  with the same code.
 
 ## Status record
 
@@ -90,11 +124,64 @@ same validation and pending-place store. Total ≤ 1024 bytes. One offer at a ti
 the app sends at most 10 offers per connection. A new `OFFER` or a disconnect
 discards an incomplete one.
 
+### Wire details (clarified 2026-09-29, reader implementation)
+
+These make explicit what the reader does; none changes the grammar above.
+
+- `END` carries the CRC as eight **upper-case** hex digits (`END 0000001A 812
+  0A1B2C3D`); the reader accepts either case in `OFFER`.
+- `OFFER` itself has no reply. The single reply to an offer is `OK <id>` after
+  its last chunk, or one `ERR <id> <code>`; later `W` chunks of a failed offer
+  are ignored silently.
+- Offer error codes: `BAD_RECORD` (total 0 or > 1024, JSON rejected by the
+  shared validation, or `deviceID` not this reader), `BAD_CHUNK` (seq not the
+  next one, overrun, CRC mismatch, or a `W` for no announced offer),
+  `UNKNOWN_DOCUMENT` (no recent book has that `document`/`filenameDocument`),
+  `NO_MEMORY`, `BUSY` (a list is streaming, or a chunk was dropped because the
+  reader's 4-record queue was full), and additionally **`FAILED`** when the
+  pending place could not be written to the SD card (HTTP answers 500). Apps
+  should treat unknown codes as a failed offer.
+- `W` chunks are raw bytes of the body: a chunk may split a multi-byte UTF-8
+  character and may begin or end with a space. Records must not contain control
+  characters (< 0x20, 0x7F); JSON escaping already guarantees that. A chunk is
+  at most 220 − len(`W <id> <seq> `) bytes.
+- Errors outside an exchange: a record without a valid id → `ERR 00000000
+  BAD_COMMAND`; an unknown verb → `ERR <id> UNKNOWN_COMMAND`; bad arguments to
+  `PING`/`CANCEL`/`READ_LIST` → `ERR <id> BAD_COMMAND`.
+- `D` records start at seq 0 and are sent in order; the list is pure ASCII
+  (digests, XPointers, numbers) because paths are omitted.
+- A new connection discards any incomplete list or offer and any record still
+  queued from the previous connection.
+
 ### Pacing
 
 The reader sends `D` notifications from its activity loop, one per pass, retrying a
 notification the stack could not queue. BLE callbacks only copy records (no SD, no
 JSON, no allocation), as in v1.
+
+## Memory
+
+`BLE_WINDOW_MIN_BLOCK` = **40 KiB** (provisional; `ExchangeWindowPolicy.h`),
+with a 64 KiB free-heap gate beside it. Not yet measured on X3/X4: this build
+was not installed. Each window logs what the measurement needs:
+
+```text
+RSYNC window <trigger> starting (heap F, block B, battery P%)
+NEARBY started window name=Pocket-XXXX heap=F0->F1 block=B0->B1
+RSYNC window open for N ms (heap F, block B)
+RSYNC List <id> sent: n books, m bytes      (or "Offer <id> stored")
+NEARBY stopped heap=F2 block=B2
+RSYNC window <trigger> skipped: <gate> (heap F, block B, battery P%)
+```
+
+`F0 − F1` is NimBLE init + advertising; the heap after a connection and an
+exchange shows in `MEM` lines during the window; `F2` vs `F0` shows whether
+deinit returned everything. Set the constant to the measured init cost plus
+the exchange scratch (≈ 2.4 KiB list, ≈ 3.7 KiB offer, allocated only while an
+exchange runs) plus margin, and record the figures here.
+
+Resident cost: 32 bytes of static RAM; the service, record queue (4 × 220 B),
+session and exchange buffers are allocated per window with nothrow allocation.
 
 ## App (Apple platforms)
 
@@ -117,3 +204,21 @@ JSON, no allocation), as in v1.
 Only the book fingerprint, the XPointer, the percentage and the device name cross
 the link, over an encrypted bonded connection. File names are omitted. Nothing is
 stored beyond what the HTTP exchange stores.
+
+## Verification
+
+Host (`test/reading_sync_ble`): record grammar and limits, CRC-32 check value,
+D chunking, offer reassembly, the callback queue, window gates and lifecycle
+(triggers, render wait, early closes, sleep extension, failed starts), and
+READ_LIST/OFFER end to end through the real record half of the service, the
+session and the exchange shared with the HTTP routes on a fake SD card (list =
+HTTP body minus paths, byte-exact; offers stored exactly as over HTTP; error
+codes; retry of refused notifications; link changes; queue overflow).
+`scripts/test_sync_routes.py` pins that HTTP and BLE share the exchange code.
+
+Needs X3/X4 with a paired iPhone: the heap figures above; bonded reconnect in a
+window (RPA resolution) and refusal of an unbonded phone without any passkey or
+bond change; each trigger (book closed, wake, sleep) and each early close;
+opening a book right after closing one (window start in flight); that sleep
+still happens and wake works after a sleep window; battery cost of windows; and
+the app's background reconnect.

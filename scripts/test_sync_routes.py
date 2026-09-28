@@ -233,16 +233,19 @@ class SyncRoutesTest(unittest.TestCase):
         handlers = source[source.index("void handleReadingList("):source.index("void handleTransferControl(")]
         # HTTP and BLE (READ_LIST / OFFER) share one exchange implementation.
         exchange = (root / "src/pocket_daily/ReadingExchange.cpp").read_text()
+        session = (root / "src/pocket_daily/nearby_sync/ReadingSyncSession.cpp").read_text()
         # No chapter streaming or position mapping while serving an exchange: the
         # reader computes XPointers when a book is left (ReadingProgressReader).
         for heavy in ("ChapterXPathResolver", "ProgressMapper", "readSpineItemToStream", "readItemContentsToStream",
                       ".load(", "O_WRITE", "saveProgress(", "saveRecord("):
             self.assertNotIn(heavy, handlers)
             self.assertNotIn(heavy, exchange)
+            self.assertNotIn(heavy, session)
         listing = handlers[handlers.index("void handleReadingList("):handlers.index("void handleReadingOffer(")]
         self.assertIn("admitContentOperation(server, d, deviceId)", listing)
         self.assertIn("Reading::ListStream stream(deviceId, true, *work)", listing)
         self.assertNotIn("saveOffer", listing)
+        self.assertIn("stream(deviceId, false, work)", session)  # no paths over the air
         composer = (root / "src/pocket_daily/ReadingProgress.cpp").read_text()
         self.assertIn("MAX_LIST_BYTES", composer[composer.index("size_t ListComposer::entry("):])
         offer = handlers[handlers.index("void handleReadingOffer("):]
@@ -250,6 +253,9 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertLess(offer.index("Reading::parseOfferJson("), offer.index("admitOperationFor("))
         self.assertLess(offer.index("admitOperationFor("), offer.index("Reading::storeOffer("))
         self.assertNotIn("saveProgress(", offer)
+        ble = session[session.index("void ReadingSyncSession::completeOffer("):]
+        self.assertLess(ble.index("Reading::parseOfferJson("), ble.index("service.deviceId()"))
+        self.assertLess(ble.index("service.deviceId()"), ble.index("Reading::storeOffer("))
         store = exchange[exchange.index("OfferStoreResult storeOffer("):]
         self.assertIn("saveOffer(", store)
         reader = (root / "src/activities/reader/EpubReaderActivity.cpp").read_text()

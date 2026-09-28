@@ -6,7 +6,6 @@
 #include <NimBLEDevice.h>
 #include <esp_system.h>
 
-#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -15,38 +14,57 @@ namespace Pocket::NearbySync {
 namespace {
 Service* activeService = nullptr;
 
-bool validRequestId(const char* value) {
-  if (!value || strlen(value) != 8) return false;
-  for (size_t i = 0; i < 8; ++i) {
-    if (!isxdigit(static_cast<unsigned char>(value[i])) || islower(static_cast<unsigned char>(value[i]))) return false;
-  }
-  return true;
+bool windowMode() { return activeService && activeService->mode() == Mode::WINDOW; }
+
+// Window admission: the peer's identity address (the controller resolves the
+// private address of a bonded phone through the IRKs NimBLE restores at sync)
+// must belong to a stored bond. An unresolved resolvable private address gets
+// a short grace to re-encrypt with its bond (ExchangeWindow enforces it); any
+// other unknown peer is dropped before it can start pairing.
+bool admitToWindow(NimBLEConnInfo& info) {
+  const NimBLEAddress identity = info.getIdAddress();
+  return NimBLEDevice::isBonded(identity) || identity.isRpa();
 }
 
 class ServerCallbacks final : public NimBLEServerCallbacks {
-  void onConnect(NimBLEServer*, NimBLEConnInfo& info) override {
-    HalSystem::setCrashBreadcrumb(info.isAuthenticated() ? "nearby:connected-authenticated"
-                                                         : "nearby:connected-awaiting-auth");
-    if (activeService) activeService->onConnected(true, info.isAuthenticated() && info.isEncrypted());
+  void onConnect(NimBLEServer* server, NimBLEConnInfo& info) override {
+    if (windowMode() && !admitToWindow(info)) {
+      HalSystem::setCrashBreadcrumb("readsync:reject-unbonded");
+      server->disconnect(info.getConnHandle());
+      return;
+    }
+    HalSystem::setCrashBreadcrumb(windowMode()             ? "readsync:connected"
+                                  : info.isAuthenticated() ? "nearby:connected-authenticated"
+                                                           : "nearby:connected-awaiting-auth");
+    if (activeService) {
+      const bool bondedOk = !windowMode() || info.isBonded();
+      activeService->onConnected(true, info.isAuthenticated() && info.isEncrypted() && bondedOk, info.getConnHandle(),
+                                 millis());
+    }
   }
 
-  void onDisconnect(NimBLEServer*, NimBLEConnInfo&, int) override {
-    HalSystem::setCrashBreadcrumb("nearby:disconnected");
+  void onDisconnect(NimBLEServer*, NimBLEConnInfo& info, int) override {
+    HalSystem::setCrashBreadcrumb(windowMode() ? "readsync:disconnected" : "nearby:disconnected");
     if (activeService) {
-      activeService->onConnected(false, false);
+      activeService->onConnected(false, false, info.getConnHandle(), millis());
       if (NimBLEDevice::isInitialized()) NimBLEDevice::startAdvertising();
     }
   }
 
   uint32_t onPassKeyDisplay() override {
-    HalSystem::setCrashBreadcrumb("nearby:passkey-display");
+    // Window mode never displays a passkey (no-input/no-output, see begin()).
+    HalSystem::setCrashBreadcrumb(windowMode() ? "readsync:passkey-refused" : "nearby:passkey-display");
     return activeService ? activeService->passkey() : 0;
   }
 
   void onAuthenticationComplete(NimBLEConnInfo& info) override {
-    const bool accepted = info.isAuthenticated() && info.isEncrypted();
-    HalSystem::setCrashBreadcrumb(accepted ? "nearby:authentication-complete" : "nearby:authentication-rejected");
-    if (activeService) activeService->onConnected(true, accepted);
+    const bool accepted = info.isAuthenticated() && info.isEncrypted() && (!windowMode() || info.isBonded());
+    if (windowMode()) {
+      HalSystem::setCrashBreadcrumb(accepted ? "readsync:encrypted-bonded" : "readsync:authentication-rejected");
+    } else {
+      HalSystem::setCrashBreadcrumb(accepted ? "nearby:authentication-complete" : "nearby:authentication-rejected");
+    }
+    if (activeService) activeService->onAuthenticated(accepted);
     if (!accepted && NimBLEDevice::getServer()) NimBLEDevice::getServer()->disconnect(info.getConnHandle());
   }
 };
@@ -54,6 +72,7 @@ class ServerCallbacks final : public NimBLEServerCallbacks {
 class CommandCallbacks final : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* characteristic, NimBLEConnInfo& info) override {
     if (!activeService || !info.isAuthenticated() || !info.isEncrypted()) return;
+    if (windowMode() && !info.isBonded()) return;
     const std::string& value = characteristic->getValue();
     activeService->onCommandRecord(value.data(), value.size());
   }
@@ -63,16 +82,20 @@ ServerCallbacks serverCallbacks;
 CommandCallbacks commandCallbacks;
 }  // namespace
 
-bool Service::begin(const char* model, const char* firmware) {
+bool Service::begin(const char* model, const char* firmware, const Mode requestedMode, const uint32_t advertiseMs) {
   if (running_) return true;
 
+  mode_ = requestedMode;
+  const bool window = requestedMode == Mode::WINDOW;
   const uint64_t chipId = ESP.getEfuseMac();
   snprintf(deviceId_, sizeof(deviceId_), "%08lX", static_cast<unsigned long>(chipId & 0xFFFFFFFFUL));
   snprintf(advertisedName_, sizeof(advertisedName_), "Pocket-%.4s", deviceId_ + 4);
   passkey_ = 100000U + (esp_random() % 900000U);
+  queue_.clear();
 
   const uint32_t heapBefore = ESP.getFreeHeap();
-  HalSystem::setCrashBreadcrumb("nearby:nimble-init");
+  const uint32_t blockBefore = ESP.getMaxAllocHeap();
+  HalSystem::setCrashBreadcrumb(window ? "readsync:nimble-init" : "nearby:nimble-init");
   if (!NimBLEDevice::init(advertisedName_)) {
     LOG_ERR("NEARBY", "NimBLE init failed");
     return false;
@@ -81,9 +104,18 @@ bool Service::begin(const char* model, const char* firmware) {
   activeService = this;
   NimBLEDevice::setMTU(247);
   NimBLEDevice::setPower(3);
-  NimBLEDevice::setSecurityAuth(true, true, true);
-  NimBLEDevice::setSecurityPasskey(passkey_);
-  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY);
+  if (window) {
+    // An exchange window never pairs: with no input or output a new peer cannot
+    // meet the MITM requirement, and without bonding nothing it negotiates is
+    // stored (so a stranger cannot evict the person's bond). Bonded phones
+    // re-encrypt with their stored MITM-protected key.
+    NimBLEDevice::setSecurityAuth(false, true, true);
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
+  } else {
+    NimBLEDevice::setSecurityAuth(true, true, true);
+    NimBLEDevice::setSecurityPasskey(passkey_);
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY);
+  }
 
   NimBLEServer* server = NimBLEDevice::createServer();
   if (!server) {
@@ -113,14 +145,12 @@ bool Service::begin(const char* model, const char* firmware) {
   }
 
   char statusRecord[MAX_RECORD_BYTES + 1];
-  const int statusLength =
-      snprintf(statusRecord, sizeof(statusRecord), "V=1;MODEL=%s;ID=%s;FW=%s;CAP=AP,HTTP,SD,COMMIT1",
-               model ? model : "X4", deviceId_, firmware ? firmware : "unknown");
-  if (statusLength <= 0 || static_cast<size_t>(statusLength) > MAX_RECORD_BYTES) {
+  const size_t statusLength = formatStatus(model, deviceId_, firmware, window, statusRecord, sizeof(statusRecord));
+  if (statusLength == 0) {
     end();
     return false;
   }
-  status->setValue(reinterpret_cast<const uint8_t*>(statusRecord), static_cast<size_t>(statusLength));
+  status->setValue(reinterpret_cast<const uint8_t*>(statusRecord), statusLength);
   command->setCallbacks(&commandCallbacks);
   server->start();
 
@@ -128,106 +158,40 @@ bool Service::begin(const char* model, const char* firmware) {
   advertising->setName(advertisedName_);
   advertising->addServiceUUID(SERVICE_UUID);
   advertising->enableScanResponse(true);
-  if (!advertising->start(120000)) {
+  if (!advertising->start(advertiseMs)) {
     end();
     return false;
   }
 
   running_ = true;
-  HalSystem::setCrashBreadcrumb("nearby:advertising");
+  HalSystem::setCrashBreadcrumb(window ? "readsync:advertising" : "nearby:advertising");
   connected_.store(false, std::memory_order_release);
   authenticated_.store(false, std::memory_order_release);
-  LOG_INF("NEARBY", "started name=%s heap=%lu->%lu", advertisedName_, static_cast<unsigned long>(heapBefore),
-          static_cast<unsigned long>(ESP.getFreeHeap()));
+  // Heap evidence for the window gate (docs/reading-sync-ble-v1.md, Memory).
+  LOG_INF("NEARBY", "started %s name=%s heap=%lu->%lu block=%lu->%lu", window ? "window" : "screen", advertisedName_,
+          static_cast<unsigned long>(heapBefore), static_cast<unsigned long>(ESP.getFreeHeap()),
+          static_cast<unsigned long>(blockBefore), static_cast<unsigned long>(ESP.getMaxAllocHeap()));
   return true;
 }
 
 void Service::end() {
-  HalSystem::setCrashBreadcrumb("nearby:shutdown");
-  pendingLength_.store(0, std::memory_order_release);
+  HalSystem::setCrashBreadcrumb(mode_ == Mode::WINDOW ? "readsync:shutdown" : "nearby:shutdown");
   connected_.store(false, std::memory_order_release);
   authenticated_.store(false, std::memory_order_release);
   eventCharacteristic_ = nullptr;
   activeService = nullptr;
   if (NimBLEDevice::isInitialized()) {
     NimBLEDevice::stopAdvertising();
-    // The Wi-Fi bulk-transfer phase starts immediately after BLE. Delete the
-    // server and advertising objects as well as stopping the controller so the
-    // scarce internal heap is returned before TCP buffers are allocated.
+    // The Wi-Fi bulk-transfer phase (and, after a window, the book the person
+    // opens) starts immediately after BLE. Delete the server and advertising
+    // objects as well as stopping the controller so the scarce internal heap
+    // is returned before anything else allocates.
     if (!NimBLEDevice::deinit(true)) LOG_ERR("NEARBY", "NimBLE deinit failed");
   }
   running_ = false;
-  LOG_INF("NEARBY", "stopped heap=%lu", static_cast<unsigned long>(ESP.getFreeHeap()));
-}
-
-void Service::onConnected(const bool connected, const bool authenticated) {
-  connected_.store(connected, std::memory_order_release);
-  authenticated_.store(connected && authenticated, std::memory_order_release);
-}
-
-void Service::onCommandRecord(const char* bytes, const size_t length) {
-  if (!bytes || length == 0 || length > MAX_RECORD_BYTES || pendingLength_.load(std::memory_order_acquire) != 0) return;
-  for (size_t i = 0; i < length; ++i) {
-    const unsigned char c = static_cast<unsigned char>(bytes[i]);
-    if (c < 0x20 || c > 0x7E) return;
-  }
-  memcpy(pendingRecord_, bytes, length);
-  pendingRecord_[length] = '\0';
-  pendingLength_.store(length, std::memory_order_release);
-}
-
-bool Service::takeCommand(Command& command) {
-  const size_t length = pendingLength_.load(std::memory_order_acquire);
-  if (length == 0 || length > MAX_RECORD_BYTES) return false;
-
-  // Keep the slot marked occupied until the callback-owned buffer has been
-  // copied. Clearing it first would let the NimBLE task overwrite the record
-  // while this activity is parsing it.
-  char record[MAX_RECORD_BYTES + 1];
-  memcpy(record, pendingRecord_, length + 1);
-  pendingLength_.store(0, std::memory_order_release);
-
-  char verb[16] = {};
-  char requestId[9] = {};
-  char extra = 0;
-  if (sscanf(record, "%15s %8s %c", verb, requestId, &extra) != 2 || !validRequestId(requestId)) {
-    notifyError("00000000", "BAD_COMMAND");
-    return false;
-  }
-
-  if (strcmp(verb, "PING") == 0)
-    command.type = CommandType::PING;
-  else if (strcmp(verb, "START_AP") == 0)
-    command.type = CommandType::START_AP;
-  else if (strcmp(verb, "CANCEL") == 0)
-    command.type = CommandType::CANCEL;
-  else {
-    notifyError(requestId, "UNKNOWN_COMMAND");
-    return false;
-  }
-  memcpy(command.requestId, requestId, sizeof(command.requestId));
-  return true;
-}
-
-bool Service::notifyOk(const char* requestId) {
-  char record[32];
-  snprintf(record, sizeof(record), "OK %s", requestId);
-  return notifyRecord(record);
-}
-
-bool Service::notifyError(const char* requestId, const char* code) {
-  char record[80];
-  snprintf(record, sizeof(record), "ERR %s %s", requestId ? requestId : "00000000", code ? code : "INTERNAL");
-  return notifyRecord(record);
-}
-
-bool Service::notifyHotspot(const char* requestId, const char* ssid, const char* passphrase, const char* host,
-                            const uint16_t httpPort, const uint16_t wsPort, const uint16_t leaseSeconds) {
-  char record[MAX_RECORD_BYTES + 1];
-  const int length = snprintf(record, sizeof(record), "AP %s %s %s %s %u %u %u", requestId, ssid, passphrase, host,
-                              httpPort, wsPort, leaseSeconds);
-  if (length <= 0 || static_cast<size_t>(length) > MAX_RECORD_BYTES) return false;
-  return notifyRecord(record);
+  queue_.clear();  // NimBLE is gone: no producer left
+  LOG_INF("NEARBY", "stopped heap=%lu block=%lu", static_cast<unsigned long>(ESP.getFreeHeap()),
+          static_cast<unsigned long>(ESP.getMaxAllocHeap()));
 }
 
 bool Service::notifyRecord(const char* record) {
@@ -236,6 +200,12 @@ bool Service::notifyRecord(const char* record) {
   if (length == 0 || length > MAX_RECORD_BYTES) return false;
   eventCharacteristic_->setValue(reinterpret_cast<const uint8_t*>(record), length);
   return eventCharacteristic_->notify();
+}
+
+void Service::disconnect() {
+  const uint16_t handle = connHandle_.load(std::memory_order_acquire);
+  if (!running_ || handle == 0xFFFF || !NimBLEDevice::getServer()) return;
+  NimBLEDevice::getServer()->disconnect(handle);
 }
 
 }  // namespace Pocket::NearbySync

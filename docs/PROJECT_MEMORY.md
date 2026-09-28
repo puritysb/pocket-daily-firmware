@@ -5,6 +5,20 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-29 Reading Sync over BLE v1, reader side (docs/reading-sync-ble-v1.md;
+  branch feat/ble-reading-sync, host-verified only, not installed). Bonded-only
+  exchange windows (book closed / wake 45 s, before sleep 20 s) on the Nearby
+  Sync service: `nearby_sync/ExchangeWindow{,Policy}`, `ReadingSyncProtocol`
+  (records, CRC, chunking, 4-record callback queue), `ReadingSyncSession`
+  (READ_LIST/OFFER/W, also on the Nearby Sync screen). HTTP and BLE share
+  `ReadingExchange` (list stream, offer store); the BLE list omits `path`.
+  Status adds `READ1` and `WIN=1|0`. Setting System → "Sync places with your
+  phone" (`pocketReadingSync`, default on). Windows never pair (no-IO, bonding
+  off), close before any non-shell screen, deinit NimBLE fully. Gates:
+  `BLE_WINDOW_MIN_BLOCK` 40 KiB (provisional) + 64 KiB free; heap logs listed in
+  the contract's Memory section. Default build: +11.6 KB flash (92.6 %), +32 B
+  static RAM; 544 host tests. Needs X3/X4 + iPhone: heap figures, bonded RPA
+  reconnect, unbonded refusal, each trigger/close, sleep still entered.
 - 2026-09-29 Exact reading positions (branch feat/exact-page-offsets; contract
   docs/reading-progress-v1.md "Chapter text offsets"). Section cache v133: each
   page record starts with `u32 textOffset`, the code point offset of its first

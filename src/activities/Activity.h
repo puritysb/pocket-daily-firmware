@@ -48,6 +48,9 @@ class Activity {
   virtual bool skipLoopDelay() { return false; }
   virtual bool preventAutoSleep() { return false; }
   virtual bool isReaderActivity() const { return false; }
+  // Pocket Reading Sync (docs/reading-sync-ble-v1.md): the shell screens that
+  // tolerate a short BLE exchange window. Any other screen closes it first.
+  virtual bool allowsExchangeWindow() const { return false; }
   // The activity owns the frame the panel holds through sleep. Paint it now
   // (synchronously — requestUpdateAndWait) and return true to keep it; return
   // false to get the standard sleep screen. E-ink retains the last frame with

@@ -8,6 +8,7 @@ class SleepActivity final : public Activity {
   explicit SleepActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool fromTimeout = false)
       : Activity("Sleep", renderer, mappedInput), fromTimeout(fromTimeout) {}
   void onEnter() override;
+  bool allowsExchangeWindow() const override { return true; }
 
  private:
   void renderDefaultSleepScreen() const;

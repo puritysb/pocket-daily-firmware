@@ -441,17 +441,21 @@ void CrossPointWebServerActivity::handleNearbySync() {
     return;
   }
 
-  Pocket::NearbySync::Command command;
+  // Reading Sync records (READ_LIST / OFFER / W) are served here too, so a
+  // paired phone gets the same answers as in an exchange window
+  // (docs/reading-sync-ble-v1.md); one notification per pass.
+  readingSync.pump();
+  Pocket::NearbySync::ParsedCommand command;
   if (!nearbySync.takeCommand(command)) return;
 
-  switch (command.type) {
-    case Pocket::NearbySync::CommandType::PING:
+  switch (command.verb) {
+    case Pocket::NearbySync::Verb::PING:
       nearbySync.notifyOk(command.requestId);
       break;
-    case Pocket::NearbySync::CommandType::CANCEL:
+    case Pocket::NearbySync::Verb::CANCEL:
       nearbySync.notifyOk(command.requestId);
       break;
-    case Pocket::NearbySync::CommandType::START_AP: {
+    case Pocket::NearbySync::Verb::START_AP: {
       PocketDaily::Web::generatePrivateApCredentials(nearbySync.deviceId(), privateApSsid, sizeof(privateApSsid),
                                                      privateApPassword, sizeof(privateApPassword));
 
@@ -465,7 +469,12 @@ void CrossPointWebServerActivity::handleNearbySync() {
       requestUpdate();
       break;
     }
-    case Pocket::NearbySync::CommandType::NONE:
+    case Pocket::NearbySync::Verb::READ_LIST:
+    case Pocket::NearbySync::Verb::OFFER:
+    case Pocket::NearbySync::Verb::WRITE:
+      readingSync.handle(command);
+      break;
+    case Pocket::NearbySync::Verb::NONE:
       break;
   }
 }

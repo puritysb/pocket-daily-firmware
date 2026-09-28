@@ -45,6 +45,7 @@ class FileBrowserActivity final : public Activity {
         mode(mode),
         basepath(initialPath.empty() ? "/" : std::move(initialPath)) {}
   void onEnter() override;
+  bool allowsExchangeWindow() const override { return true; }
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
