@@ -204,9 +204,15 @@ transcript. Current source and release records override dated observations.
   keeps the checked-in PlatformIO profile/strict defect thresholds and uses
   that executable through a local package adapter. No broad suppressions.
   `<cmath>` and the formatting defect are fixed. Local host suite: 441 pass;
-  default firmware build and native 2.11 strict check pass. The exact Linux
-  loader failure was not exposed by the old log, so missing cppcheck is not
-  established as the sole cause.
+  default firmware build and native 2.11 strict check pass.
+- 2026-09-29 CI cppcheck 127 root cause (diagnosed on branch
+  ci/cppcheck-127-diag): espressif32 55.03.311's platform.py installs its own
+  tool-cppcheck 2.20.1 from ~/.platformio/tools on every check, overriding the
+  platform_packages adapter; that binary needs libpcre.so.3, absent on
+  ubuntu-latest. Deleting the package does not help (it is reinstalled).
+  ci.yml now points the installed package's executable at the native 2.11
+  build; the full strict check passed with no defects on the runner. The same
+  job also fixed Linux-only missing <cstring>/<cstdint> includes.
 
 - 2026-09-25 My cards (docs/pocket-profile-v1.md): profile IDs `word` (Home
   item 5, the daily word as its own page; Study then shows only app cards) and
