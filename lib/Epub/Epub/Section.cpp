@@ -30,7 +30,9 @@ namespace {
 // glyph-fallback font or a missing-glyph mark, and the header's font field holds
 // fontId ^ GfxRenderer::glyphLayoutKey() so installing or removing the fallback font
 // re-lays out affected sections.
-constexpr uint8_t SECTION_FILE_VERSION = 131;
+// v132: same binary layout. Long paragraphs are laid out in 192-word chunks instead of
+// 750 (bounded word-buffer allocations), which can move line breaks inside them.
+constexpr uint8_t SECTION_FILE_VERSION = 132;
 
 // Written into the version field while a build is in progress and replaced only after
 // every table has been committed. A crash-interrupted .part file is therefore rejected.

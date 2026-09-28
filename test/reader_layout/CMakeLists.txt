@@ -55,7 +55,8 @@ target_include_directories(reader_layout_test BEFORE PRIVATE stubs ${REPO_ROOT}/
   ${REPO_ROOT}/lib/FsHelpers ${REPO_ROOT}/lib/XmlParserUtils ${REPO_ROOT}/lib/Serialization ${REPO_ROOT}/lib/ZipFile
   ${REPO_ROOT}/lib/JpegToBmpConverter ${REPO_ROOT}/lib/PngToBmpConverter ${REPO_ROOT}/lib/hal)
 target_compile_definitions(reader_layout_test PRIVATE XML_GE=0 XML_CONTEXT_BYTES=1024 HAVE_ARC4RANDOM_BUF
-  CROSSPOINT_VERSION="reader-layout-test" READER_LAYOUT_EPUB="${REPO_ROOT}/test/epubs/short-spines.epub")
+  CROSSPOINT_VERSION="reader-layout-test" READER_LAYOUT_EPUB="${REPO_ROOT}/test/epubs/short-spines.epub"
+  LONG_PARAGRAPH_EPUB="${REPO_ROOT}/test/reading_progress/fixtures/pocket-daily-epub-check.epub")
 find_package(ZLIB REQUIRED)
 target_link_libraries(reader_layout_test PRIVATE crosspoint_test_common ZLIB::ZLIB GTest::gtest_main)
 gtest_discover_tests(reader_layout_test)

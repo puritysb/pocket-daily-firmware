@@ -3,6 +3,7 @@
 // nearly every page turn enters a new chapter.
 #include <Epub.h>
 #include <Epub/Page.h>
+#include <Epub/ParsedText.h>
 #include <Epub/Section.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
@@ -13,14 +14,39 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <fstream>
 #include <memory>
+#include <new>
 #include <string>
 #include <vector>
 
 #include "activities/reader/ReaderLayoutAhead.h"
 #include "activities/reader/ReaderPageRenderer.h"
+
+// Largest single allocation while `trackAllocations` is set: the X3 only builds a
+// section while its largest free heap block is at least 12 KB, so no build step may
+// need a bigger contiguous block (-fno-exceptions turns a failed one into abort()).
+std::atomic<bool> trackAllocations{false};
+std::atomic<size_t> largestAllocation{0};
+
+void* trackedAllocate(const std::size_t size) {
+  if (trackAllocations.load(std::memory_order_relaxed)) {
+    size_t seen = largestAllocation.load(std::memory_order_relaxed);
+    while (size > seen && !largestAllocation.compare_exchange_weak(seen, size)) {
+    }
+  }
+  if (void* p = std::malloc(size ? size : 1)) return p;
+  throw std::bad_alloc();
+}
+
+void* operator new(const std::size_t size) { return trackedAllocate(size); }
+void* operator new[](const std::size_t size) { return trackedAllocate(size); }
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete[](void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 namespace {
 constexpr int FONT_ID = 1;
@@ -320,4 +346,37 @@ TEST_F(ReaderLayout, IdleOnAFirstPageLaysOutThePreviousChapter) {
   busy.idle(0);
   EXPECT_FALSE(busy.backIntoPreviousChapter());
   EXPECT_EQ(busy.adoptedTurns, 0U);
+}
+
+// A 30,000-character single paragraph (the reading-progress fixture's chapter 3) is laid
+// out in bounded chunks. With 750-word chunks the word buffers grew to 1024 entries, a
+// ~24 KB contiguous reserve that aborted an X3 build resumed with a 12 KB free block.
+TEST_F(ReaderLayout, LongParagraphBuildNeedsNoLargeContiguousBlock) {
+  std::ifstream in(LONG_PARAGRAPH_EPUB, std::ios::binary);
+  std::ofstream out(TestFs::root + "/long.epub", std::ios::binary);
+  out << in.rdbuf();
+  out.close();
+  auto book = std::make_shared<Epub>("/long.epub", "/.crosspoint");
+  ASSERT_TRUE(book->load(true, false));
+  ASSERT_GE(book->getSpineItemsCount(), 3);
+  Section section(book, 2, renderer);
+  ASSERT_TRUE(layout.startBuild(section));
+  largestAllocation = 0;
+  trackAllocations = true;
+  const bool built = section.buildSomeMore(0);
+  trackAllocations = false;
+  ASSERT_TRUE(built);
+  EXPECT_TRUE(section.isBuildComplete());
+  EXPECT_GT(section.pageCount, 20U);
+  EXPECT_LT(largestAllocation.load(), 12U * 1024U) << "a build step needs more than the X3's build threshold";
+}
+
+TEST(ParsedTextBuffers, WordCapacityStaysBoundedUpToTheChunkSize) {
+  ParsedText text(false);
+  for (size_t i = 0; i <= ParsedText::LONG_BLOCK_WORDS; ++i) text.addWord("word", EpdFontFamily::REGULAR);
+  EXPECT_LE(text.wordCapacity(), ParsedText::WORD_CAPACITY_STEP_LIMIT);
+  // A single very long word still fits; it only raises the capacity to what it needs.
+  text.addWord(std::string(200, 'x'), EpdFontFamily::REGULAR);
+  EXPECT_GE(text.wordCapacity(), text.size());
+  EXPECT_LE(text.wordCapacity(), ParsedText::LONG_BLOCK_WORDS + 1 + 200);
 }

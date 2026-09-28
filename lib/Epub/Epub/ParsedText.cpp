@@ -333,10 +333,15 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   size_t requiredSize = words.size() + maxPossibleNewTokens;
 
   if (words.capacity() < requiredSize) {
-    // Emulate standard geometric growth (doubling) to ensure we don't reallocate on every word.
+    // Emulate standard geometric growth (doubling) to ensure we don't reallocate on every word,
+    // but never double past WORD_CAPACITY_STEP_LIMIT: long paragraphs are split before that
+    // (LONG_BLOCK_WORDS), so a larger buffer would only be a bigger contiguous allocation.
     size_t newCapacity = words.capacity() * 2;
+    if (newCapacity > WORD_CAPACITY_STEP_LIMIT) {
+      newCapacity = WORD_CAPACITY_STEP_LIMIT;
+    }
 
-    // Ensure the doubled capacity is actually enough for this specific word
+    // Ensure the capacity is actually enough for this specific word
     if (newCapacity < requiredSize) {
       newCapacity = requiredSize;
     }

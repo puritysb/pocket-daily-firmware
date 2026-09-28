@@ -63,6 +63,16 @@ class ParsedText {
   void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
+  size_t wordCapacity() const { return words.capacity(); }
+
+  // A long paragraph is laid out in chunks of about this many words (all but the
+  // last line is emitted each time). The word buffers are sized to it, so their
+  // largest single allocation (~256 std::string, ~6 KB) stays well below the
+  // 12 KB free block the section build requires before it runs. A 750-word
+  // chunk grew them to 1024 entries (~24 KB contiguous) and a build resumed at
+  // 12-24 KB aborted on the failed reserve (-fno-exceptions).
+  static constexpr size_t LONG_BLOCK_WORDS = 192;
+  static constexpr size_t WORD_CAPACITY_STEP_LIMIT = 256;
   bool isEmpty() const { return words.empty(); }
   void layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
                              const std::function<void(std::shared_ptr<TextBlock>)>& processLine,
