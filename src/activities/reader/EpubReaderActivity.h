@@ -63,6 +63,16 @@ class EpubReaderActivity final : public Activity {
   // Pocket Daily reading-progress v1: another device left a position to ask about.
   bool readingOfferPending = false;
   void askReadingOffer();
+  // An XPointer jump's chapter text offset (ProgressMapper CrossPointPosition::textOffset),
+  // resolved to the page holding that character once its section is laid out far enough.
+  struct PendingTextOffset {
+    int spineIndex;
+    uint32_t textOffset;
+  };
+  std::optional<PendingTextOffset> pendingTextOffset;
+  void setPendingTextOffset(const CrossPointPosition& target);
+  // False only when a build step failed (the caller shows the build error).
+  bool resolvePendingTextOffset(const SectionLayout& layout);
 
   // Footnote support
   std::vector<FootnoteEntry> currentPageFootnotes;

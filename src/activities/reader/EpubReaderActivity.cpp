@@ -694,6 +694,8 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             ProgressMapper::toCrossPoint(epub, {sync.xpath, sync.percentage}, renderer, currentSpineIndex, totalPages);
         targetSpineIndex = fallback.spineIndex;
         targetPage = fallback.pageNumber;
+        RenderLock lock(*this);
+        setPendingTextOffset(fallback);
       }
 
       if (currentSpineIndex != targetSpineIndex) {
@@ -843,6 +845,7 @@ void EpubReaderActivity::askReadingOffer() {
         const CrossPointPosition target =
             ProgressMapper::toCrossPoint(epub, {xpointer, percentage}, renderer, currentSpineIndex, pages);
         RenderLock lock(*this);
+        setPendingTextOffset(target);
         if (!section || currentSpineIndex != target.spineIndex) {
           currentSpineIndex = target.spineIndex;
           nextPageNumber = target.pageNumber;
@@ -851,6 +854,42 @@ void EpubReaderActivity::askReadingOffer() {
           section->currentPage = std::max(0, target.pageNumber);
         }
       });
+}
+
+void EpubReaderActivity::setPendingTextOffset(const CrossPointPosition& target) {
+  if (target.hasTextOffset) {
+    pendingTextOffset = PendingTextOffset{target.spineIndex, target.textOffset};
+  } else {
+    pendingTextOffset.reset();
+  }
+}
+
+// Moves to the page holding the pending XPointer's character. A building section (or a
+// partial) is laid out until a page starting past that character exists, so the landing is
+// the exact page rather than the estimate toCrossPoint made without the layout.
+bool EpubReaderActivity::resolvePendingTextOffset(const SectionLayout& layout) {
+  const PendingTextOffset pending = *pendingTextOffset;
+  pendingTextOffset.reset();
+  if (!section || pending.spineIndex != currentSpineIndex) return true;  // navigated elsewhere meanwhile
+  for (;;) {
+    uint16_t page = 0;
+    const auto lookup = section->findPageForTextOffset(pending.textOffset, page);
+    if (lookup == Section::TextOffsetLookup::Found) {
+      LOG_DBG("ERS", "Text offset %lu -> page %u (estimate %d)", static_cast<unsigned long>(pending.textOffset), page,
+              section->currentPage);
+      section->currentPage = page;
+      return true;
+    }
+    if (lookup == Section::TextOffsetLookup::Unavailable) return true;  // keep the estimate
+    if (!section->isBuilding() && !(section->isPartial() && layout.startBuild(*section))) {
+      return true;
+    }
+    PocketDaily::ReaderPerf::addFlags(PocketDaily::ReaderPerf::FLAG_BUILT);
+    if (!section->buildSomeMore(BUILD_PAGES_PER_CHUNK)) {
+      LOG_ERR("ERS", "Failed during incremental section build");
+      return false;
+    }
+  }
 }
 
 bool EpubReaderActivity::launchKOReaderSync() {
@@ -1381,6 +1420,11 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         return;
       }
     }
+  }
+
+  if (pendingTextOffset && !resolvePendingTextOffset(layoutParams(viewportWidth, viewportHeight))) {
+    showBuildError();
+    return;
   }
 
   // The requested page is now as built as it will get. If it still lands past the end,
