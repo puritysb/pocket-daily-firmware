@@ -910,6 +910,11 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
     }
   }
 
+  if (xpathSpine >= 0 && xpathSpine < spineCount &&
+      ChapterXPathResolver::findTextOffsetForXPath(epub, xpathSpine, koPos.xpath, result.textOffset)) {
+    result.hasTextOffset = true;
+  }
+
   float intra = 0.0f;
   bool resolvedIntra = false;
   const XPathSpineTarget target = locateInSpine(epub, result.spineIndex, koPos.xpath);

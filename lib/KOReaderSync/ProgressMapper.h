@@ -18,6 +18,11 @@ struct CrossPointPosition {
   uint16_t liIndex = 0;            // Running <li> count at the matched XPath element
   bool hasLiIndex = false;         // True when target element is <li> and liIndex was resolved
   char xpathAnchorId[64] = {};     // First <a id> captured inside the matched XPath element
+  // Chapter text offset of the XPath's character (ChapterXPathResolver::findTextOffsetForXPath).
+  // With the section laid out, Section::findPageForTextOffset turns it into the exact page;
+  // pageNumber above is only the estimate for when it is not.
+  uint32_t textOffset = 0;
+  bool hasTextOffset = false;
 };
 
 /**

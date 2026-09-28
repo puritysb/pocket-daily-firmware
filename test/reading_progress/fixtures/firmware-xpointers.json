@@ -52,6 +52,34 @@
           "textAt": "줄입니다."
         },
         {
+          "sectionIndex": 0,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[1]/body/h1[1]/text()[1].0",
+          "textAt": "한글과 문장https:"
+        },
+        {
+          "sectionIndex": 0,
+          "method": "offset",
+          "offset": 21,
+          "xpointer": "/body/DocFragment[1]/body/p[1]/a[1]/text()[1].15",
+          "textAt": ".org/article"
+        },
+        {
+          "sectionIndex": 0,
+          "method": "offset",
+          "offset": 54,
+          "xpointer": "/body/DocFragment[1]/body/p[2]/text()[1].13",
+          "textAt": "함께 읽습니다. 👩🏽‍"
+        },
+        {
+          "sectionIndex": 0,
+          "method": "offset",
+          "offset": 87,
+          "xpointer": "/body/DocFragment[1]/body/p[3]/text()[1].20",
+          "textAt": "그대로 표시되어야 합니"
+        },
+        {
           "sectionIndex": 1,
           "method": "progress",
           "fraction": 0.3,
@@ -96,6 +124,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[2]/body/p[1]/text()[1].25",
           "textAt": "니다."
+        },
+        {
+          "sectionIndex": 1,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[2]/body/h1[1]/text()[1].0",
+          "textAt": "두 번째 기사목차에서 "
+        },
+        {
+          "sectionIndex": 1,
+          "method": "offset",
+          "offset": 7,
+          "xpointer": "/body/DocFragment[2]/body/p[1]/text()[1].0",
+          "textAt": "목차에서 이 장을 선택"
+        },
+        {
+          "sectionIndex": 1,
+          "method": "offset",
+          "offset": 17,
+          "xpointer": "/body/DocFragment[2]/body/p[1]/text()[1].10",
+          "textAt": "선택해 순서와 이동을 "
+        },
+        {
+          "sectionIndex": 1,
+          "method": "offset",
+          "offset": 28,
+          "xpointer": "/body/DocFragment[2]/body/p[1]/text()[1].21",
+          "textAt": " 확인합니다."
         },
         {
           "sectionIndex": 2,
@@ -144,6 +200,34 @@
           "textAt": "sh & 기호 < > "
         },
         {
+          "sectionIndex": 2,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[3]/body/h1[1]/text()[1].0",
+          "textAt": "긴 본문 분할가나다라 "
+        },
+        {
+          "sectionIndex": 2,
+          "method": "offset",
+          "offset": 5995,
+          "xpointer": "/body/DocFragment[3]/body/p[1]/text()[1].5988",
+          "textAt": "‍💻. 가나다라 Eng"
+        },
+        {
+          "sectionIndex": 2,
+          "method": "offset",
+          "offset": 14989,
+          "xpointer": "/body/DocFragment[3]/body/p[1]/text()[1].14982",
+          "textAt": "다라 English &"
+        },
+        {
+          "sectionIndex": 2,
+          "method": "offset",
+          "offset": 23983,
+          "xpointer": "/body/DocFragment[3]/body/p[1]/text()[1].23976",
+          "textAt": "lish & 기호 < "
+        },
+        {
           "sectionIndex": 3,
           "method": "progress",
           "fraction": 0.3,
@@ -190,6 +274,34 @@
           "textAt": "기호 < > 👩🏽‍💻."
         },
         {
+          "sectionIndex": 3,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[4]/body/h1[1]/text()[1].0",
+          "textAt": "긴 본문 분할 (2) "
+        },
+        {
+          "sectionIndex": 3,
+          "method": "offset",
+          "offset": 5995,
+          "xpointer": "/body/DocFragment[4]/body/p[1]/text()[1].5984",
+          "textAt": " English & 기"
+        },
+        {
+          "sectionIndex": 3,
+          "method": "offset",
+          "offset": 14987,
+          "xpointer": "/body/DocFragment[4]/body/p[1]/text()[1].14976",
+          "textAt": "lish & 기호 < "
+        },
+        {
+          "sectionIndex": 3,
+          "method": "offset",
+          "offset": 23980,
+          "xpointer": "/body/DocFragment[4]/body/p[1]/text()[1].23969",
+          "textAt": "& 기호 < > 👩🏽‍"
+        },
+        {
           "sectionIndex": 4,
           "method": "progress",
           "fraction": 0.3,
@@ -233,6 +345,34 @@
           "paragraph": 1,
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[5]/body/p[1]/text()[1].21657",
+          "textAt": "나다라 English "
+        },
+        {
+          "sectionIndex": 4,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[5]/body/h1[1]/text()[1].0",
+          "textAt": "긴 본문 분할 (3)호"
+        },
+        {
+          "sectionIndex": 4,
+          "method": "offset",
+          "offset": 4815,
+          "xpointer": "/body/DocFragment[5]/body/p[1]/text()[1].4804",
+          "textAt": " English & 기"
+        },
+        {
+          "sectionIndex": 4,
+          "method": "offset",
+          "offset": 12037,
+          "xpointer": "/body/DocFragment[5]/body/p[1]/text()[1].12026",
+          "textAt": "다라 English &"
+        },
+        {
+          "sectionIndex": 4,
+          "method": "offset",
+          "offset": 19260,
+          "xpointer": "/body/DocFragment[5]/body/p[1]/text()[1].19249",
           "textAt": "나다라 English "
         }
       ]
@@ -287,6 +427,34 @@
           "textAt": "y.\n\t\t\t\n\t\t\n\t"
         },
         {
+          "sectionIndex": 0,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[1]/body/section[1]/h1[1]/text()[1].0",
+          "textAt": "Frankenstein"
+        },
+        {
+          "sectionIndex": 0,
+          "method": "offset",
+          "offset": 9,
+          "xpointer": "/body/DocFragment[1]/body/section[1]/h1[1]/text()[1].2",
+          "textAt": "ankenstein\n\t"
+        },
+        {
+          "sectionIndex": 0,
+          "method": "offset",
+          "offset": 24,
+          "xpointer": "/body/DocFragment[1]/body/section[1]/p[1]/text()[1].1",
+          "textAt": "y Mary Shell"
+        },
+        {
+          "sectionIndex": 0,
+          "method": "offset",
+          "offset": 38,
+          "xpointer": "/body/DocFragment[1]/body/section[1]/p[1]/text()[2].0",
+          "textAt": ".\n\t\t\t\n\t\t\n\t"
+        },
+        {
           "sectionIndex": 1,
           "method": "progress",
           "fraction": 0.3,
@@ -331,6 +499,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[2]/body/section[1]/p[3]/text()[2].18",
           "textAt": " information"
+        },
+        {
+          "sectionIndex": 1,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[2]/body/section[1]/header[1]/h2[1]/text()[1].0",
+          "textAt": "Imprint\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 1,
+          "method": "offset",
+          "offset": 245,
+          "xpointer": "/body/DocFragment[2]/body/section[1]/p[2]/text()[1].31",
+          "textAt": "on a transcr"
+        },
+        {
+          "sectionIndex": 1,
+          "method": "offset",
+          "offset": 614,
+          "xpointer": "/body/DocFragment[2]/body/section[1]/p[3]/text()[1].276",
+          "textAt": "es must chec"
+        },
+        {
+          "sectionIndex": 1,
+          "method": "offset",
+          "offset": 983,
+          "xpointer": "/body/DocFragment[2]/body/section[1]/p[4]/text()[1].60",
+          "textAt": "ebook editio"
         },
         {
           "sectionIndex": 2,
@@ -379,6 +575,34 @@
           "textAt": "pens his eye"
         },
         {
+          "sectionIndex": 2,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[3]/body/section[1]/h2[1]/text()[1].0",
+          "textAt": "Introduction"
+        },
+        {
+          "sectionIndex": 2,
+          "method": "offset",
+          "offset": 2507,
+          "xpointer": "/body/DocFragment[3]/body/section[1]/p[3]/text()[1].889",
+          "textAt": " but I was n"
+        },
+        {
+          "sectionIndex": 2,
+          "method": "offset",
+          "offset": 6268,
+          "xpointer": "/body/DocFragment[3]/body/section[1]/p[8]/text()[2].5",
+          "textAt": "tory to riva"
+        },
+        {
+          "sectionIndex": 2,
+          "method": "offset",
+          "offset": 10029,
+          "xpointer": "/body/DocFragment[3]/body/section[1]/p[12]/text()[1].5",
+          "textAt": "ned mine in "
+        },
+        {
           "sectionIndex": 3,
           "method": "progress",
           "fraction": 0.3,
@@ -423,6 +647,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[4]/body/section[1]/p[3]/text()[1].833",
           "textAt": "be drawn fro"
+        },
+        {
+          "sectionIndex": 3,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[4]/body/section[1]/h2[1]/text()[1].0",
+          "textAt": "Preface\n\t\t\tT"
+        },
+        {
+          "sectionIndex": 3,
+          "method": "offset",
+          "offset": 683,
+          "xpointer": "/body/DocFragment[4]/body/section[1]/p[1]/text()[2].596",
+          "textAt": "he imaginati"
+        },
+        {
+          "sectionIndex": 3,
+          "method": "offset",
+          "offset": 1707,
+          "xpointer": "/body/DocFragment[4]/body/section[1]/p[3]/text()[1].250",
+          "textAt": "rk proceeded"
+        },
+        {
+          "sectionIndex": 3,
+          "method": "offset",
+          "offset": 2732,
+          "xpointer": "/body/DocFragment[4]/body/section[1]/p[4]/text()[1].345",
+          "textAt": "occasionally"
         },
         {
           "sectionIndex": 4,
@@ -471,6 +723,34 @@
           "textAt": "by the autho"
         },
         {
+          "sectionIndex": 4,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[5]/body/section[1]/p[1]/text()[1].0",
+          "textAt": "To\n\t\t\tWillia"
+        },
+        {
+          "sectionIndex": 4,
+          "method": "offset",
+          "offset": 28,
+          "xpointer": "/body/DocFragment[5]/body/section[1]/p[1]/text()[3].0",
+          "textAt": "\n\t\t\tAuthor o"
+        },
+        {
+          "sectionIndex": 4,
+          "method": "offset",
+          "offset": 71,
+          "xpointer": "/body/DocFragment[5]/body/section[1]/p[1]/i[2]/text()[1].10",
+          "textAt": "iams, etc.,\n"
+        },
+        {
+          "sectionIndex": 4,
+          "method": "offset",
+          "offset": 114,
+          "xpointer": "/body/DocFragment[5]/body/section[1]/p[1]/text()[7].32",
+          "textAt": "inscribed by"
+        },
+        {
           "sectionIndex": 5,
           "method": "progress",
           "fraction": 0.3,
@@ -515,6 +795,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[6]/body/section[1]/blockquote[1]/p[1]/span[3]/text()[1].20",
           "textAt": "mote me?”\n\t\t"
+        },
+        {
+          "sectionIndex": 5,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[6]/body/section[1]/blockquote[1]/p[1]/span[1]/text()[1].0",
+          "textAt": "“Did I reque"
+        },
+        {
+          "sectionIndex": 5,
+          "method": "offset",
+          "offset": 38,
+          "xpointer": "/body/DocFragment[6]/body/section[1]/blockquote[1]/p[1]/span[1]/text()[1].20",
+          "textAt": " Maker, from"
+        },
+        {
+          "sectionIndex": 5,
+          "method": "offset",
+          "offset": 95,
+          "xpointer": "/body/DocFragment[6]/body/section[1]/blockquote[1]/p[1]/span[2]/text()[1].25",
+          "textAt": "licit thee\n\t"
+        },
+        {
+          "sectionIndex": 5,
+          "method": "offset",
+          "offset": 152,
+          "xpointer": "/body/DocFragment[6]/body/section[1]/blockquote[1]/cite[1]/i[1]/text()[1].0",
+          "textAt": "Paradise Los"
         },
         {
           "sectionIndex": 6,
@@ -563,6 +871,34 @@
           "textAt": "eus\n\t\t\t\n\t\t\n\t"
         },
         {
+          "sectionIndex": 6,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[7]/body/section[1]/hgroup[1]/h2[1]/text()[1].0",
+          "textAt": "Frankenstein"
+        },
+        {
+          "sectionIndex": 6,
+          "method": "offset",
+          "offset": 12,
+          "xpointer": "/body/DocFragment[7]/body/section[1]/hgroup[1]/h2[1]/text()[1].0",
+          "textAt": "Frankenstein"
+        },
+        {
+          "sectionIndex": 6,
+          "method": "offset",
+          "offset": 31,
+          "xpointer": "/body/DocFragment[7]/body/section[1]/hgroup[1]/p[1]/text()[1].2",
+          "textAt": ", The Modern"
+        },
+        {
+          "sectionIndex": 6,
+          "method": "offset",
+          "offset": 50,
+          "xpointer": "/body/DocFragment[7]/body/section[1]/hgroup[1]/p[1]/text()[1].21",
+          "textAt": "heus\n\t\t\t\n\t\t\n"
+        },
+        {
           "sectionIndex": 7,
           "method": "progress",
           "fraction": 0.3,
@@ -607,6 +943,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[8]/body/section[1]/blockquote[1]/p[2]/text()[1].1985",
           "textAt": "assage near "
+        },
+        {
+          "sectionIndex": 7,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[8]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Letter\n\t\t\t\tI"
+        },
+        {
+          "sectionIndex": 7,
+          "method": "offset",
+          "offset": 1391,
+          "xpointer": "/body/DocFragment[8]/body/section[1]/blockquote[1]/p[2]/text()[1].979",
+          "textAt": "uctions and "
+        },
+        {
+          "sectionIndex": 7,
+          "method": "offset",
+          "offset": 3479,
+          "xpointer": "/body/DocFragment[8]/body/section[1]/blockquote[1]/p[3]/text()[1].856",
+          "textAt": "on learning "
+        },
+        {
+          "sectionIndex": 7,
+          "method": "offset",
+          "offset": 5567,
+          "xpointer": "/body/DocFragment[8]/body/section[1]/blockquote[1]/p[6]/text()[1].539",
+          "textAt": " to sustain "
         },
         {
           "sectionIndex": 8,
@@ -655,6 +1019,34 @@
           "textAt": " wholly uned"
         },
         {
+          "sectionIndex": 8,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[9]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Letter\n\t\t\t\tI"
+        },
+        {
+          "sectionIndex": 8,
+          "method": "offset",
+          "offset": 1494,
+          "xpointer": "/body/DocFragment[9]/body/section[1]/blockquote[1]/p[2]/text()[1].1066",
+          "textAt": "ut our uncle"
+        },
+        {
+          "sectionIndex": 8,
+          "method": "offset",
+          "offset": 3735,
+          "xpointer": "/body/DocFragment[9]/body/section[1]/blockquote[1]/p[4]/text()[1].769",
+          "textAt": ", from a lad"
+        },
+        {
+          "sectionIndex": 8,
+          "method": "offset",
+          "offset": 5976,
+          "xpointer": "/body/DocFragment[9]/body/section[1]/blockquote[1]/p[6]/text()[1].142",
+          "textAt": "bling sensat"
+        },
+        {
           "sectionIndex": 9,
           "method": "progress",
           "fraction": 0.3,
@@ -699,6 +1091,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[10]/body/section[1]/blockquote[1]/p[1]/text()[1].709",
           "textAt": "sire to atta"
+        },
+        {
+          "sectionIndex": 9,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[10]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Letter\n\t\t\t\tI"
+        },
+        {
+          "sectionIndex": 9,
+          "method": "offset",
+          "offset": 367,
+          "xpointer": "/body/DocFragment[10]/body/section[1]/blockquote[1]/p[1]/text()[1].266",
+          "textAt": "ears. I am, "
+        },
+        {
+          "sectionIndex": 9,
+          "method": "offset",
+          "offset": 918,
+          "xpointer": "/body/DocFragment[10]/body/section[1]/blockquote[1]/p[2]/text()[1].24",
+          "textAt": "to befallen "
+        },
+        {
+          "sectionIndex": 9,
+          "method": "offset",
+          "offset": 1468,
+          "xpointer": "/body/DocFragment[10]/body/section[1]/blockquote[1]/p[4]/text()[2].115",
+          "textAt": "ars themselv"
         },
         {
           "sectionIndex": 10,
@@ -747,6 +1167,34 @@
           "textAt": "n! Do you sh"
         },
         {
+          "sectionIndex": 10,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[11]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Letter\n\t\t\t\tI"
+        },
+        {
+          "sectionIndex": 10,
+          "method": "offset",
+          "offset": 3089,
+          "xpointer": "/body/DocFragment[11]/body/section[1]/blockquote[1]/p[8]/text()[1].230",
+          "textAt": " the most pr"
+        },
+        {
+          "sectionIndex": 10,
+          "method": "offset",
+          "offset": 7723,
+          "xpointer": "/body/DocFragment[11]/body/section[1]/blockquote[1]/p[23]/text()[1].88",
+          "textAt": "h incidents "
+        },
+        {
+          "sectionIndex": 10,
+          "method": "offset",
+          "offset": 12356,
+          "xpointer": "/body/DocFragment[11]/body/section[1]/blockquote[2]/p[8]/text()[1].701",
+          "textAt": "se varied in"
+        },
+        {
           "sectionIndex": 11,
           "method": "progress",
           "fraction": 0.3,
@@ -791,6 +1239,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[12]/body/section[1]/p[8]/text()[1].1458",
           "textAt": " and sweetne"
+        },
+        {
+          "sectionIndex": 11,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[12]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 11,
+          "method": "offset",
+          "offset": 2048,
+          "xpointer": "/body/DocFragment[12]/body/section[1]/p[3]/text()[1].439",
+          "textAt": "nd in the me"
+        },
+        {
+          "sectionIndex": 11,
+          "method": "offset",
+          "offset": 5121,
+          "xpointer": "/body/DocFragment[12]/body/section[1]/p[7]/text()[1].166",
+          "textAt": "s their only"
+        },
+        {
+          "sectionIndex": 11,
+          "method": "offset",
+          "offset": 8193,
+          "xpointer": "/body/DocFragment[12]/body/section[1]/p[9]/text()[1].493",
+          "textAt": " of the anti"
         },
         {
           "sectionIndex": 12,
@@ -839,6 +1315,34 @@
           "textAt": " branches of"
         },
         {
+          "sectionIndex": 12,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[13]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 12,
+          "method": "offset",
+          "offset": 2562,
+          "xpointer": "/body/DocFragment[13]/body/section[1]/p[3]/text()[1].113",
+          "textAt": " kindness an"
+        },
+        {
+          "sectionIndex": 12,
+          "method": "offset",
+          "offset": 6406,
+          "xpointer": "/body/DocFragment[13]/body/section[1]/p[8]/text()[1].224",
+          "textAt": "ers than the"
+        },
+        {
+          "sectionIndex": 12,
+          "method": "offset",
+          "offset": 10250,
+          "xpointer": "/body/DocFragment[13]/body/section[1]/p[13]/text()[1].337",
+          "textAt": "ith curiosit"
+        },
+        {
           "sectionIndex": 13,
           "method": "progress",
           "fraction": 0.3,
@@ -883,6 +1387,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[14]/body/section[1]/p[18]/text()[3].769",
           "textAt": "out letting "
+        },
+        {
+          "sectionIndex": 13,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[14]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 13,
+          "method": "offset",
+          "offset": 3084,
+          "xpointer": "/body/DocFragment[14]/body/section[1]/p[3]/text()[1].1183",
+          "textAt": "earn to thin"
+        },
+        {
+          "sectionIndex": 13,
+          "method": "offset",
+          "offset": 7711,
+          "xpointer": "/body/DocFragment[14]/body/section[1]/p[11]/text()[2].423",
+          "textAt": "ientific age"
+        },
+        {
+          "sectionIndex": 13,
+          "method": "offset",
+          "offset": 12337,
+          "xpointer": "/body/DocFragment[14]/body/section[1]/p[17]/text()[1].511",
+          "textAt": "ay, explore "
         },
         {
           "sectionIndex": 14,
@@ -931,6 +1463,34 @@
           "textAt": "ith the imme"
         },
         {
+          "sectionIndex": 14,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[15]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 14,
+          "method": "offset",
+          "offset": 2905,
+          "xpointer": "/body/DocFragment[15]/body/section[1]/p[3]/text()[1].225",
+          "textAt": "uestion, and"
+        },
+        {
+          "sectionIndex": 14,
+          "method": "offset",
+          "offset": 7263,
+          "xpointer": "/body/DocFragment[15]/body/section[1]/p[7]/text()[1].243",
+          "textAt": "th all its i"
+        },
+        {
+          "sectionIndex": 14,
+          "method": "offset",
+          "offset": 11620,
+          "xpointer": "/body/DocFragment[15]/body/section[1]/p[10]/text()[1].581",
+          "textAt": "will think o"
+        },
+        {
           "sectionIndex": 15,
           "method": "progress",
           "fraction": 0.3,
@@ -975,6 +1535,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[16]/body/section[1]/p[3]/text()[1].1951",
           "textAt": " the night, "
+        },
+        {
+          "sectionIndex": 15,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[16]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 15,
+          "method": "offset",
+          "offset": 2626,
+          "xpointer": "/body/DocFragment[16]/body/section[1]/p[3]/text()[1].1430",
+          "textAt": " through the"
+        },
+        {
+          "sectionIndex": 15,
+          "method": "offset",
+          "offset": 6566,
+          "xpointer": "/body/DocFragment[16]/body/section[1]/p[9]/text()[1].640",
+          "textAt": "all necessar"
+        },
+        {
+          "sectionIndex": 15,
+          "method": "offset",
+          "offset": 10505,
+          "xpointer": "/body/DocFragment[16]/body/section[1]/p[18]/text()[1].353",
+          "textAt": " that I coul"
         },
         {
           "sectionIndex": 16,
@@ -1023,6 +1611,34 @@
           "textAt": "e that knew "
         },
         {
+          "sectionIndex": 16,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[17]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 16,
+          "method": "offset",
+          "offset": 3128,
+          "xpointer": "/body/DocFragment[17]/body/section[1]/blockquote[1]/p[4]/text()[2].288",
+          "textAt": "s that surro"
+        },
+        {
+          "sectionIndex": 16,
+          "method": "offset",
+          "offset": 7820,
+          "xpointer": "/body/DocFragment[17]/body/section[1]/p[2]/text()[1].42",
+          "textAt": "I had read h"
+        },
+        {
+          "sectionIndex": 16,
+          "method": "offset",
+          "offset": 12512,
+          "xpointer": "/body/DocFragment[17]/body/section[1]/p[6]/text()[1].1416",
+          "textAt": " Greece and "
+        },
+        {
           "sectionIndex": 17,
           "method": "progress",
           "fraction": 0.3,
@@ -1067,6 +1683,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[18]/body/section[1]/p[16]/text()[2].236",
           "textAt": "s of the nea"
+        },
+        {
+          "sectionIndex": 17,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[18]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 17,
+          "method": "offset",
+          "offset": 4015,
+          "xpointer": "/body/DocFragment[18]/body/section[1]/p[2]/text()[1].3",
+          "textAt": "rval, who ha"
+        },
+        {
+          "sectionIndex": 17,
+          "method": "offset",
+          "offset": 10037,
+          "xpointer": "/body/DocFragment[18]/body/section[1]/p[16]/text()[1].304",
+          "textAt": "e from behin"
+        },
+        {
+          "sectionIndex": 17,
+          "method": "offset",
+          "offset": 16060,
+          "xpointer": "/body/DocFragment[18]/body/section[1]/p[26]/text()[1].117",
+          "textAt": "surely, Erne"
         },
         {
           "sectionIndex": 18,
@@ -1115,6 +1759,34 @@
           "textAt": "ble on which"
         },
         {
+          "sectionIndex": 18,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[19]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 18,
+          "method": "offset",
+          "offset": 3485,
+          "xpointer": "/body/DocFragment[19]/body/section[1]/p[5]/text()[1].40",
+          "textAt": "m innocent. "
+        },
+        {
+          "sectionIndex": 18,
+          "method": "offset",
+          "offset": 8713,
+          "xpointer": "/body/DocFragment[19]/body/section[1]/p[12]/text()[1].19",
+          "textAt": " unmingled w"
+        },
+        {
+          "sectionIndex": 18,
+          "method": "offset",
+          "offset": 13941,
+          "xpointer": "/body/DocFragment[19]/body/section[1]/p[26]/text()[1].330",
+          "textAt": "d them toget"
+        },
+        {
           "sectionIndex": 19,
           "method": "progress",
           "fraction": 0.3,
@@ -1159,6 +1831,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[20]/body/section[1]/p[8]/text()[1].1443",
           "textAt": "the world fr"
+        },
+        {
+          "sectionIndex": 19,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[20]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 19,
+          "method": "offset",
+          "offset": 2509,
+          "xpointer": "/body/DocFragment[20]/body/section[1]/p[5]/text()[1].2",
+          "textAt": "out this tim"
+        },
+        {
+          "sectionIndex": 19,
+          "method": "offset",
+          "offset": 6274,
+          "xpointer": "/body/DocFragment[20]/body/section[1]/p[8]/text()[1].624",
+          "textAt": "ssuredly she"
+        },
+        {
+          "sectionIndex": 19,
+          "method": "offset",
+          "offset": 10039,
+          "xpointer": "/body/DocFragment[20]/body/section[1]/p[13]/text()[1].677",
+          "textAt": "ess almighty"
         },
         {
           "sectionIndex": 20,
@@ -1207,6 +1907,34 @@
           "textAt": "r own creatu"
         },
         {
+          "sectionIndex": 20,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[21]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 20,
+          "method": "offset",
+          "offset": 2630,
+          "xpointer": "/body/DocFragment[21]/body/section[1]/p[3]/text()[1].66",
+          "textAt": "short windin"
+        },
+        {
+          "sectionIndex": 20,
+          "method": "offset",
+          "offset": 6577,
+          "xpointer": "/body/DocFragment[21]/body/section[1]/p[5]/text()[1].894",
+          "textAt": "ly to overwh"
+        },
+        {
+          "sectionIndex": 20,
+          "method": "offset",
+          "offset": 10523,
+          "xpointer": "/body/DocFragment[21]/body/section[1]/p[13]/text()[1].1314",
+          "textAt": "ilty are all"
+        },
+        {
           "sectionIndex": 21,
           "method": "progress",
           "fraction": 0.3,
@@ -1251,6 +1979,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[22]/body/section[1]/p[15]/text()[1].1395",
           "textAt": "pleasure, su"
+        },
+        {
+          "sectionIndex": 21,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[22]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 21,
+          "method": "offset",
+          "offset": 3210,
+          "xpointer": "/body/DocFragment[22]/body/section[1]/p[4]/text()[1].664",
+          "textAt": "s of the bir"
+        },
+        {
+          "sectionIndex": 21,
+          "method": "offset",
+          "offset": 8025,
+          "xpointer": "/body/DocFragment[22]/body/section[1]/p[10]/text()[1].130",
+          "textAt": "ence my trav"
+        },
+        {
+          "sectionIndex": 21,
+          "method": "offset",
+          "offset": 12840,
+          "xpointer": "/body/DocFragment[22]/body/section[1]/p[15]/text()[1].831",
+          "textAt": "eautiful bef"
         },
         {
           "sectionIndex": 22,
@@ -1299,6 +2055,34 @@
           "textAt": "to pronounce"
         },
         {
+          "sectionIndex": 22,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[23]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 22,
+          "method": "offset",
+          "offset": 2419,
+          "xpointer": "/body/DocFragment[23]/body/section[1]/p[5]/text()[1].307",
+          "textAt": "ring the win"
+        },
+        {
+          "sectionIndex": 22,
+          "method": "offset",
+          "offset": 6047,
+          "xpointer": "/body/DocFragment[23]/body/section[1]/p[10]/text()[1].792",
+          "textAt": "nce and tone"
+        },
+        {
+          "sectionIndex": 22,
+          "method": "offset",
+          "offset": 9676,
+          "xpointer": "/body/DocFragment[23]/body/section[1]/p[16]/text()[1].237",
+          "textAt": "d retired to"
+        },
+        {
           "sectionIndex": 23,
           "method": "progress",
           "fraction": 0.3,
@@ -1343,6 +2127,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[24]/body/section[1]/p[6]/text()[1].1042",
           "textAt": "s at the fir"
+        },
+        {
+          "sectionIndex": 23,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[24]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 23,
+          "method": "offset",
+          "offset": 2340,
+          "xpointer": "/body/DocFragment[24]/body/section[1]/p[5]/text()[1].652",
+          "textAt": "nto the cott"
+        },
+        {
+          "sectionIndex": 23,
+          "method": "offset",
+          "offset": 5850,
+          "xpointer": "/body/DocFragment[24]/body/section[1]/p[12]/text()[1].8",
+          "textAt": " were spent "
+        },
+        {
+          "sectionIndex": 23,
+          "method": "offset",
+          "offset": 9360,
+          "xpointer": "/body/DocFragment[24]/body/section[1]/p[18]/text()[1].80",
+          "textAt": "tried to dis"
         },
         {
           "sectionIndex": 24,
@@ -1391,6 +2203,34 @@
           "textAt": "g to his own"
         },
         {
+          "sectionIndex": 24,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[25]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 24,
+          "method": "offset",
+          "offset": 2114,
+          "xpointer": "/body/DocFragment[25]/body/section[1]/p[4]/text()[1].722",
+          "textAt": "x rejected h"
+        },
+        {
+          "sectionIndex": 24,
+          "method": "offset",
+          "offset": 5286,
+          "xpointer": "/body/DocFragment[25]/body/section[1]/p[10]/text()[1].174",
+          "textAt": " part of the"
+        },
+        {
+          "sectionIndex": 24,
+          "method": "offset",
+          "offset": 8458,
+          "xpointer": "/body/DocFragment[25]/body/section[1]/p[17]/text()[1].8",
+          "textAt": "e news reach"
+        },
+        {
           "sectionIndex": 25,
           "method": "progress",
           "fraction": 0.3,
@@ -1435,6 +2275,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[26]/body/section[1]/p[6]/text()[3].1144",
           "textAt": "irst introdu"
+        },
+        {
+          "sectionIndex": 25,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[26]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 25,
+          "method": "offset",
+          "offset": 3460,
+          "xpointer": "/body/DocFragment[26]/body/section[1]/p[6]/text()[3].176",
+          "textAt": "nd love the "
+        },
+        {
+          "sectionIndex": 25,
+          "method": "offset",
+          "offset": 8651,
+          "xpointer": "/body/DocFragment[26]/body/section[1]/p[11]/text()[1].159",
+          "textAt": "ecked by rea"
+        },
+        {
+          "sectionIndex": 25,
+          "method": "offset",
+          "offset": 13842,
+          "xpointer": "/body/DocFragment[26]/body/section[1]/p[25]/text()[1].187",
+          "textAt": "fore, on you"
         },
         {
           "sectionIndex": 26,
@@ -1483,6 +2351,34 @@
           "textAt": "un, which he"
         },
         {
+          "sectionIndex": 26,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[27]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 26,
+          "method": "offset",
+          "offset": 3544,
+          "xpointer": "/body/DocFragment[27]/body/section[1]/p[7]/text()[1].450",
+          "textAt": "nnot describ"
+        },
+        {
+          "sectionIndex": 26,
+          "method": "offset",
+          "offset": 8862,
+          "xpointer": "/body/DocFragment[27]/body/section[1]/p[17]/text()[1].672",
+          "textAt": "ed in my hea"
+        },
+        {
+          "sectionIndex": 26,
+          "method": "offset",
+          "offset": 14179,
+          "xpointer": "/body/DocFragment[27]/body/section[1]/p[27]/text()[1].144",
+          "textAt": " I will tell"
+        },
+        {
           "sectionIndex": 27,
           "method": "progress",
           "fraction": 0.3,
@@ -1527,6 +2423,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[28]/body/section[1]/p[5]/text()[1].980",
           "textAt": "at your dest"
+        },
+        {
+          "sectionIndex": 27,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[28]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 27,
+          "method": "offset",
+          "offset": 2074,
+          "xpointer": "/body/DocFragment[28]/body/section[1]/p[5]/text()[1].1029",
+          "textAt": "your heart, "
+        },
+        {
+          "sectionIndex": 27,
+          "method": "offset",
+          "offset": 5186,
+          "xpointer": "/body/DocFragment[28]/body/section[1]/p[11]/text()[1].287",
+          "textAt": "an, and dwel"
+        },
+        {
+          "sectionIndex": 27,
+          "method": "offset",
+          "offset": 8297,
+          "xpointer": "/body/DocFragment[28]/body/section[1]/p[19]/text()[1].78",
+          "textAt": "izon when he"
         },
         {
           "sectionIndex": 28,
@@ -1575,6 +2499,34 @@
           "textAt": "h, surely, t"
         },
         {
+          "sectionIndex": 28,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[29]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 28,
+          "method": "offset",
+          "offset": 3269,
+          "xpointer": "/body/DocFragment[29]/body/section[1]/p[7]/text()[1].43",
+          "textAt": "subject, my "
+        },
+        {
+          "sectionIndex": 28,
+          "method": "offset",
+          "offset": 8174,
+          "xpointer": "/body/DocFragment[29]/body/section[1]/p[13]/text()[1].222",
+          "textAt": " attacks, ex"
+        },
+        {
+          "sectionIndex": 28,
+          "method": "offset",
+          "offset": 13079,
+          "xpointer": "/body/DocFragment[29]/body/section[1]/p[18]/text()[1].1283",
+          "textAt": "ntains of La"
+        },
+        {
           "sectionIndex": 29,
           "method": "progress",
           "fraction": 0.3,
@@ -1619,6 +2571,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[30]/body/section[1]/p[3]/text()[1].1150",
           "textAt": "to it was an"
+        },
+        {
+          "sectionIndex": 29,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[30]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 29,
+          "method": "offset",
+          "offset": 2986,
+          "xpointer": "/body/DocFragment[30]/body/section[1]/p[4]/text()[1].377",
+          "textAt": "I abhorred s"
+        },
+        {
+          "sectionIndex": 29,
+          "method": "offset",
+          "offset": 7466,
+          "xpointer": "/body/DocFragment[30]/body/section[1]/p[11]/text()[1].241",
+          "textAt": "lakes, and t"
+        },
+        {
+          "sectionIndex": 29,
+          "method": "offset",
+          "offset": 11946,
+          "xpointer": "/body/DocFragment[30]/body/section[1]/p[18]/text()[1].460",
+          "textAt": "ble fare. Ve"
         },
         {
           "sectionIndex": 30,
@@ -1667,6 +2647,34 @@
           "textAt": " me into a r"
         },
         {
+          "sectionIndex": 30,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[31]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 30,
+          "method": "offset",
+          "offset": 3843,
+          "xpointer": "/body/DocFragment[31]/body/section[1]/p[6]/text()[1].424",
+          "textAt": "s suddenly a"
+        },
+        {
+          "sectionIndex": 30,
+          "method": "offset",
+          "offset": 9608,
+          "xpointer": "/body/DocFragment[31]/body/section[1]/p[20]/text()[1].591",
+          "textAt": "ike a death-"
+        },
+        {
+          "sectionIndex": 30,
+          "method": "offset",
+          "offset": 15372,
+          "xpointer": "/body/DocFragment[31]/body/section[1]/p[26]/text()[1].206",
+          "textAt": " sick, and h"
+        },
+        {
           "sectionIndex": 31,
           "method": "progress",
           "fraction": 0.3,
@@ -1711,6 +2719,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[32]/body/section[1]/p[2]/text()[1].1248",
           "textAt": "twenty years"
+        },
+        {
+          "sectionIndex": 31,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[32]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 31,
+          "method": "offset",
+          "offset": 4134,
+          "xpointer": "/body/DocFragment[32]/body/section[1]/p[8]/text()[1].610",
+          "textAt": "e that the b"
+        },
+        {
+          "sectionIndex": 31,
+          "method": "offset",
+          "offset": 10336,
+          "xpointer": "/body/DocFragment[32]/body/section[1]/p[25]/text()[1].61",
+          "textAt": "s, become th"
+        },
+        {
+          "sectionIndex": 31,
+          "method": "offset",
+          "offset": 16537,
+          "xpointer": "/body/DocFragment[32]/body/section[1]/p[45]/text()[1].542",
+          "textAt": "times they w"
         },
         {
           "sectionIndex": 32,
@@ -1759,6 +2795,34 @@
           "textAt": "friend; and "
         },
         {
+          "sectionIndex": 32,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[33]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 32,
+          "method": "offset",
+          "offset": 3849,
+          "xpointer": "/body/DocFragment[33]/body/section[1]/p[8]/text()[1].273",
+          "textAt": "hich sometim"
+        },
+        {
+          "sectionIndex": 32,
+          "method": "offset",
+          "offset": 9623,
+          "xpointer": "/body/DocFragment[33]/body/section[1]/p[11]/text()[2].189",
+          "textAt": "nunciation o"
+        },
+        {
+          "sectionIndex": 32,
+          "method": "offset",
+          "offset": 15396,
+          "xpointer": "/body/DocFragment[33]/body/section[1]/p[24]/text()[1].276",
+          "textAt": "e period app"
+        },
+        {
           "sectionIndex": 33,
           "method": "progress",
           "fraction": 0.3,
@@ -1803,6 +2867,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[34]/body/section[1]/p[14]/text()[1].1142",
           "textAt": "pe of future"
+        },
+        {
+          "sectionIndex": 33,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[34]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 33,
+          "method": "offset",
+          "offset": 2837,
+          "xpointer": "/body/DocFragment[34]/body/section[1]/p[8]/text()[1].350",
+          "textAt": "orm flung by"
+        },
+        {
+          "sectionIndex": 33,
+          "method": "offset",
+          "offset": 7094,
+          "xpointer": "/body/DocFragment[34]/body/section[1]/p[14]/text()[1].799",
+          "textAt": " moment, and"
+        },
+        {
+          "sectionIndex": 33,
+          "method": "offset",
+          "offset": 11351,
+          "xpointer": "/body/DocFragment[34]/body/section[1]/p[23]/text()[1].145",
+          "textAt": "hole power. "
         },
         {
           "sectionIndex": 34,
@@ -1851,6 +2943,34 @@
           "textAt": ". When actua"
         },
         {
+          "sectionIndex": 34,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[35]/body/section[1]/h2[1]/span[1]/text()[1].0",
+          "textAt": "Chapter\n\t\t\t\t"
+        },
+        {
+          "sectionIndex": 34,
+          "method": "offset",
+          "offset": 9256,
+          "xpointer": "/body/DocFragment[35]/body/section[1]/p[17]/text()[1].194",
+          "textAt": "mense desert"
+        },
+        {
+          "sectionIndex": 34,
+          "method": "offset",
+          "offset": 23140,
+          "xpointer": "/body/DocFragment[35]/body/section[1]/section[1]/blockquote[1]/p[9]/text()[1].1313",
+          "textAt": "ellow-creatu"
+        },
+        {
+          "sectionIndex": 34,
+          "method": "offset",
+          "offset": 37024,
+          "xpointer": "/body/DocFragment[35]/body/section[1]/section[1]/blockquote[5]/p[16]/text()[1].259",
+          "textAt": "bly destroye"
+        },
+        {
           "sectionIndex": 35,
           "method": "progress",
           "fraction": 0.3,
@@ -1895,6 +3015,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[36]/body/section[1]/ol[1]/li[1]/p[1]/text()[1].29",
           "textAt": "” ↩︎\n\t\t\t\t\n\t\t"
+        },
+        {
+          "sectionIndex": 35,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[36]/body/section[1]/h2[1]/text()[1].0",
+          "textAt": "Endnotes\n\t\t\t"
+        },
+        {
+          "sectionIndex": 35,
+          "method": "offset",
+          "offset": 30,
+          "xpointer": "/body/DocFragment[36]/body/section[1]/ol[1]/li[1]/p[1]/text()[1].0",
+          "textAt": "Coleridge’s "
+        },
+        {
+          "sectionIndex": 35,
+          "method": "offset",
+          "offset": 76,
+          "xpointer": "/body/DocFragment[36]/body/section[1]/ol[1]/li[2]/p[1]/text()[1].0",
+          "textAt": "The moon. ↩︎"
+        },
+        {
+          "sectionIndex": 35,
+          "method": "offset",
+          "offset": 122,
+          "xpointer": "/body/DocFragment[36]/body/section[1]/ol[1]/li[3]/p[1]/text()[1].15",
+          "textAt": "intern Abbey"
         },
         {
           "sectionIndex": 36,
@@ -1943,6 +3091,34 @@
           "textAt": "rg/ebooks/ma"
         },
         {
+          "sectionIndex": 36,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[37]/body/section[1]/header[1]/h2[1]/text()[1].0",
+          "textAt": "Colophon\n\t\t\t"
+        },
+        {
+          "sectionIndex": 36,
+          "method": "offset",
+          "offset": 239,
+          "xpointer": "/body/DocFragment[37]/body/section[1]/p[2]/text()[5].16",
+          "textAt": "d in 2013 by"
+        },
+        {
+          "sectionIndex": 36,
+          "method": "offset",
+          "offset": 597,
+          "xpointer": "/body/DocFragment[37]/body/section[1]/p[3]/text()[8].13",
+          "textAt": " created in "
+        },
+        {
+          "sectionIndex": 36,
+          "method": "offset",
+          "offset": 956,
+          "xpointer": "/body/DocFragment[37]/body/section[1]/p[4]/text()[5].116",
+          "textAt": "s at\n\t\t\tstan"
+        },
+        {
           "sectionIndex": 37,
           "method": "progress",
           "fraction": 0.3,
@@ -1987,6 +3163,34 @@
           "fraction": 0.9,
           "xpointer": "/body/DocFragment[38]/body/section[1]/p[3]/text()[2].461",
           "textAt": "ure around t"
+        },
+        {
+          "sectionIndex": 37,
+          "method": "offset",
+          "offset": 0,
+          "xpointer": "/body/DocFragment[38]/body/section[1]/h2[1]/text()[1].0",
+          "textAt": "Uncopyright\n"
+        },
+        {
+          "sectionIndex": 37,
+          "method": "offset",
+          "offset": 425,
+          "xpointer": "/body/DocFragment[38]/body/section[1]/p[1]/text()[2].167",
+          "textAt": "that is, the"
+        },
+        {
+          "sectionIndex": 37,
+          "method": "offset",
+          "offset": 1062,
+          "xpointer": "/body/DocFragment[38]/body/section[1]/p[2]/text()[1].345",
+          "textAt": "his ebook in"
+        },
+        {
+          "sectionIndex": 37,
+          "method": "offset",
+          "offset": 1700,
+          "xpointer": "/body/DocFragment[38]/body/section[1]/p[3]/text()[2].141",
+          "textAt": "page, imprin"
         }
       ]
     }

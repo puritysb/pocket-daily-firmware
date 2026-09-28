@@ -12,6 +12,7 @@
 #include <ArduinoJson.h>
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -78,6 +79,7 @@ struct VisibleText {
   std::vector<std::string> chars;                     // one UTF-8 string per codepoint
   std::vector<bool> inParagraph;                      // inside a <p> or <li>
   std::vector<std::pair<size_t, size_t>> paragraphs;  // [start, end) of each <p>, in order
+  size_t bodyStart = 0;                               // visible characters before <body>'s text
   size_t bodyEnd = 0;                                 // visible characters up to </body>
   size_t size() const { return chars.size(); }
 };
@@ -124,6 +126,7 @@ VisibleText visibleText(const std::string& xhtml) {
       } else if (!close && !selfClose) {
         open.push_back(lower);
         if (lower == "p" || lower == "li") ++paragraphOrItem;
+        if (lower == "body") result.bodyStart = out.size();
         if (lower == "p") {
           openParagraphs.push_back(result.paragraphs.size());
           result.paragraphs.emplace_back(out.size(), out.size());
@@ -339,6 +342,69 @@ TEST(ReadingProgressXPointer, EntitiesCountAsDecodedCodepoints) {
   EXPECT_EQ(landing(body, byProgress), "x'y");
 }
 
+// Chapter text offsets (ChapterXPathResolver::findXPathForTextOffset / findTextOffsetForXPath):
+// the count the layout stamps on pages -- all character data inside <body> -- reaching text
+// outside <p>/<li> too, and both directions agreeing.
+TEST(ReadingProgressXPointer, TextOffsetsReachEveryElementAndRoundTrip) {
+  // Body text, by offset: 0 "\n" | 1-5 "Title" | 6 "\n" | 7-10 "ab\u00A0c" | 11-12 "de" |
+  // 13-15 " fg" | 16 "\n" | 17-22 "loose " | 23-26 "bold" | 27-31 " tail" | 32-37 "tail2\n".
+  const auto epub =
+      Epub::fromSpine({chapter("\n<h1>Title</h1>\n<p>ab&nbsp;c<i>de</i> fg</p>\n"
+                               "<div>loose <b>bold</b> tail</div>tail2\n")});
+  struct Case {
+    uint32_t offset;
+    const char* xpointer;
+    const char* textAt;
+  };
+  const Case cases[] = {
+      {1, "/body/DocFragment[1]/body/h1[1]/text()[1].0", "Title\n"},
+      {3, "/body/DocFragment[1]/body/h1[1]/text()[1].2", "tle\nab"},
+      {7, "/body/DocFragment[1]/body/p[1]/text()[1].0",
+       "ab\xC2\xA0"
+       "cde"},
+      {10, "/body/DocFragment[1]/body/p[1]/text()[1].3", "cde fg"},
+      {11, "/body/DocFragment[1]/body/p[1]/i[1]/text()[1].0", "de fg\n"},
+      {14, "/body/DocFragment[1]/body/p[1]/text()[2].1", "fg\nloo"},
+      {23, "/body/DocFragment[1]/body/div[1]/b[1]/text()[1].0", "bold t"},
+      {28, "/body/DocFragment[1]/body/div[1]/text()[2].1", "tailta"},
+      {32, "/body/DocFragment[1]/body/text()[1].0", "tail2\n"},
+  };
+  for (const auto& c : cases) {
+    EXPECT_EQ(ChapterXPathResolver::findXPathForTextOffset(epub, 0, c.offset), c.xpointer) << c.offset;
+    uint32_t back = 0;
+    EXPECT_TRUE(ChapterXPathResolver::findTextOffsetForXPath(epub, 0, c.xpointer, back)) << c.xpointer;
+    EXPECT_EQ(back, c.offset) << c.xpointer;
+    // ProgressMapper's streamer reads the same XPointer to the same text. It has no form for a
+    // run directly in <body> (the app's xpointer.js resolves that step generically).
+    if (std::string(c.xpointer).find("/body/text()") != std::string::npos) continue;
+    EXPECT_EQ(
+        landing("\n<h1>Title</h1>\n<p>ab&nbsp;c<i>de</i> fg</p>\n<div>loose <b>bold</b> tail</div>tail2\n", c.xpointer),
+        c.textAt)
+        << c.xpointer;
+  }
+  // An offset in a whitespace-only run (not numbered) moves to the next character.
+  EXPECT_EQ(ChapterXPathResolver::findXPathForTextOffset(epub, 0, 0), "/body/DocFragment[1]/body/h1[1]/text()[1].0");
+  EXPECT_EQ(ChapterXPathResolver::findXPathForTextOffset(epub, 0, 16), "/body/DocFragment[1]/body/div[1]/text()[1].0");
+  // Past the text: nothing.
+  EXPECT_EQ(ChapterXPathResolver::findXPathForTextOffset(epub, 0, 38), "");
+
+  // The app's forms: omitted [1], element pointers, clamping, missing runs and elements.
+  const auto offsetOf = [&](const char* xpointer) -> int64_t {
+    uint32_t offset = 0;
+    return ChapterXPathResolver::findTextOffsetForXPath(epub, 0, xpointer, offset) ? static_cast<int64_t>(offset) : -1;
+  };
+  EXPECT_EQ(offsetOf("/body/DocFragment[1]/body/p/text().1"), 8);
+  EXPECT_EQ(offsetOf("/body/DocFragment[1]/body/div"), 17);
+  EXPECT_EQ(offsetOf("/body/DocFragment[1]/body/p[1].0"), 7);
+  EXPECT_EQ(offsetOf("/body/DocFragment[1]/body/p/text()[1].99"), 11);  // clamps to the run's end
+  EXPECT_EQ(offsetOf("/body/DocFragment[1]/body/p/text()[5].0"), 7);    // no such run: the element
+  EXPECT_EQ(offsetOf("/body/DocFragment[1]/body"), 0);
+  EXPECT_EQ(offsetOf("/body/DocFragment[1]"), 0);
+  EXPECT_EQ(offsetOf("/body/DocFragment[1]/body/p[3]"), -1);
+  EXPECT_EQ(offsetOf("/body/DocFragment[1]/body/p[1]/text()x"), -1);
+  EXPECT_EQ(offsetOf("/body/DocFragment[1]/body/p[0]"), -1);
+}
+
 // One firmware-generated position, re-resolved by the firmware's own reader side.
 struct Generated {
   int spine;
@@ -347,7 +413,52 @@ struct Generated {
   float fraction;
   std::string xpointer;
   size_t visibleChar;
+  int64_t textOffset = -1;  // chapter text offset for "offset"
 };
+
+bool isSpace(const std::string& cp) {
+  return cp == " " || cp == "\n" || cp == "\t" || cp == "\r" || cp == "\xC2\xA0" || cp == "\xE3\x80\x80";
+}
+
+// "offset": what the reader records for a laid-out page -- the XPointer of the character at
+// a chapter text offset (ChapterXPathResolver::findXPathForTextOffset). Offsets at the body's
+// start (usually a heading) and at fractions of its text; each must land on that character
+// (or, inside a whitespace-only run, on the next one) and read back to the same offset.
+void generateOffsets(const Book& book, const int spine, std::vector<Generated>& out,
+                     std::vector<std::string>& failures) {
+  const VisibleText& text = book.text[spine];
+  if (text.bodyEnd <= text.bodyStart) return;
+  const size_t bodyLength = text.bodyEnd - text.bodyStart;
+  for (const float fraction : {0.0f, 0.2f, 0.5f, 0.8f}) {
+    Generated g{spine, "offset", 0, fraction, {}, 0};
+    g.textOffset = static_cast<int64_t>(fraction * static_cast<float>(bodyLength));
+    g.xpointer = ChapterXPathResolver::findXPathForTextOffset(book.epub, spine, static_cast<uint32_t>(g.textOffset));
+    std::ostringstream where;
+    where << "spine " << spine << " offset " << g.textOffset << " '" << g.xpointer << "'";
+    if (g.xpointer.empty()) {
+      failures.push_back(where.str() + ": not generated");
+      continue;
+    }
+    const XPathSpineTarget target = ProgressMapper::locateInSpine(book.epub, spine, g.xpointer);
+    if (!target.found || target.visibleChar < text.bodyStart + static_cast<size_t>(g.textOffset)) {
+      failures.push_back(where.str() + ": does not resolve at or after the offset");
+      continue;
+    }
+    for (size_t i = text.bodyStart + static_cast<size_t>(g.textOffset); i < target.visibleChar; ++i) {
+      if (!isSpace(text.chars[i])) {
+        failures.push_back(where.str() + ": skipped text");
+        break;
+      }
+    }
+    uint32_t back = 0;
+    if (!ChapterXPathResolver::findTextOffsetForXPath(book.epub, spine, g.xpointer, back) ||
+        back != target.visibleChar - text.bodyStart) {
+      failures.push_back(where.str() + ": does not read back");
+    }
+    g.visibleChar = target.visibleChar;
+    out.push_back(g);
+  }
+}
 
 // Reader -> app: the positions a closed book would report (docs/reading-progress-v1.md).
 // "paragraph" is what the reader records (Section's paragraph LUT + fraction of that
@@ -408,6 +519,7 @@ std::vector<Generated> generate(const Book& book, std::vector<std::string>& fail
       }
       out.push_back(g);
     }
+    generateOffsets(book, spine, out, failures);
   }
   return out;
 }
@@ -421,7 +533,11 @@ void addBook(JsonArray books, const char* file, const Book& book, const std::vec
     row["sectionIndex"] = g.spine;
     row["method"] = g.method;
     if (g.paragraph) row["paragraph"] = g.paragraph;
-    row["fraction"] = g.fraction;
+    if (g.textOffset >= 0) {
+      row["offset"] = g.textOffset;
+    } else {
+      row["fraction"] = g.fraction;
+    }
     row["xpointer"] = g.xpointer;
     const VisibleText& text = book.text[g.spine];
     const size_t end = std::min(g.visibleChar + 12, text.bodyEnd);
