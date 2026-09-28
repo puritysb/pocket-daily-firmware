@@ -2,6 +2,7 @@
 #include <SdCardFont.h>
 
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 

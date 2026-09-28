@@ -3,6 +3,7 @@
 #include <common/FsApiConstants.h>
 #include <freertos/semphr.h>
 
+#include <cstdint>
 #include <cstring>
 #include <utility>
 #include <vector>

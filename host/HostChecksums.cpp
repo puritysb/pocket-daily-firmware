@@ -1,6 +1,8 @@
 #include <uzlib.h>
 #include <zlib.h>
 
+#include <cstdint>
+
 // The vendored inflater declares these optional checked-stream functions but
 // firmware drops their unused section. The host library resolves them through zlib.
 // uzlib_crc32 carries the unfinalized state; zlib carries the finalized state.

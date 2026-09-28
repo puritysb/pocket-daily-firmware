@@ -2,6 +2,7 @@
 #include <Epub.h>
 #include <GfxRenderer.h>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 

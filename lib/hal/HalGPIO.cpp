@@ -5,6 +5,8 @@
 #include <Wire.h>
 #include <esp_sleep.h>
 
+#include <cstdint>
+
 // Global HalGPIO instance
 HalGPIO gpio;
 

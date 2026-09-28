@@ -3,6 +3,7 @@
 #include <uzlib.h>
 
 #include <cstddef>
+#include <cstdint>
 
 // Return value for readAtMost().
 enum class InflateStatus {

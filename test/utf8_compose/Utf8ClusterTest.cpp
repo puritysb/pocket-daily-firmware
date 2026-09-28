@@ -1,6 +1,7 @@
 #include <Utf8.h>
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <string>
 
 namespace {

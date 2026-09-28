@@ -4,6 +4,7 @@
 #include <SdCardFontRegistry.h>
 
 #include <atomic>
+#include <cstdint>
 
 class GfxRenderer;
 
