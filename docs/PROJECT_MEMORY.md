@@ -205,6 +205,13 @@ transcript. Current source and release records override dated observations.
   that executable through a local package adapter. No broad suppressions.
   `<cmath>` and the formatting defect are fixed. Local host suite: 441 pass;
   default firmware build and native 2.11 strict check pass.
+- 2026-09-29 X3 crash on a long paragraph fixed (51191628): after the
+  PocketSymbols font forced a re-layout, the 30,000-character single-paragraph
+  chapter of the EPUB check book aborted (std::terminate) once the build resumed
+  with a 12-24 KB free block: 750-word chunks grew the word buffers to a ~24 KB
+  contiguous reserve. Chunks are now 192 words, capacity doubling stops at 256
+  (host test tracks allocations: 24,576 B -> < 12 KB), section cache v132. X3:
+  installed, same chapter read past 21 %, no crash report.
 - 2026-09-29 CI cppcheck 127 root cause (diagnosed on branch
   ci/cppcheck-127-diag): espressif32 55.03.311's platform.py installs its own
   tool-cppcheck 2.20.1 from ~/.platformio/tools on every check, overriding the
