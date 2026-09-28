@@ -380,3 +380,54 @@ TEST(ParsedTextBuffers, WordCapacityStaysBoundedUpToTheChunkSize) {
   EXPECT_GE(text.wordCapacity(), text.size());
   EXPECT_LE(text.wordCapacity(), ParsedText::LONG_BLOCK_WORDS + 1 + 200);
 }
+
+// A suspended build persists a partial section. The partial sentinel is the same for every
+// section format, so the trailer carries the format it was written in: a partial from older
+// firmware (8-byte trailer, v132 page records without the text offset) must be rebuilt, not
+// read as the current format (X3: a book reopened at its chapter start after an update).
+TEST_F(ReaderLayout, PartialFromAnotherFormatIsRebuilt) {
+  std::ifstream in(LONG_PARAGRAPH_EPUB, std::ios::binary);
+  std::ofstream out(TestFs::root + "/long.epub", std::ios::binary);
+  out << in.rdbuf();
+  out.close();
+  auto book = std::make_shared<Epub>("/long.epub", "/.crosspoint");
+  ASSERT_TRUE(book->load(true, false));
+  const std::string path = TestFs::root + book->getCachePath() + "/sections/2.bin";
+  {
+    Section section(book, 2, renderer);
+    ASSERT_TRUE(layout.startBuild(section));
+    ASSERT_TRUE(section.buildSomeMore(3));
+    section.suspendBuild();
+  }
+  {
+    Section section(book, 2, renderer);
+    ASSERT_TRUE(layout.load(section));
+    EXPECT_TRUE(section.isPartial());
+  }
+  std::ifstream partialIn(path, std::ios::binary);
+  std::string bytes((std::istreambuf_iterator<char>(partialIn)), {});
+  partialIn.close();
+  ASSERT_GT(bytes.size(), 12U);
+
+  // Older firmware: the same trailer without the format tag.
+  {
+    std::ofstream old(path, std::ios::binary | std::ios::trunc);
+    old.write(bytes.data(), static_cast<std::streamsize>(bytes.size() - 4));
+  }
+  {
+    Section section(book, 2, renderer);
+    EXPECT_FALSE(layout.load(section));
+    EXPECT_FALSE(section.isPartial());
+  }
+  EXPECT_FALSE(std::ifstream(path).good()) << "the stale partial is cleared";
+
+  // A tag naming another section format.
+  {
+    std::string other = bytes;
+    other[other.size() - 4] = static_cast<char>(other[other.size() - 4] ^ 0x01);
+    std::ofstream write(path, std::ios::binary | std::ios::trunc);
+    write.write(other.data(), static_cast<std::streamsize>(other.size()));
+  }
+  Section section(book, 2, renderer);
+  EXPECT_FALSE(layout.load(section));
+}

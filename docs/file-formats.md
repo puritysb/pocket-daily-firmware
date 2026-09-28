@@ -98,7 +98,9 @@ if (parsedSize != fileSize) {
 > `u8 bilingualViewMode` field between `focusReadingEnabled` and `pageCount`.
 > Incremental builds use an incomplete `.bin.part` file and may be committed as a
 > fork-private `0xFF` partial section with an eight-byte
-> `{bytesConsumed, totalBytes}` trailer after the list-item LUT. Finalized v131 files
+> `{bytesConsumed, totalBytes, formatTag}` trailer after the list-item LUT (`formatTag` =
+> `0x5044_0000 | SECTION_FILE_VERSION`; partials without a matching tag, including older
+> 8-byte trailers, are discarded and rebuilt). Finalized v131 files
 > omit that trailer. See [`docs/bilingual-epub.md`](bilingual-epub.md) for the marker
 > classes that drive the view mode. v131 keeps the v130 byte layout; its `fontId`
 > field stores `fontId ^ GfxRenderer::glyphLayoutKey()` (the installed glyph-fallback

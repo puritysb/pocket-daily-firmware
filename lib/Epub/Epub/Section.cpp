@@ -46,6 +46,11 @@ constexpr uint8_t SECTION_FILE_INCOMPLETE_VERSION = 0;
 // Fork-private partial marker. Upstream uses 0xFE for a header without bilingualViewMode,
 // so use a distinct reserved value to make cross-firmware downgrade fail closed.
 constexpr uint8_t SECTION_FILE_PARTIAL_VERSION = 0xFF;
+// Last u32 of a partial's trailer: 'P','D' plus the finalized version whose page records the
+// partial holds. The partial sentinel above is the same for every format, so without this a
+// partial written by older firmware (e.g. v132 pages without the text offset) would be read
+// as the current format. Partials without the tag (8-byte trailer) are rebuilt.
+constexpr uint32_t PARTIAL_FORMAT_TAG = 0x50440000u | SECTION_FILE_VERSION;
 
 // Sentinel patched into the header's bilingualViewMode field when the chapter contains no
 // bilingual role markers: its layout is identical in every view mode, so loadSectionFile
@@ -210,18 +215,26 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
     file.seek(HEADER_SIZE - sizeof(uint32_t));
     serialization::readPod(file, liLutOffset);
     const uint32_t trailerOffset = liLutOffset + static_cast<uint32_t>(pageCount) * sizeof(uint16_t);
-    const bool trailerValid =
-        pageCount > 0 && liLutOffset >= HEADER_SIZE && trailerOffset + 2 * sizeof(uint32_t) <= file.size();
+    bool trailerValid =
+        pageCount > 0 && liLutOffset >= HEADER_SIZE && trailerOffset + 3 * sizeof(uint32_t) <= file.size();
+    uint32_t formatTag = 0;
+    if (trailerValid) {
+      file.seek(trailerOffset);
+      serialization::readPod(file, partialBytesConsumed_);
+      serialization::readPod(file, partialTotalBytes_);
+      serialization::readPod(file, formatTag);
+      trailerValid = formatTag == PARTIAL_FORMAT_TAG;
+    }
     if (!trailerValid) {
       closeFile();
-      LOG_ERR("SCT", "Deserialization failed: malformed partial section");
+      LOG_ERR("SCT", "Deserialization failed: partial section from another format (tag %08lx)",
+              static_cast<unsigned long>(formatTag));
       clearCache();
       pageCount = 0;
+      partialBytesConsumed_ = 0;
+      partialTotalBytes_ = 0;
       return false;
     }
-    file.seek(trailerOffset);
-    serialization::readPod(file, partialBytesConsumed_);
-    serialization::readPod(file, partialTotalBytes_);
     partial_ = true;
     partialPageCount_ = pageCount;
   }
@@ -612,6 +625,7 @@ bool Section::commitBuildFile(const uint8_t version, const uint32_t bytesConsume
     // Watermark trailer, located on load as liLutOffset + pageCount * sizeof(uint16_t).
     serialization::writePod(file, bytesConsumed);
     serialization::writePod(file, totalBytes);
+    serialization::writePod(file, PARTIAL_FORMAT_TAG);
   }
 
   // Pages laid out before the first bilingual marker are identical in every view mode, so a
