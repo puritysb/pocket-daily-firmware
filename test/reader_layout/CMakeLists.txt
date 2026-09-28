@@ -60,3 +60,24 @@ target_compile_definitions(reader_layout_test PRIVATE XML_GE=0 XML_CONTEXT_BYTES
 find_package(ZLIB REQUIRED)
 target_link_libraries(reader_layout_test PRIVATE crosspoint_test_common ZLIB::ZLIB GTest::gtest_main)
 gtest_discover_tests(reader_layout_test)
+
+# Exact reading positions: page text offsets from the real layout against the XPointer
+# resolvers (lib/KOReaderSync) and the reading-progress fixtures.
+add_executable(reading_position_layout_test ReadingPositionLayoutTest.cpp stubs/ImageStubs.cpp
+  ${REPO_ROOT}/host/HostChecksums.cpp ${READER_LAYOUT_FIRMWARE} ${REPO_ROOT}/lib/KOReaderSync/ChapterXPathResolver.cpp
+  ${REPO_ROOT}/lib/KOReaderSync/ProgressMapper.cpp)
+set_source_files_properties(${REPO_ROOT}/lib/KOReaderSync/ChapterXPathResolver.cpp
+  ${REPO_ROOT}/lib/KOReaderSync/ProgressMapper.cpp PROPERTIES COMPILE_OPTIONS
+  "-w;-include;${CMAKE_CURRENT_SOURCE_DIR}/stubs/Arduino.h")
+target_include_directories(reading_position_layout_test BEFORE PRIVATE stubs ${REPO_ROOT}/host/hal ${REPO_ROOT}/lib/Epub
+  ${REPO_ROOT}/lib/GfxRenderer ${REPO_ROOT}/lib/EpdFont ${REPO_ROOT}/lib/Utf8 ${REPO_ROOT}/lib/Memory
+  ${REPO_ROOT}/lib/MiniBidi ${REPO_ROOT}/lib/InflateReader ${REPO_ROOT}/lib/uzlib/src ${REPO_ROOT}/lib/expat
+  ${REPO_ROOT}/lib/FsHelpers ${REPO_ROOT}/lib/XmlParserUtils ${REPO_ROOT}/lib/Serialization ${REPO_ROOT}/lib/ZipFile
+  ${REPO_ROOT}/lib/JpegToBmpConverter ${REPO_ROOT}/lib/PngToBmpConverter ${REPO_ROOT}/lib/hal
+  ${REPO_ROOT}/lib/KOReaderSync)
+target_compile_definitions(reading_position_layout_test PRIVATE XML_GE=0 XML_CONTEXT_BYTES=1024 HAVE_ARC4RANDOM_BUF
+  CROSSPOINT_VERSION="reading-position-test"
+  READING_PROGRESS_FIXTURES="${REPO_ROOT}/test/reading_progress/fixtures")
+target_link_libraries(reading_position_layout_test PRIVATE crosspoint_test_common ArduinoJson ZLIB::ZLIB
+  GTest::gtest_main)
+gtest_discover_tests(reading_position_layout_test)
