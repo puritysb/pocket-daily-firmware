@@ -3,6 +3,17 @@
 This is concise, repository-owned context for future sessions. It is not a chat
 transcript. Current source and release records override dated observations.
 
+## Product version reset — 2026-09-30
+
+- Pocket Daily starts product firmware version `1.0.0` on CrossPoint 1.6.5
+  (`93e98bb7`). Product release tags use `pocket-v...` to avoid collisions
+  with historical `v1.6.6`/`v1.7.0-beta.*` tags. See
+  `docs/product-versioning.md` for the full contract and migration path.
+- `/api/status` exposes lineage 1 and the CrossPoint base; About shows the
+  base. The companion recognizes legacy test images, while the new on-device
+  updater only accepts product stable tags. Stable release still requires
+  exact-artifact X3/X4 sign-off in `docs/release-checklist.md`.
+
 ## BLE integration and review — 2026-09-30
 
 - `codex/ble-sync-review` integrates held BLE `68a77147` onto main `ee188fe7`;
