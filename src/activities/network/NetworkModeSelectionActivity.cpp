@@ -58,7 +58,13 @@ NetworkModeSelectionActivity::NetworkModeSelectionActivity(GfxRenderer& renderer
   }
 }
 
-int NetworkModeSelectionActivity::listCount() const { return pocketSync ? 3 : MENU_ITEM_COUNT; }
+int NetworkModeSelectionActivity::listCount() const {
+#if FREEINK_CAP_USB_MSC
+  return pocketSync ? 3 : MENU_ITEM_COUNT;
+#else
+  return MENU_ITEM_COUNT;
+#endif
+}
 
 const char* NetworkModeSelectionActivity::headerTitle() const {
   return pocketSync ? tr(STR_POCKET_CONNECT_TITLE) : tr(STR_FILE_TRANSFER);

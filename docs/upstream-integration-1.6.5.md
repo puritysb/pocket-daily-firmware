@@ -116,3 +116,12 @@ the eight-line build-managed SDCardManager API patch.
 Local evidence: `firmware/UPSTREAM_1.6.5_VALIDATION.json` records image hashes
 and the checked source fingerprint; `build/integration/verified-source-files.json`
 lists the individual source hashes. They are ignored outputs, not release files.
+
+## CI reconciliation
+
+The first remote run found a mid-build tool upgrade: the custom Arduino rebuild
+upgraded PlatformIO 6.1.19 to 6.2.0 and replaced SCons 4.8 while it was still
+running. CI/release jobs now start on pinned 6.2.0 with a separate cache key.
+Linux cppcheck also found an identical conditional result on non-USB boards
+and an unused/shadowed theme coordinate; both were simplified without changing
+reader behavior. Remote CI remains the publication gate after these fixes.

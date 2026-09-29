@@ -225,7 +225,6 @@ void RoundedRaffTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, 
   const int hintHeight = UITheme::getInstance().getMetrics().buttonHintsHeight - 10;  // 30px total guide height
   const int groupWidth = (pageWidth - sidePadding * 2 - groupGap) / 2;
   const int hintY = pageHeight - hintHeight - bottomMargin;
-  const int textY = hintY + (hintHeight - renderer.getLineHeight(kGuideFontId)) / 2;
 
   if (renderer.getRenderMode() != GfxRenderer::BW && !renderer.grayPlanesAreAbsolute()) {
     renderer.fillRect(sidePadding, hintY, groupWidth, hintHeight, true);
