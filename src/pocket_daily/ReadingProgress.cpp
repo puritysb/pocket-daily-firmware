@@ -338,8 +338,12 @@ size_t writeListEntry(const ListEntry& entry, char* out, const size_t capacity) 
   out[0] = '\0';
   size_t used = 0;
   char number[48];
-  const bool ok = appendRaw("{\"path\":", out, capacity, used) && appendJsonString(entry.path, out, capacity, used) &&
-                  appendRaw(",\"document\":", out, capacity, used) &&
+  // The BLE list omits `path`: no file names cross the air.
+  const bool opened = entry.path
+                          ? appendRaw("{\"path\":", out, capacity, used) &&
+                                appendJsonString(entry.path, out, capacity, used) && appendRaw(",", out, capacity, used)
+                          : appendRaw("{", out, capacity, used);
+  const bool ok = opened && appendRaw("\"document\":", out, capacity, used) &&
                   appendJsonString(entry.document, out, capacity, used) &&
                   appendRaw(",\"filenameDocument\":", out, capacity, used) &&
                   appendJsonString(entry.filenameDocument, out, capacity, used) &&
@@ -356,5 +360,39 @@ size_t writeListEntry(const ListEntry& entry, char* out, const size_t capacity) 
     return 0;
   }
   return used;
+}
+
+size_t ListComposer::head(const char* deviceId, char* out, const size_t capacity) {
+  books = 0;
+  isFull = false;
+  bytes = writeListHead(deviceId, out, capacity);
+  return bytes;
+}
+
+size_t ListComposer::entry(const ListEntry& book, char* out, const size_t capacity) {
+  if (isFull || !out || capacity < 2) return 0;
+  if (books >= MAX_BOOKS) {
+    isFull = true;
+    return 0;
+  }
+  const size_t comma = books ? 1 : 0;
+  out[0] = ',';
+  const size_t length = writeListEntry(book, out + comma, capacity - comma);
+  if (!length) return 0;  // e.g. a path too long to report
+  if (bytes + comma + length + sizeof(LIST_TAIL) - 1 > MAX_LIST_BYTES) {
+    isFull = true;
+    return 0;
+  }
+  bytes += comma + length;
+  books++;
+  return comma + length;
+}
+
+size_t ListComposer::tail(char* out, const size_t capacity) {
+  constexpr size_t length = sizeof(LIST_TAIL) - 1;
+  if (!out || capacity < length) return 0;
+  memcpy(out, LIST_TAIL, length);
+  bytes += length;
+  return length;
 }
 }  // namespace PocketDaily::ReadingProgress

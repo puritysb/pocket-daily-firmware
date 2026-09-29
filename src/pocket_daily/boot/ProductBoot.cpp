@@ -15,6 +15,7 @@
 #include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/live_studio/UiPackStore.h"
+#include "pocket_daily/nearby_sync/ExchangeWindow.h"
 #include "util/ScreenshotUtil.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include "pocket_daily/product_identity.h"
@@ -192,6 +193,8 @@ void silentRestartToPocketDaily() {
 
 void silentRestartToPocketNearbySync() {
   if (deepSleepLatch && *deepSleepLatch) return;  // sleeping supersedes the heap-defrag reboot
+  // The Nearby Sync screen owns BLE: end any Reading Sync window first.
+  Pocket::NearbySync::Window::close(Pocket::NearbySync::Window::CloseReason::RADIO_OWNER);
   // Preserve the exact Pocket Daily surface before the loading popup replaces
   // it. Writing the BMP row-by-row costs no framebuffer-sized allocation and
   // gives the Apple companion a pixel-identical preview after the clean reboot.

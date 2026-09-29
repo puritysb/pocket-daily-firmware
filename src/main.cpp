@@ -41,6 +41,7 @@
 #include "platform/UsbSerialJtagHandoff.h"
 #include "pocket_daily/StagedFirmwareStore.h"
 #include "pocket_daily/boot/ProductBoot.h"
+#include "pocket_daily/nearby_sync/ExchangeWindow.h"
 #include "pocket_daily/staged_firmware.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
@@ -320,6 +321,15 @@ void enterDeepSleep(bool fromTimeout = false) {
   } else if (Storage.exists(SLEEP_FRAME_FILE)) {
     // A stale Quick Resume frame must not replace the selected sleep screen during wake.
     Storage.remove(SLEEP_FRAME_FILE);
+  }
+
+  // Pocket Reading Sync: the sleep frame is on the panel; give a paired phone
+  // 20 s to exchange places (docs/reading-sync-ble-v1.md), then sleep. Never
+  // while Wi-Fi is up: BLE and Wi-Fi stay mutually exclusive.
+  if (WiFi.getMode() == WIFI_MODE_NULL) {
+    Pocket::NearbySync::Window::runBeforeDeepSleep(activityManager.renderCount());
+  } else {
+    Pocket::NearbySync::Window::close(Pocket::NearbySync::Window::CloseReason::RADIO_OWNER);
   }
 
   // Tear down WiFi so the modem power domain isn't held alive across deep sleep.
@@ -669,11 +679,18 @@ void setup() {
     gpio.update();
   }
 
+  // Pocket Reading Sync: waking from sleep onto the shell opens an exchange
+  // window once the first frame is drawn (ExchangeWindow waits for it).
+  if (wakeupReason == HalGPIO::WakeupReason::PowerButton && resume != BootResume::Silent && !recoveryFirmwareMode &&
+      !HalSystem::isRebootFromCrash() && devBootReturn == PocketDaily::Boot::DevBootReturn::None) {
+    Pocket::NearbySync::Window::arm(Pocket::NearbySync::Window::Trigger::WAKE, activityManager.renderCount());
+  }
+
   allowSleepAt = millis() + 2000;
   // Edge-latch the power button from here on: a busy activity can block a
   // loop iteration for seconds, and a press-and-release inside that window is
   // invisible to the polled check below (this is why the power button felt
-  // dead on the AgentDeck dashboard). Attached after waitForPowerRelease so
+  // dead on the AgentDeck dashboard). Attached after boot wake validation so
   // the boot press can't latch.
   gpio.attachPowerButtonLatch();
 }
@@ -889,6 +906,10 @@ void loop() {
   const unsigned long activityStartTime = millis();
   activityManager.loop();
   [[maybe_unused]] const unsigned long activityDuration = millis() - activityStartTime;
+  // Pocket Reading Sync exchange windows: opened on the shell, served and
+  // closed from this loop (docs/reading-sync-ble-v1.md).
+  Pocket::NearbySync::Window::loop(activityManager.allowsExchangeWindow() && WiFi.getMode() == WIFI_MODE_NULL,
+                                   activityManager.renderCount());
 
   const unsigned long loopDuration = millis() - loopStartTime;
   if (loopDuration > maxLoopDuration) {
@@ -915,6 +936,11 @@ void loop() {
   if (skipLoopDelay) {
     powerManager.setPowerSaving(false);  // Make sure we're at full performance when skipLoopDelay is requested
     yield();                             // Give FreeRTOS a chance to run tasks, but return immediately
+  } else if (Pocket::NearbySync::Window::active()) {
+    // The BLE controller needs the normal CPU clock; keep the short delay so
+    // notifications are paced one per pass without spinning.
+    powerManager.setPowerSaving(false);
+    delay(10);
   } else {
     if (millis() - lastActivityTime >= HalPowerManager::IDLE_POWER_SAVING_MS) {
       // If we've been inactive for a while, increase the delay to save power

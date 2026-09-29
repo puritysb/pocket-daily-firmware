@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -43,6 +44,8 @@ class ActivityManager {
   std::unique_ptr<Activity> currentActivity;
 
   void exitActivity(const RenderLock& lock);
+  static void closeExchangeWindowFor(const Activity& next);
+  void armExchangeWindowAfterBook();
 
   // Pending activity to be launched on next loop iteration
   std::unique_ptr<Activity> pendingActivity;
@@ -61,6 +64,10 @@ class ActivityManager {
   // Mutex to protect rendering operations from race conditions
   // Must only be used via RenderLock
   SemaphoreHandle_t renderingMutex = nullptr;
+
+  // Frames the render task completed (Pocket Reading Sync waits for the shell's
+  // next frame before raising the radio).
+  std::atomic<uint32_t> completedRenders{0};
 
   // Whether to trigger a render after the current loop()
   // This variable must only be set by the main loop, to avoid race conditions
@@ -111,6 +118,10 @@ class ActivityManager {
   bool requiresExclusiveStorageLoop() const;
   bool isReaderActivity() const;
   bool handleForcedRefresh();
+  // The current screen tolerates a Reading Sync exchange window and no book is
+  // open anywhere on the stack.
+  bool allowsExchangeWindow() const;
+  uint32_t renderCount() const { return completedRenders.load(std::memory_order_acquire); }
   bool skipLoopDelay() const;
   ScreenshotInfo getScreenshotInfo() const;
   // Caller must hold RenderLock so activity lifetime and framebuffer agree.
