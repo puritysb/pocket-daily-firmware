@@ -26,3 +26,7 @@ target_link_libraries(pocket_preferences_test PRIVATE
 )
 
 gtest_discover_tests(pocket_preferences_test)
+
+add_executable(legacy_font_size_test LegacyFontSizeTest.cpp)
+target_link_libraries(legacy_font_size_test PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(legacy_font_size_test)

@@ -11,6 +11,9 @@
  */
 class HttpDownloader {
  public:
+  // Conservative admission floor; hardware TLS headroom must still be measured.
+  static constexpr uint32_t MIN_TLS_FREE_HEAP = 40000;
+  static constexpr uint32_t MIN_TLS_MAX_ALLOC = 20000;
   using ProgressCallback = std::function<void(size_t downloaded, size_t total)>;
   // Called with each body chunk as it arrives; return false to abort. Lets a
   // streaming parser consume the response without buffering the whole body.

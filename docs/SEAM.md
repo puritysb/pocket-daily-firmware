@@ -317,7 +317,9 @@ in the same commit:
 
 ## Merge routine
 
-1. `git fetch upstream && git merge upstream/main` — merge, never rebase
+1. `./scripts/sync-upstream.sh --dry-run --ref <stable-commit>`, then prepare the merge
+   on a clean integration branch with `--branch <existing-branch> --ref <stable-commit>`
+   (the stable remote branch is `upstream/master`; merge, never rebase)
    product history onto upstream; never send Pocket product-stack files
    upstream.
 2. Expect conflicts only at the hook sites and carried patches above.

@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <GrayscaleCapabilities.h>
 
 #include <algorithm>
 #include <stdexcept>
@@ -10,6 +11,25 @@
 class HalDisplay {
  public:
   enum RefreshMode { FULL_REFRESH, HALF_REFRESH, FAST_REFRESH };
+  using GrayscaleMode = freeink::GrayscaleMode;
+  using GrayscaleCapabilities = freeink::GrayscaleCapabilities;
+  using GrayscaleBase = freeink::GrayscaleBase;
+  using GrayscaleEncoding = freeink::GrayscaleEncoding;
+  GrayscaleCapabilities grayscaleCapabilities(GrayscaleMode mode = GrayscaleMode::Overlay) const {
+    if (mode != GrayscaleMode::Overlay) return {};
+    return {GrayscaleEncoding::OverlayMasks, GrayscaleBase::Separate, supportsStripGrayscale(), false, false};
+  }
+  bool displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback, bool off = false);
+  bool isInverted() const { return inverted_; }
+  void setInverted(bool value) { inverted_ = value; }
+  void displayBufferAsync(RefreshMode mode);
+  void waitRefreshComplete() {}
+  bool supportsAsyncRefresh() const { return false; }
+  uint8_t* lendFrameBufferStorage(uint32_t* size) {
+    *size = 0;
+    return nullptr;
+  }
+  void returnFrameBufferStorage() {}
   static constexpr uint16_t DISPLAY_WIDTH = 800, DISPLAY_HEIGHT = 480, DISPLAY_WIDTH_BYTES = 100;
   static constexpr uint32_t BUFFER_SIZE = 48000;
   explicit HalDisplay(uint16_t width = DISPLAY_WIDTH, uint16_t height = DISPLAY_HEIGHT)
@@ -41,6 +61,7 @@ class HalDisplay {
   unsigned presentations = 0;
 
  private:
+  bool inverted_ = false;
   // Host heap, not device DRAM: at most512KiB +32B guards, owned for the panel
   // lifetime. Too large for stack; no allocation while rasterizing.
   static size_t checkedSize(uint16_t width, uint16_t height) {
@@ -52,3 +73,10 @@ class HalDisplay {
   uint16_t width_, height_;
   mutable std::vector<uint8_t> bytes_;
 };
+
+inline bool HalDisplay::displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback, bool off) {
+  if (mode != GrayscaleMode::Overlay) return false;
+  displayGrayscaleBase(fallback, off);
+  return true;
+}
+inline void HalDisplay::displayBufferAsync(RefreshMode mode) { displayBuffer(mode); }

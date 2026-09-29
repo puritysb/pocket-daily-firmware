@@ -22,6 +22,9 @@ struct SectionLayout {
   uint8_t imageRendering = 0;
   bool focusReadingEnabled = false;
   uint8_t bilingualViewMode = 0;
+  int8_t characterSpacing = 0;
+  uint8_t wordSpacingPercent = 100;
+  ReaderRenderSpec renderSpec() const;
   bool operator==(const SectionLayout&) const = default;
 
   bool load(Section& section) const;

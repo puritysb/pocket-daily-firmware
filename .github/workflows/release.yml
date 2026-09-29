@@ -26,14 +26,14 @@ jobs:
           enable-cache: false
 
       - name: Install PlatformIO Core
-        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.2.0.zip
 
       - name: Cache PlatformIO packages
         uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: pio-${{ runner.os }}-
+          key: pio-core620-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-core620-${{ runner.os }}-
 
       # v<version> is the stable release; v<version>-beta.<n> a pre-release for
       # the companion's beta channel. Anything else, or a version that is not
@@ -53,6 +53,11 @@ jobs:
             echo "Tag $TAG is neither v${VERSION} nor v${VERSION}-beta.<n>" >&2
             exit 1
           fi
+
+      - name: Align installed SCons metadata
+        run: |
+          pio pkg install -e "$PIO_ENV"
+          python scripts/patch_pio_scons.py "$HOME/.platformio/platforms/espressif32/platform.json"
 
       - name: Build Pocket Daily Firmware
         run: pio run -e "$PIO_ENV"

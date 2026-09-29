@@ -43,7 +43,7 @@ jobs:
             base_sha="$(git rev-list --max-parents=0 "${GITHUB_SHA}")"
           fi
           git diff --name-only --diff-filter=ACMR "${base_sha}" "${GITHUB_SHA}" -- '*.c' '*.cpp' '*.h' '*.hpp' \
-            | awk '!/^(lib\/EpdFont\/builtinFonts\/|lib\/Epub\/Epub\/hyphenation\/generated\/|lib\/uzlib\/)/' \
+            | awk '!/^(lib\/EpdFont\/builtinFonts\/|lib\/Epub\/Epub\/hyphenation\/generated\/|lib\/uzlib\/|lib\/miniz\/third_party\/)/' \
             | xargs -r /usr/lib/llvm-21/bin/clang-format -style=file -i
           git diff --exit-code || (echo "Please run 'bin/clang-format-fix' to fix formatting issues" && exit 1)
 
@@ -65,21 +65,23 @@ jobs:
           enable-cache: false
 
       - name: Install PlatformIO Core
-        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.2.0.zip
 
       - name: Cache PlatformIO packages
         uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: pio-${{ runner.os }}-
+          key: pio-core620-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-core620-${{ runner.os }}-
 
       # check_skip_packages keeps packages out of the analysis, but pio check
       # still runs the toolchain compiler to read its defines. Install the
       # platform's toolchain first: a platform bump otherwise leaves only the
       # previous toolchain in the restored cache and the check exits with 127.
       - name: Install PlatformIO packages
-        run: pio pkg install -e default
+        run: |
+          pio pkg install -e default
+          python scripts/patch_pio_scons.py "$HOME/.platformio/platforms/espressif32/platform.json"
 
       # Match PlatformIO's 2.11 baseline, but build a native executable instead
       # of depending on the bundled binary's runtime loader on ubuntu-latest.
@@ -96,28 +98,18 @@ jobs:
           make -C build/cppcheck-source -j2 MATCHCOMPILER=yes
           build/cppcheck-source/cppcheck --version
 
-      # The espressif32 55.x platform installs its own tool-cppcheck 2.20.1
-      # (from ~/.platformio/tools) on every check, overriding the adapter in
-      # platform_packages. That binary needs libpcre.so.3, which ubuntu-latest
-      # lacks, so every file exits 127. Point the installed package's
-      # executable at the native 2.11 build instead.
-      - name: Use native cppcheck for the platform's tool package
-        run: |
-          pkg="$HOME/.platformio/packages/tool-cppcheck"
-          if [[ ! -e "$pkg/cppcheck" ]]; then
-            echo "tool-cppcheck was not installed by pio pkg install" >&2
-            exit 1
-          fi
-          printf '#!/bin/sh\nexec %s "$@"\n' "$PWD/build/cppcheck-source/cppcheck" > "$pkg/cppcheck"
-          chmod 755 "$pkg/cppcheck"
-          "$pkg/cppcheck" --version
-
+      # The adapter changes only the analyzer executable in PlatformIO's
+      # command; Core 6.2 otherwise ignores the platform_packages override.
       - name: Run cppcheck
         run: |
           python -m unittest discover -s scripts -p test_check_firmware.py
           python scripts/check_firmware.py --cppcheck build/cppcheck-source/cppcheck
 
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [default, gh_release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -135,19 +127,24 @@ jobs:
           enable-cache: false
 
       - name: Install PlatformIO Core
-        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.2.0.zip
 
       - name: Cache PlatformIO packages
         uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: pio-${{ runner.os }}-
+          key: pio-core620-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-core620-${{ runner.os }}-
+
+      - name: Align installed SCons metadata
+        run: |
+          pio pkg install -e "${{ matrix.environment }}"
+          python scripts/patch_pio_scons.py "$HOME/.platformio/platforms/espressif32/platform.json"
 
       - name: Build Pocket Daily Firmware
         run: |
           set -euo pipefail
-          pio run | tee pio.log
+          ./scripts/pio.sh run -e "${{ matrix.environment }}" | tee pio.log
 
       - name: Extract firmware stats
 
@@ -166,8 +163,8 @@ jobs:
       - name: Upload firmware.bin artifact
         uses: actions/upload-artifact@v6
         with:
-          name: firmware.bin
-          path: .pio/build/default/firmware.bin
+          name: firmware-${{ matrix.environment }}.bin
+          path: .pio/build/${{ matrix.environment }}/firmware.bin
           if-no-files-found: error
 
   unit-tests:
@@ -187,6 +184,16 @@ jobs:
         with:
           path: build/test/_deps/googletest-src
           key: ${{ runner.os }}-googletest-${{ hashFiles('test/CMakeLists.txt') }}
+
+      - name: Check integration boundaries and sync safety
+        run: |
+          python3 scripts/check_seam.py
+          python3 -m unittest discover -s scripts -p test_check_seam.py
+          python3 -m unittest discover -s scripts -p test_sync_upstream.py
+          python3 -m unittest discover -s scripts -p test_patch_storage_sdk.py
+          python3 -m unittest discover -s scripts -p test_patch_pio_scons.py
+          python3 -m unittest discover -s scripts -p test_sync_routes.py
+          python3 -m unittest discover -s scripts -p test_build_host_apple.py
 
       - name: Configure
         run: cmake -S test -B build/test -G Ninja -DCMAKE_BUILD_TYPE=Release

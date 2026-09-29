@@ -37,3 +37,10 @@ target_compile_options(pdui_host PRIVATE -Wall -Wextra -pedantic)
 target_link_libraries(pdui_host PUBLIC ZLIB::ZLIB)
 # Generated built-in font headers omit a trailing optional field.
 set_source_files_properties(HostHome.cpp PROPERTIES COMPILE_OPTIONS -Wno-missing-field-initializers)
+
+target_include_directories(pdui_host PUBLIC
+  ${REPO_ROOT}/freeink-sdk/libs/display/FreeInkDisplay/include
+  ${REPO_ROOT}/freeink-sdk/libs/font/FreeInkFont/include)
+target_sources(pdui_host PRIVATE
+  ${REPO_ROOT}/freeink-sdk/libs/font/FreeInkFont/src/FontAlloc.c
+  ${REPO_ROOT}/lib/Memory/BuildScratch.cpp)

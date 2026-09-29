@@ -1,6 +1,7 @@
 _language_name: "한국어"
 _language_code: "KO"
-_order: "26"
+_bcp47: "ko"
+_order: "36"
 
 STR_INDEX_FAILED: "인덱싱 실패 - 책 또는 SD 카드 오류"
 

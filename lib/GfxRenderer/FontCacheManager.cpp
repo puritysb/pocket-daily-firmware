@@ -4,28 +4,112 @@
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <SdCardFont.h>
+#include <TtfEpdFont.h>
+#include <Utf8.h>
 
+#include <algorithm>
+#include <cstdio>
 #include <cstring>
+#include <string>
+
+namespace {
+const std::map<int, TtfEpdFont*> noTtfFonts;
+
+char* appendUtf8Codepoint(char* output, const uint32_t codepoint) {
+  if (codepoint < 0x80) {
+    *output++ = static_cast<char>(codepoint);
+  } else if (codepoint < 0x800) {
+    *output++ = static_cast<char>(0xC0 | (codepoint >> 6));
+    *output++ = static_cast<char>(0x80 | (codepoint & 0x3F));
+  } else if (codepoint < 0x10000) {
+    *output++ = static_cast<char>(0xE0 | (codepoint >> 12));
+    *output++ = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+    *output++ = static_cast<char>(0x80 | (codepoint & 0x3F));
+  } else {
+    *output++ = static_cast<char>(0xF0 | (codepoint >> 18));
+    *output++ = static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
+    *output++ = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+    *output++ = static_cast<char>(0x80 | (codepoint & 0x3F));
+  }
+  return output;
+}
+
+}  // namespace
 
 FontCacheManager::FontCacheManager(const std::map<int, EpdFontFamily>& fontMap,
-                                   const std::map<int, SdCardFont*>& sdCardFonts)
-    : fontMap_(fontMap), sdCardFonts_(sdCardFonts) {}
+                                   const std::map<int, SdCardFont*>& sdCardFonts,
+                                   const std::map<int, TtfEpdFont*>& ttfFonts)
+    : fontMap_(fontMap), sdCardFonts_(sdCardFonts), ttfFonts_(ttfFonts) {}
+
+FontCacheManager::FontCacheManager(const std::map<int, EpdFontFamily>& fonts, const std::map<int, SdCardFont*>& sd)
+    : FontCacheManager(fonts, sd, noTtfFonts) {}
+
+void FontCacheManager::recordExtraText(const char* text, int fontId) {
+  if (!text || !isScanning()) return;
+  extraFontId_ = fontId;
+  snprintf(extraText_, sizeof(extraText_), "%s", text);
+  recordText(" ", fontId, EpdFontFamily::REGULAR);
+}
+
+void FontCacheManager::prewarmCache(int fontId, const char* text, uint8_t styleMask, const char* extra) {
+  const auto font = sdCardFonts_.find(fontId);
+  if (font != sdCardFonts_.end()) {
+    font->second->prewarm(text, styleMask, false, extra);
+    return;
+  }
+  prewarmCache(fontId, text, styleMask, false);
+}
 
 void FontCacheManager::setFontDecompressor(FontDecompressor* d) { fontDecompressor_ = d; }
 
 void FontCacheManager::clearCache() {
+  if (renderer_) renderer_->clearFallbackCache();
   if (fontDecompressor_) fontDecompressor_->clearCache();
   for (auto& [id, font] : sdCardFonts_) {
     font->clearCache();
   }
-  if (renderer_) renderer_->clearFallbackCache();
+#if CROSSPOINT_VECTOR_FONTS
+  for (auto& [id, font] : ttfFonts_) {
+    if (font) font->clearCache();
+  }
+#endif
 }
 
-void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask, const char* extraText) {
+void FontCacheManager::releaseSdFontCaches() {
+  if (renderer_) renderer_->clearFallbackCache();
+  if (fontDecompressor_) fontDecompressor_->clearCache();
+  for (auto& [id, font] : sdCardFonts_) {
+    font->releaseResidentCaches();
+  }
+#if CROSSPOINT_VECTOR_FONTS
+  for (auto& [id, font] : ttfFonts_) {
+    if (font) font->releaseResidentCaches();
+  }
+#endif
+}
+
+void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask, bool accumulate) {
+  // TTF (vector) font prewarm path. This is the single dispatch every draw path
+  // funnels through (reader endScanAndPrewarm, the settings preview, UI text),
+  // so building here covers them all. accumulate=false means "this is the whole
+  // glyph set for this render" → replace; accumulate=true → add incrementally.
+  // styleMask is ignored: a TTF face has no synthesized bold/italic here.
+#if CROSSPOINT_VECTOR_FONTS
+  auto tit = ttfFonts_.find(fontId);
+  if (tit != ttfFonts_.end() && tit->second) {
+    if (accumulate) {
+      tit->second->addCoverage(utf8Text);
+    } else {
+      tit->second->build(utf8Text);
+    }
+    return;
+  }
+#endif
+
   // SD card font prewarm path: prewarm all requested styles in one call
   auto it = sdCardFonts_.find(fontId);
   if (it != sdCardFonts_.end()) {
-    int missed = it->second->prewarm(utf8Text, styleMask, /*metadataOnly=*/false, extraText);
+    int missed = it->second->prewarm(utf8Text, styleMask, /*metadataOnly=*/false, /*loadKernLig=*/true, accumulate);
     if (missed > 0) {
       LOG_DBG("FCM", "prewarmCache(SD): %d glyph(s) not found (styleMask=0x%02X)", missed, styleMask);
     }
@@ -35,14 +119,6 @@ void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t st
   // Standard compressed font prewarm path: loop over all requested styles
   if (!fontDecompressor_ || fontMap_.count(fontId) == 0) return;
 
-  // Flash fonts have static kerning, so extra text simply joins the page text.
-  std::string combined;
-  if (extraText && *extraText) {
-    combined.reserve(strlen(utf8Text) + strlen(extraText));
-    combined = utf8Text;
-    combined += extraText;
-    utf8Text = combined.c_str();
-  }
   for (uint8_t i = 0; i < 4; i++) {
     if (!(styleMask & (1 << i))) continue;
     auto style = static_cast<EpdFontFamily::Style>(i);
@@ -71,68 +147,133 @@ void FontCacheManager::resetStats() {
 
 bool FontCacheManager::isScanning() const { return scanMode_ == ScanMode::Scanning; }
 
-void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::Style style) {
-  auto& bucket = scanBuckets_[fontId];
-  bucket.text += text;
+uint8_t FontCacheManager::resolveScanStyle(int fontId, EpdFontFamily::Style style) const {
   const uint8_t baseStyle = static_cast<uint8_t>(style) & 0x03;
-  const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
-  uint32_t cpCount = 0;
-  while (*p) {
-    if ((*p & 0xC0) != 0x80) cpCount++;
-    p++;
+
+  const auto sdFont = sdCardFonts_.find(fontId);
+  if (sdFont != sdCardFonts_.end()) return sdFont->second->resolveStyle(baseStyle);
+
+  const auto font = fontMap_.find(fontId);
+  if (font == fontMap_.end()) return baseStyle;
+
+  const EpdFontData* resolvedData = font->second.getData(static_cast<EpdFontFamily::Style>(baseStyle));
+  for (uint8_t candidate = 0; candidate < 4; candidate++) {
+    if (font->second.getData(static_cast<EpdFontFamily::Style>(candidate)) == resolvedData) return candidate;
   }
-  bucket.styleCounts[baseStyle] += cpCount;
+  return baseStyle;
 }
 
-void FontCacheManager::recordExtraText(const char* text, int fontId) {
-  if (!text || !*text || scanMode_ != ScanMode::Scanning) return;
-  scanBuckets_[fontId].extraText += text;
+void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::Style style) {
+  if (!text || *text == '\0') return;
+
+  uint8_t fontSlot = scanFontCount_;
+  for (uint8_t i = 0; i < scanFontCount_; i++) {
+    if (scanFontIds_[i] == fontId) {
+      fontSlot = i;
+      break;
+    }
+  }
+  if (fontSlot == scanFontCount_) {
+    if (scanFontCount_ >= MAX_SCAN_FONTS) return;
+    scanFontIds_[scanFontCount_++] = fontId;
+  }
+
+  const uint8_t resolvedStyle = resolveScanStyle(fontId, style);
+  const uint8_t group = fontSlot * 4 + resolvedStyle;
+  const unsigned char* cursor = reinterpret_cast<const unsigned char*>(text);
+  while (*cursor) {
+    const uint32_t codepoint = utf8NextCodepoint(&cursor);
+    if (codepoint == 0) break;
+
+    const uint32_t packed = (static_cast<uint32_t>(fontSlot) << SCAN_FONT_SHIFT) |
+                            (static_cast<uint32_t>(resolvedStyle) << SCAN_STYLE_SHIFT) | codepoint;
+    bool found = false;
+    for (uint16_t i = 0; i < scanCodepointCount_; i++) {
+      if (scanCodepoints_[i] == packed) {
+        found = true;
+        break;
+      }
+    }
+    if (found) continue;
+
+    if (scanCodepointCount_ >= MAX_SCAN_CODEPOINTS) {
+      if (!scanOverflowWarned_) {
+        LOG_DBG("FCM", "Scan codepoint cap (%u) reached; excess glyphs will load on demand",
+                static_cast<unsigned>(MAX_SCAN_CODEPOINTS));
+        scanOverflowWarned_ = true;
+      }
+      continue;
+    }
+
+    scanCodepoints_[scanCodepointCount_++] = packed;
+    scanGroupCounts_[group]++;
+  }
 }
 
 // --- PrewarmScope implementation ---
 
 FontCacheManager::PrewarmScope::PrewarmScope(FontCacheManager& manager) : manager_(&manager) {
+  manager_->extraText_[0] = 0;
   manager_->scanMode_ = ScanMode::Scanning;
   manager_->clearCache();
   manager_->resetStats();
-  manager_->scanBuckets_.clear();
+  manager_->scanCodepointCount_ = 0;
+  manager_->scanFontCount_ = 0;
+  manager_->scanOverflowWarned_ = false;
+  memset(manager_->scanGroupCounts_, 0, sizeof(manager_->scanGroupCounts_));
 }
 
 void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
+  if (manager_->scanMode_ != ScanMode::Scanning) return;
   manager_->scanMode_ = ScanMode::None;
   manager_->pageGlyphSetPinned_ = true;
-  if (manager_->scanBuckets_.empty()) return;
+  if (manager_->scanCodepointCount_ == 0) return;
 
-  for (auto& [fontId, bucket] : manager_->scanBuckets_) {
-    if (bucket.text.empty() && bucket.extraText.empty()) continue;
-    // Build style bitmask from all styles that appeared during the scan for this font.
-    uint8_t styleMask = 0;
-    for (uint8_t i = 0; i < 4; i++) {
-      if (bucket.styleCounts[i] > 0) styleMask |= (1 << i);
-    }
-    if (styleMask == 0) styleMask = 1;  // default to regular (extra UI text draws regular)
-    manager_->prewarmCache(fontId, bucket.text.c_str(), styleMask,
-                           bucket.extraText.empty() ? nullptr : bucket.extraText.c_str());
+  std::sort(manager_->scanCodepoints_, manager_->scanCodepoints_ + manager_->scanCodepointCount_);
+
+  uint16_t groupStarts[SCAN_GROUP_COUNT] = {};
+  for (uint8_t group = 1; group < SCAN_GROUP_COUNT; group++) {
+    groupStarts[group] = groupStarts[group - 1] + manager_->scanGroupCounts_[group - 1];
   }
 
-  // Glyphs no page font covers come from the fallback font. Prewarm them all
-  // in one set (its resident set is shared by every font on the page), so the
-  // grayscale strip passes do not reload them one by one through the overflow
-  // ring. Pages without such glyphs never touch or load the fallback font.
-  if (manager_->renderer_) {
-    std::string fallbackText;
-    for (auto& [fontId, bucket] : manager_->scanBuckets_) {
-      manager_->renderer_->appendFallbackCodepoints(fontId, bucket.text.c_str(), fallbackText);
+  std::string fallbackText;
+  // Each packed entry provides four bytes, enough for one UTF-8 codepoint.
+  // Encoding high groups first means a terminator can overwrite only a group
+  // that has already been prewarmed; unread lower groups remain intact.
+  for (int group = SCAN_GROUP_COUNT - 1; group >= 0; group--) {
+    const uint16_t groupCount = manager_->scanGroupCounts_[group];
+    if (groupCount == 0) continue;
+
+    const uint16_t groupStart = groupStarts[group];
+    char* const utf8Text = reinterpret_cast<char*>(manager_->scanCodepoints_ + groupStart);
+    char* output = utf8Text;
+    for (uint16_t i = 0; i < groupCount; i++) {
+      const uint32_t codepoint = manager_->scanCodepoints_[groupStart + i] & SCAN_CODEPOINT_MASK;
+      output = appendUtf8Codepoint(output, codepoint);
     }
-    if (!fallbackText.empty()) manager_->renderer_->prewarmFallbackFont(fallbackText.c_str());
+    *output = '\0';
+
+    const uint8_t fontSlot = static_cast<uint8_t>(group) / 4;
+    const uint8_t style = static_cast<uint8_t>(group) & 0x03;
+    // This group is the complete glyph set for one font/style in this render.
+    const int fontId = manager_->scanFontIds_[fontSlot];
+    if (manager_->renderer_) manager_->renderer_->appendFallbackCodepoints(fontId, utf8Text, fallbackText);
+    if (fontId == manager_->extraFontId_ && style == 0 && manager_->extraText_[0]) {
+      manager_->prewarmCache(fontId, utf8Text, 1 << style, manager_->extraText_);
+    } else {
+      manager_->prewarmCache(fontId, utf8Text, 1 << style, /*accumulate=*/false);
+    }
   }
 
-  manager_->scanBuckets_.clear();
+  if (manager_->renderer_ && !fallbackText.empty()) manager_->renderer_->prewarmFallbackFont(fallbackText.c_str());
+  manager_->scanCodepointCount_ = 0;
+  manager_->scanFontCount_ = 0;
+  memset(manager_->scanGroupCounts_, 0, sizeof(manager_->scanGroupCounts_));
 }
 
 FontCacheManager::PrewarmScope::~PrewarmScope() {
   if (active_) {
-    endScanAndPrewarm();  // no-op if already called (scanText_ is empty)
+    endScanAndPrewarm();  // no-op if already called
     manager_->pageGlyphSetPinned_ = false;
     manager_->clearCache();
   }

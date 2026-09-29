@@ -17,9 +17,12 @@ Daily product code is downstream-only and never goes upstream.**
 ## Pulling upstream — merge, never rebase
 
 ```bash
-./scripts/sync-upstream.sh           # fetch + report + merge upstream/master into main
-./scripts/sync-upstream.sh --check   # report pending upstream commits only, don't merge
-# then: ./scripts/pio.sh run  (verify build) && git push origin main
+./scripts/sync-upstream.sh --check   # fetch and report only
+./scripts/sync-upstream.sh --dry-run --ref <stable-commit>
+# In a clean, explicitly selected integration branch:
+./scripts/sync-upstream.sh --branch <existing-branch> --ref <stable-commit>
+# Resolve, verify default + gh_release + host + strict cppcheck + app contracts.
+# The script never switches branches, commits, rebases, or pushes.
 ```
 
 Upstream's stable line is **`master`**, not `main`; releases land there. Upstream also has

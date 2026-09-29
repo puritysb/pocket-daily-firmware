@@ -297,10 +297,10 @@ class ReadingPositionLayout : public testing::Test {
       EXPECT_EQ(loaded->textOffset, *offset);
       if (!loaded->elements.empty() && loaded->elements.front()->getTag() == TAG_PageLine) {
         const auto& line = static_cast<const PageLine&>(*loaded->elements.front());
-        const auto& words = line.getBlock()->getWords();
-        if (!words.empty()) {
-          EXPECT_TRUE(bodyStartsWithWord(text, *offset, words.front()))
-              << "spine " << spine << " page " << page << ": first word '" << words.front() << "' but text at "
+        const auto& words = *line.getBlock();
+        if (words.wordCount() != 0) {
+          EXPECT_TRUE(bodyStartsWithWord(text, *offset, words.wordText(0)))
+              << "spine " << spine << " page " << page << ": first word '" << words.wordText(0) << "' but text at "
               << *offset << " is '" << bodyTextAt(text, *offset, 12) << "'";
         }
       }

@@ -12,12 +12,12 @@ class StorageSDKPatchTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.project = Path(self.temporary.name)
         root = Path(__file__).resolve().parents[1]
-        relative = Path("open-x4-sdk/libs/hardware/SDCardManager/include/SDCardManager.h")
+        relative = Path("freeink-sdk/libs/hardware/SDCardManager/include/SDCardManager.h")
         self.header = self.project / relative
         self.header.parent.mkdir(parents=True)
         import subprocess
         self.original = subprocess.check_output(
-            ["git", "-C", str(root / "open-x4-sdk"), "show", "HEAD:libs/hardware/SDCardManager/include/SDCardManager.h"], text=True)
+            ["git", "-C", str(root / "freeink-sdk"), "show", "HEAD:libs/hardware/SDCardManager/include/SDCardManager.h"], text=True)
         self.header.write_text(self.original)
         (self.project / "scripts").mkdir()
         shutil.copyfile(root / "scripts/storage_sdk.patch", self.project / "scripts/storage_sdk.patch")
@@ -26,7 +26,7 @@ class StorageSDKPatchTests(unittest.TestCase):
         self.header.write_text(self.original + "\n// unrelated local work\n")
         self.assertEqual(apply_storage_patch(self.project), "applied")
         result = self.header.read_bytes()
-        self.assertIn(b"filesystemType() const", result)
+        self.assertIn(b"filesystemType()", result)
         self.assertTrue(result.endswith(b"// unrelated local work\n"))
         self.assertEqual(apply_storage_patch(self.project), "already applied")
         self.assertEqual(self.header.read_bytes(), result)

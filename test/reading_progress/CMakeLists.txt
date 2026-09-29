@@ -5,7 +5,7 @@ find_package(ZLIB REQUIRED)
 add_executable(reading_progress_xpointer_test
   XPointerCrossCheckTest.cpp
   stubs/EpubHost.cpp
-  ${REPO_ROOT}/lib/KOReaderSync/ChapterXPathResolver.cpp
+  ${REPO_ROOT}/lib/KOReaderSync/ChapterXPathResolver.cpp ${REPO_ROOT}/lib/KOReaderSync/ChapterTextOffsetResolver.cpp
   ${REPO_ROOT}/lib/KOReaderSync/ProgressMapper.cpp
   ${REPO_ROOT}/lib/Epub/Epub/htmlEntities.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
@@ -28,6 +28,8 @@ gtest_discover_tests(reading_progress_xpointer_test)
 # Records, offers, list JSON and SD storage of the product module.
 add_executable(reading_progress_format_test
   ReadingProgressFormatTest.cpp
+  ReaderProgressCodecTest.cpp
+  SyncResponseBufferTest.cpp
   ${REPO_ROOT}/src/pocket_daily/ReadingProgress.cpp
   ${REPO_ROOT}/src/pocket_daily/ReadingProgressStore.cpp)
 target_include_directories(reading_progress_format_test BEFORE PRIVATE ../stubs ${REPO_ROOT}/lib/Memory)

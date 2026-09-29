@@ -42,10 +42,10 @@ class SyncRoutesTest(unittest.TestCase):
         # Pocket's second item is the direct (private AP) path, never Calibre;
         # its third is the release update check, absent from File Transfer.
         compact = re.sub(r"\s+", " ", chooser)
-        self.assertIn("POCKET_MODES[MENU_ITEM_COUNT] = {NetworkMode::JOIN_NETWORK, NetworkMode::CREATE_HOTSPOT, "
+        self.assertIn("POCKET_MODES[] = {NetworkMode::JOIN_NETWORK, NetworkMode::CREATE_HOTSPOT, "
                       "NetworkMode::CHECK_FOR_UPDATES}", compact)
-        self.assertIn("TRANSFER_MODES[MENU_ITEM_COUNT] = {NetworkMode::JOIN_NETWORK, NetworkMode::CONNECT_CALIBRE, "
-                      "NetworkMode::CREATE_HOTSPOT}", compact)
+        self.assertIn("TRANSFER_MODES[] = {NetworkMode::JOIN_NETWORK, NetworkMode::CONNECT_CALIBRE, "
+                      "NetworkMode::CREATE_HOTSPOT, NetworkMode::USB_DRIVE}", compact)
         self.assertIn("pocketSync ? POCKET_MODES[index] : TRANSFER_MODES[index]", chooser)
         activity = (root / "src/activities/network/CrossPointWebServerActivity.cpp").read_text()
         view = activity[activity.index("void CrossPointWebServerActivity::renderServerRunning()"):
@@ -259,7 +259,7 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertLess(offer.index("admitOperationFor("), offer.index("Reading::saveOffer("))
         self.assertNotIn("saveProgress(", offer)
         reader = (root / "src/activities/reader/EpubReaderActivity.cpp").read_text()
-        exit_hook = reader[reader.index("void EpubReaderActivity::onExit()"):reader.index("void EpubReaderActivity::loop()")]
+        exit_hook = reader[reader.index("EpubReaderActivity::~EpubReaderActivity()"):reader.index("void EpubReaderActivity::loop()")]
         self.assertLess(exit_hook.index("capturePosition("), exit_hook.index("section.reset();"))
         self.assertLess(exit_hook.index("section.reset();"), exit_hook.index("recordPosition("))
         self.assertLess(exit_hook.index("recordPosition("), exit_hook.index("moveFinishedBookToReadFolder("))

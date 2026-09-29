@@ -23,14 +23,14 @@ jobs:
           enable-cache: false
 
       - name: Install PlatformIO Core
-        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.2.0.zip
 
       - name: Cache PlatformIO packages
         uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: pio-${{ runner.os }}-
+          key: pio-core620-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-core620-${{ runner.os }}-
 
       - name: Extract env
         run: |
@@ -40,7 +40,10 @@ jobs:
       - name: Build Pocket Daily Firmware release candidate
         env:
           CROSSPOINT_RC_HASH: ${{ env.SHORT_SHA }}
-        run: pio run -e gh_release_rc
+        run: |
+          pio pkg install -e gh_release_rc
+          python scripts/patch_pio_scons.py "$HOME/.platformio/platforms/espressif32/platform.json"
+          pio run -e gh_release_rc
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v6

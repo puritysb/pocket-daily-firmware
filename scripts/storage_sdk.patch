@@ -1,18 +1,17 @@
 --- a/libs/hardware/SDCardManager/include/SDCardManager.h
 +++ b/libs/hardware/SDCardManager/include/SDCardManager.h
-@@ -10,6 +10,15 @@
+@@ -32,6 +32,14 @@
    SDCardManager();
    bool begin();
    bool ready() const;
-+  // Pocket HAL-only query: 0 unavailable, 12/16/32 FAT, 64 exFAT. No scan.
-+  uint8_t filesystemType() const { return initialized ? sd.fatType() : 0; }
-+  // Metadata and bounded FAT reads for HAL-owned space accounting.
-+  uint32_t volumeClusters() const { return initialized ? sd.clusterCount() : 0; }
-+  uint32_t clusterBytes() const { return initialized ? sd.bytesPerCluster() : 0; }
-+  uint32_t fatStart() const { return initialized ? sd.fatStartSector() : 0; }
++  // HAL-only mounted metadata; callers serialize access through HalStorage.
++  uint8_t filesystemType() { return initialized ? vol().fatType() : 0; }
++  uint32_t volumeClusters() { return initialized ? vol().clusterCount() : 0; }
++  uint32_t clusterBytes() { return initialized ? vol().bytesPerCluster() : 0; }
++  uint32_t fatStart() { return initialized ? vol().fatStartSector() : 0; }
 +  bool readAllocationSector(uint32_t sector, uint8_t* data) {
-+    return initialized && sd.card()->readSector(sector, data);
++    return initialized && rawBlockDevice() && rawBlockDevice()->readSector(sector, data);
 +  }
-   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
-   // Read the entire file at `path` into a String. Returns empty string on failure.
-   String readFile(const char* path);
+   // Returns the total card capacity in bytes. Cached at begin(); 0 if not mounted.
+   uint64_t sdTotalBytes() const;
+   // Returns used space in bytes, cached with a 20-second TTL (freeClusterCount

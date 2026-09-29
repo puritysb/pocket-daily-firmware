@@ -4,6 +4,10 @@
 #include <cstring>
 #include <type_traits>
 
+namespace {
+constexpr size_t INFLATE_DICT_SIZE = InflateReader::RING_BYTES;
+}
+
 // Guarantee the cast pattern in the header comment is valid.
 static_assert(std::is_standard_layout<InflateReader>::value,
               "InflateReader must be standard-layout for the uzlib callback cast to work");
@@ -31,11 +35,24 @@ bool InflateReader::init(const bool streaming) {
   return true;
 }
 
+bool InflateReader::initWithRing(uint8_t* ring) {
+  deinit();  // free any owned ring buffer and reset state
+  if (!ring) return false;
+  ringBuffer = ring;
+  ownsRing = false;  // caller's buffer: never freed here
+  memset(ringBuffer, 0, INFLATE_DICT_SIZE);
+  uzlib_uncompress_init(&decomp, ringBuffer, INFLATE_DICT_SIZE);
+  return true;
+}
+
 void InflateReader::deinit() {
   for (auto& segment : dictSegments) {
     free(segment);
     segment = nullptr;
   }
+  if (ringBuffer && ownsRing) free(ringBuffer);
+  ringBuffer = nullptr;
+  ownsRing = false;
   memset(&decomp, 0, sizeof(decomp));
 }
 
@@ -52,7 +69,7 @@ void InflateReader::skipZlibHeader() {
 }
 
 bool InflateReader::read(uint8_t* dest, size_t len) {
-  if (!decomp.dict_segs) {
+  if (!decomp.dict_segs && !decomp.dict_ring) {
     // One-shot mode: back-references use absolute offset from dest_start.
     // Valid only when read() is called once with the full output buffer.
     decomp.dest_start = dest;
@@ -66,7 +83,7 @@ bool InflateReader::read(uint8_t* dest, size_t len) {
 }
 
 InflateStatus InflateReader::readAtMost(uint8_t* dest, size_t maxLen, size_t* produced) {
-  if (!decomp.dict_segs) {
+  if (!decomp.dict_segs && !decomp.dict_ring) {
     // One-shot mode: back-references use absolute offset from dest_start.
     // Valid only when readAtMost() is called once with the full output buffer.
     decomp.dest_start = dest;

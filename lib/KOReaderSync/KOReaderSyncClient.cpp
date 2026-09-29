@@ -1,6 +1,7 @@
 #include "KOReaderSyncClient.h"
 
 #include <ArduinoJson.h>
+#include <HalMemory.h>
 #include <Logging.h>
 #include <esp_crt_bundle.h>
 #include <esp_http_client.h>
@@ -8,6 +9,7 @@
 #include <ctime>
 
 #include "KOReaderCredentialStore.h"
+#include "SyncResponseBuffer.h"
 
 int KOReaderSyncClient::lastHttpCode = 0;
 
@@ -28,41 +30,29 @@ constexpr int HTTP_BUF_SIZE = 2048;
 // contiguous block) because the failure mode is aggregate exhaustion, not one large alloc.
 constexpr uint32_t MIN_HEAP_FOR_TLS = 55000;
 
-// Response buffer for reading HTTP body
-struct ResponseBuffer {
-  char* data = nullptr;
-  int len = 0;
-  int capacity = 0;
-
-  ~ResponseBuffer() { free(data); }
-
-  bool ensure(int size) {
-    if (size <= capacity) return true;
-    char* newData = (char*)realloc(data, size);
-    if (!newData) return false;
-    data = newData;
-    capacity = size;
-    return true;
-  }
-};
+// Recheck after request JSON and the bounded response buffer have been
+// allocated so the original TLS admission floor remains available to TLS.
+bool insufficientPreparedHeap() {
+  const auto heap = HalMemory::getDefaultHeap();
+  if (heap.freeBytes >= MIN_HEAP_FOR_TLS && heap.largestBlockBytes >= 20000) return false;
+  LOG_ERR("KOSync", "Insufficient TLS headroom after request preparation");
+  return true;
+}
 
 // HTTP event handler to collect response body
 esp_err_t httpEventHandler(esp_http_client_event_t* evt) {
-  auto* buf = static_cast<ResponseBuffer*>(evt->user_data);
+  auto* buf = static_cast<SyncResponseBuffer*>(evt->user_data);
   if (evt->event_id == HTTP_EVENT_ON_DATA && buf) {
-    if (buf->ensure(buf->len + evt->data_len + 1)) {
-      memcpy(buf->data + buf->len, evt->data, evt->data_len);
-      buf->len += evt->data_len;
-      buf->data[buf->len] = '\0';
-    } else {
-      LOG_ERR("KOSync", "Response buffer allocation failed (%d bytes)", evt->data_len);
+    if (evt->data_len < 0 || !buf->append(evt->data, static_cast<size_t>(evt->data_len))) {
+      LOG_ERR("KOSync", "Response exceeded the bounded buffer or allocation failed");
+      return ESP_FAIL;
     }
   }
   return ESP_OK;
 }
 
 // Create configured esp_http_client with small TLS buffers
-esp_http_client_handle_t createClient(const char* url, ResponseBuffer* buf,
+esp_http_client_handle_t createClient(const char* url, SyncResponseBuffer* buf,
                                       esp_http_client_method_t method = HTTP_METHOD_GET) {
   esp_http_client_config_t config = {};
   config.url = url;
@@ -105,12 +95,17 @@ KOReaderSyncClient::Error KOReaderSyncClient::authenticate() {
   std::string url = KOREADER_STORE.getBaseUrl() + "/users/auth";
   const uint32_t freeHeap = ESP.getFreeHeap();
   LOG_DBG("KOSync", "Authenticating: %s (heap: %u)", url.c_str(), (unsigned)freeHeap);
-  if (freeHeap < MIN_HEAP_FOR_TLS) {
+  if (freeHeap < MIN_HEAP_FOR_TLS || HalMemory::getDefaultHeap().largestBlockBytes < 20000) {
     LOG_ERR("KOSync", "Insufficient heap for TLS handshake: %u bytes free (need %u)", freeHeap, MIN_HEAP_FOR_TLS);
     return LOW_MEMORY;
   }
 
-  ResponseBuffer buf;
+  SyncResponseBuffer buf;
+  if (!buf.ready()) {
+    LOG_ERR("KOSync", "Response buffer allocation failed");
+    return LOW_MEMORY;
+  }
+  if (insufficientPreparedHeap()) return LOW_MEMORY;
   esp_http_client_handle_t client = createClient(url.c_str(), &buf);
   if (!client) return NETWORK_ERROR;
 
@@ -121,9 +116,53 @@ KOReaderSyncClient::Error KOReaderSyncClient::authenticate() {
 
   LOG_DBG("KOSync", "Auth response: %d (err: %d)", httpCode, err);
 
-  if (err != ESP_OK) return NETWORK_ERROR;
-  if (httpCode == 200) return OK;
+  if (err != ESP_OK || buf.failed()) return NETWORK_ERROR;
+  if (httpCode >= 200 && httpCode < 300) return OK;
   if (httpCode == 401) return AUTH_FAILED;
+  return SERVER_ERROR;
+}
+
+KOReaderSyncClient::Error KOReaderSyncClient::createUser() {
+  lastHttpCode = 0;
+  if (!KOREADER_STORE.hasCredentials()) {
+    LOG_DBG("KOSync", "No credentials configured");
+    return NO_CREDENTIALS;
+  }
+
+  const std::string url = KOREADER_STORE.getBaseUrl() + "/users/create";
+  LOG_DBG("KOSync", "Creating account: %s (heap: %u)", url.c_str(), (unsigned)ESP.getFreeHeap());
+  const auto heap = HalMemory::getDefaultHeap();
+  if (heap.freeBytes < MIN_HEAP_FOR_TLS || heap.largestBlockBytes < 20000) return LOW_MEMORY;
+
+  JsonDocument doc;
+  doc["username"] = KOREADER_STORE.getUsername();
+  doc["password"] = KOREADER_STORE.getMd5Password();
+  std::string body;
+  serializeJson(doc, body);
+
+  SyncResponseBuffer buf;
+  if (!buf.ready()) {
+    LOG_ERR("KOSync", "Response buffer allocation failed");
+    return LOW_MEMORY;
+  }
+  if (insufficientPreparedHeap()) return LOW_MEMORY;
+  esp_http_client_handle_t client = createClient(url.c_str(), &buf, HTTP_METHOD_POST);
+  if (!client) return NETWORK_ERROR;
+  if (esp_http_client_set_header(client, "Content-Type", "application/json") != ESP_OK ||
+      esp_http_client_set_post_field(client, body.c_str(), body.length()) != ESP_OK) {
+    esp_http_client_cleanup(client);
+    return NETWORK_ERROR;
+  }
+  const esp_err_t err = esp_http_client_perform(client);
+  const int httpCode = esp_http_client_get_status_code(client);
+  esp_http_client_cleanup(client);
+  lastHttpCode = httpCode;
+
+  LOG_DBG("KOSync", "Create user response: %d", httpCode);
+
+  if (err != ESP_OK || buf.failed()) return NETWORK_ERROR;
+  if (httpCode >= 200 && httpCode < 300) return OK;  // 2xx: created (see #2876)
+  if (httpCode == 402) return USER_EXISTS;
   return SERVER_ERROR;
 }
 
@@ -138,12 +177,17 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
   std::string url = KOREADER_STORE.getBaseUrl() + "/syncs/progress/" + documentHash;
   const uint32_t freeHeap = ESP.getFreeHeap();
   LOG_DBG("KOSync", "Getting progress: %s (heap: %u)", url.c_str(), (unsigned)freeHeap);
-  if (freeHeap < MIN_HEAP_FOR_TLS) {
+  if (freeHeap < MIN_HEAP_FOR_TLS || HalMemory::getDefaultHeap().largestBlockBytes < 20000) {
     LOG_ERR("KOSync", "Insufficient heap for TLS handshake: %u bytes free (need %u)", freeHeap, MIN_HEAP_FOR_TLS);
     return LOW_MEMORY;
   }
 
-  ResponseBuffer buf;
+  SyncResponseBuffer buf;
+  if (!buf.ready()) {
+    LOG_ERR("KOSync", "Response buffer allocation failed");
+    return LOW_MEMORY;
+  }
+  if (insufficientPreparedHeap()) return LOW_MEMORY;
   esp_http_client_handle_t client = createClient(url.c_str(), &buf);
   if (!client) return NETWORK_ERROR;
 
@@ -154,11 +198,13 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
 
   LOG_DBG("KOSync", "Get progress response: %d (err: %d)", httpCode, err);
 
-  if (err != ESP_OK) return NETWORK_ERROR;
+  if (err != ESP_OK || buf.failed()) return NETWORK_ERROR;
 
-  if (httpCode == 200 && buf.data) {
+  if (httpCode == 204) return NOT_FOUND;
+
+  if (httpCode >= 200 && httpCode < 300 && buf.data()) {
     JsonDocument doc;
-    const DeserializationError error = deserializeJson(doc, buf.data);
+    const DeserializationError error = deserializeJson(doc, buf.data());
 
     if (error) {
       LOG_ERR("KOSync", "JSON parse failed: %s", error.c_str());
@@ -171,6 +217,25 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
     outProgress.device = doc["device"].as<std::string>();
     outProgress.deviceId = doc["device_id"].as<std::string>();
     outProgress.timestamp = doc["timestamp"].as<int64_t>();
+
+    outProgress.position.reset();
+    if (KOREADER_STORE.usesCrossPointSyncServer()) {
+      const JsonObjectConst pos = doc["position"].as<JsonObjectConst>();
+      if (!pos.isNull()) {
+        KOReaderRichPosition rich;
+        rich.pctQ = pos["pctQ"].as<uint32_t>();
+        rich.spineIndex = pos["spine"].as<uint16_t>();
+        rich.pageNumber = pos["page"].as<uint16_t>();
+        const uint16_t pages = pos["pages"].as<uint16_t>();
+        rich.totalPages = pages > 0 ? pages : 1;
+        const uint16_t para = pos["para"].as<uint16_t>();
+        if (para > 0) rich.paragraphIndex = para;
+        rich.xpath = pos["xpath"].as<const char*>() ? pos["xpath"].as<const char*>() : "";
+        LOG_DBG("KOSync", "Got rich position: spine=%u page=%u/%u para=%u", rich.spineIndex, rich.pageNumber,
+                rich.totalPages, para);
+        outProgress.position = std::move(rich);
+      }
+    }
 
     LOG_DBG("KOSync", "Got progress: %.2f%% at %s", outProgress.percentage * 100, outProgress.progress.c_str());
     return OK;
@@ -191,7 +256,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
   std::string url = KOREADER_STORE.getBaseUrl() + "/syncs/progress";
   const uint32_t freeHeap = ESP.getFreeHeap();
   LOG_DBG("KOSync", "Updating progress: %s (heap: %u)", url.c_str(), (unsigned)freeHeap);
-  if (freeHeap < MIN_HEAP_FOR_TLS) {
+  if (freeHeap < MIN_HEAP_FOR_TLS || HalMemory::getDefaultHeap().largestBlockBytes < 20000) {
     LOG_ERR("KOSync", "Insufficient heap for TLS handshake: %u bytes free (need %u)", freeHeap, MIN_HEAP_FOR_TLS);
     return LOW_MEMORY;
   }
@@ -199,17 +264,41 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
   // Build JSON body
   JsonDocument doc;
   doc["document"] = progress.document;
+  if (progress.metadata.has_value()) {
+    auto meta = doc["metadata"].to<JsonObject>();
+    meta["filename"] = progress.metadata->filename;
+    meta["title"] = progress.metadata->title;
+    meta["authors"] = progress.metadata->authors;
+  }
   doc["progress"] = progress.progress;
   doc["percentage"] = progress.percentage;
   doc["device"] = DEVICE_NAME;
   doc["device_id"] = DEVICE_ID;
+
+  if (progress.position.has_value() && KOREADER_STORE.usesCrossPointSyncServer()) {
+    // CrossPoint-specific extension: do not send it to third-party KOSync servers.
+    const auto& p = *progress.position;
+    auto pos = doc["position"].to<JsonObject>();
+    pos["pctQ"] = p.pctQ;
+    pos["spine"] = p.spineIndex;
+    pos["page"] = p.pageNumber;
+    pos["pages"] = p.totalPages;
+    if (p.paragraphIndex.has_value()) pos["para"] = *p.paragraphIndex;
+    // Server rejects the whole position object if xpath exceeds 120 bytes.
+    if (!p.xpath.empty() && p.xpath.size() <= 120) pos["xpath"] = p.xpath;
+  }
 
   std::string body;
   serializeJson(doc, body);
 
   LOG_DBG("KOSync", "Request body: %s", body.c_str());
 
-  ResponseBuffer buf;
+  SyncResponseBuffer buf;
+  if (!buf.ready()) {
+    LOG_ERR("KOSync", "Response buffer allocation failed");
+    return LOW_MEMORY;
+  }
+  if (insufficientPreparedHeap()) return LOW_MEMORY;
   esp_http_client_handle_t client = createClient(url.c_str(), &buf, HTTP_METHOD_PUT);
   if (!client) return NETWORK_ERROR;
 
@@ -227,8 +316,8 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
 
   LOG_DBG("KOSync", "Update progress response: %d (err: %d)", httpCode, err);
 
-  if (err != ESP_OK) return NETWORK_ERROR;
-  if (httpCode == 200 || httpCode == 202) return OK;
+  if (err != ESP_OK || buf.failed()) return NETWORK_ERROR;
+  if (httpCode >= 200 && httpCode < 300) return OK;
   if (httpCode == 401) return AUTH_FAILED;
   return SERVER_ERROR;
 }
@@ -249,6 +338,8 @@ const char* KOReaderSyncClient::errorString(Error error) {
       return "JSON parse error";
     case NOT_FOUND:
       return "No progress found";
+    case USER_EXISTS:
+      return "Username already exists";
     case LOW_MEMORY:
       return "Not enough memory for sync — please retry";
     default:

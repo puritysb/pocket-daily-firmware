@@ -48,6 +48,35 @@ Evidence/log reference:
 
 Evidence/log reference:
 
+## Major upstream baseline upgrade (both X3 and X4)
+
+Record results separately for each device against the candidate identity above.
+Host render tests do not sign off panel or radio behavior.
+
+- [ ] Upgrade from the previous product build with existing settings and books;
+      legacy 0..3 app font sizes still select the expected point sizes.
+- [ ] Old complete and partial section caches regenerate as v134; opening,
+      page turning and resuming do not reset the accepted reading position.
+- [ ] Reading-position round trips between the companion and reader land on
+      the same text, including entities, long paragraphs, hyphenation and CJK.
+- [ ] Built-in and SD fonts, character/word spacing, bilingual pages, footnotes,
+      RTL, grayscale images and UI packs work in all four orientations.
+- [ ] Home exposes one Pocket Reader entry; Articles opens from that entry.
+- [ ] Page turning, background layout and repeated book/font changes retain
+      over 50 KiB free heap in the reading acceptance scenario without leaks;
+      record free heap, largest block and minimum-ever heap separately.
+- [ ] Repeat the device-specific radio/transfer gates above after a reading
+      session; record heap before/during/after and exercise Back cancellation.
+- [ ] Certificate-verified HTTPS and streamed OTA succeed; truncated/wrong-board
+      images are rejected and SD recovery with the previous product image works.
+- [ ] Validate saved-network reconnect, sleep/wake, progress persistence and
+      watchdog recovery using the new FreeInk SDK on the physical device.
+
+| Device | Tested commit + image SHA-256 | Result / evidence |
+| --- | --- | --- |
+| X3 | Pending | Not tested |
+| X4 | Pending | Not tested |
+
 ## Publication
 
 - [ ] Nearby Sync v1 is frozen and compatible with the app repository.

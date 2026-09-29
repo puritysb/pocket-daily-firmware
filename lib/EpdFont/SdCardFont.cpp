@@ -391,6 +391,7 @@ void SdCardFont::applyGlyphMissCallback(uint8_t styleIdx) {
   overflowCtx_[styleIdx].styleIdx = styleIdx;
 
   auto& s = styles_[styleIdx];
+  s.stubData.coverageHandler = &SdCardFont::onCoverage;
   s.stubData.glyphMissHandler = &SdCardFont::onGlyphMiss;
   s.stubData.glyphMissCtx = &overflowCtx_[styleIdx];
   s.stubData.kernLookup = loadMode_ == LoadMode::BoundedUI ? &SdCardFont::lookupBoundedKerning : nullptr;
@@ -699,9 +700,29 @@ int32_t SdCardFont::findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) 
 
 // --- Prewarm ---
 
-int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOnly, const char* extraText) {
+namespace {
+const char* onePrewarmText(const void* ctx, uint32_t) { return static_cast<const char*>(ctx); }
+}  // namespace
+int SdCardFont::prewarm(const char* text, uint8_t styles, bool metadataOnly, const char* extraText) {
+  return prewarm(onePrewarmText, text, 1, styles, metadataOnly, true, extraText);
+}
+int SdCardFont::prewarm(const char* text, uint8_t styles, bool metadataOnly, bool loadKernLig) {
+  return prewarm(onePrewarmText, text, 1, styles, metadataOnly, loadKernLig);
+}
+int SdCardFont::prewarm(TextGetter getter, const void* ctx, uint32_t textCount, uint8_t styleMask, bool metadataOnly,
+                        bool loadKernLig, const char* extraText) {
   if (!loaded_) return -1;
-  if (loadMode_ == LoadMode::BoundedUI) return checkBoundedText(utf8Text, styleMask);
+  if (loadMode_ == LoadMode::BoundedUI) {
+    int missed = 0;
+    for (uint32_t i = 0; i < textCount; ++i) {
+      const char* text = getter(ctx, i);
+      if (!text) continue;
+      const int result = checkBoundedText(text, styleMask);
+      if (result < 0 || result > INT_MAX - missed) return -1;
+      missed += result;
+    }
+    return missed;
+  }
   styleMask = resolveStyleMask(styleMask);
   if (styleMask == 0) return 0;
 
@@ -716,12 +737,15 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
   // need, at most MAX_PAGE_GLYPHS * 4 = 2048 bytes: a CJK page decodes to a few hundred
   // codepoints, and this buffer is live at the page render's prewarm memory peak.
   uint32_t capacity = 1;  // replacement glyph
-  for (const unsigned char* q = reinterpret_cast<const unsigned char*>(utf8Text);
-       capacity < MAX_PAGE_GLYPHS && utf8NextCodepoint(&q) != 0;) {
-    capacity++;
+  for (uint32_t i = 0; i < textCount && capacity < MAX_PAGE_GLYPHS; ++i) {
+    const char* text = getter(ctx, i);
+    if (!text) continue;
+    for (const unsigned char* q = reinterpret_cast<const unsigned char*>(text);
+         capacity < MAX_PAGE_GLYPHS && utf8NextCodepoint(&q) != 0;)
+      capacity++;
   }
   if (extraText && !metadataOnly) capacity += MAX_EXTRA_GLYPHS;
-  if (!metadataOnly) {
+  if (!metadataOnly && loadKernLig) {
     for (uint8_t si = 0; si < MAX_STYLES; si++) {
       if ((styleMask & (1 << si)) && styles_[si].present) capacity += styles_[si].header.ligaturePairCount;
     }
@@ -734,20 +758,24 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
   }
   uint32_t cpCount = 0;
 
-  const unsigned char* p = reinterpret_cast<const unsigned char*>(utf8Text);
-  while (*p && cpCount < capacity) {
-    uint32_t cp = utf8NextCodepoint(&p);
-    if (cp == 0) break;
+  for (uint32_t ti = 0; ti < textCount && cpCount < capacity; ++ti) {
+    const char* text = getter(ctx, ti);
+    if (!text) continue;
+    const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
+    while (*p && cpCount < capacity) {
+      uint32_t cp = utf8NextCodepoint(&p);
+      if (cp == 0) break;
 
-    bool found = false;
-    for (uint32_t i = 0; i < cpCount; i++) {
-      if (codepoints[i] == cp) {
-        found = true;
-        break;
+      bool found = false;
+      for (uint32_t i = 0; i < cpCount; i++) {
+        if (codepoints[i] == cp) {
+          found = true;
+          break;
+        }
       }
-    }
-    if (!found) {
-      codepoints[cpCount++] = cp;
+      if (!found) {
+        codepoints[cpCount++] = cp;
+      }
     }
   }
 
@@ -769,7 +797,7 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
   // Skip during metadata-only prewarm (layout measurement) to avoid loading
   // kern/lig data for all styles upfront (~22KB per style). Kern/lig is
   // loaded per-style in prewarmStyle() during the full render prewarm instead.
-  if (!metadataOnly) {
+  if (!metadataOnly && loadKernLig) {
     for (uint8_t si = 0; si < MAX_STYLES; si++) {
       if (!(styleMask & (1 << si)) || !styles_[si].present) continue;
       auto& s = styles_[si];
@@ -829,7 +857,7 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
   int totalMissed = 0;
   for (uint8_t si = 0; si < MAX_STYLES; si++) {
     if (!(styleMask & (1 << si)) || !styles_[si].present) continue;
-    totalMissed += prewarmStyle(si, codepoints.get(), cpCount, metadataOnly, extras, extraCount);
+    totalMissed += prewarmStyle(si, codepoints.get(), cpCount, metadataOnly, extras, extraCount, loadKernLig);
   }
 
   stats_.prewarmTotalMs = millis() - startMs;
@@ -837,7 +865,7 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
 }
 
 int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly,
-                             const uint32_t* kernExcluded, uint32_t kernExcludedCount) {
+                             const uint32_t* kernExcluded, uint32_t kernExcludedCount, bool loadKernLig) {
   auto& s = styles_[styleIdx];
 
   // Map codepoints to global glyph indices for this style
@@ -973,6 +1001,11 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
 
     s.miniBitmap = new (std::nothrow) uint8_t[totalBitmapSize > 0 ? totalBitmapSize : 1];
     if (!s.miniBitmap) {
+      // Metric tables are rebuildable; release them before retrying the page bitmap.
+      clearPersistentCache();
+      s.miniBitmap = new (std::nothrow) uint8_t[totalBitmapSize > 0 ? totalBitmapSize : 1];
+    }
+    if (!s.miniBitmap) {
       LOG_ERR("SDCF", "Failed to allocate mini bitmap (%u bytes) for style %u", totalBitmapSize, styleIdx);
       delete[] readOrder;
       delete[] mappings;
@@ -1031,7 +1064,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   // page's codepoints. Skip during metadata-only prewarm — layout only needs
   // advanceX and the mini kern would be thrown away before rendering.
   bool kernLigOk = false;
-  if (!metadataOnly) {
+  if (!metadataOnly && loadKernLig) {
     if (loadStyleKernLigatureData(s)) {
       kernLigOk = buildMiniKernMatrix(s, codepoints, cpCount, kernExcluded, kernExcludedCount, file);
     }
@@ -1050,6 +1083,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   if (kernLigOk) {
     applyKernLigaturePointers(s, s.miniData);
   }
+  s.miniData.coverageHandler = &SdCardFont::onCoverage;
   s.miniData.glyphMissHandler = &SdCardFont::onGlyphMiss;
   s.miniData.glyphMissCtx = &overflowCtx_[styleIdx];
 
@@ -1502,7 +1536,7 @@ struct SdCardFont::AdvanceRequest {
   }
 };
 
-int SdCardFont::buildAdvanceTable(const char* utf8Text, uint8_t styleMask) {
+int SdCardFont::buildAdvanceTable(const char* utf8Text, uint8_t styleMask, const char* extraText) {
   if (loadMode_ == LoadMode::BoundedUI) return checkBoundedText(utf8Text, styleMask);
   if (!loaded_ || !utf8Text) return -1;
   styleMask = resolveStyleMask(styleMask);
@@ -1513,6 +1547,7 @@ int SdCardFont::buildAdvanceTable(const char* utf8Text, uint8_t styleMask) {
     if (!(styleMask & (1u << si)) || !styles_[si].present) continue;
     request.beginStyle(si);
     request.addText(utf8Text);
+    if (extraText) request.addText(extraText);
     request.flush();
   }
   stats_.prewarmTotalMs = millis() - startMs;
@@ -1868,3 +1903,52 @@ const uint8_t* SdCardFont::getOverflowBitmap(const EpdGlyph* glyph) const {
 }
 
 SdCardFont* SdCardFont::fromMissCtx(void* ctx) { return static_cast<OverflowContext*>(ctx)->self; }
+
+void SdCardFont::releaseResidentCaches() {
+  clearCache();
+  clearPersistentCache();
+  for (uint8_t i = 0; i < MAX_STYLES; ++i) {
+    freeStyleKernLigatureData(styles_[i]);
+    if (styles_[i].present) applyGlyphMissCallback(i);
+  }
+}
+
+// Feed WordStore runs through the existing bounded batch reader. A 4096-entry
+// temporary table would add 16 KiB during layout on the C3 without PSRAM.
+int SdCardFont::buildAdvanceTablePacked(const char* const* segments, const size_t* lengths, size_t count,
+                                        bool includeSpace, bool includeHyphen, uint8_t styleMask,
+                                        const char* extraText) {
+  if (!loaded_) return -1;
+  if (loadMode_ == LoadMode::BoundedUI) {
+    int missed = 0;
+    for (size_t i = 0; i < count; ++i) {
+      const char* end = segments[i] + lengths[i];
+      for (const char* text = segments[i]; text < end; text += strlen(text) + 1) {
+        const int result = checkBoundedText(text, styleMask);
+        if (result < 0 || result > INT_MAX - missed) return -1;
+        missed += result;
+      }
+    }
+    return missed;
+  }
+  styleMask = resolveStyleMask(styleMask);
+  AdvanceRequest request(*this, beginAdvanceRequest());
+  for (uint8_t si = 0; si < MAX_STYLES; ++si) {
+    if (!(styleMask & (1u << si)) || !styles_[si].present) continue;
+    request.beginStyle(si);
+    for (size_t i = 0; i < count; ++i) {
+      const char* end = segments[i] + lengths[i];
+      for (const char* text = segments[i]; text < end; text += strlen(text) + 1) request.addText(text);
+    }
+    if (includeSpace) request.add(' ');
+    if (includeHyphen) request.add('-');
+    if (extraText) request.addText(extraText);
+    request.flush();
+  }
+  return request.failed ? -1 : request.missed;
+}
+
+bool SdCardFont::onCoverage(void* ctx, uint32_t codepoint) {
+  const auto* oc = static_cast<OverflowContext*>(ctx);
+  return oc->self->hasGlyph(codepoint, oc->styleIdx);
+}

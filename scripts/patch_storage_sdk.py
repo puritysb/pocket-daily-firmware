@@ -4,7 +4,7 @@ import subprocess
 
 
 def apply_storage_patch(project: Path) -> str:
-    sdk = project / "open-x4-sdk"
+    sdk = project / "freeink-sdk"
     patch = project / "scripts" / "storage_sdk.patch"
     if not patch.is_file() or not (sdk / "libs/hardware/SDCardManager/include/SDCardManager.h").is_file():
         raise RuntimeError("Storage SDK or reviewed patch is missing")

@@ -431,3 +431,36 @@ TEST_F(ReaderLayout, PartialFromAnotherFormatIsRebuilt) {
   Section section(book, 2, renderer);
   EXPECT_FALSE(layout.load(section));
 }
+
+TEST_F(ReaderLayout, UpgradedSectionRejectsOldVersionAndChangedSpacing) {
+  const std::string path = TestFs::root + epub->getCachePath() + "/sections/0.bin";
+  {
+    Section section(epub, 0, renderer);
+    ASSERT_TRUE(layout.startBuild(section));
+    ASSERT_TRUE(section.buildSomeMore(0));
+    ASSERT_TRUE(section.isBuildComplete());
+  }
+  {
+    std::fstream cache(path, std::ios::binary | std::ios::in | std::ios::out);
+    ASSERT_TRUE(cache.good());
+    EXPECT_EQ(cache.get(), 134);
+    cache.seekp(0);
+    cache.put(static_cast<char>(133));
+  }
+  {
+    Section stale(epub, 0, renderer);
+    EXPECT_FALSE(layout.load(stale));
+  }
+  for (bool wordSpacing : {false, true}) {
+    Section built(epub, 0, renderer);
+    ASSERT_TRUE(layout.startBuild(built));
+    ASSERT_TRUE(built.buildSomeMore(0));
+    SectionLayout changed = layout;
+    if (wordSpacing)
+      changed.wordSpacingPercent = 120;
+    else
+      changed.characterSpacing = 1;
+    Section reopened(epub, 0, renderer);
+    EXPECT_FALSE(changed.load(reopened));
+  }
+}

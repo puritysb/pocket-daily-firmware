@@ -5,6 +5,19 @@ transcript. Current source and release records override dated observations.
 
 ## Repository split
 
+- 2026-09-29 CrossPoint 1.6.5 full baseline candidate is prepared on isolated
+  `feature/upstream-1.6.5` (product parent `ccc601c5`, upstream `93e98bb7`,
+  FreeInk SDK `111fdcc7`). Commit, main merge and beta publication are user-authorized;
+  the verification details below describe the pre-commit candidate. Product version stays 1.7.0. Section cache
+  is now 134; raw DOM offsets remain the app v1 contract alongside upstream's
+  visible offsets. Saved progress keeps the seven-byte prefix and adds a tagged
+  12-byte form. App font-size slots map to point sizes. C3 bounded fonts and
+  certificate-verified ESP-IDF TLS are retained; two TLS engines exceeded the
+  existing OTA slot, so wolfSSL is not enabled. Host 828/828, app iOS 101/101,
+  macOS XPointer 1/1 and local default/gh_release builds pass. Physical X3/X4
+  acceptance, remote CI, main merge and release are pending. See
+  `docs/upstream-integration-1.6.5.md` for exact inputs, intentional differences,
+  final artifact identities and verification limitations.
 - 2026-09-29 Home menu is stock CrossPoint plus one entry. Articles moved from
   the Home menu into Pocket Reader: the Left front button on Pocket Daily's Home
   opens the Articles library and Back from Articles returns to Pocket Daily

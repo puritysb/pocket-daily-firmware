@@ -9,4 +9,5 @@
 #include "pocket_daily/web/PocketStatus.h"
 #include "pocket_daily/web/Profile.h"
 #include "pocket_daily/web/ServerTimeWait.h"
+#include "pocket_daily/web/TransferAdmission.h"
 #include "pocket_daily/web/UploadStreamServer.h"
