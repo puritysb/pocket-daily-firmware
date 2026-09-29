@@ -3,10 +3,10 @@
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <Logging.h>
-#include <esp_task_wdt.h>
 
 #include "pocket_daily/ContentPathPolicy.h"
 #include "util/BookCacheUtils.h"
+#include "util/TaskWatchdog.h"
 
 namespace {
 constexpr const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
@@ -96,7 +96,7 @@ void WebDAVHandler::raw(WebServer& server, const String& uri, HTTPRaw& raw) {
         Storage.remove(tempPath.c_str());
         return;
       }
-      esp_task_wdt_reset();
+      resetTaskWatchdogIfSubscribed();
       size_t written = _putFile.write(raw.buf, raw.currentSize);
       if (written != raw.currentSize) {
         _putOk = false;
@@ -289,7 +289,7 @@ void WebDAVHandler::handlePropfind(WebServer& s) {
 
       file.close();
       yield();
-      esp_task_wdt_reset();
+      resetTaskWatchdogIfSubscribed();
       file = root.openNextFile();
     }
   }
@@ -686,7 +686,7 @@ void WebDAVHandler::handleCopy(WebServer& s) {
   uint8_t buf[4096];
   bool copyOk = true;
   while (srcFile.available()) {
-    esp_task_wdt_reset();
+    resetTaskWatchdogIfSubscribed();
     int bytesRead = srcFile.read(buf, sizeof(buf));
     if (bytesRead <= 0) break;
     size_t written = dstFile.write(buf, bytesRead);
@@ -856,7 +856,7 @@ bool WebDAVHandler::getOverwrite(WebServer& s) const {
   return true;  // Default is T
 }
 
-String WebDAVHandler::getMimeType(const String& path) const {
+String WebDAVHandler::getMimeType(const String& path) {
   if (FsHelpers::hasEpubExtension(path)) return "application/epub+zip";
   if (FsHelpers::checkFileExtension(path, ".pdf")) return "application/pdf";
   if (FsHelpers::hasTxtExtension(path)) return "text/plain";

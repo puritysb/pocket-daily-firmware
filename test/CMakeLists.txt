@@ -75,3 +75,45 @@ add_subdirectory(reader_layout)
 add_subdirectory(opds_parser)
 
 add_subdirectory(articles)
+add_subdirectory(opds_filename)
+add_subdirectory(html_to_plain_text)
+add_subdirectory(library_text)
+add_subdirectory(library_format)
+add_subdirectory(library_index_file)
+add_subdirectory(library_builder)
+add_subdirectory(minibidi_arabic)
+add_subdirectory(combining_marks)
+add_subdirectory(credential_integrity)
+add_subdirectory(xml_parser_utils)
+add_subdirectory(token_boundary)
+add_subdirectory(koreader_xpath_resolver)
+add_subdirectory(progress_comparison)
+add_subdirectory(font_cache_manager)
+add_subdirectory(css_parser)
+add_subdirectory(chapter_html_slim_parser)
+add_subdirectory(korean_line_breaking)
+add_subdirectory(ligature_guard)
+add_subdirectory(page_link)
+add_subdirectory(content_opf_parser)
+add_subdirectory(chapter_position)
+add_subdirectory(home_button)
+
+add_subdirectory(inflate_stream)
+add_subdirectory(fs_helpers)
+
+add_subdirectory(absolute_grayscale)
+
+add_subdirectory(sd_card_font)
+add_subdirectory(glyph_bitmap)
+
+target_include_directories(crosspoint_test_common INTERFACE
+  ${REPO_ROOT}/freeink-sdk/libs/display/FreeInkDisplay/include
+  ${REPO_ROOT}/freeink-sdk/libs/font/FreeInkFont/include)
+foreach(target reader_layout_test reading_position_layout_test)
+  target_sources(${target} PRIVATE
+    ${REPO_ROOT}/freeink-sdk/libs/font/FreeInkFont/src/FontAlloc.c
+    ${REPO_ROOT}/lib/Memory/BuildScratch.cpp
+    ${REPO_ROOT}/lib/miniz/src/InflateStream.cpp
+    ${REPO_ROOT}/lib/miniz/src/miniz_impl.c)
+  target_include_directories(${target} PRIVATE ${REPO_ROOT}/lib/miniz/src ${REPO_ROOT}/lib/miniz/third_party)
+endforeach()

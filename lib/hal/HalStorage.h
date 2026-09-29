@@ -11,6 +11,15 @@
 
 class HalFile;
 
+enum class UsbDriveState : uint8_t {
+  Unsupported,
+  WaitingForHost,
+  Connected,
+  Ejected,
+  Disconnected,
+  IoError,
+};
+
 class HalStorage {
  public:
   HalStorage();
@@ -26,6 +35,18 @@ class HalStorage {
   };
   // At most 4096 clusters per request; yields between sectors, never scans on heartbeat.
   bool spaceChunk(uint32_t cluster, SpaceChunk& result, void (*progress)());
+  // Stop the SD card for deep sleep: unmount, stop the SDMMC host, and release
+  // the bus pads (no-op on SPI boards). Call only after all file users have
+  // stopped; open HalFiles become invalid. A deep-sleep wake resets the MCU and
+  // mounts storage again through begin().
+  void prepareForDeepSleep();
+  // USB Drive exclusively owns the SD card while active. Callers must stop
+  // all filesystem work before beginUsbDrive(), then reboot after endUsbDrive().
+  bool beginUsbDrive();
+  bool disconnectUsbDriveHost();
+  void endUsbDrive();
+  UsbDriveState usbDriveState() const;
+  bool usbDriveHostSuspended() const;
   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
   // Read the entire file at `path` into a String. Returns empty string on failure.
   String readFile(const char* path);
@@ -121,6 +142,7 @@ class HalFile : public Print {
   size_t size();
   size_t fileSize();
   uint64_t fileSize64();
+  uint32_t modificationTime();
   bool seek(size_t pos);
   bool seek64(uint64_t pos);
   bool seekCur(int64_t offset);
@@ -134,6 +156,7 @@ class HalFile : public Print {
   size_t position() const;
   int read(void* buf, size_t count);
   int read();  // read a single byte
+  size_t write(const uint8_t* buf, size_t count) override;
   size_t write(const void* buf, size_t count);
   size_t write(uint8_t b) override;
   bool rename(const char* newPath);

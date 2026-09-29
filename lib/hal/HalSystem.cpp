@@ -6,12 +6,17 @@
 #include "HalStorage.h"
 #include "Logging.h"
 #include "esp_debug_helpers.h"
+#include "esp_memory_utils.h"
 #include "esp_private/esp_cpu_internal.h"
 #include "esp_private/esp_system_attr.h"
 #include "esp_private/panic_internal.h"
 #include "esp_task_wdt.h"
+#if !__riscv
+#include <xtensa_context.h>  // XtExcFrame for the stack capture below
+#endif
 
 #define MAX_PANIC_STACK_DEPTH 32
+#define PANIC_CAPTURE_MAGIC 0x50414E49u
 
 void HalSystem::feedWatchdogIfRegistered() {
   if (esp_task_wdt_status(nullptr) == ESP_OK) esp_task_wdt_reset();
@@ -24,6 +29,9 @@ RTC_NOINIT_ATTR uint32_t crashBreadcrumbMagic;
 // Snapshot of the previous boot's last breadcrumb, taken before clearPanic().
 static char previousBootBreadcrumb[96];
 static constexpr uint32_t CRASH_BREADCRUMB_MAGIC = 0x43504243;  // CPBC
+// RTC_NOINIT is uninitialized on cold boot, so only this exact marker proves a
+// panic diagnostic was captured before the reset.
+RTC_NOINIT_ATTR volatile uint32_t panicCaptureMarker;
 
 extern "C" {
 
@@ -39,6 +47,7 @@ void IRAM_ATTR __wrap_panic_abort(const char* message) {
     panicMessage[i] = message[i];
   }
   panicMessage[i] = '\0';
+  panicCaptureMarker = PANIC_CAPTURE_MAGIC;
 
   __real_panic_abort(message);
 }
@@ -48,23 +57,31 @@ void IRAM_ATTR __wrap_panic_print_backtrace(const void* frame, int core) {
     __real_panic_print_backtrace(frame, core);
     return;
   }
+
   for (size_t i = 0; i < MAX_PANIC_STACK_DEPTH; i++) {
     panicStack[i].sp = 0;
   }
 
-  // Copied from components/esp_system/port/arch/riscv/panic_arch.c
-  uint32_t sp = (uint32_t)((RvExcFrame*)frame)->sp;
+  // Stack window dump, mirroring components/esp_system/port/arch/*/panic_arch.c.
+  // Hardware exceptions never reach __wrap_panic_abort, so on both
+  // architectures this dump is the only diagnostic a crash leaves on-device.
+#if __riscv
+  const uint32_t sp = (uint32_t)((RvExcFrame*)frame)->sp;
+#else
+  const uint32_t sp = (uint32_t)((XtExcFrame*)frame)->a1;
+#endif
+  constexpr uint32_t captureBytes = 1024;
+  if (!esp_stack_ptr_is_sane(sp) || sp > UINT32_MAX - captureBytes ||
+      !esp_ptr_in_dram(reinterpret_cast<const void*>(sp + captureBytes - 1))) {
+    __real_panic_print_backtrace(frame, core);
+    return;
+  }
   const int per_line = 8;
   int depth = 0;
-  for (int x = 0; x < 1024; x += per_line * sizeof(uint32_t)) {
+  for (int x = 0; x < captureBytes; x += per_line * sizeof(uint32_t)) {
     uint32_t* spp = (uint32_t*)(sp + x);
-    // panic_print_hex(sp + x);
-    // panic_print_str(": ");
     panicStack[depth].sp = sp + x;
     for (int y = 0; y < per_line; y++) {
-      // panic_print_str("0x");
-      // panic_print_hex(spp[y]);
-      // panic_print_str(y == per_line - 1 ? "\r\n" : " ");
       panicStack[depth].spp[y] = spp[y];
     }
 
@@ -73,6 +90,7 @@ void IRAM_ATTR __wrap_panic_print_backtrace(const void* frame, int core) {
       break;
     }
   }
+  panicCaptureMarker = PANIC_CAPTURE_MAGIC;
 
   __real_panic_print_backtrace(frame, core);
 }
@@ -152,10 +170,9 @@ void begin() {
     previousBootBreadcrumb[0] = '\0';
   }
 
-  // This is mostly for the first boot, we need to initialize the panic info and logs to empty state
-  // If we reboot from a panic state, we want to keep the panic info until we successfully dump it to the SD card, use
-  // `clearPanic()` to clear it after dumping
-  if (!isRebootFromCrash()) {
+  // On a panic reboot, preserve diagnostics until checkPanic() has tried to write them to the SD card.
+  // Ordinary boots clear any stale retained diagnostics.
+  if (!isRebootFromPanic()) {
     clearPanic();
   } else {
     // Panic reboot: preserve logs and panic info, but clamp logHead in case the
@@ -174,9 +191,16 @@ void checkPanic() {
     rotateCrashReports();
     auto file = Storage.open(CRASH_REPORT_PATH, O_WRITE | O_CREAT | O_TRUNC);
     if (file) {
-      file.write(panicInfo.c_str(), panicInfo.size());
+      const size_t written = file.write(panicInfo.c_str(), panicInfo.size());
       file.close();
-      LOG_INF("SYS", "Dumped panic info to SD card");
+      if (written == panicInfo.size()) {
+        // Keep the crash data for CrashActivity, but mark it consumed so a
+        // later watchdog reset cannot be mistaken for this panic.
+        panicCaptureMarker = 0;
+        LOG_INF("SYS", "Dumped panic info to SD card");
+      } else {
+        LOG_ERR("SYS", "Failed to write complete crash report (%zu of %zu bytes)", written, panicInfo.size());
+      }
     } else {
       LOG_ERR("SYS", "Failed to open crash_report.txt for writing");
     }
@@ -184,6 +208,7 @@ void checkPanic() {
 }
 
 void clearPanic() {
+  panicCaptureMarker = 0;
   panicMessage[0] = '\0';
   for (size_t i = 0; i < MAX_PANIC_STACK_DEPTH; i++) {
     panicStack[i].sp = 0;
@@ -216,8 +241,10 @@ std::string getPanicInfo(bool full) {
     std::string info;
 
     info += "CrossPoint version: " CROSSPOINT_VERSION;
-    info += "\n\nReset reason: ";
-    info += resetReasonName(esp_reset_reason());
+    // A lockup or hardware watchdog resets without running any panic hook, so
+    // the reason and stack come back empty; the reset cause is then the only
+    // way to tell those apart from a true panic.
+    info += "\n\nReset reason: " + std::string(resetReasonName(esp_reset_reason()));
     info += "\n\nPanic reason: " + std::string(panicMessage);
     if (crashBreadcrumbMagic == CRASH_BREADCRUMB_MAGIC && crashBreadcrumb[0]) {
       info += "\n\nRuntime breadcrumb: " + std::string(crashBreadcrumb);
@@ -247,8 +274,13 @@ std::string getPanicInfo(bool full) {
 
 bool isRebootFromPanic() {
   const auto resetReason = esp_reset_reason();
-  return resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP || resetReason == ESP_RST_INT_WDT ||
-         resetReason == ESP_RST_TASK_WDT || resetReason == ESP_RST_WDT;
+  if (resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP) {
+    return true;
+  }
+
+  const bool watchdogReset =
+      resetReason == ESP_RST_INT_WDT || resetReason == ESP_RST_TASK_WDT || resetReason == ESP_RST_WDT;
+  return watchdogReset && panicCaptureMarker == PANIC_CAPTURE_MAGIC;
 }
 
 bool isRebootFromCrash() {

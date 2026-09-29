@@ -2,6 +2,7 @@
 
 #include <DNSServer.h>
 #include <ESPmDNS.h>
+#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
 #include <HalStorage.h>
@@ -9,7 +10,6 @@
 #include <I18n.h>
 #include <Memory.h>
 #include <WiFi.h>
-#include <esp_task_wdt.h>
 
 #include <cstddef>
 
@@ -26,6 +26,7 @@
 #include "pocket_daily/live_studio/LiveFrameCapture.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "util/QrUtils.h"
+#include "util/TaskWatchdog.h"
 #include "util/UiCjkFont.h"
 
 namespace {
@@ -77,6 +78,16 @@ void CrossPointWebServerActivity::onEnter() {
   Activity::onEnter();
 
   LOG_DBG("WEBACT", "Free heap at onEnter: %d bytes", ESP.getFreeHeap());
+
+  // Heap-critical transition: WiFi (~45KB) plus the web server have to fit in
+  // what's left of the ~380KB parts. SD-font caches retained for the CJK UI
+  // fallback (mini glyph/kern arenas, kern class tables) are rebuildable on
+  // demand — release them up front instead of aborting in startWebServer()
+  // when the heap comes up short (observed on X3 with a Korean SD font).
+  if (auto* fcm = renderer.getFontCacheManager()) {
+    fcm->releaseSdFontCaches();
+    LOG_DBG("WEBACT", "Free heap after SD font cache release: %d bytes", ESP.getFreeHeap());
+  }
 
   // Reset state
   state = WebServerActivityState::MODE_SELECTION;
@@ -243,8 +254,19 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     modeName = "Connect to Calibre";
   } else if (mode == NetworkMode::CREATE_HOTSPOT) {
     modeName = "Create Hotspot";
+#if FREEINK_CAP_USB_MSC
+  } else if (mode == NetworkMode::USB_DRIVE) {
+    modeName = "USB Drive";
+#endif
   }
   LOG_DBG("WEBACT", "Network mode selected: %s", modeName);
+
+#if FREEINK_CAP_USB_MSC
+  if (mode == NetworkMode::USB_DRIVE) {
+    activityManager.goToUsbDrive();
+    return;
+  }
+#endif
 
   networkMode = mode;
   isApMode = (mode == NetworkMode::CREATE_HOTSPOT);
@@ -772,7 +794,7 @@ void CrossPointWebServerActivity::loop() {
 
       // Reset watchdog BEFORE processing - HTTP header parsing can be slow
       if (privateApMode) HalSystem::setCrashBreadcrumb("nearby:http-handle");
-      esp_task_wdt_reset();
+      resetTaskWatchdogIfSubscribed();
 
       // Service a small bounded batch, then return to the global loop so GPIO
       // is sampled again. Upload bodies are consumed by WebServer itself; 500
@@ -787,7 +809,7 @@ void CrossPointWebServerActivity::loop() {
       for (int i = 0; i < maxIterations && webServer->isRunning(); i++) {
         webServer->handleClient();
         if ((i & 0x03) == 0x03) {
-          esp_task_wdt_reset();
+          resetTaskWatchdogIfSubscribed();
           yield();
         }
       }

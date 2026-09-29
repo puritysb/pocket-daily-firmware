@@ -31,10 +31,9 @@ PageDescription ContentPresentation::describe(const GfxRenderer& renderer, const
   page.style = currentContentPageStyle();
   pageLabels(input, page.labels);
   page.fontFamily = kPageFontFamily;
-  // Same size selection as ensureUiFamilyLoaded(..., SMALL) in prepareFont.
+  // Same size selection as ensureUiFamilyLoaded (12 pt) in prepareFont.
   if (const auto* family = sdFontSystem.registry().findFamily(kPageFontFamily))
-    if (const auto* file = family->findClosestReaderSize(CrossPointSettings::SMALL))
-      page.fontPointSize = file->pointSize;
+    if (const auto* file = family->findNearestSize(12)) page.fontPointSize = file->pointSize;
   return page;
 }
 

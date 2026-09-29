@@ -1,12 +1,10 @@
 #pragma once
 
-#include <functional>
+#include <BoardConfig.h>
 
-#include "activities/Activity.h"
-#include "util/ButtonNavigator.h"
+#include "activities/UiListActivity.h"
 
-// CHECK_FOR_UPDATES is offered only by the Pocket Daily Sync menu.
-enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, CHECK_FOR_UPDATES };
+enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, USB_DRIVE, CHECK_FOR_UPDATES };
 
 /**
  * NetworkModeSelectionActivity presents the user with a choice:
@@ -14,27 +12,35 @@ enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, CHECK_FO
  * - "Connect to Calibre" - Use Calibre wireless device transfers
  * - "Create Hotspot" - Create an Access Point that others can connect to (AP mode)
  *
- * The Pocket Daily Sync variant offers "Same Wi-Fi", "Direct connection" and
- * "Check for updates" (the release OTA check) instead.
- *
  * The onModeSelected callback is called with the user's choice.
  * The onCancel callback is called if the user presses back.
+ *
+ * The header stays on GUI.drawHeader for the battery indicator.
  */
-class NetworkModeSelectionActivity final : public Activity {
-  ButtonNavigator buttonNavigator;
-
-  int selectedIndex = 0;
-  const bool pocketSync;
-  static constexpr int itemCount() { return 3; }
-
+class NetworkModeSelectionActivity final : public UiListActivity {
  public:
-  explicit NetworkModeSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool pocketSync = false)
-      : Activity("NetworkModeSelection", renderer, mappedInput), pocketSync(pocketSync) {}
-  void onEnter() override;
-  void onExit() override;
-  void loop() override;
-  void render(RenderLock&&) override;
+  explicit NetworkModeSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                        bool pocketSync = false);
+
+#if FREEINK_CAP_USB_MSC
+  static constexpr int MENU_ITEM_COUNT = 4;
+#else
+  static constexpr int MENU_ITEM_COUNT = 3;
+#endif
 
   void onModeSelected(NetworkMode mode);
   void onCancel();
+
+ private:
+  const bool pocketSync;
+  int listCount() const override;
+  void buildScreen(UiScreen& screen) override;
+  void activateIndex(int index) override;
+  void onBackButton() override { onCancel(); }
+  const char* headerTitle() const override;
+
+  // Row storage: entirely static (label/subtitle/icon never change), so it's
+  // built once in the constructor instead of every buildScreen() call, into
+  // fixed-capacity storage that avoids any heap allocation for the row list.
+  freeink::ui::ListItem rowItems_[MENU_ITEM_COUNT]{};
 };

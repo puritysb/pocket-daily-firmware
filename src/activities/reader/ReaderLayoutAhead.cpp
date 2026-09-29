@@ -4,17 +4,23 @@
 #include <Logging.h>
 #include <Memory.h>
 
-bool SectionLayout::load(Section& section) const {
-  return section.loadSectionFile(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
-                                 viewportHeight, hyphenationEnabled, embeddedStyle, imageRendering, focusReadingEnabled,
-                                 bilingualViewMode);
+ReaderRenderSpec SectionLayout::renderSpec() const {
+  return {.fontId = fontId,
+          .lineCompression = lineCompression,
+          .extraParagraphSpacing = extraParagraphSpacing,
+          .characterSpacing = characterSpacing,
+          .wordSpacingPercent = wordSpacingPercent,
+          .paragraphAlignment = paragraphAlignment,
+          .viewportWidth = viewportWidth,
+          .viewportHeight = viewportHeight,
+          .hyphenationEnabled = hyphenationEnabled,
+          .embeddedStyle = embeddedStyle,
+          .imageRendering = imageRendering,
+          .focusReadingEnabled = focusReadingEnabled,
+          .bilingualViewMode = bilingualViewMode};
 }
-
-bool SectionLayout::startBuild(Section& section) const {
-  return section.startBuild(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
-                            viewportHeight, hyphenationEnabled, embeddedStyle, imageRendering, focusReadingEnabled,
-                            bilingualViewMode);
-}
+bool SectionLayout::load(Section& section) const { return section.loadSectionFile(renderSpec()); }
+bool SectionLayout::startBuild(Section& section) const { return section.startBuild(renderSpec()); }
 
 bool ReaderLayoutAhead::step(Section& section) {
   const uint16_t before = section.pageCount;

@@ -8,6 +8,7 @@
 
 class GfxRenderer;
 struct SdCardFontFamilyInfo;
+struct SdCardFontFileInfo;
 
 class SdCardFontManager {
  public:
@@ -21,10 +22,16 @@ class SdCardFontManager {
   // .cpfont file is loaded; other sizes remain on disk. This keeps resident
   // interval + kern/ligature tables to one size's worth of memory.
   // Returns true on success.
-  bool loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t fontSizeEnum,
+  bool loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t pointSize,
                   SdCardFont::LoadMode mode = SdCardFont::LoadMode::Cached, void (*progress)() = nullptr);
   SdCardFont::LoadMode loadMode() const { return loadedMode_; }
   bool boundedReadFailed() const { return loaded_.empty() || loaded_.front().font->boundedReadFailed(); }
+  // Additively load the .cpfont of `family` at the exact physical `pointSize`
+  // (used for size-matched CJK UI fallback alongside the reader-size font).
+  // Does not unload anything. If a font of that size is already loaded its id
+  // is reused. Returns the font id, or 0 if the family has no file at that size
+  // or loading failed.
+  int loadFamilyExtraSize(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t pointSize);
 
   // Unload everything, unregister from renderer.
   void unloadAll(GfxRenderer& renderer);
@@ -47,6 +54,11 @@ class SdCardFontManager {
     uint8_t size;
   };
   static int computeFontId(uint32_t contentHash, const char* familyName, uint8_t pointSize);
+
+  // Load+register a single .cpfont file and append it to loaded_.
+  // Returns the font id, or 0 on failure (allocation, read, or id collision).
+  int loadFile(const SdCardFontFileInfo& file, const char* familyName, GfxRenderer& renderer,
+               SdCardFont::LoadMode mode = SdCardFont::LoadMode::Cached, void (*progress)() = nullptr);
 
   std::string loadedFamilyName_;
   uint8_t loadedPointSize_ = 0;

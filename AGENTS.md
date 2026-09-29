@@ -77,7 +77,7 @@ improving reading is out of scope.
 - Evidence: before proposing a change, cite the file path (and line numbers
   where useful) that justifies it.
 - Do not assume a library or ESP-IDF function exists for the ESP32-C3 RISC-V
-  target; check `open-x4-sdk` or official docs.
+  target; check `freeink-sdk` or official docs.
 - Do not claim performance or memory gains without the technical mechanism
   (for example DRAM vs IRAM).
 - Justify every new heap allocation (`new`, `malloc`, `std::vector`) or say why

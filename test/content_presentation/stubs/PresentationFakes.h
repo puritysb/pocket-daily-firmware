@@ -59,7 +59,7 @@ struct FakeFontFile {
   uint8_t pointSize;
 };
 struct FakeFontFamily {
-  const FakeFontFile* findClosestReaderSize(uint8_t) const {
+  const FakeFontFile* findNearestSize(uint8_t) const {
     static FakeFontFile file;
     file.pointSize = PresentationFake::pointSize;
     return &file;

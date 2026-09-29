@@ -45,6 +45,7 @@
 #include "pocket_daily/web/DisplayState.h"
 #include "pocket_daily/web/ExactRouteDispatch.h"
 #include "pocket_daily/web/GenerationArgument.h"
+#include "pocket_daily/web/LegacyFontSize.h"
 #include "pocket_daily/web/PocketStatus.h"
 #include "pocket_daily/web/PreferencesUpdate.h"
 #include "pocket_daily/web/ReaderFilesPolicy.h"
@@ -1168,7 +1169,8 @@ void handleGetPreferences(WebServer& server) {
       "{\"startupApp\":%u,\"pocketDailySleepCover\":%u,\"sleepTimeoutMinutes\":%u,\"fontSize\":%u,"
       "\"sideButtonLayout\":%u,\"frontButtonFollowOrientation\":%u}",
       static_cast<unsigned>(SETTINGS.startupApp), static_cast<unsigned>(SETTINGS.pocketDailySleepCover),
-      static_cast<unsigned>(SETTINGS.sleepTimeoutMinutes), static_cast<unsigned>(SETTINGS.fontSize),
+      static_cast<unsigned>(SETTINGS.sleepTimeoutMinutes),
+      static_cast<unsigned>(LegacyFontSize::fromPoints(SETTINGS.fontPointSize)),
       static_cast<unsigned>(SETTINGS.sideButtonLayout), static_cast<unsigned>(SETTINGS.frontButtonFollowOrientation));
   if (written <= 0 || static_cast<size_t>(written) >= sizeof(json)) {
     server.send(500, "text/plain", "Could not encode Pocket preferences");
@@ -1187,7 +1189,7 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
   // valid, and a failed save restores the previous values (PreferencesUpdate.h).
   const String& body = server.arg("plain");
   const PreferenceLimits limits{CrossPointSettings::STARTUP_APP_COUNT, CrossPointSettings::MIN_SLEEP_TIMEOUT_MINUTES,
-                                CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES, CrossPointSettings::FONT_SIZE_COUNT,
+                                CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES, LegacyFontSize::COUNT,
                                 CrossPointSettings::SIDE_BUTTON_LAYOUT_COUNT};
   PreferencesUpdate update;
   const char* error = nullptr;
@@ -1196,12 +1198,12 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
     return;
   }
   const uint8_t previous[6] = {SETTINGS.startupApp,          SETTINGS.pocketDailySleepCover,
-                               SETTINGS.sleepTimeoutMinutes, SETTINGS.fontSize,
+                               SETTINGS.sleepTimeoutMinutes, SETTINGS.fontPointSize,
                                SETTINGS.sideButtonLayout,    SETTINGS.frontButtonFollowOrientation};
   if (update.hasStartupApp) SETTINGS.startupApp = update.startupApp;
   if (update.hasSleepCover) SETTINGS.pocketDailySleepCover = update.sleepCover;
   if (update.hasSleepTimeout) SETTINGS.sleepTimeoutMinutes = update.sleepTimeoutMinutes;
-  if (update.hasFontSize) SETTINGS.fontSize = update.fontSize;
+  if (update.hasFontSize) SETTINGS.fontPointSize = LegacyFontSize::toPoints(update.fontSize);
   if (update.hasSideButtonLayout) SETTINGS.sideButtonLayout = update.sideButtonLayout;
   if (update.hasFrontButtonFollowOrientation) {
     SETTINGS.frontButtonFollowOrientation = update.frontButtonFollowOrientation;
@@ -1211,7 +1213,7 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
     SETTINGS.startupApp = previous[0];
     SETTINGS.pocketDailySleepCover = previous[1];
     SETTINGS.sleepTimeoutMinutes = previous[2];
-    SETTINGS.fontSize = previous[3];
+    SETTINGS.fontPointSize = previous[3];
     SETTINGS.sideButtonLayout = previous[4];
     SETTINGS.frontButtonFollowOrientation = previous[5];
     server.send(500, "text/plain", "Could not save Pocket preferences");

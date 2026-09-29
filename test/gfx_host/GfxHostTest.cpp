@@ -290,3 +290,25 @@ TEST(GfxHostStatusBarTitle, ReaderSizeCjkTitleStaysInsideTheStatusLane) {
     EXPECT_EQ(same.style, EpdFontFamily::REGULAR);
   }
 }
+
+TEST(GfxHost, LegacyRectangularIconsKeepExactPixelsInEveryOrientation) {
+  static constexpr uint8_t icon[] = {0x7F, 0xBF, 0xFF};
+  HalDisplay actual;
+  HalDisplay expected;
+  GfxRenderer renderer(actual);
+  GfxRenderer reference(expected);
+  renderer.begin();
+  reference.begin();
+  for (const auto orientation : {GfxRenderer::Portrait, GfxRenderer::PortraitInverted, GfxRenderer::LandscapeClockwise,
+                                 GfxRenderer::LandscapeCounterClockwise}) {
+    renderer.setOrientation(orientation);
+    reference.setOrientation(orientation);
+    renderer.clearScreen();
+    reference.clearScreen();
+    renderer.drawIcon(icon, 13, 17, 3, 2);
+    reference.drawPixel(15, 17);
+    reference.drawPixel(14, 18);
+    EXPECT_EQ(memcmp(actual.getFrameBuffer(), expected.getFrameBuffer(), actual.getBufferSize()), 0);
+    EXPECT_TRUE(actual.guardsIntact());
+  }
+}

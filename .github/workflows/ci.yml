@@ -43,7 +43,7 @@ jobs:
             base_sha="$(git rev-list --max-parents=0 "${GITHUB_SHA}")"
           fi
           git diff --name-only --diff-filter=ACMR "${base_sha}" "${GITHUB_SHA}" -- '*.c' '*.cpp' '*.h' '*.hpp' \
-            | awk '!/^(lib\/EpdFont\/builtinFonts\/|lib\/Epub\/Epub\/hyphenation\/generated\/|lib\/uzlib\/)/' \
+            | awk '!/^(lib\/EpdFont\/builtinFonts\/|lib\/Epub\/Epub\/hyphenation\/generated\/|lib\/uzlib\/|lib\/miniz\/third_party\/)/' \
             | xargs -r /usr/lib/llvm-21/bin/clang-format -style=file -i
           git diff --exit-code || (echo "Please run 'bin/clang-format-fix' to fix formatting issues" && exit 1)
 
@@ -118,6 +118,10 @@ jobs:
           python scripts/check_firmware.py --cppcheck build/cppcheck-source/cppcheck
 
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [default, gh_release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -147,7 +151,7 @@ jobs:
       - name: Build Pocket Daily Firmware
         run: |
           set -euo pipefail
-          pio run | tee pio.log
+          ./scripts/pio.sh run -e "${{ matrix.environment }}" | tee pio.log
 
       - name: Extract firmware stats
 
@@ -166,8 +170,8 @@ jobs:
       - name: Upload firmware.bin artifact
         uses: actions/upload-artifact@v6
         with:
-          name: firmware.bin
-          path: .pio/build/default/firmware.bin
+          name: firmware-${{ matrix.environment }}.bin
+          path: .pio/build/${{ matrix.environment }}/firmware.bin
           if-no-files-found: error
 
   unit-tests:
@@ -187,6 +191,15 @@ jobs:
         with:
           path: build/test/_deps/googletest-src
           key: ${{ runner.os }}-googletest-${{ hashFiles('test/CMakeLists.txt') }}
+
+      - name: Check integration boundaries and sync safety
+        run: |
+          python3 scripts/check_seam.py
+          python3 -m unittest discover -s scripts -p test_check_seam.py
+          python3 -m unittest discover -s scripts -p test_sync_upstream.py
+          python3 -m unittest discover -s scripts -p test_patch_storage_sdk.py
+          python3 -m unittest discover -s scripts -p test_sync_routes.py
+          python3 -m unittest discover -s scripts -p test_build_host_apple.py
 
       - name: Configure
         run: cmake -S test -B build/test -G Ninja -DCMAKE_BUILD_TYPE=Release

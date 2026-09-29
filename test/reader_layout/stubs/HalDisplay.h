@@ -2,6 +2,7 @@
 // Host test X3 panel model: real framebuffer, strip grayscale composed into
 // full planes for hashing, SPI byte and refresh counters. No waveform timing.
 #include <Arduino.h>
+#include <GrayscaleCapabilities.h>
 
 #include <cstdint>
 #include <cstring>
@@ -15,6 +16,25 @@ struct PanelCounters {
 class HalDisplay {
  public:
   enum RefreshMode { FULL_REFRESH, HALF_REFRESH, FAST_REFRESH };
+  using GrayscaleMode = freeink::GrayscaleMode;
+  using GrayscaleCapabilities = freeink::GrayscaleCapabilities;
+  using GrayscaleBase = freeink::GrayscaleBase;
+  using GrayscaleEncoding = freeink::GrayscaleEncoding;
+  GrayscaleCapabilities grayscaleCapabilities(GrayscaleMode mode = GrayscaleMode::Overlay) const {
+    if (mode != GrayscaleMode::Overlay) return {};
+    return {GrayscaleEncoding::OverlayMasks, GrayscaleBase::Separate, supportsStripGrayscale(), false, false};
+  }
+  bool displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback, bool off = false);
+  bool isInverted() const { return inverted_; }
+  void setInverted(bool value) { inverted_ = value; }
+  void displayBufferAsync(RefreshMode mode);
+  void waitRefreshComplete() {}
+  bool supportsAsyncRefresh() const { return false; }
+  uint8_t* lendFrameBufferStorage(uint32_t* size) {
+    *size = 0;
+    return nullptr;
+  }
+  void returnFrameBufferStorage() {}
   static constexpr uint16_t DISPLAY_WIDTH = 792, DISPLAY_HEIGHT = 528, DISPLAY_WIDTH_BYTES = 99;
   static constexpr uint32_t BUFFER_SIZE = 99u * 528u;
   explicit HalDisplay(uint16_t = DISPLAY_WIDTH, uint16_t = DISPLAY_HEIGHT)
@@ -86,5 +106,13 @@ class HalDisplay {
     }
     grayShown = false;
   }
+  bool inverted_ = false;
   std::vector<uint8_t> fb_, lsb_, msb_;
 };
+
+inline bool HalDisplay::displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback, bool off) {
+  if (mode != GrayscaleMode::Overlay) return false;
+  displayGrayscaleBase(fallback, off);
+  return true;
+}
+inline void HalDisplay::displayBufferAsync(RefreshMode mode) { displayBuffer(mode); }

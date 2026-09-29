@@ -62,6 +62,12 @@ class FsFile {
     opened = false;
     return true;
   }
+  bool getModifyDateTime(uint16_t* date, uint16_t* time) {
+    FakeSDK::checkLock();
+    *date = 0;
+    *time = 0;
+    return false;
+  }
   bool isOpen() const { return opened; }
   bool isDirectory() const { return opened && FakeSDK::directory; }
   uint8_t getError() const {
@@ -152,6 +158,7 @@ class SDCardManager {
     static SDCardManager manager;
     return manager;
   }
+  void shutdown() { FakeSDK::checkLock(); }
   bool begin() { return true; }
   bool ready() const { return true; }
   uint32_t volumeClusters() const { return FakeSDK::clusters; }

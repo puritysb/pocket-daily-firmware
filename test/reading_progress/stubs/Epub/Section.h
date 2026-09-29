@@ -11,6 +11,7 @@ class GfxRenderer;
 
 class Section {
  public:
+  std::optional<uint16_t> getPageForVisibleTextOffset(uint32_t, bool = false) const { return std::nullopt; }
   Section(const std::shared_ptr<Epub>&, int, GfxRenderer&) {}
   std::optional<uint16_t> getCachedPageCount() const { return std::nullopt; }
   std::optional<uint16_t> getPageForListItemIndex(uint16_t) const { return std::nullopt; }

@@ -20,8 +20,8 @@ hash, a new cache, and **lost reading progress**. That is expected behaviour, no
 | File | Version |
 |---|---|
 | `book.bin` | **7** (metadata structure) |
-| `section.bin` — incremental upstream baseline | **28** (layout structure) |
-| `section.bin` — **this fork** | **133** |
+| `section.bin` — incremental upstream baseline | **44** (CrossPoint 1.6.5) |
+| `section.bin` — **this fork** | **134** |
 
 The fork adds a `bilingualViewMode` header field and numbers itself in the **reserved 128–255
 range** rather than `upstream + 1`. Upstream keeps incrementing 27→28→…; a
@@ -59,7 +59,11 @@ v133 starts every page record with a `u32` chapter text offset (`Page::textOffse
 page's first character; see docs/reading-progress-v1.md), read by
 `Section::getPageTextOffset`/`findPageForTextOffset` straight from the record.
 
-The next fork-specific finalized format must use `134`, not an upstream version number or
+v134 integrates CrossPoint 1.6.5 layout: packed text/link records, character and word
+spacing, and a separate visible-text-offset LUT. The raw DOM offset prefix remains
+for app sync. Its partial trailer follows the visible-offset LUT and carries tag134.
+
+The next fork-specific finalized format must use `135`, not an upstream version number or
 the `0xFF` partial sentinel.
 
 ## What else invalidates a cache

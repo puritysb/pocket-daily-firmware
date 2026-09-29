@@ -58,6 +58,18 @@ class SdCardFont {
   // kerning classes, so they render exactly as the on-demand overflow path draws them.
   int prewarm(const char* utf8Text, uint8_t styleMask = 0x0F, bool metadataOnly = false,
               const char* extraText = nullptr);
+  using TextGetter = const char* (*)(const void*, uint32_t);
+  int prewarm(TextGetter getter, const void* ctx, uint32_t textCount, uint8_t styleMask = 0x0F,
+              bool metadataOnly = false, bool loadKernLig = true, const char* extraText = nullptr);
+  int prewarm(const char* text, uint8_t styleMask, bool metadataOnly, bool loadKernLig);
+  // C3 keeps a bounded replacement set per style; unsupported accumulation falls
+  // back to on-demand glyph loads without extending the resident heap lifetime.
+  int prewarm(const char* text, uint8_t styleMask, bool metadataOnly, bool loadKernLig, bool) {
+    return prewarm(text, styleMask, metadataOnly, loadKernLig);
+  }
+  int buildAdvanceTablePacked(const char* const* segments, const size_t* lengths, size_t count, bool includeSpace,
+                              bool includeHyphen, uint8_t styleMask = 0x0F, const char* extraText = nullptr);
+  void releaseResidentCaches();
   static constexpr uint8_t MAX_EXTRA_GLYPHS = 32;
 
   // Prepare advance widths for layout measurement. Every glyph the request
@@ -66,7 +78,7 @@ class SdCardFont {
   // ADVANCE_FETCH_BATCH codepoints, sorted by glyph index. Invisible
   // (default-ignorable) codepoints are skipped: renderers give them no width.
   // Returns number of codepoints (per style) not covered by the font.
-  int buildAdvanceTable(const char* utf8Text, uint8_t styleMask = 0x0F);
+  int buildAdvanceTable(const char* utf8Text, uint8_t styleMask = 0x0F, const char* extraText = nullptr);
   // `wordStyles`, when given, is parallel to `words`: each word's codepoints
   // are prepared only for its own (resolved) style instead of every style in
   // styleMask. Space and, when includeHyphen, '-' are prepared for each style.
@@ -353,7 +365,7 @@ class SdCardFont {
   void applyGlyphMissCallback(uint8_t styleIdx);
   int32_t findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) const;
   int prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly,
-                   const uint32_t* kernExcluded, uint32_t kernExcludedCount);
+                   const uint32_t* kernExcluded, uint32_t kernExcludedCount, bool loadKernLig = true);
 
   // Global helpers
   void freeAll();
@@ -361,5 +373,6 @@ class SdCardFont {
   static void computeStyleFileOffsets(PerStyle& s, uint32_t baseOffset);
 
   // Static callback for EpdFontData::glyphMissHandler (per-style via OverflowContext)
+  static bool onCoverage(void* ctx, uint32_t codepoint);
   static const EpdGlyph* onGlyphMiss(void* ctx, uint32_t codepoint);
 };

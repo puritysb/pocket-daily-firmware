@@ -23,7 +23,7 @@ add_executable(UiPackTest
 target_include_directories(UiPackTest PRIVATE
   ${REPO_ROOT}/src
   ${REPO_ROOT}/lib/GfxRenderer
-  ${REPO_ROOT}/open-x4-sdk/libs/display/EInkDisplay/include
+  ${REPO_ROOT}/freeink-sdk/libs/display/EInkDisplay/include
 )
 
 target_link_libraries(UiPackTest PRIVATE

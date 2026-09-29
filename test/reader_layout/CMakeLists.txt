@@ -14,6 +14,9 @@ set(READER_LAYOUT_FIRMWARE
   ${REPO_ROOT}/lib/Epub/Epub/parsers/TocNavParser.cpp
   ${REPO_ROOT}/lib/Epub/Epub/parsers/TocNcxParser.cpp
   ${REPO_ROOT}/lib/Epub/Epub/ParsedText.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/WordStore.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/converters/ImageDimsProbe.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/converters/ImageToFramebufferDecoder.cpp
   ${REPO_ROOT}/lib/Epub/Epub/Page.cpp
   ${REPO_ROOT}/lib/Epub/Epub/blocks/TextBlock.cpp
   ${REPO_ROOT}/lib/Epub/Epub/blocks/ImageBlock.cpp
@@ -64,9 +67,9 @@ gtest_discover_tests(reader_layout_test)
 # Exact reading positions: page text offsets from the real layout against the XPointer
 # resolvers (lib/KOReaderSync) and the reading-progress fixtures.
 add_executable(reading_position_layout_test ReadingPositionLayoutTest.cpp stubs/ImageStubs.cpp
-  ${REPO_ROOT}/host/HostChecksums.cpp ${READER_LAYOUT_FIRMWARE} ${REPO_ROOT}/lib/KOReaderSync/ChapterXPathResolver.cpp
+  ${REPO_ROOT}/host/HostChecksums.cpp ${READER_LAYOUT_FIRMWARE} ${REPO_ROOT}/lib/KOReaderSync/ChapterXPathResolver.cpp ${REPO_ROOT}/lib/KOReaderSync/ChapterTextOffsetResolver.cpp
   ${REPO_ROOT}/lib/KOReaderSync/ProgressMapper.cpp)
-set_source_files_properties(${REPO_ROOT}/lib/KOReaderSync/ChapterXPathResolver.cpp
+set_source_files_properties(${REPO_ROOT}/lib/KOReaderSync/ChapterXPathResolver.cpp ${REPO_ROOT}/lib/KOReaderSync/ChapterTextOffsetResolver.cpp
   ${REPO_ROOT}/lib/KOReaderSync/ProgressMapper.cpp PROPERTIES COMPILE_OPTIONS
   "-w;-include;${CMAKE_CURRENT_SOURCE_DIR}/stubs/Arduino.h")
 target_include_directories(reading_position_layout_test BEFORE PRIVATE stubs ${REPO_ROOT}/host/hal ${REPO_ROOT}/lib/Epub
@@ -81,3 +84,7 @@ target_compile_definitions(reading_position_layout_test PRIVATE XML_GE=0 XML_CON
 target_link_libraries(reading_position_layout_test PRIVATE crosspoint_test_common ArduinoJson ZLIB::ZLIB
   GTest::gtest_main)
 gtest_discover_tests(reading_position_layout_test)
+
+foreach(target reader_layout_test reading_position_layout_test)
+  target_sources(${target} PRIVATE stubs/HalMemory.cpp)
+endforeach()

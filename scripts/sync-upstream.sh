@@ -1,84 +1,60 @@
 #!/usr/bin/env bash
-#
-# sync-upstream.sh — pull the upstream stable line into Pocket Daily's main.
-#
-# Pocket Daily is an independent product built on the upstream CrossPoint
-# reader engine. AgentDeck is one optional Companion provider. We follow
-# upstream's STABLE line (upstream/master, where releases land), not develop.
-#
-# Why merge (not rebase): Pocket Daily has product commits layered on top. A
-# rebase would replay all of them and force re-resolving the same conflicts
-# every sync. A merge resolves once and preserves the AgentDeck history.
-#
-# This script only fetches + merges on a local branch. It does NOT push — review
-# the merge and build first, then `git push origin main` yourself.
-#
-# Usage:
-#   ./scripts/sync-upstream.sh            # sync main with upstream/master
-#   ./scripts/sync-upstream.sh --check    # only report pending upstream commits
-#
+# Fetch the stable CrossPoint line and prepare a reviewable merge. Never commit,
+# switch branches, rebase, or push. --ref pins the integration input.
 set -euo pipefail
 
-UPSTREAM_REMOTE="upstream"
-UPSTREAM_BRANCH="master"   # upstream's stable/default line (releases land here)
-LOCAL_BRANCH="main"        # Pocket Daily product line
+usage() {
+  echo "Usage: $0 [--branch EXISTING_BRANCH] [--ref STABLE_COMMIT] [--check | --dry-run]"
+}
+branch=""
+ref="upstream/master"
+mode="merge"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --branch|--ref)
+      [[ $# -ge 2 && -n "$2" && "$2" != -* ]] || { usage >&2; exit 2; }
+      if [[ "$1" == --branch ]]; then branch="$2"; else ref="$2"; fi
+      shift 2 ;;
+    --check|--dry-run)
+      [[ "$mode" == merge ]] || { usage >&2; exit 2; }
+      mode="${1#--}"; shift ;;
+    --help|-h) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
 
-CHECK_ONLY=0
-[[ "${1:-}" == "--check" ]] && CHECK_ONLY=1
+git rev-parse --is-inside-work-tree >/dev/null
+current=$(git branch --show-current)
+branch="${branch:-$current}"
+[[ -n "$branch" ]] || { echo "ERROR: select an existing integration branch; HEAD is detached." >&2; exit 1; }
+git show-ref --verify --quiet "refs/heads/$branch" || { echo "ERROR: branch does not exist: $branch" >&2; exit 1; }
+if [[ "$mode" == merge ]]; then
+  [[ "$current" == "$branch" ]] || { echo "ERROR: check out $branch explicitly first; no branch was changed." >&2; exit 1; }
+  [[ -z "$(git status --porcelain)" ]] || { echo "ERROR: preserve local changes before merging." >&2; exit 1; }
+  if git rev-parse --verify -q MERGE_HEAD >/dev/null; then
+    echo "ERROR: finish or abort the existing merge first." >&2; exit 1
+  fi
+fi
 
-# --- preconditions ---------------------------------------------------------
-git rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
-  echo "ERROR: not inside a git repository." >&2; exit 1; }
-
-git remote get-url "$UPSTREAM_REMOTE" >/dev/null 2>&1 || {
-  echo "ERROR: no '$UPSTREAM_REMOTE' remote. Add it with:" >&2
-  echo "  git remote add upstream https://github.com/crosspoint-reader/crosspoint-reader.git" >&2
-  exit 1; }
-
-echo "==> Fetching $UPSTREAM_REMOTE ..."
-git fetch "$UPSTREAM_REMOTE" --prune
-
-PENDING=$(git rev-list --count "$LOCAL_BRANCH..$UPSTREAM_REMOTE/$UPSTREAM_BRANCH")
-if [[ "$PENDING" -eq 0 ]]; then
-  echo "==> Up to date: $LOCAL_BRANCH already contains $UPSTREAM_REMOTE/$UPSTREAM_BRANCH."
+git remote get-url upstream >/dev/null
+git fetch upstream --prune
+target=$(git rev-parse --verify "${ref}^{commit}")
+git merge-base --is-ancestor "$target" upstream/master || {
+  echo "ERROR: $ref is not on the fetched upstream stable line." >&2; exit 1;
+}
+pending=$(git rev-list --count "$branch..$target")
+echo "==> $branch: $pending upstream ancestry commits; target $target"
+if [[ "$mode" == check ]]; then
+  git log --oneline "$branch..$target"
   exit 0
 fi
-
-echo "==> $PENDING new upstream commit(s) on $UPSTREAM_REMOTE/$UPSTREAM_BRANCH:"
-git log --oneline "$LOCAL_BRANCH..$UPSTREAM_REMOTE/$UPSTREAM_BRANCH"
-
-if [[ "$CHECK_ONLY" -eq 1 ]]; then
-  echo "==> --check only; not merging. Run without --check to merge."
-  exit 0
+[[ "$pending" -gt 0 ]] || exit 0
+if [[ "$mode" == dry-run ]]; then
+  git merge-tree --write-tree --name-only "$branch" "$target"
+  exit $?
 fi
 
-# --- clean tree + branch switch -------------------------------------------
-if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
-  echo "ERROR: working tree has uncommitted changes. Commit or stash first." >&2
-  exit 1
-fi
-
-CURRENT=$(git branch --show-current)
-if [[ "$CURRENT" != "$LOCAL_BRANCH" ]]; then
-  echo "==> Switching to $LOCAL_BRANCH (was $CURRENT) ..."
-  git checkout "$LOCAL_BRANCH"
-fi
-
-# --- merge -----------------------------------------------------------------
-echo "==> Merging $UPSTREAM_REMOTE/$UPSTREAM_BRANCH into $LOCAL_BRANCH ..."
-if git merge --no-edit "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH"; then
-  echo
-  echo "==> Merge complete. Next steps:"
-  echo "    1. ./scripts/pio.sh run    # verify the firmware still builds"
-  echo "    2. git push origin $LOCAL_BRANCH"
-  echo
-  echo "    Conflicts usually hit Pocket Daily-touched shared files"
-  echo "    (ActivityManager, HomeActivity, themes). Provider adapters are isolated."
-else
-  echo
-  echo "==> MERGE CONFLICT. Resolve preserving BOTH sides:" >&2
-  echo "    - keep upstream's fixes AND Pocket Daily changes in the shared files" >&2
-  echo "    - git add <resolved>; git commit   (then: ./scripts/pio.sh run; git push origin $LOCAL_BRANCH)" >&2
-  echo "    - to bail out: git merge --abort" >&2
-  exit 1
-fi
+git merge --no-ff --no-commit "$target"
+echo "==> Merge prepared, not committed. Resolve both reader and product contracts."
+echo "==> Run default + gh_release builds, strict cppcheck, host and companion contract checks."
+echo "==> Hardware acceptance remains required; commit/push only when authorized."

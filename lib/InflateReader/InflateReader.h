@@ -14,6 +14,11 @@ enum class InflateStatus {
 
 // Streaming deflate decompressor wrapping uzlib.
 //
+// NOTE: retained ONLY for FontDecompressor's tiny one-shot flash-resident group
+// decompressions, where uzlib's ~1KB state beats tinfl's ~11KB on the
+// OOM-sensitive render path. All throughput paths (zip entries, PNG IDAT) use
+// InflateStream (lib/miniz), which decodes several times faster.
+//
 // Two modes:
 //   init(false)  — one-shot: input is a contiguous buffer, call read() once.
 //   init(true)   — streaming: allocates a 32KB window for back-references
@@ -46,6 +51,8 @@ class InflateReader {
   InflateReader(const InflateReader&) = delete;
   InflateReader& operator=(const InflateReader&) = delete;
 
+  static constexpr size_t RING_BYTES = 32768;
+  bool initWithRing(uint8_t* ring);
   // Initialise decompressor. streaming=true allocates the 32KB window (4 x 8KB)
   // needed when read() or readAtMost() will be called multiple times.
   // Returns false only in streaming mode if a window segment allocation fails.
@@ -88,4 +95,6 @@ class InflateReader {
 
   uzlib_uncomp decomp = {};
   uint8_t* dictSegments[DICT_SEGMENTS] = {};
+  uint8_t* ringBuffer = nullptr;
+  bool ownsRing = false;
 };

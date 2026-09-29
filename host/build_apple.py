@@ -65,6 +65,16 @@ def source_state(root: Path) -> dict:
     # build/header definitions in the renderer's dependency directories.
     names = [name for name in names if name and (root / name).exists() and
              (Path(name).suffix in SOURCE_SUFFIXES or Path(name).name == "CMakeLists.txt")]
+    # git ls-files in the parent does not enumerate submodule contents. Hash the
+    # SDK sources compiled by the host archive explicitly so a submodule change
+    # cannot reuse an artifact with stale provenance.
+    for relative in ("freeink-sdk/libs/display/FreeInkDisplay/include",
+                     "freeink-sdk/libs/font/FreeInkFont/include",
+                     "freeink-sdk/libs/font/FreeInkFont/src/FontAlloc.c"):
+        path = root / relative
+        candidates = path.rglob("*") if path.is_dir() else (path,)
+        names.extend(str(item.relative_to(root)) for item in candidates
+                     if item.is_file() and item.suffix in SOURCE_SUFFIXES)
     files = manifest(root, names)
     if "host/CMakeLists.txt" not in files or "host/include/PocketUIHost.h" not in files:
         raise ValueError("Not a Pocket UI host source tree")

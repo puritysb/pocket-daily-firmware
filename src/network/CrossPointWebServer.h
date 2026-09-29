@@ -11,7 +11,6 @@
 #include <string>
 
 #include "pocket_daily/web/PocketWebServices.h"
-#include "pocket_daily/web/TransferAdmission.h"
 
 // Pocket-owned profile enum (route/listener/watchdog gating lives with the
 // pocket web modules); alias keeps every existing call site unchanged.
