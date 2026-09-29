@@ -140,3 +140,10 @@ it after package installation. For a fresh local tool setup, install Core
 `python3 scripts/patch_pio_scons.py ~/.platformio/platforms/espressif32/platform.json`.
 The Apple Silicon wrapper prefers compatible native Core 6.2.0 from Homebrew
 or the SDK environment and still honors an explicit `PLATFORMIO_BIN`.
+
+Core 6.2 hardcodes the bundled cppcheck path instead of resolving the analyzer
+package override. The native adapter now runs inside PlatformIO's own Python
+process and replaces only the analyzer executable in its generated command.
+Compiler defines, file selection, diagnostic parsing and strict exit handling
+are preserved; no installed analyzer files are replaced. Two adapter regressions
+verify preserved build inputs and exact diagnostic/argument forwarding.

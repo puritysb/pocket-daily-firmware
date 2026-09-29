@@ -98,8 +98,8 @@ jobs:
           make -C build/cppcheck-source -j2 MATCHCOMPILER=yes
           build/cppcheck-source/cppcheck --version
 
-      # The checked-in adapter installs the exact native tool via the
-      # environment's platform_packages; no cached global package is required.
+      # The adapter changes only the analyzer executable in PlatformIO's
+      # command; Core 6.2 otherwise ignores the platform_packages override.
       - name: Run cppcheck
         run: |
           python -m unittest discover -s scripts -p test_check_firmware.py
