@@ -54,6 +54,11 @@ jobs:
             exit 1
           fi
 
+      - name: Align installed SCons metadata
+        run: |
+          pio pkg install -e "$PIO_ENV"
+          python scripts/patch_pio_scons.py "$HOME/.platformio/platforms/espressif32/platform.json"
+
       - name: Build Pocket Daily Firmware
         run: pio run -e "$PIO_ENV"
 

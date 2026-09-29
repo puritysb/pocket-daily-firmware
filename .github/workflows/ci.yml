@@ -79,7 +79,9 @@ jobs:
       # platform's toolchain first: a platform bump otherwise leaves only the
       # previous toolchain in the restored cache and the check exits with 127.
       - name: Install PlatformIO packages
-        run: pio pkg install -e default
+        run: |
+          pio pkg install -e default
+          python scripts/patch_pio_scons.py "$HOME/.platformio/platforms/espressif32/platform.json"
 
       # Match PlatformIO's 2.11 baseline, but build a native executable instead
       # of depending on the bundled binary's runtime loader on ubuntu-latest.
@@ -134,6 +136,11 @@ jobs:
           key: pio-core620-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-core620-${{ runner.os }}-
 
+      - name: Align installed SCons metadata
+        run: |
+          pio pkg install -e "${{ matrix.environment }}"
+          python scripts/patch_pio_scons.py "$HOME/.platformio/platforms/espressif32/platform.json"
+
       - name: Build Pocket Daily Firmware
         run: |
           set -euo pipefail
@@ -184,6 +191,7 @@ jobs:
           python3 -m unittest discover -s scripts -p test_check_seam.py
           python3 -m unittest discover -s scripts -p test_sync_upstream.py
           python3 -m unittest discover -s scripts -p test_patch_storage_sdk.py
+          python3 -m unittest discover -s scripts -p test_patch_pio_scons.py
           python3 -m unittest discover -s scripts -p test_sync_routes.py
           python3 -m unittest discover -s scripts -p test_build_host_apple.py
 

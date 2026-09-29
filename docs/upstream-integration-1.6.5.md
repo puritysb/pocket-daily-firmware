@@ -130,3 +130,13 @@ A fresh CI run also exposed the platform's SCons 4.8 package overriding Core
 6.2's SCons 4.11.1. `base.platform_packages` now pins the matching SCons archive;
 the native cppcheck adapter retains that inherited pin. The obsolete workaround
 that required an already-cached global cppcheck package was removed.
+
+The platform additionally checks a separate `package-version` field and deletes
+SCons on a mismatch, including while the build is running. A narrow, idempotent
+`patch_pio_scons.py` aligns both manifest fields before SCons starts, refuses
+unknown versions, and has two fixture tests. CI, release and RC workflows run
+it after package installation. For a fresh local tool setup, install Core
+6.2.0, run `./scripts/pio.sh pkg install -e default`, then run
+`python3 scripts/patch_pio_scons.py ~/.platformio/platforms/espressif32/platform.json`.
+The Apple Silicon wrapper prefers compatible native Core 6.2.0 from Homebrew
+or the SDK environment and still honors an explicit `PLATFORMIO_BIN`.

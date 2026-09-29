@@ -40,7 +40,10 @@ jobs:
       - name: Build Pocket Daily Firmware release candidate
         env:
           CROSSPOINT_RC_HASH: ${{ env.SHORT_SHA }}
-        run: pio run -e gh_release_rc
+        run: |
+          pio pkg install -e gh_release_rc
+          python scripts/patch_pio_scons.py "$HOME/.platformio/platforms/espressif32/platform.json"
+          pio run -e gh_release_rc
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v6
