@@ -96,22 +96,8 @@ jobs:
           make -C build/cppcheck-source -j2 MATCHCOMPILER=yes
           build/cppcheck-source/cppcheck --version
 
-      # The espressif32 55.x platform installs its own tool-cppcheck 2.20.1
-      # (from ~/.platformio/tools) on every check, overriding the adapter in
-      # platform_packages. That binary needs libpcre.so.3, which ubuntu-latest
-      # lacks, so every file exits 127. Point the installed package's
-      # executable at the native 2.11 build instead.
-      - name: Use native cppcheck for the platform's tool package
-        run: |
-          pkg="$HOME/.platformio/packages/tool-cppcheck"
-          if [[ ! -e "$pkg/cppcheck" ]]; then
-            echo "tool-cppcheck was not installed by pio pkg install" >&2
-            exit 1
-          fi
-          printf '#!/bin/sh\nexec %s "$@"\n' "$PWD/build/cppcheck-source/cppcheck" > "$pkg/cppcheck"
-          chmod 755 "$pkg/cppcheck"
-          "$pkg/cppcheck" --version
-
+      # The checked-in adapter installs the exact native tool via the
+      # environment's platform_packages; no cached global package is required.
       - name: Run cppcheck
         run: |
           python -m unittest discover -s scripts -p test_check_firmware.py

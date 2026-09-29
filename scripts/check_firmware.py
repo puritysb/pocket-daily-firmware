@@ -32,6 +32,8 @@ def prepare(project: Path, executable: Path, version: str) -> Path:
     # Analyze the checked-in default profile, never per-machine overrides.
     config.remove_option("platformio", "extra_configs")
     packages = config.get("env:default", "platform_packages", fallback="")
+    if not packages and config.has_option("base", "platform_packages"):
+        packages = "${base.platform_packages}"
     config.set("env:default", "platform_packages",
                packages + "\ntool-cppcheck=" + package.resolve().as_uri())
     generated = output / "platformio.ini"

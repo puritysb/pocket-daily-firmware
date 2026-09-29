@@ -125,3 +125,8 @@ running. CI/release jobs now start on pinned 6.2.0 with a separate cache key.
 Linux cppcheck also found an identical conditional result on non-USB boards
 and an unused/shadowed theme coordinate; both were simplified without changing
 reader behavior. Remote CI remains the publication gate after these fixes.
+
+A fresh CI run also exposed the platform's SCons 4.8 package overriding Core
+6.2's SCons 4.11.1. `base.platform_packages` now pins the matching SCons archive;
+the native cppcheck adapter retains that inherited pin. The obsolete workaround
+that required an already-cached global cppcheck package was removed.

@@ -15,6 +15,7 @@ class CheckFirmwareTests(unittest.TestCase):
             original = """[platformio]
 extra_configs = platformio.local.ini
 [base]
+platform_packages = tool-scons @ pinned-scons
 check_flags = --enable=all --inline-suppr
 build_flags = -std=gnu++2a
 extra_scripts = pre:scripts/patch_storage_sdk.py
@@ -32,6 +33,8 @@ extends = base
             self.assertEqual(config["base"]["check_flags"], "--enable=all --inline-suppr")
             self.assertEqual(config["base"]["extra_scripts"], "pre:scripts/patch_storage_sdk.py")
             self.assertEqual(config["env:default"]["extends"], "base")
+            self.assertIn("${base.platform_packages}", config["env:default"]["platform_packages"])
+            self.assertIn("tool-cppcheck=", config["env:default"]["platform_packages"])
             self.assertEqual((root / "platformio.ini").read_text(), original)
             package = generated.parent / "tool-cppcheck"
             self.assertEqual(json.loads((package / "package.json").read_text())["version"], "2.11.0")
