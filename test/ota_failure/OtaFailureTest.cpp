@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "src/network/FirmwareVersion.h"
 #include "src/network/OtaFailure.h"
 
 using OtaFailure::classify;
@@ -35,4 +36,22 @@ TEST(OtaFailure, ServerAndReleaseProblems) {
 TEST(OtaFailure, InstallFailuresKeepTheirOwnReasonUnlessMemory) {
   EXPECT_EQ(classify(OtaFailure::kUpdaterHttpError, "status", 500, 0, true), Kind::Install);
   EXPECT_EQ(classify(OtaFailure::kUpdaterHttpError, "open", kHttpConnect, 0x7F00, true), Kind::Memory);
+}
+
+TEST(FirmwareVersion, ProductStableUpgradeNeverOffersHistoricalTags) {
+  EXPECT_FALSE(FirmwareVersion::isNewerStable("v1.6.6", "1.0.0-beta.1"));
+  EXPECT_FALSE(FirmwareVersion::isNewerStable("v1.7.0-beta.4", "1.0.0-beta.1"));
+  EXPECT_TRUE(FirmwareVersion::isNewerStable("pocket-v1.0.0", "1.0.0-beta.1"));
+  EXPECT_TRUE(FirmwareVersion::isNewerStable("pocket-v1.0.0", "1.0.0-dev-main-abcd"));
+  EXPECT_FALSE(FirmwareVersion::isNewerStable("pocket-v1.0.0", "1.0.0"));
+  EXPECT_TRUE(FirmwareVersion::isNewerStable("pocket-v1.0.1", "1.0.0"));
+  EXPECT_FALSE(FirmwareVersion::isNewerStable("pocket-v1.0.0", "1.0.1"));
+}
+
+TEST(FirmwareVersion, RejectsMalformedAndPrereleaseLatestTags) {
+  EXPECT_FALSE(FirmwareVersion::isNewerStable("pocket-v1.0.0-beta.1", "1.0.0"));
+  EXPECT_FALSE(FirmwareVersion::isNewerStable("pocket-v1.0.0.1", "1.0.0"));
+  EXPECT_FALSE(FirmwareVersion::isNewerStable("pocket-v10000.0.0", "1.0.0"));
+  EXPECT_FALSE(FirmwareVersion::isNewerStable("pocket-v1.0.0", "bad"));
+  EXPECT_FALSE(FirmwareVersion::isNewerStable(nullptr, "1.0.0"));
 }

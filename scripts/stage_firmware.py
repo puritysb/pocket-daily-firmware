@@ -20,6 +20,7 @@ import configparser
 import datetime
 import glob
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -52,11 +53,16 @@ def get_git_info(project_dir):
     return branch, sha
 
 
-def get_base_version(project_dir):
-    ini_path = os.path.join(project_dir, "platformio.ini")
-    config = configparser.ConfigParser()
-    config.read(ini_path)
-    return config.get("crosspoint", "version", fallback="0.0.0")
+def get_embedded_version(firmware_bin):
+    """Use the image identity, including beta/dev suffixes, as staging truth."""
+    with open(firmware_bin, "rb") as image:
+        data = image.read()
+    versions = set(re.findall(
+        rb"CrossPoint version: (\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._+-]+)?)\x00", data
+    ))
+    if len(versions) != 1:
+        raise ValueError("firmware image must contain exactly one embedded version")
+    return next(iter(versions)).decode("ascii")
 
 
 def get_custom_staging_dir(env):
@@ -87,13 +93,13 @@ def prune_versioned_copies(staging_dir, prefix):
             pass
 
 
-def write_manifest(manifest_path, base_version, env_name, branch, sha, date_str, file_size, versioned_name,
+def write_manifest(manifest_path, version, env_name, branch, sha, date_str, file_size, versioned_name,
                    learning_pack_size, world_font_size, symbols_font_size):
     lines = [
         "Pocket Daily Firmware Staging",
         "=============================",
         "",
-        f"Version:      {base_version}",
+        f"Version:      {version}",
         f"Environment:  {env_name}",
         f"Git branch:   {branch}",
         f"Git SHA:      {sha}",
@@ -130,12 +136,13 @@ def stage(source, target, env):
     staging_dir = os.path.join(project_dir, STAGING_DIR_NAME)
     os.makedirs(staging_dir, exist_ok=True)
 
-    base_version = get_base_version(project_dir)
+    version = get_embedded_version(firmware_bin)
     branch, sha = get_git_info(project_dir)
-    date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    date_compact = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    image_time = datetime.datetime.fromtimestamp(os.path.getmtime(firmware_bin))
+    date_str = image_time.strftime("%Y-%m-%d %H:%M:%S")
+    date_compact = image_time.strftime("%Y%m%d-%H%M%S")
 
-    prefix = f"pocket-daily-{base_version}-{env_name}"
+    prefix = f"pocket-daily-{version}-{env_name}"
     versioned_name = f"{prefix}-{sha}-{date_compact}.bin"
     versioned_path = os.path.join(staging_dir, versioned_name)
     update_path = os.path.join(staging_dir, "update.bin")
@@ -179,7 +186,7 @@ def stage(source, target, env):
 
     file_size = os.path.getsize(update_path)
     manifest_path = os.path.join(staging_dir, "LATEST_BUILD.txt")
-    write_manifest(manifest_path, base_version, env_name, branch, sha, date_str, file_size, versioned_name,
+    write_manifest(manifest_path, version, env_name, branch, sha, date_str, file_size, versioned_name,
                    learning_pack_size, world_font_size, symbols_font_size)
 
     extra_dir = get_custom_staging_dir(env)

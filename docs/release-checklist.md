@@ -101,7 +101,7 @@ Host render tests do not sign off panel or radio behavior.
 
 ## Beta pre-releases (companion beta channel)
 
-Tag `v<version>-beta.<n>` (for example `v1.7.0-beta.1`, where `<version>` is
+Tag `pocket-v<version>-beta.<n>` (for example `pocket-v1.0.0-beta.1`, where `<version>` is
 `platformio.ini`'s) to publish a GitHub **pre-release**. The release workflow
 builds `gh_release_beta`, checks that `firmware.bin` reports exactly
 `<version>-beta.<n>`, and publishes with `--prerelease --latest=false`, so
@@ -110,4 +110,3 @@ sees it. Development builds of the app list recent releases, pre-releases
 included, and offer the newest one through Update reader. A beta is for
 hardware testing: this checklist still gates the stable tag. Any other tag
 shape fails the workflow before building.
-

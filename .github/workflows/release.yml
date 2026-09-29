@@ -2,7 +2,7 @@ name: Compile Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'pocket-v*'
 
 permissions:
   contents: write
@@ -35,22 +35,22 @@ jobs:
           key: pio-core620-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-core620-${{ runner.os }}-
 
-      # v<version> is the stable release; v<version>-beta.<n> a pre-release for
+      # pocket-v<version> is stable; pocket-v<version>-beta.<n> a pre-release for
       # the companion's beta channel. Anything else, or a version that is not
       # platformio.ini's, fails before building.
       - name: Resolve release kind
         run: |
           VERSION=$(sed -n 's/^version = //p' platformio.ini | head -1)
           TAG="${GITHUB_REF_NAME}"
-          if [[ "$TAG" == "v${VERSION}" ]]; then
+          if [[ "$TAG" == "pocket-v${VERSION}" ]]; then
             echo "PIO_ENV=gh_release" >> "$GITHUB_ENV"
             echo "RELEASE_FLAGS=--latest" >> "$GITHUB_ENV"
-          elif [[ "$TAG" =~ ^v${VERSION//./\\.}-beta\.([0-9]+)$ ]]; then
+          elif [[ "$TAG" =~ ^pocket-v${VERSION//./\\.}-beta\.([0-9]+)$ ]]; then
             echo "PIO_ENV=gh_release_beta" >> "$GITHUB_ENV"
             echo "CROSSPOINT_BETA=${BASH_REMATCH[1]}" >> "$GITHUB_ENV"
             echo "RELEASE_FLAGS=--prerelease --latest=false" >> "$GITHUB_ENV"
           else
-            echo "Tag $TAG is neither v${VERSION} nor v${VERSION}-beta.<n>" >&2
+            echo "Tag $TAG is neither pocket-v${VERSION} nor pocket-v${VERSION}-beta.<n>" >&2
             exit 1
           fi
 
@@ -64,8 +64,8 @@ jobs:
 
       - name: Check embedded version matches the tag
         run: |
-          strings ".pio/build/$PIO_ENV/firmware.bin" | grep -qx "CrossPoint version: ${GITHUB_REF_NAME#v}" \
-            || { echo "firmware.bin does not report ${GITHUB_REF_NAME#v}" >&2; exit 1; }
+          strings ".pio/build/$PIO_ENV/firmware.bin" | grep -qx "CrossPoint version: ${GITHUB_REF_NAME#pocket-v}" \
+            || { echo "firmware.bin does not report ${GITHUB_REF_NAME#pocket-v}" >&2; exit 1; }
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v6

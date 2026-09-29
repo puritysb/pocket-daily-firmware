@@ -17,6 +17,7 @@
 
 #include "FirmwareBoardTag.h"
 #include "FirmwareFlasher.h"
+#include "FirmwareVersion.h"
 
 namespace {
 constexpr char latestReleaseUrl[] = "https://api.github.com/repos/puritysb/pocket-daily-firmware/releases/latest";
@@ -68,51 +69,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
 }
 
 bool OtaUpdater::isUpdateNewer() const {
-  if (!updateAvailable || latestVersion.empty() || latestVersion == CROSSPOINT_VERSION) {
-    return false;
-  }
-
-  int currentMajor = 0, currentMinor = 0, currentPatch = 0;
-  int latestMajor = 0, latestMinor = 0, latestPatch = 0;
-
-  const auto currentVersion = CROSSPOINT_VERSION;
-  const char* latest = latestVersion.c_str();
-  if (*latest == 'v' || *latest == 'V') latest++;
-
-  // semantic version check (only match on 3 segments)
-  if (sscanf(latest, "%d.%d.%d", &latestMajor, &latestMinor, &latestPatch) != 3 ||
-      sscanf(currentVersion, "%d.%d.%d", &currentMajor, &currentMinor, &currentPatch) != 3) {
-    LOG_ERR("OTA", "Invalid semantic version: current=%s latest=%s", currentVersion, latestVersion.c_str());
-    return false;
-  }
-
-  /*
-   * Compare major versions.
-   * If they differ, return true if latest major version greater than current major version
-   * otherwise return false.
-   */
-  if (latestMajor != currentMajor) return latestMajor > currentMajor;
-
-  /*
-   * Compare minor versions.
-   * If they differ, return true if latest minor version greater than current minor version
-   * otherwise return false.
-   */
-  if (latestMinor != currentMinor) return latestMinor > currentMinor;
-
-  /*
-   * Check patch versions.
-   */
-  if (latestPatch != currentPatch) return latestPatch > currentPatch;
-
-  // If we reach here, it means all segments are equal.
-  // One final check, if we're on an RC build (contains "-rc"), we should consider the latest version as newer even if
-  // the segments are equal, since RC builds are pre-release versions.
-  if (strstr(currentVersion, "-rc") != nullptr) {
-    return true;
-  }
-
-  return false;
+  return updateAvailable && FirmwareVersion::isNewerStable(latestVersion.c_str(), CROSSPOINT_VERSION);
 }
 
 const std::string& OtaUpdater::getLatestVersion() const { return latestVersion; }

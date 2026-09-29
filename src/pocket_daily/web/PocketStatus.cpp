@@ -8,6 +8,7 @@
 #include <WiFi.h>
 
 #include "pocket_daily/BuildFailureLog.h"
+#include "pocket_daily/FirmwareIdentity.h"
 #include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/ReaderPerf.h"
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
@@ -47,6 +48,8 @@ String buildStatusJson(const StatusInputs& in) {
   // GET /api/pocket/v1/content/file: read-only published revision files.
   doc["contentRead"] = 1;
   doc["version"] = CROSSPOINT_VERSION;
+  doc["firmwareLineage"] = PocketDaily::FirmwareIdentity::LINEAGE;
+  doc["crossPointBase"] = PocketDaily::FirmwareIdentity::CROSSPOINT_BASE;
   doc["ip"] = ipAddr;
   doc["mode"] = in.apMode ? "AP" : "STA";
   doc["rssi"] = in.apMode ? 0 : WiFi.RSSI();
