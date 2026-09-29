@@ -259,6 +259,66 @@ TEST(ReadingProgressFormat, ListEntriesAreValidJsonWithinBudget) {
   EXPECT_EQ(Reading::writeListEntry(entry, buffer, sizeof(buffer)), 0u);
 }
 
+TEST(ReadingProgressFormat, ListWithoutPathsForBle) {
+  Reading::ListEntry entry;
+  entry.document = DIGEST;
+  entry.filenameDocument = DIGEST;
+  entry.xpointer = "/body/DocFragment[3]/body/p[12]/text().5";
+  entry.percentage = 0.43f;
+  char buffer[Reading::MAX_XPOINTER_BYTES + 512];
+  const size_t size = Reading::writeListEntry(entry, buffer, sizeof(buffer));
+  ASSERT_GT(size, 0u);
+  const std::string json(buffer, size);
+  EXPECT_EQ(json.find("path"), std::string::npos);
+  EXPECT_EQ(json.rfind("{\"document\":", 0), 0u);
+  JsonDocument doc;
+  ASSERT_FALSE(deserializeJson(doc, json)) << json;
+  EXPECT_STREQ(doc["document"], DIGEST);
+  EXPECT_TRUE(doc["path"].isNull());
+}
+
+TEST(ReadingProgressFormat, ComposerKeepsTheListWithinItsBudget) {
+  char out[Reading::MAX_XPOINTER_BYTES + 512];
+  Reading::ListComposer composer;
+  std::string json;
+  size_t n = composer.head("ABCD1234", out, sizeof(out));
+  ASSERT_GT(n, 0u);
+  json.append(out, n);
+  Reading::ListEntry entry;
+  entry.document = DIGEST;
+  entry.filenameDocument = DIGEST;
+  const std::string longXPointer = "/body/DocFragment[1]" + std::string(Reading::MAX_XPOINTER_BYTES - 20, '1');
+  entry.xpointer = longXPointer.c_str();
+  const std::string longPath = "/" + std::string(250, 'p') + ".epub";
+  entry.path = longPath.c_str();
+  // An entry that cannot be serialized is skipped without filling the list.
+  Reading::ListEntry broken = entry;
+  broken.document = "not-a-digest";
+  EXPECT_EQ(composer.entry(broken, out, sizeof(out)), 0u);
+  EXPECT_FALSE(composer.full());
+  while ((n = composer.entry(entry, out, sizeof(out))) != 0) json.append(out, n);
+  EXPECT_TRUE(composer.full());
+  EXPECT_LT(composer.listed(), Reading::MAX_BOOKS);  // the byte budget ended it
+  EXPECT_EQ(composer.entry(entry, out, sizeof(out)), 0u);
+  n = composer.tail(out, sizeof(out));
+  json.append(out, n);
+  EXPECT_EQ(json.size(), composer.total());
+  EXPECT_LE(json.size(), Reading::MAX_LIST_BYTES);
+  JsonDocument doc;
+  ASSERT_FALSE(deserializeJson(doc, json));
+  EXPECT_EQ(doc["books"].size(), composer.listed());
+
+  // Short entries stop at MAX_BOOKS.
+  Reading::ListComposer small;
+  small.head("ABCD1234", out, sizeof(out));
+  entry.path = nullptr;
+  entry.xpointer = "";
+  size_t listed = 0;
+  while (small.entry(entry, out, sizeof(out))) listed++;
+  EXPECT_EQ(listed, Reading::MAX_BOOKS);
+  EXPECT_TRUE(small.full());
+}
+
 TEST(ReadingProgressFormat, OnlyClearlyFurtherOffersAreAsked) {
   EXPECT_TRUE(Reading::isFurther(0.5f, 0.4f));
   EXPECT_FALSE(Reading::isFurther(0.403f, 0.4f));

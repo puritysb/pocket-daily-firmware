@@ -77,6 +77,19 @@ Host render tests do not sign off panel or radio behavior.
 | X3 | Pending | Not tested |
 | X4 | Pending | Not tested |
 
+## Automatic BLE reading-sync candidate (both X3 and X4)
+
+- [ ] Complete `docs/ble-sync-review-2026-09-30.md` with actual list/offer completion,
+      not advertising alone; record the app build and firmware image identity.
+- [ ] Verify book-close/Home/Library/pop, wake and sleep windows; memory skips,
+      early close during startup, safe radio handoff and deinit recovery.
+- [ ] Verify existing-bond reconnect including RPA, unbonded refusal, no new
+      pairing or START_AP in an automatic window, app foreground/background,
+      explicit Nearby Sync priority, demo, toggle off and forget.
+- [ ] Measure pre/ready/min/post free heap and largest block on the current SDK;
+      do not reduce gates to hide missing headroom. Mark skipped-only scenarios
+      as unavailable, not successful reading sync.
+
 ## Publication
 
 - [ ] Nearby Sync v1 is frozen and compatible with the app repository.

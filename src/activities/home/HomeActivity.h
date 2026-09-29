@@ -87,6 +87,7 @@ class HomeActivity final : public Activity {
         initialMenuItem(initialMenuItemValue),
         cleanInitialRefresh(cleanInitialRefresh) {}
   void onEnter() override;
+  bool allowsExchangeWindow() const override { return true; }
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;

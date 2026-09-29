@@ -3,21 +3,37 @@
 This is concise, repository-owned context for future sessions. It is not a chat
 transcript. Current source and release records override dated observations.
 
+## BLE integration and review — 2026-09-30
+
+- `codex/ble-sync-review` integrates held BLE `68a77147` onto main `ee188fe7`;
+  app counterpart integrates `e4751d3` onto `c22df41`. This change contains
+  the reviewed integration; publication state is recorded in GitHub PRs/releases. See `docs/ble-sync-review-2026-09-30.md` and
+  `docs/reading-sync-ble-v1.md` for behavior, verification and hardware gates.
+- Corrected book-close navigation triggers, latest Library integration, app ACK
+  ordering and confirmed-only send counts, synchronous demo/manual BLE ownership,
+  restored connection cleanup, and unnecessary identifying trace data. Final
+  review also preserves connections accepted during startup, applies their
+  five-second unbonded grace, and recovers by restart if NimBLE deinit fails.
+- Old X3 no-peer advertising fell to ~13 KB free/~2 KB minimum block; it was not
+  exchange acceptance. Candidate uses 96/40 KiB start, 24/8 KiB ready/admission,
+  20/4 KiB running floors. The old ~83 KB Home case now skips; current X3/X4
+  availability must be measured. No physical-device or production-release approval.
+- Candidate verification: host 862/862, route 13/13, SDK patch 3/3, strict
+  cppcheck 2.11, format, default and gh_release (zero compiler warnings/errors);
+  app iOS 439/439, BLE/permission UI 2/2, macOS/XPointer and 19 screenshots pass.
+  Logs are in ignored `build/ble-review/` and app `.build/ble-review/`. Current
+  staged artifact identity is recorded in `firmware/LATEST_BUILD.txt`; the review
+  records local evidence, not physical installation approval.
+
 ## Repository split
 
-- 2026-09-29 CrossPoint 1.6.5 full baseline candidate is prepared on isolated
-  `feature/upstream-1.6.5` (product parent `ccc601c5`, upstream `93e98bb7`,
-  FreeInk SDK `111fdcc7`). Commit, main merge and beta publication are user-authorized;
-  the verification details below describe the pre-commit candidate. Product version stays 1.7.0. Section cache
-  is now 134; raw DOM offsets remain the app v1 contract alongside upstream's
-  visible offsets. Saved progress keeps the seven-byte prefix and adds a tagged
-  12-byte form. App font-size slots map to point sizes. C3 bounded fonts and
-  certificate-verified ESP-IDF TLS are retained; two TLS engines exceeded the
-  existing OTA slot, so wolfSSL is not enabled. Host 828/828, app iOS 101/101,
-  macOS XPointer 1/1 and local default/gh_release builds pass. Physical X3/X4
-  acceptance, remote CI, main merge and release are pending. See
-  `docs/upstream-integration-1.6.5.md` for exact inputs, intentional differences,
-  final artifact identities and verification limitations.
+- CrossPoint 1.6.5 integration is on main `ee188fe7` (PR #4), with upstream
+  `93e98bb7` and FreeInk SDK `111fdcc7`. `v1.7.0-beta.4` was published as a
+  prerelease on 2026-09-29 UTC. The older candidate-only note is superseded.
+  Section cache 134, tagged progress layout, app font-size adaptation, bounded
+  C3 fonts and certificate-verified TLS remain; wolfSSL is intentionally excluded.
+  Prior baseline host 828/828 and default/production builds passed. Physical
+  X3/X4 acceptance remains pending; see `docs/upstream-integration-1.6.5.md`.
 - 2026-09-29 Home menu is stock CrossPoint plus one entry. Articles moved from
   the Home menu into Pocket Reader: the Left front button on Pocket Daily's Home
   opens the Articles library and Back from Articles returns to Pocket Daily

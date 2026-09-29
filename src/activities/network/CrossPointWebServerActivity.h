@@ -14,6 +14,7 @@
 #include "pocket_daily/ContentSessionInput.h"
 #include "pocket_daily/PresentationSlot.h"
 #include "pocket_daily/nearby_sync/NearbySyncService.h"
+#include "pocket_daily/nearby_sync/ReadingSyncSession.h"
 #include "pocket_daily/web/PrivateApPolicy.h"
 #include "pocket_daily/web/StaRadioWatch.h"
 
@@ -60,6 +61,7 @@ class CrossPointWebServerActivity final : public Activity {
   bool updateCheckHandoff = false;
 
   Pocket::NearbySync::Service nearbySync;
+  Pocket::NearbySync::ReadingSyncSession readingSync{nearbySync};
   enum class NearbyStartResult : uint8_t { IDLE, RUNNING, SUCCEEDED, FAILED };
   std::atomic<NearbyStartResult> nearbyStartResult{NearbyStartResult::IDLE};
   std::atomic<bool> nearbyCancelRequested{false};

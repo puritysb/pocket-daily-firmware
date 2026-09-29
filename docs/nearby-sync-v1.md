@@ -16,6 +16,8 @@ the phone and reader to be on the same infrastructure Wi-Fi network.
   content, learning state, or firmware updates.
 - Deep sleep turns both radios off. Nearby Sync therefore starts only after the
   person wakes the device, opens Pocket Daily, and presses its `Sync` action.
+  (Reading-place exchange windows with an already bonded phone are the one
+  exception; see `reading-sync-ble-v1.md`.)
 - Nearby Sync belongs to Pocket Daily and is not shown in CrossPoint's generic
   File Transfer mode selector. File Transfer remains the manual recovery path.
 
@@ -46,8 +48,13 @@ deinitializes BLE, and only then starts Wi-Fi AP mode.
 
 ## BLE service
 
-Pocket advertises only after the Pocket Daily `Sync` action opens its dedicated
-Nearby Sync screen.
+Pocket advertises for pairing and hotspot handoff only after the Pocket Daily
+`Sync` action opens its dedicated Nearby Sync screen. Exception (2026-09-29):
+Pocket Reading Sync over BLE (`reading-sync-ble-v1.md`) advertises the same
+service in short exchange windows (book closed, wake, before sleep) to phones
+that are already bonded. A window never pairs, shows no passkey, refuses
+`START_AP` with `ERR <id> NOT_IN_SYNC`, and ends before any other screen or
+Wi-Fi mode starts.
 
 | Item | Value |
 | --- | --- |
@@ -69,6 +76,10 @@ Status is readable only on an encrypted, authenticated connection:
 V=1;MODEL=X3;ID=89ABCDEF;FW=1.4.1;CAP=AP,HTTP,SD,COMMIT1
 ```
 
+Readers with Reading Sync add `READ1` to `CAP` and `WIN=0` on this screen
+(`WIN=1` in an exchange window); the screen also serves `READ_LIST`, `OFFER`
+and `W` (`reading-sync-ble-v1.md`).
+
 `MODEL` is `X3` or `X4`; the app uses it to select the 528×792 X3 or 480×800
 X4 surface and matching physical-control geometry. Unknown fields must be
 ignored. `V`, `MODEL`, `ID`, and `CAP` are required.
@@ -84,8 +95,8 @@ CANCEL <request-id>
 ```
 
 `request-id` is eight uppercase hexadecimal digits chosen by the app. The
-device accepts one command at a time and never performs Wi-Fi or SD work in a
-BLE callback; callbacks only copy the bounded record into the activity queue.
+device never performs Wi-Fi or SD work in a BLE callback; callbacks only copy
+the bounded record into a four-record queue that the owning loop drains.
 
 ### Events
 

@@ -85,6 +85,7 @@ class HalFile {
     return DirectoryRead::Record;
   }
   size_t size() const { return bytes ? bytes->size() : 0; }
+  bool isDirectory() const { return !directory.empty(); }
   bool close() {
     bytes = nullptr;
     directory.clear();

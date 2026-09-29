@@ -26,6 +26,7 @@
 #include "pocket_daily/PocketDailyActivity.h"
 #include "pocket_daily/live_studio/DevTrace.h"
 #include "pocket_daily/live_studio/LiveFrameCapture.h"
+#include "pocket_daily/nearby_sync/ExchangeWindow.h"
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
@@ -87,6 +88,7 @@ void ActivityManager::renderTaskLoop() {
         PocketDaily::LiveFrameCapture::maybeCapture(renderer.getFrameBuffer(), renderer.getDisplayWidth(),
                                                     renderer.getDisplayHeight());
       }
+      completedRenders.fetch_add(1, std::memory_order_acq_rel);
       const UBaseType_t stackHeadroom = uxTaskGetStackHighWaterMark(nullptr);
       if (stackHeadroom < 1024)
         LOG_ERR("ACT", "Render stack headroom low: %uB", (unsigned)stackHeadroom);
@@ -150,6 +152,7 @@ void ActivityManager::loop() {
     currentActivity->loop();
   }
 
+  bool closedBook = false;
   while (pendingAction != PendingAction::None) {
     if (pendingAction == PendingAction::Pop) {
       RenderLock lock;
@@ -162,6 +165,7 @@ void ActivityManager::loop() {
       }
 
       ActivityResult pendingResult = std::move(currentActivity->result);
+      closedBook = closedBook || currentActivity->isReaderActivity();
 
       // Destroy the current activity
       exitActivity(lock);
@@ -198,7 +202,13 @@ void ActivityManager::loop() {
       }
 
     } else if (pendingActivity) {
-      // Current activity has requested a new activity to be launched
+      // Current activity has requested a new activity to be launched.
+      // Pocket Reading Sync: a screen that does not tolerate the radio (a book,
+      // a Wi-Fi mode, the Nearby Sync screen, any dialog that may need the
+      // heap) gets NimBLE released before it is constructed further.
+      closeExchangeWindowFor(*pendingActivity);
+      closedBook = closedBook || (pendingAction == PendingAction::Replace && isReaderActivity() &&
+                                  !pendingActivity->isReaderActivity());
       RenderLock lock;
 
       if (pendingAction == PendingAction::Replace) {
@@ -227,6 +237,9 @@ void ActivityManager::loop() {
       continue;
     }
   }
+
+  // Wait until all pending transitions settle, including Pop -> Home and result handlers.
+  if (closedBook) armExchangeWindowAfterBook();
 
   if (requestedUpdate.exchange(false)) {
     // Using direct notification to signal the render task to update
@@ -410,6 +423,29 @@ bool ActivityManager::preventAutoSleep() const { return currentActivity && curre
 bool ActivityManager::paintSleepFrame() { return currentActivity && currentActivity->paintSleepFrame(); }
 bool ActivityManager::requiresExclusiveStorageLoop() const {
   return currentActivity && currentActivity->requiresExclusiveStorageLoop();
+}
+
+bool ActivityManager::allowsExchangeWindow() const {
+  return currentActivity && currentActivity->allowsExchangeWindow() && pendingAction == PendingAction::None &&
+         !isReaderActivity();
+}
+
+void ActivityManager::closeExchangeWindowFor(const Activity& next) {
+  if (next.allowsExchangeWindow()) return;
+  using Pocket::NearbySync::Window::CloseReason;
+  const CloseReason reason = next.isReaderActivity() ? CloseReason::BOOK_OPENED
+                             : (next.name == "CrossPointWebServer" || next.name == "PocketNearbySync")
+                                 ? CloseReason::RADIO_OWNER
+                                 : CloseReason::LEFT_SHELL;
+  Pocket::NearbySync::Window::close(reason);
+}
+
+void ActivityManager::armExchangeWindowAfterBook() {
+  // A book was just closed onto the shell: the reader recorded its place in
+  // onExit, so a paired phone can take it once Home is drawn.
+  if (allowsExchangeWindow()) {
+    Pocket::NearbySync::Window::arm(Pocket::NearbySync::Window::Trigger::BOOK_CLOSED, renderCount());
+  }
 }
 
 bool ActivityManager::isReaderActivity() const {
