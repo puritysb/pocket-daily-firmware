@@ -21,9 +21,16 @@ transcript. Current source and release records override dated observations.
   Browser host no BLE window; sleep default/Blank screens back to stock; UI packs
   and live frame capture to be removed with the themes restored to stock.
   Host 874/874, default build clean. Not yet on X3/X4.
-- The companion removed its `.uipack` encoder and live-frame fetching on
-  2026-09-25 (app `a98e879`); the firmware theme-metric routing and render-task
-  frame capture have no client today.
+- 2026-10-01, branch `refactor/remove-ui-packs`: after the companion dropped
+  its `.uipack` encoder, theme inspector and frame fetching (app `a98e879`),
+  the firmware removed UI packs (`ffe19edf`), live frame capture (`ad38b5db`)
+  and the saved screen preview (`e5d6e79c`); moved content-card drawing to
+  `PocketDaily::Content` (`b5be8778`) and Articles rows into the activity
+  (`4485e457`); and restored the stock themes, keeping only per-label
+  `UiCjkFont`, `StatusBarTitle` and Home paging (`6a9b8c8c`, fixes R-7/R-9).
+  The WebSocket status/prefs push and `liveStudio.mode`/`wsPort` stay.
+  Host 848/848, default build clean (static RAM 69,912 → 69,496 B, flash
+  6,396,307 → 6,369,675 B). Not yet on X3/X4.
 
 ## Product version reset — 2026-09-30
 

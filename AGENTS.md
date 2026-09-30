@@ -68,7 +68,7 @@ improving reading is out of scope.
    you need the mechanism or example behind a rule.
 4. `docs/PROJECT_MEMORY.md` for repository boundaries and durable state.
 5. `docs/release-checklist.md` before declaring a release complete.
-6. For live-studio, live sync, or UI-pack work, `docs/live-studio-v1.md` and
+6. For live-studio or live sync work, `docs/live-studio-v1.md` and
    the companion design `docs/LIVE_STUDIO_DESIGN.md` in the sibling app
    repository.
 

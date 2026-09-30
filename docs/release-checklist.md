@@ -60,7 +60,10 @@ Host render tests do not sign off panel or radio behavior.
 - [ ] Reading-position round trips between the companion and reader land on
       the same text, including entities, long paragraphs, hyphenation and CJK.
 - [ ] Built-in and SD fonts, character/word spacing, bilingual pages, footnotes,
-      RTL, grayscale images and UI packs work in all four orientations.
+      RTL and grayscale images work in all four orientations.
+- [ ] Classic, Lyra, Lyra 3 Covers and RoundedRaff draw stock CrossPoint menus
+      and button hints (two-line labels), Korean labels render, and an
+      OPDS-configured Home pages with page marks instead of covering the hints.
 - [ ] Home exposes one Pocket Daily entry; Articles opens from Pocket Daily.
 - [ ] Pocket Daily's first button reads Home and opens CrossPoint Home.
 - [ ] A book opened from Pocket Daily returns there on Back; an article returns to

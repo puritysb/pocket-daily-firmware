@@ -26,7 +26,8 @@ The loader itself does not create tasks, dispatch network work, write storage,
 or claim a rendered frame. A caller requesting a particular revision cannot
 silently accept active-store fallback to an older one; offline startup may.
 
-`ContentPresentation` hosts `BaseTheme::drawContentPage` inside the existing
+`ContentPresentation` hosts `PocketDaily::Content::drawContentPage`
+(`src/pocket_daily/ContentPage.cpp`) inside the existing
 transfer activity. Presentation is gated against active file writers; queued
 and drawing states block new writers until the display call finishes and fonts
 are released. Back returns to the transfer view without ending the session.
@@ -81,18 +82,15 @@ tests now compile the production ContentPresentation.cpp against fake storage,
 font and display boundaries: load/OOM, missing coverage, font-read and paint
 failures, delayed driver completion, navigation, hide and explicit recovery.
 They verify no display call on failed paint, no implicit retry, and release of
-fonts/the writer gate. The controller permits capture only after driver completion.
-ActivityManager now checks the activity's capture permission before publishing
-a live frame; manual screenshots check the same permission under RenderLock
-before writing a BMP or flashing the screenshot border. The transfer activity
-also tracks whether its last native/content paint completed, so closing a failed
-view cannot expose the damaged buffer before the transfer view repaints. Other
-native activities retain their previous capture policy. The last valid live
-capture remains historical; a failed content paint emits no new frame.
+fonts/the writer gate. The transfer activity also tracks whether its last
+native/content paint completed, so closing a failed view cannot expose the
+damaged buffer before the transfer view repaints.
 
-Controller capture-state transitions are host-tested. Actual manager/screenshot
-scheduling and host/device pixel parity remain unverified; the fake theme does
-not test actual page pixels or font-facade allocation behavior.
+Controller phase transitions (Queued → Rendered/Failed) are host-tested against
+a link-time fake of `drawContentPage`, which does not test actual page pixels or
+font-facade allocation behavior. Host/device pixel parity remains unverified.
+The live-frame capture permission and the screenshot guard built on it were
+removed 2026-10-01 with live frame capture (`docs/live-studio-v1.md`).
 
 The live path also needs bounded font access: File Transfer unloads SD fonts,
 whereas the existing Pocket renderer may rebuild page-sized font caches.
@@ -105,8 +103,8 @@ See [bounded-ui-fonts.md](bounded-ui-fonts.md) for exact bounds and evidence.
 
 ## Live page geometry
 
-`ContentPageRenderer` now owns shared page drawing used by both BaseTheme's
-device adapter and the host target. It receives preflighted font ID, theme
+`ContentPageRenderer` now owns shared page drawing used by both the device
+adapter (`PocketDaily::Content::drawContentPage`) and the host target. It receives preflighted font ID, theme
 spacing/padding, translated empty-state/button strings, immutable card and an
 image painter callback. The device adapter retains UITheme/HAL ownership and
 post-draw font-I/O checks. The common function neither selects fonts nor performs
@@ -132,8 +130,8 @@ counts and image height are bounded by the remaining body area.
 Host tests cover X3/X4 portrait/landscape dimensions, four rotated asymmetric
 insets, exact minimum empty-state height, invalid cursors and int32 extremes.
 These prove layout-box arithmetic, not actual glyph ink bearings, real panel
-bezel calibration or rendered pixel parity. This shared geometry is not the
-still-unimplemented host-renderer ABI or declarative UI-pack runtime.
+bezel calibration or rendered pixel parity. This shared geometry is used by,
+but is not itself, the host-renderer ABI (`host/`).
 
 Content font preflight now uses `checkLayoutText`: validated UTF-8 is checked
 in bounded128-byte chunks, with newline/CR/tab normalized to spaces. Those are
@@ -169,7 +167,7 @@ load discards the snapshot, rather than exposing partial cards.
 
 The activity retains the selected revision's65-byte identifier with its cards.
 For a matching card image, it opens only that published revision's canonical
-path through HAL and calls the shared BaseTheme image renderer. PBM validation
+path through HAL and calls the shared `PocketDaily::Content::drawContentImage`. PBM validation
 precedes pixel output. Rasterization reads <=64B per row, uses integer
 nearest-neighbor fitting without upscaling, and writes through the existing
 oriented GfxRenderer. The image occupies the remaining area below card text and

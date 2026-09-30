@@ -25,7 +25,7 @@ draft-file import. Nothing on the reader changes.
   `/pocket-daily/content/<revision>/<name>`. Anything else is 400.
 - `offset` is 1–7 decimal digits. The reply is up to 4,096 bytes of the file
   from that offset as `application/octet-stream`, sent with the same bounded
-  socket timeout as the screen preview. 404 when the file does not exist,
+  socket timeout as the crash report. 404 when the file does not exist,
   416 when the offset is at or past its end.
 - Any published revision can be read, not only the active one: published
   revisions are immutable and content-addressed. The companion asks

@@ -16,7 +16,7 @@ companion routes (`/api/pocket/v1/*`, the port-82 upload stream, and the Live
 Studio WebSocket push) are owned by `src/pocket_daily/web/` — see
 [SEAM.md](SEAM.md) for the ownership boundary,
 [nearby-sync-v1.md](nearby-sync-v1.md) for the private-AP sync protocol, and
-[live-studio-v1.md](live-studio-v1.md) for the live frame/UI-pack endpoints.
+[live-studio-v1.md](live-studio-v1.md) for the WebSocket status/prefs push.
 Which routes exist in a given mode is gated by the profile selected in
 `pocket_daily/web/PrivateApPolicy.h`.
 

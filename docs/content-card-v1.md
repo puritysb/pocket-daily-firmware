@@ -9,7 +9,7 @@ Status: codec implemented in firmware `ContentCard.cpp` and companion
 shared device/host rendering. **Physical acceptance remains unverified**;
 historical incremental notes below are not the current implementation status.
 This is the text-card payload referenced by a PDCM manifest entry of kind 1.
-It is not the provider's wire JSON and does not change `.pdl` or `.uipack`.
+It is not the provider's wire JSON and does not change `.pdl`.
 
 ## Exact 512-byte layout
 

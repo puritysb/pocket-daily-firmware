@@ -102,9 +102,9 @@ direct PR:
 | R-4 | Wake-refresh inputs dropped; OK-held resume bypassed the boot-loop guard | **Fixed**: Home routes get `needsWakeRefresh`; reader resume (OK held, or waking from the book's Quick Resume page) uses stock's `readerActivityLoadCount` guard and `allowFastInitialReaderRefresh`; unused `rebootedFromPanic` removed | Device: Quick Resume sleep from a book, wake → same page; crash-loop book is not reopened |
 | R-5 | Duplicate page-load retry counters | **Fixed**: upstream's `pageLoadRetryCount`/`MAX_PAGE_LOAD_RETRIES` only | Host build |
 | R-6 | Crash report lost logs on brownout / no-marker watchdog | **Fixed**: `begin()` keeps diagnostics for every `isRebootFromCrash()` reset; message/stack cleared when no panic hook ran; retained strings terminated | Device only (reset reasons are not host-testable) |
-| R-7 | Merge rolled back upstream's `drawHintLabel` wrap and screen-width button positions | Open → theme restoration | Frame diff after themes return to upstream |
+| R-7 | Merge rolled back upstream's `drawHintLabel` wrap and screen-width button positions | **Fixed** (`6a9b8c8c`): themes rebuilt from `upstream/master`; two-line hint labels and panel-width button positions are upstream's again | `git diff upstream/master -- src/components` shows only the CJK font, `StatusBarTitle` and Home paging hunks. Device: hints on X3/X4, all four orientations |
 | R-8 | Segmented inflate window no longer on the index path | Open | Confirm the X3 "Failed to index" case on hardware first |
-| R-9 | Dead declarations and code | **Partly fixed**: `goToRecentBooks` removed, `renderBlankSleepScreen` defined again (stock Blank mode), `CssParser` identical to upstream. Theme leftovers (`drawTabBar`, `drawKeyboardKey`, `MENUDBG`) go with the theme restoration | — |
+| R-9 | Dead declarations and code | **Fixed**: `goToRecentBooks` removed, `renderBlankSleepScreen` defined again (stock Blank mode), `CssParser` identical to upstream; theme leftovers (`drawList`, `drawTabBar`, `drawKeyboardKey`, `TabInfo`, `MENUDBG`) removed with the theme restoration (`6a9b8c8c`) | `scripts/test_sync_routes.py` `test_stock_themes_carry_no_product_code` |
 | R-10 | Two loop-stack macros | **Fixed** structurally (one `#if/#else`); 16 KB kept until `uxTaskGetStackHighWaterMark()` is measured on the companion, BLE and OTA paths | Build |
 
 ## Q — stock deviations
@@ -129,12 +129,18 @@ packs and live frame capture leave the firmware and the themes return to stock.
   upstream's `WifiPowerSaveGuard`; OPDS aborts past 128 entries or a 2 KiB field
   where upstream truncates. Open.
 - **Stacks**: render task 8 → 12 KB (`ActivityManager.cpp:53`). Open (measure).
-- **Themes**: every theme reads metrics through `UITheme::getMetrics()` so
-  `.uipack` files can override them; the companion stopped using packs on
-  2026-09-25 (app `a98e879`). Decided: remove, restore stock themes.
+- **Themes**: **Done** 2026-10-01. UI packs (`ffe19edf`) and live frame
+  capture (`ad38b5db`) are removed and the themes are rebuilt from
+  `upstream/master` (`6a9b8c8c`). What remains in `src/components` (+184/−62
+  against upstream): per-label `UiCjkFont::fontForText` (see H),
+  `StatusBarTitle`, and minimal Home menu paging
+  (`BaseTheme::drawMenuPageArrows`) so the Pocket Daily row cannot draw over
+  the button hints. Pocket content cards and Articles rows are drawn outside
+  the themes (`b5be8778`, `4485e457`).
 - **Home**: one Pocket Daily row with the stock `Recent` icon (Classic draws no
   menu icons, as in stock). Stock Home shows 4 rows (+OPDS); with ours, Classic
-  fits 5 rows per page on X3/X4, so only an OPDS-configured Classic Home pages.
+  fits 5 rows per page on X3/X4, so only an OPDS-configured Home pages (with
+  page marks, on Classic and the Lyra themes).
   BLE windows were removed from Home, File Browser and Library.
 
 ## D — duplicates to delete
@@ -147,8 +153,10 @@ packs and live frame capture leave the firmware and the themes return to stock.
   `Page.cpp` now reserves twice.
 - 192-word chunking (51191628): moot with upstream's WordStore;
   `LONG_BLOCK_WORDS`/`WORD_CAPACITY_STEP_LIMIT` are dead.
-- `UiCjkFont::fontForText` in themes: upstream resolves per-string UI fallback
-  through `setupUiFallbacks`/`resolveTextFontId`.
+- ~~`UiCjkFont::fontForText` in themes~~: not a duplicate on X3/X4.
+  Upstream's per-string UI fallback (`setupUiFallbacks`/`resolveTextFontId`)
+  returns early without PSRAM (`SdCardFontSystem.cpp`), so Korean labels need
+  `UiCjkFont`. Reclassified H 2026-10-01.
 
 ## H — device and fork patches (kept, never sent upstream)
 
@@ -157,6 +165,9 @@ packs and live frame capture leave the firmware and the themes return to stock.
 - 12 KB build-suspend floor, X3 76-row render strips, ReaderPerf stages.
 - BoundedUI font mode, kerning/ligature lookup hooks, page glyph pinning
   (93017b70, 4dbf8a72), `StatusBarTitle`.
+- `UiCjkFont::fontForText` at theme text sites: upstream's
+  `SdCardFontSystem::setupUiFallbacks` returns early when there is no PSRAM,
+  so without it Korean menu, hint and title labels have no glyphs on X3/X4.
 - Verified ESP-IDF TLS only (wolfSSL/SecureNet removed to fit the 6,553,600 B
   OTA slot), static 4 KiB flasher staging buffer, 8 s LAN timeout and 1 KiB RX
   buffer, SD font release before Wi-Fi.
@@ -174,7 +185,7 @@ Documented by their own contracts; the seam mechanics are in `docs/SEAM.md`.
 | Reading-progress offer, exact positions | `docs/reading-progress-v1.md` | `EpubReaderActivity` offer and exit record |
 | Bilingual EPUB | `docs/bilingual-epub.md` | Parser filter, reader cycle, long-press value |
 | Companion web routes, port-82 upload, private AP | `docs/webserver-endpoints.md`, `docs/transfer-control-v1.md`, `docs/SEAM.md` | Web server hooks E1–E5 |
-| Live Studio (UI packs, frame capture) | `docs/live-studio-v1.md` | Theme metric routing, render-task capture |
+| Live Studio (WebSocket status/prefs push; UI packs and frame capture removed 2026-10-01) | `docs/live-studio-v1.md` | `wireLiveStudioHost()` thunks in `CrossPointWebServer.cpp`; no theme or render-task hooks |
 | Glance, profile, content cards | `docs/pocket-glance-v1.md`, `docs/pocket-profile-v1.md`, `docs/content-*.md` | none outside `src/pocket_daily/` |
 | Staged firmware offer, dev remote flash | `docs/dev-update-return.md` | `main.cpp` boot, `SdFirmwareUpdateActivity` |
 | Daily Brief sleep frame, WAKE cue | `docs/nearby-sync-v1.md` | `Activity::paintSleepFrame`, `SleepActivity` |
