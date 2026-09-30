@@ -34,6 +34,17 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertIn("activityManager.goToArticles()", pocket)
         self.assertIn("activityManager.goToPocketDaily()", articles)
 
+    def test_page_turns_defer_the_progress_write(self):
+        # renderBook() queues the position; loop() writes it after PROGRESS_SAVE_IDLE_MS
+        # and onExit flushes it. A synchronous save in renderBook() (the 1.6.5 merge
+        # regression) makes every turn wait on the SD rename again.
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "src/activities/reader/EpubReaderActivity.cpp").read_text()
+        render = source[source.index("void EpubReaderActivity::renderBook()"):]
+        render = render[:render.index("\nvoid EpubReaderActivity::")]
+        self.assertTrue("progressSavePending = true;" in render, "renderBook() must queue the save")
+        self.assertFalse("saveProgress(currentSpineIndex" in render, "renderBook() writes progress synchronously")
+
     def test_pocket_connection_guidance_is_separate_from_browser_transfer(self):
         root = Path(__file__).resolve().parents[1]
         chooser = (root / "src/activities/network/NetworkModeSelectionActivity.cpp").read_text()
