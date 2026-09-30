@@ -181,10 +181,12 @@ inline SettingInfo buildDictionarySetting(const std::vector<DictionaryEntry>& di
 }
 
 inline std::vector<StrId> buildLongPressMenuValues() {
-  static constexpr StrId VALUES[] = {StrId::STR_KOSYNC,           StrId::STR_DISABLED,   StrId::STR_BOOKMARK_OPTION,
-                                     StrId::STR_BILINGUAL_TOGGLE, StrId::STR_DICTIONARY, StrId::STR_READER_MENU};
-  const size_t count = BoardConfig::hasHomeKey() ? std::size(VALUES) : std::size(VALUES) - 1;
-  return {VALUES, VALUES + count};
+  // Stored by position. Stock hides the trailing Reader Menu on boards without
+  // a Home key; Bilingual Toggle is appended after it, so every position stays
+  // listed (Reader Menu opens the reader menu on long press here).
+  static constexpr StrId VALUES[] = {StrId::STR_KOSYNC,     StrId::STR_DISABLED,    StrId::STR_BOOKMARK_OPTION,
+                                     StrId::STR_DICTIONARY, StrId::STR_READER_MENU, StrId::STR_BILINGUAL_TOGGLE};
+  return {VALUES, VALUES + std::size(VALUES)};
 }
 
 inline std::vector<StrId> homeThemeValues() {

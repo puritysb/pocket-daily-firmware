@@ -165,9 +165,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     LP_MENU_KOSYNC = 0,
     LP_MENU_DISABLED = 1,
     LP_MENU_BOOKMARK = 2,
-    LP_MENU_BILINGUAL_TOGGLE = 3,
-    LP_MENU_DICTIONARY = 4,
-    LP_MENU_READER_MENU = 5,
+    LP_MENU_DICTIONARY = 3,
+    LP_MENU_READER_MENU = 4,
+    // Pocket Daily: appended so stock files keep their meaning (SettingsMigration.h).
+    LP_MENU_BILINGUAL_TOGGLE = 5,
     LONG_PRESS_MENU_FUNCTION_COUNT
   };
 
