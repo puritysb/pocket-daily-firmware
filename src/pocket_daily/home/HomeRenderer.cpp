@@ -134,6 +134,10 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   };
 
   auto drawReading = [&](int x, int y, int cw, int ch) {
+    // Keep title, artwork and progress together when the Daily panel is off.
+    const int readingH = std::min(ch, cw * 3 / 4 + 24);
+    y += (ch - readingH) / 2;
+    ch = readingH;
     const int panelBottom = y + ch;
     renderer.drawRect(x, y, cw, ch, 2, true);
     const bool hasBook = renderReadingSnapshot.valid;
@@ -145,12 +149,13 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
       return;
     }
 
-    // One flat editorial grid: artwork and metadata share the same top/bottom
-    // baselines. Removing the floating slab makes the enlarged cover feel like
-    // part of the page instead of a card placed on top of another card.
-    const int coverW = std::min(cw * 60 / 100, std::max(cw * 47 / 100, ch * 2 / 3));
-    drawReadingCover(x, y, coverW, ch);
-    const int metaX = x + coverW;
+    // A portrait book sits inside a stable column. Turning the Daily panel
+    // off adds breathing room, never a taller/stretched book frame.
+    const int coverColumn = cw * 47 / 100;
+    const int coverH = std::min(ch - 24, (coverColumn - 24) * 3 / 2);
+    const int coverW = coverH * 2 / 3;
+    drawReadingCover(x + (coverColumn - coverW) / 2, y + (ch - coverH) / 2, coverW, coverH);
+    const int metaX = x + coverColumn;
     renderer.drawLine(metaX, y, metaX, panelBottom, 2, true);
     const int textX = metaX + 14;
     const int textW = x + cw - textX - 13;
@@ -353,7 +358,7 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   // Landscape panels (X4, 800×480) split into two columns — left: reading and
   // cards, right: weather and TODAY. Portrait (X3) keeps a single column in the
   // profile's order. Every section leads with a small labeled overline rule.
-  const int topY = m.topPadding + m.headerHeight + m.verticalSpacing;
+  const int topY = std::max(m.topPadding + m.headerHeight + m.verticalSpacing, view.contentTopInset);
   const int statusY = pageH - lineS - 12;
 
   // "LABEL ────" overline. CJK-capable: the weather section uses the

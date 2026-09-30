@@ -233,6 +233,8 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Enum(StrId::STR_QUICK_RESUME_TIMEOUT, &CrossPointSettings::quickResumeSleepScreen,
                           {StrId::STR_STATE_OFF, StrId::STR_STATE_ON}, "quickResumeSleepScreen",
                           StrId::STR_CAT_DISPLAY),
+        SettingInfo::Toggle(StrId::STR_SLEEP_WAKE_INDICATOR, &CrossPointSettings::sleepWakeIndicator,
+                            "sleepWakeIndicator", StrId::STR_CAT_DISPLAY),
         SettingInfo::Toggle(StrId::STR_POCKET_SLEEP_COVER, &CrossPointSettings::pocketDailySleepCover,
                             "pocketDailySleepCover", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_HIDE_BATTERY, &CrossPointSettings::hideBatteryPercentage,

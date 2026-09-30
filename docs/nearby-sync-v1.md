@@ -323,7 +323,7 @@ large firmware staging, content batch, lock/background interruption and retry,
 explicit/end-of-batch shutdown, user Wi-Fi change, reader reboot and installation
 version verification. Measure free heap/largest block and watchdog behavior.
 
-## Companion preferences (updated 2026-09-26)
+## Companion preferences (updated 2026-09-30)
 
 `GET`/`POST /api/pocket/v1/preferences` is registered only in the POCKET_SYNC
 (private AP) and COMPANION (Pocket Sync → Join a Network) server profiles. GET
@@ -332,13 +332,14 @@ integers:
 
 ```json
 {"startupApp":0,"pocketDailySleepCover":1,"sleepTimeoutMinutes":10,"fontSize":1,
- "sideButtonLayout":0,"frontButtonFollowOrientation":0}
+ "sideButtonLayout":0,"frontButtonFollowOrientation":0,"sleepWakeIndicator":1}
 ```
 
 | Key | POST accepts | Meaning |
 | --- | --- | --- |
 | `startupApp` | integer 0..1 | 0 Home, 1 Pocket Daily |
 | `pocketDailySleepCover` | boolean, or integer (non-zero = on) | Pocket Daily sleep cover |
+| `sleepWakeIndicator` | boolean, or integer (non-zero = on) | show WAKE at the physical power switch on sleep screens; default on |
 | `sleepTimeoutMinutes` | integer 1..31 | 31 means never |
 | `fontSize` | integer 0..3 | small, medium, large, extra large |
 | `sideButtonLayout` | integer 0..2 | 0 side Up = previous page, Down = next; 1 swapped; 2 side buttons do not turn pages |
@@ -349,7 +350,7 @@ setting changes: one invalid value (out of range, wrong JSON type, or a string)
 returns `400 text/plain` with a short reason such as `Invalid sideButtonLayout`
 and applies nothing. Unknown keys are ignored. Success saves `settings.json`
 and returns `200 {"saved":true}`, then emits the Live Studio `prefs` event; a
-failed save restores all six previous values and returns 500.
+failed save restores all seven previous values and returns 500.
 
 `sideButtonLayout` and `frontButtonFollowOrientation` were added on
 2026-09-26. Their presence in the GET response is the capability signal:
@@ -358,3 +359,12 @@ reader whose GET lacks it (an older reader would silently ignore it and report
 success). Both take effect immediately — `MappedInputManager` reads `SETTINGS`
 on every button query — so the reader does not need to leave Sync or restart.
 They are the same values as Settings → Controls on the reader.
+
+`sleepWakeIndicator` was added on 2026-09-30. Its GET presence is the capability
+signal; omit it when talking to older firmware. It persists via the settings
+registry and is also available in Settings → Display. Missing saved values keep
+it enabled. The change takes effect on the next sleep frame, including Daily
+Brief, covers, custom/transparent screens and Quick Resume. It does not change
+how the power button works. The cue remains anchored in physical portrait at
+X3's top switch or X4's upper-right switch regardless of reading orientation.
+No new endpoint or automatic firmware installation is involved.

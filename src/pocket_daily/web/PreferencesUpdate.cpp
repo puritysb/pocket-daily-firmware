@@ -47,6 +47,10 @@ bool parsePreferences(const char* json, const size_t length, const PreferenceLim
     error = "Invalid startupApp";
     return false;
   }
+  if (!readToggle(doc["sleepWakeIndicator"], parsed.hasSleepWakeIndicator, parsed.sleepWakeIndicator)) {
+    error = "Invalid sleepWakeIndicator";
+    return false;
+  }
   if (!readToggle(doc["pocketDailySleepCover"], parsed.hasSleepCover, parsed.sleepCover)) {
     error = "Invalid pocketDailySleepCover";
     return false;

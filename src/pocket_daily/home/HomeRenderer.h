@@ -124,6 +124,7 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env);
 // Daily Brief / ambient glance (sleep frame when isSleep).
 struct BriefView {
   bool isSleep = true;
+  int contentTopInset = 0;                      // reserved for the physical wake cue when present
   const char* headerMeta = nullptr;             // snapshot date/sync, nullptr when powered off
   const PocketDaily::Glance* glance = nullptr;  // required
   Reading reading;

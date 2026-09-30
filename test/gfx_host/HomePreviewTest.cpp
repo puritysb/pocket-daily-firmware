@@ -1,4 +1,5 @@
 #include <EpdFontData.h>
+#include <GfxRenderer.h>
 #include <PocketUIHost.h>
 #include <gtest/gtest.h>
 
@@ -10,6 +11,7 @@
 
 #include "pocket_daily/ContentChecksum.h"
 #include "pocket_daily/home/HomeRenderer.h"
+#include "util/PowerWakeCue.h"
 
 // Shared Home / Daily Brief painters through the host ABI (P1-3). These pin
 // structure and determinism; pixel parity with the device is a hardware check.
@@ -353,3 +355,113 @@ TEST_P(HomePreview, DailyWordItemAndPinnedCardSection) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Panels, HomePreview, testing::Values(std::make_pair(792u, 528u), std::make_pair(800u, 480u)));
+
+// Capture the actual painter callback, not a duplicate of its layout formula.
+TEST(HomeCoverLayout, PortraitFrameSurvivesDailyPanelChangesAndRotations) {
+  for (const auto [width, height] : {std::pair{792, 528}, {800, 480}}) {
+    HalDisplay panel(width, height);
+    GfxRenderer renderer(panel);
+    renderer.begin();
+    for (int rotation = 0; rotation < 4; ++rotation) {
+      renderer.setOrientation(static_cast<GfxRenderer::Orientation>(rotation));
+      for (const auto placement :
+           {PocketDaily::DailyProfile::WeatherPanel::Top, PocketDaily::DailyProfile::WeatherPanel::Bottom,
+            PocketDaily::DailyProfile::WeatherPanel::Off}) {
+        struct Cover {
+          int x = 0, y = 0, w = 0, h = 0;
+        } cover;
+        PocketDaily::Glance glance{};
+        PocketDaily::Home::Row row{};
+        row.reading = true;
+        PocketDaily::Home::HomeView view{};
+        view.isX3 = width == 792;
+        view.rows = &row;
+        view.count = 1;
+        view.reading = {true, "Sample book", "Author", 35};
+        view.glance = &glance;
+        view.profile.weather = placement;
+        PocketDaily::Home::Env env{};
+        env.metrics = {8, 48, 12, 16, 20};
+        env.context = &cover;
+        env.drawCover = [](void* target, GfxRenderer&, int x, int y, int w, int h) {
+          *static_cast<Cover*>(target) = {x, y, w, h};
+          return true;
+        };
+        PocketDaily::Home::renderHome(renderer, view, env);
+        EXPECT_GT(cover.w, 12);
+        EXPECT_GT(cover.h, cover.w);
+        EXPECT_LE(std::abs(cover.w * 3 - cover.h * 2), 2);
+        EXPECT_GE(cover.x, 0);
+        EXPECT_GE(cover.y, 0);
+        EXPECT_LE(cover.x + cover.w, renderer.getScreenWidth());
+        EXPECT_LE(cover.y + cover.h, renderer.getScreenHeight());
+        EXPECT_TRUE(panel.guardsIntact());
+      }
+    }
+  }
+}
+
+TEST_P(HomePreview, SleepWakeAndCoverOptionsAreIndependentAndReversible) {
+  const auto profile = defaults();
+  const auto oldFrame = brief(profile);
+  ASSERT_EQ(pdui_render_sleep_brief(context.get(), &profile, PDUI_SAMPLE_ALL, 2), PDUI_OK);
+  EXPECT_EQ(frame(), oldFrame);
+  ASSERT_EQ(pdui_render_sleep_brief(context.get(), &profile, PDUI_SAMPLE_ALL, 3), PDUI_OK);
+  const auto withWake = frame();
+  EXPECT_NE(withWake, oldFrame);
+  ASSERT_EQ(pdui_render_sleep_brief(context.get(), &profile, PDUI_SAMPLE_ALL, 1), PDUI_OK);
+  EXPECT_NE(frame(), withWake);
+  ASSERT_EQ(pdui_render_sleep_brief(context.get(), &profile, PDUI_SAMPLE_ALL, 2), PDUI_OK);
+  EXPECT_EQ(frame(), oldFrame);
+  ASSERT_EQ(pdui_render_sleep_brief(context.get(), &profile, PDUI_SAMPLE_ALL, 4), PDUI_INVALID_ARGUMENT);
+  pdui_frame_info info{};
+  EXPECT_EQ(pdui_get_frame_info(context.get(), &info), PDUI_NO_FRAME);
+}
+
+TEST(SleepWakeCue, RemainsAtPhysicalPowerSwitchAndRestoresEveryOrientation) {
+  for (const auto [width, height] : {std::pair{792, 528}, {800, 480}}) {
+    HalDisplay panel(width, height);
+    GfxRenderer renderer(panel);
+    renderer.begin();
+    std::vector<uint8_t> portrait;
+    for (int rotation = 0; rotation < 4; ++rotation) {
+      const auto orientation = static_cast<GfxRenderer::Orientation>(rotation);
+      renderer.setOrientation(orientation);
+      renderer.clearScreen();
+      PowerWakeCue::draw(renderer, width == 792, "");
+      EXPECT_EQ(renderer.getOrientation(), orientation);
+      const std::vector<uint8_t> pixels(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize());
+      if (rotation == 0) portrait = pixels;
+      EXPECT_EQ(pixels, portrait);
+      EXPECT_TRUE(panel.guardsIntact());
+      EXPECT_NE(std::count(pixels.begin(), pixels.end(), 0xFF), pixels.size());
+    }
+  }
+}
+
+TEST(SleepWakeCue, BriefSectionsStartBelowTheWakeTab) {
+  for (const auto [width, height] : {std::pair{792, 528}, {800, 480}}) {
+    HalDisplay panel(width, height);
+    GfxRenderer renderer(panel);
+    renderer.begin();
+    renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+    PocketDaily::Glance glance{};
+    PocketDaily::Card card{};
+    PocketDaily::Home::BriefView view{};
+    view.glance = &glance;
+    view.pocketCard = &card;
+    view.reading = {true, "Book", "Author", 42};
+    view.contentTopInset = PowerWakeCue::portraitContentTop(width == 792);
+    int coverY = -1;
+    PocketDaily::Home::Env env{};
+    env.metrics = {8, 48, 12, 16, 20};
+    env.context = &coverY;
+    env.drawCover = [](void* context, GfxRenderer&, int, int y, int, int) {
+      *static_cast<int*>(context) = y;
+      return true;
+    };
+    PocketDaily::Home::renderBrief(renderer, view, env);
+    EXPECT_GE(coverY, view.contentTopInset);
+    EXPECT_TRUE(panel.guardsIntact());
+  }
+}

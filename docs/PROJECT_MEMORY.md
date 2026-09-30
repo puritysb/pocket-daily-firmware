@@ -14,6 +14,21 @@ transcript. Current source and release records override dated observations.
   updater only accepts product stable tags. Stable release still requires
   exact-artifact X3/X4 sign-off in `docs/release-checklist.md`.
 
+## Sleep WAKE control — 2026-09-30
+
+- Optional `sleepWakeIndicator` GET/POST preference defaults on and persists in
+  Settings → Display. The companion gates editing/sending on GET presence.
+  Next sleep frame honors it in Brief, covers, custom/transparent and Quick
+  Resume modes. Seven preference fields roll back together if persistence fails.
+- PowerWakeCue now takes hardware/label inputs for shared host rendering;
+  portrait Brief sections reserve space below the tab. Additive host ABI options
+  let the app preview WAKE and cover independently; old ABI behavior is retained.
+- Verified 868 host tests, warning-free default build (69,912 B static RAM,
+  6,410,009 B flash). Full cppcheck still reports the existing 2 medium/210 low
+  findings. Companion Mac installed and iOS flow tested; firmware not installed
+  and physical sleep-frame/heap checks remain pending. Contract:
+  `docs/nearby-sync-v1.md`, host additions: `docs/live-studio-v1.md`.
+
 ## BLE integration and review — 2026-09-30
 
 - `codex/ble-sync-review` integrates held BLE `68a77147` onto main `ee188fe7`;

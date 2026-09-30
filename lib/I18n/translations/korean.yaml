@@ -121,3 +121,5 @@ STR_TRANSFER_INSTALL_LATER: "설치는 리더에서 확인 후 진행"
 STR_TRANSFER_SD_CARD: "책과 아티클은 SD 카드에 저장"
 STR_TRANSFER_APP_CONTROLS: "앱에서 일시정지 · 재시도 · 정리"
 STR_READING_OFFER_FORMAT: "%s: %d%% · 이동할까요?"
+
+STR_SLEEP_WAKE_INDICATOR: "절전 화면 WAKE 표시"
