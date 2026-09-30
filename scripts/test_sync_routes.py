@@ -241,6 +241,9 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertNotIn('"frameStream"', status)
         # The companion decodes liveStudio.mode as required.
         self.assertIn('live["mode"]', status)
+        # The saved Pocket screen preview went with it.
+        self.assertNotIn("/api/pocket/v1/screen-preview", routes)
+        self.assertNotIn('"screenPreviewAvailable"', status)
 
     def test_screen_presentation_is_sync_only_identity_first_and_advertised(self):
         root = Path(__file__).resolve().parents[1]

@@ -27,7 +27,6 @@
 #include "pocket_daily/ContentSealStore.h"
 #include "pocket_daily/PocketGlanceStore.h"
 #include "pocket_daily/PocketProfileStore.h"
-#include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/ReadingExchange.h"
 #include "pocket_daily/ReadingProgress.h"
 #include "pocket_daily/StagedFirmwareStore.h"
@@ -57,24 +56,13 @@ namespace {
 // heap and return to the global loop between every piece. The previous 512 B
 // write loop could block inside lwIP long enough to trip the task watchdog.
 // Each diagnostic request reads one chunk into the shared static staging
-// buffer and answers with one bounded socket write. A 53 KB X3 frame needs
-// ~13 requests instead of ~52.
+// buffer and answers with one bounded socket write.
 constexpr size_t CRASH_REPORT_CHUNK_BYTES = 1024;
-constexpr size_t SCREEN_PREVIEW_CHUNK_BYTES = firmware_flash::STAGING_BUFFER_BYTES;
 // A diagnostic chunk send blocks the loop task. Unlike an SD write it can
 // hang forever if the peer vanishes, so the loop watchdog must stay armed;
 // bounding the socket below the 5 s task-WDT window guarantees the send
 // returns (completed or aborted) before the watchdog could fire.
 constexpr unsigned long DIAGNOSTIC_SEND_TIMEOUT_MS = 3000;
-
-// LS-2 live frame fetch: same chunked octet-stream contract as the one-shot
-// screen preview, but reading the latest captured frame. Single slot — the
-// companion associates the fetched bytes with the newest `frame` event.
-// The fetch gate sits below the diagnostics floor on purpose: a 4 KiB shared
-// -buffer read plus one bounded send is far lighter than the crash report,
-// and an X3 in STA File Transfer idles within a few hundred bytes of the
-// 10 KiB diagnostics floor, which starved multi-chunk fetches in testing.
-constexpr uint32_t LIVE_FETCH_MIN_FREE_HEAP = 6U * 1024U;
 
 void note(const RouteDeps& d) {
   if (d.host.noteClientActivity) d.host.noteClientActivity(d.host.self);
@@ -930,75 +918,6 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
           static_cast<unsigned>(expectedSize), static_cast<unsigned long>(uploadedCrc));
 }
 
-void handleScreenPreview(WebServer& server) {
-  HalSystem::setCrashBreadcrumb("nearby:screen-preview");
-  if (!diagnosticsAffordable()) {
-    server.send(503, "text/plain", "Reader memory is too low for diagnostics right now");
-    return;
-  }
-  HalFile preview = Storage.open(PocketDaily::SCREEN_PREVIEW_PATH);
-  if (!preview || preview.isDirectory()) {
-    if (preview) preview.close();
-    server.send(404, "text/plain", "No Pocket Daily screen preview available");
-    return;
-  }
-
-  if (!server.hasArg("offset")) {
-    preview.close();
-    server.send(400, "text/plain", "Missing screen preview offset");
-    return;
-  }
-
-  const String offsetText = server.arg("offset");
-  if (offsetText.isEmpty()) {
-    preview.close();
-    server.send(400, "text/plain", "Invalid screen preview offset");
-    return;
-  }
-  for (size_t i = 0; i < offsetText.length(); i++) {
-    if (offsetText[i] < '0' || offsetText[i] > '9') {
-      preview.close();
-      server.send(400, "text/plain", "Invalid screen preview offset");
-      return;
-    }
-  }
-
-  const size_t previewSize = preview.size();
-  const size_t offset = static_cast<size_t>(offsetText.toInt());
-  if (offset >= previewSize || !preview.seek(offset)) {
-    preview.close();
-    server.send(416, "text/plain", "Screen preview offset out of range");
-    return;
-  }
-
-  uint8_t* body = firmware_flash::sharedStagingBuffer();
-  const size_t requested = std::min(previewSize - offset, SCREEN_PREVIEW_CHUNK_BYTES);
-  const int count = preview.read(body, requested);
-  preview.close();
-  if (count <= 0) {
-    server.send(500, "text/plain", "Could not read screen preview chunk");
-    return;
-  }
-
-  // The blocking TCP send can exceed the private-AP loop watchdog window on a
-  // weak link (measured: a task-watchdog reset at nearby:screen-preview while
-  // streaming 4 KiB chunks). Suspend the loop task's watchdog around the send,
-  // exactly as the SD upload path does, and bound the peer wait so a vanished
-  // companion cannot hang the reader while the watchdog is off.
-  // Keep the watchdog armed; the bounded socket timeout, not a WDT suspension,
-  // is what prevents a stuck send from either hanging the reader or tripping
-  // the 5 s task watchdog.
-  server.client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
-  feedLoopWDT();
-  server.setContentLength(static_cast<size_t>(count));
-  server.sendHeader("Cache-Control", "no-store");
-  server.send(200, "application/octet-stream", "");
-  server.sendContent(reinterpret_cast<const char*>(body), static_cast<size_t>(count));
-  feedLoopWDT();
-  LOG_DBG("WEB", "Pocket screen preview offset=%u bytes=%u total=%u", static_cast<unsigned>(offset),
-          static_cast<unsigned>(count), static_cast<unsigned>(previewSize));
-}
-
 // One chunk of one file of a published revision, so the companion can load
 // the reader's cards back into its editor. Published revisions are immutable
 // and content-addressed; this reads only <content>/<revision>/<leaf> and never
@@ -1259,12 +1178,6 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     handleCommitUpload(*server, *deps);
   });
 
-  if (d.profile == Profile::POCKET_SYNC) {
-    routes.on("/api/pocket/v1/screen-preview", HTTP_GET, [server = &server, deps = &d] {
-      note(*deps);
-      handleScreenPreview(*server);
-    });
-  }
   if (isSyncProfile(d.profile)) {
     routes.on("/api/pocket/v1/files", HTTP_GET, [server = &server, deps = &d] {
       note(*deps);

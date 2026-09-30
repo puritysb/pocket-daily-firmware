@@ -12,10 +12,8 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "pocket_daily/PocketProfileStore.h"
-#include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
-#include "util/ScreenshotUtil.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include "pocket_daily/product_identity.h"
 #endif
@@ -178,7 +176,6 @@ void installJapaneseFont() {
 // verbatim from main.cpp (deepSleepInProgress read through the wired latch).
 void silentRestartToPocketDaily() {
   if (deepSleepLatch && *deepSleepLatch) return;  // sleeping supersedes the heap-defrag reboot
-  if (Storage.exists(PocketDaily::SCREEN_PREVIEW_PATH)) Storage.remove(PocketDaily::SCREEN_PREVIEW_PATH);
   silentRebootTarget = PocketDaily::Boot::kRebootTargetPocketDaily;
   silentRebootMagic = kSilentRebootMagic;
   LOG_DBG("MAIN", "Silent restart (target=Pocket Daily)");
@@ -191,13 +188,6 @@ void silentRestartToPocketNearbySync() {
   if (deepSleepLatch && *deepSleepLatch) return;  // sleeping supersedes the heap-defrag reboot
   // The Nearby Sync screen owns BLE: end any Reading Sync window first.
   Pocket::NearbySync::Window::close(Pocket::NearbySync::Window::CloseReason::RADIO_OWNER);
-  // Preserve the exact Pocket Daily surface before the loading popup replaces
-  // it. Writing the BMP row-by-row costs no framebuffer-sized allocation and
-  // gives the Apple companion a pixel-identical preview after the clean reboot.
-  [[maybe_unused]] const bool previewSaved =
-      ScreenshotUtil::saveFramebufferAsBmp(PocketDaily::SCREEN_PREVIEW_PATH, bootRenderer->getFrameBuffer(),
-                                           bootRenderer->getDisplayWidth(), bootRenderer->getDisplayHeight());
-  LOG_DBG("MAIN", "Pocket screen preview %s", previewSaved ? "saved" : "unavailable");
   silentRebootTarget = PocketDaily::Boot::kRebootTargetPocketNearbySync;
   silentRebootMagic = kSilentRebootMagic;
   LOG_DBG("MAIN", "Silent restart (target=Pocket Nearby Sync)");
