@@ -14,6 +14,7 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "pocket_daily/ContentImageRenderer.h"
+#include "pocket_daily/ContentPage.h"
 #include "pocket_daily/ContentViewState.h"
 #include "pocket_daily/home/GlanceFormat.h"
 
@@ -110,7 +111,7 @@ int drawContentCardImage(GfxRenderer& renderer, const PocketDaily::Content::Cont
           return file.seek(offset) && file.read(bytes, count) == static_cast<int>(count);
         }};
     const int drawn = PocketDaily::Content::contentImageHeight(renderer, source, x, y, width, height);
-    return drawn > 0 && GUI.drawContentImage(renderer, source, x, y, width, height) ? drawn : 0;
+    return drawn > 0 && PocketDaily::Content::drawContentImage(renderer, source, x, y, width, height) ? drawn : 0;
   }
   return 0;
 }

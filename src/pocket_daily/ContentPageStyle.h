@@ -3,7 +3,7 @@
 #include <cstdint>
 
 namespace PocketDaily::Content {
-// The page inputs BaseTheme::drawContentPage hands to renderContentPage besides
+// The page inputs drawContentPage (ContentPage.cpp) hands to renderContentPage besides
 // the card, font and labels. The display endpoint reports these same values so
 // a companion preview cannot drift from what the reader draws.
 struct ContentPageStyle {

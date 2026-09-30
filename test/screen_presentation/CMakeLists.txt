@@ -1,7 +1,7 @@
 # Production screen/content presentation controllers and the shared slot,
 # compiled against the content presentation fakes (renderer, font system,
 # theme) plus fake frame inputs (ScreenFrameFakes in the test source).
-add_executable(screen_presentation_test ScreenPresentationTest.cpp
+add_executable(screen_presentation_test ScreenPresentationTest.cpp ../content_presentation/stubs/ContentPageFake.cpp
   ${REPO_ROOT}/src/pocket_daily/ScreenPresentation.cpp
   ${REPO_ROOT}/src/pocket_daily/PresentationSlot.cpp
   ${REPO_ROOT}/src/pocket_daily/ContentPresentation.cpp

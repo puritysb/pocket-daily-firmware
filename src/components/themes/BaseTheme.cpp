@@ -25,18 +25,8 @@
 #include "components/icons/cover.h"
 #include "components/icons/headerIcons.h"
 #include "fontIds.h"
-#include "pocket_daily/ContentImage.h"
-#include "pocket_daily/ContentImageRenderer.h"
 #include "pocket_daily/live_studio/MetricGeometry.h"
 #include "util/UiCjkFont.h"
-
-bool BaseTheme::drawContentImage(const GfxRenderer& renderer, const PocketDaily::Content::ManifestSource& source, int x,
-                                 int y, int width, int height) const {
-  const auto result = PocketDaily::Content::renderContentImage(renderer, source, x, y, width, height);
-  if (result == PocketDaily::Content::ImageResult::Ok) return true;
-  LOG_ERR("CONTENT", "Image render failed: %u", static_cast<unsigned>(result));
-  return false;
-}
 
 // Internal constants
 namespace {

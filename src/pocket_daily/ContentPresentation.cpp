@@ -10,7 +10,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "SdCardFontSystem.h"
-#include "components/UITheme.h"
+#include "pocket_daily/ContentPage.h"
 
 namespace PocketDaily::Content {
 namespace {
@@ -141,7 +141,7 @@ bool ContentPresentation::render(GfxRenderer& renderer, const MappedInputManager
   const auto* card = cards && index_ < cards->count ? &cards->cards[index_] : nullptr;
   const char* labels[4];
   pageLabels(input, labels);
-  if (!GUI.drawContentPage(renderer, card, view_.revision(), font_, labels)) {
+  if (!drawContentPage(renderer, card, view_.revision(), font_, labels)) {
     failure_ = PresentationFailure::Display;
     phase_ = PresentationPhase::Failed;
     sdFontSystem.releaseLoaded(renderer);

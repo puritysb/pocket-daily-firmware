@@ -244,11 +244,6 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .capsuleRadius = 0};
 }
 
-namespace PocketDaily::Content {
-struct ManifestSource;
-struct ContentCard;
-}  // namespace PocketDaily::Content
-
 class BaseTheme {
  public:
   virtual void drawKeyboardKey(const GfxRenderer& renderer, Rect rect, const char* label, const bool isSelected,
@@ -263,12 +258,6 @@ class BaseTheme {
                         const std::function<std::string(int index)>& rowValue = nullptr, bool highlightValue = false,
                         const std::function<bool(int index)>& rowDimmed = nullptr) const;
   virtual int getListPageItems(int contentHeight, bool hasSubtitle) const;
-  // Uses one already-loaded bounded SD font; never invokes font discovery or
-  // switches back to the cached EPUB font path while a live session is open.
-  bool drawContentPage(GfxRenderer& renderer, const PocketDaily::Content::ContentCard* card, const char* revision,
-                       int fontId, const char* const labels[4]) const;
-  bool drawContentImage(const GfxRenderer& renderer, const PocketDaily::Content::ManifestSource& source, int x, int y,
-                        int width, int height) const;
   virtual ~BaseTheme() = default;
 
   // Component drawing methods
