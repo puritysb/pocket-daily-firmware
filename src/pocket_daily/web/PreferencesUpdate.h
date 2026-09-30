@@ -17,6 +17,8 @@ struct PreferenceLimits {
 struct PreferencesUpdate {
   bool hasStartupApp = false;
   uint8_t startupApp = 0;
+  bool hasSleepWakeIndicator = false;
+  uint8_t sleepWakeIndicator = 0;
   bool hasSleepCover = false;
   uint8_t sleepCover = 0;
   bool hasSleepTimeout = false;
@@ -30,7 +32,7 @@ struct PreferencesUpdate {
 };
 
 // Integers must be JSON integers (a string is not 0). pocketDailySleepCover and
-// frontButtonFollowOrientation accept a boolean or an integer (non-zero means
+// sleepWakeIndicator and frontButtonFollowOrientation accept a boolean or an integer (non-zero means
 // on). Unknown keys stay ignored for older/newer clients. `error` is a short static reason.
 bool parsePreferences(const char* json, size_t length, const PreferenceLimits& limits, PreferencesUpdate& out,
                       const char*& error);

@@ -134,3 +134,18 @@ TEST(PreferencesUpdate, InvalidButtonFieldDoesNotReportEarlierValidFields) {
     EXPECT_FALSE(u.hasSideButtonLayout || u.hasFrontButtonFollowOrientation) << json;
   }
 }
+
+TEST(PreferencesUpdate, WakeIndicatorIsOptionalAndValidatedBeforeAnyChanges) {
+  PreferencesUpdate u;
+  ASSERT_TRUE(parse(R"({"fontSize":2})", u));
+  EXPECT_FALSE(u.hasSleepWakeIndicator);
+  for (const auto* value : {"false", "0", "true", "1"}) {
+    ASSERT_TRUE(parse(std::string("{\"sleepWakeIndicator\":") + value + "}", u));
+    EXPECT_TRUE(u.hasSleepWakeIndicator);
+    EXPECT_EQ(u.sleepWakeIndicator, std::string(value) == "true" || std::string(value) == "1");
+  }
+  u.fontSize = 3;
+  EXPECT_FALSE(parse(R"({"fontSize":1,"sleepWakeIndicator":"false"})", u));
+  EXPECT_EQ(u.fontSize, 3);
+  EXPECT_EQ(u.sleepWakeIndicator, 1);
+}

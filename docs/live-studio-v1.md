@@ -407,3 +407,26 @@ per the repository-boundary rule.
   window; `LiveFramePolicy` refuses under heap pressure.
 - No pack operation touches the OTA/update path or persists anything before
   validation.
+
+### Home cover layout — 2026-09-30
+
+Home uses a bounded 2:3 portrait cover slot in its left column in every Daily
+Panel placement. Removing the panel adds space around the cover rather than
+stretching its frame. The device fits the bitmap without cropping or changing
+its aspect ratio and outlines the actual image; the host draws the shared
+no-art illustration. Profile and ABI formats are unchanged. The companion must
+refresh its pinned host artifact to preview this renderer; older installed
+firmware retains its previous layout until explicitly updated.
+
+### Sleep WAKE preview — 2026-09-30
+
+The additive ABI v1 `pdui_render_sleep_brief` accepts `PDUI_SLEEP_WAKE_INDICATOR`
+and `PDUI_SLEEP_BOOK_COVER`. It runs the same `PowerWakeCue` painter as the reader;
+hardware and localized label are explicit inputs to that painter. The previous
+`pdui_render_brief` preserves cover-on/cue-off behavior. Unknown option bits
+invalidate the frame. Portrait Brief sections reserve the area below the wake
+tab so it cannot obscure cover-free progress or a reordered section. The
+companion follows the optional `sleepWakeIndicator`
+preferences capability described in `nearby-sync-v1.md` and rerenders local
+previews when either sleep preference changes. Reader-selected custom sleep
+screens remain an outline; their private image is not fetched for preview.

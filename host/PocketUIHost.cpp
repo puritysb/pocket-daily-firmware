@@ -13,6 +13,7 @@
 #include "pocket_daily/ContentImageRenderer.h"
 #include "pocket_daily/ContentPageRenderer.h"
 #include "pocket_daily/ContentTextLayout.h"
+#include "util/PowerWakeCue.h"
 
 using namespace PocketDaily::Content;
 namespace {
@@ -341,16 +342,27 @@ int32_t pdui_render_home(pdui_context* context, const pdui_profile* profile, uin
 }
 
 int32_t pdui_render_brief(pdui_context* context, const pdui_profile* profile, uint32_t samples) noexcept {
+  return pdui_render_sleep_brief(context, profile, samples, PDUI_SLEEP_BOOK_COVER);
+}
+
+int32_t pdui_render_sleep_brief(pdui_context* context, const pdui_profile* profile, uint32_t samples,
+                                uint32_t options) noexcept {
   if (!context) return PDUI_INVALID_ARGUMENT;
   context->frameValid = false;
   PocketDaily::DailyProfile::Profile parsed;
-  if (!profile || samples > PDUI_SAMPLE_ALL || !toProfile(*profile, parsed)) return PDUI_INVALID_ARGUMENT;
+  if (options > PDUI_SLEEP_ALL || !profile || samples > PDUI_SAMPLE_ALL || !toProfile(*profile, parsed))
+    return PDUI_INVALID_ARGUMENT;
   try {
     const std::lock_guard<std::mutex> renderLock(renderMutex);
     const PocketUIHost::AssetScope scope(context->assetSpan());
     const auto sample = PocketUIHost::buildSample(samples);
     PocketDaily::Home::BriefView view;
     view.isSleep = true;
+    view.sleepCover = (options & PDUI_SLEEP_BOOK_COVER) != 0;
+    if ((options & PDUI_SLEEP_WAKE_INDICATOR) &&
+        context->renderer.getOrientation() == GfxRenderer::Orientation::Portrait) {
+      view.contentTopInset = PowerWakeCue::portraitContentTop(isX3Panel(context->panel));
+    }
     view.glance = &sample.glance;
     view.reading = sample.reading;
     // As on the reader: the first own card, else the sample, else the daily word.
@@ -362,6 +374,7 @@ int32_t pdui_render_brief(pdui_context* context, const pdui_profile* profile, ui
     view.status = "Powered off";
     view.profile = parsed;
     PocketDaily::Home::renderBrief(context->renderer, view, PocketUIHost::hostEnv(context->renderer, context->cards));
+    if (options & PDUI_SLEEP_WAKE_INDICATOR) PowerWakeCue::draw(context->renderer, isX3Panel(context->panel), "WAKE");
     if (context->activeFont().boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
     context->frameValid = true;
     return PDUI_OK;

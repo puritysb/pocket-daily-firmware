@@ -321,6 +321,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Show the current book's cached cover on Pocket Daily's retained frame.
   // Disable when the title/cover would expose private reading in a shared space.
   uint8_t pocketDailySleepCover = 1;
+  uint8_t sleepWakeIndicator = 1;
   // Pocket Reading Sync over BLE (docs/reading-sync-ble-v1.md): short exchange
   // windows with an already paired phone when a book closes, on wake and
   // before sleep. Only effective once a phone was paired through Nearby Sync.

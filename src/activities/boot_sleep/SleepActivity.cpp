@@ -642,7 +642,7 @@ void SleepActivity::renderDefaultSleepScreen() const {
     renderer.invertScreen();
   }
 
-  PowerWakeCue::draw(renderer);
+  if (SETTINGS.sleepWakeIndicator) PowerWakeCue::draw(renderer, gpio.deviceIsX3(), tr(STR_POCKET_WAKE_READ));
 
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
@@ -669,11 +669,12 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool pre
     return;
   }
 
-  PowerWakeCue::draw(renderer);
   if (!preserveBackground &&
       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
     renderer.invertScreen();
   }
+
+  if (SETTINGS.sleepWakeIndicator) PowerWakeCue::draw(renderer, gpio.deviceIsX3(), tr(STR_POCKET_WAKE_READ));
 
   const bool absolute = hasGreyscale && renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported();
   if (absolute) {
@@ -701,7 +702,7 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool pre
         ready = false;
         break;
       }
-      PowerWakeCue::draw(renderer);
+      if (SETTINGS.sleepWakeIndicator) PowerWakeCue::draw(renderer, gpio.deviceIsX3(), tr(STR_POCKET_WAKE_READ));
       if (plane == GfxRenderer::GRAYSCALE_LSB)
         renderer.copyGrayscaleLsbBuffers();
       else
@@ -754,6 +755,7 @@ bool SleepActivity::renderTransparentOverlayPng(const std::string& path) const {
   LOG_DBG("SLP", "Rendering transparent PNG overlay: %s (%dx%d)", path.c_str(), dimensions.width, dimensions.height);
 
   if (!converter.decodeToFramebuffer(path, renderer, config)) return false;
+  if (SETTINGS.sleepWakeIndicator) PowerWakeCue::draw(renderer, gpio.deviceIsX3(), tr(STR_POCKET_WAKE_READ));
   const bool absolute = renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported();
   if (absolute) {
     if (!renderer.displayGrayscaleBase(sleepGrayscaleMode(renderer))) return false;
@@ -768,6 +770,7 @@ bool SleepActivity::renderTransparentOverlayPng(const std::string& path) const {
     renderer.setRenderMode(GfxRenderer::BW);
     return true;
   }
+  if (SETTINGS.sleepWakeIndicator) PowerWakeCue::draw(renderer, gpio.deviceIsX3(), tr(STR_POCKET_WAKE_READ));
   renderer.copyGrayscaleLsbBuffers();
 
   if (!absolute) renderer.clearScreen(0x00);
@@ -776,6 +779,7 @@ bool SleepActivity::renderTransparentOverlayPng(const std::string& path) const {
     renderer.setRenderMode(GfxRenderer::BW);
     return true;
   }
+  if (SETTINGS.sleepWakeIndicator) PowerWakeCue::draw(renderer, gpio.deviceIsX3(), tr(STR_POCKET_WAKE_READ));
   renderer.copyGrayscaleMsbBuffers();
 
   renderer.displayGrayBuffer();
@@ -894,7 +898,8 @@ void SleepActivity::renderCoverSleepScreen() const {
 void SleepActivity::renderLastScreenSleepScreen() const {
   const auto pageHeight = renderer.getScreenHeight();
   renderer.drawImage(MoonIcon, 0, pageHeight - MOONICON_HEIGHT, MOONICON_WIDTH, MOONICON_HEIGHT);
-  // Only the moon differs from the displayed frame, so a differential FAST
+  if (SETTINGS.sleepWakeIndicator) PowerWakeCue::draw(renderer, gpio.deviceIsX3(), tr(STR_POCKET_WAKE_READ));
+  // The moon and optional wake cue differ, so a differential FAST
   // update adds it without the flashing clean pass (which sweeps the panel
   // through the inverse — a full white flash on a night-mode page).
   if (gpio.deviceIsX3()) {

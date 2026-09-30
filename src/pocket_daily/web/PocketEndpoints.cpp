@@ -1070,17 +1070,18 @@ void handleContentFile(WebServer& server, const RouteDeps& d) {
 // response can consume the last contiguous heap immediately after Wi-Fi
 // starts and strand the X3 on its retained Hotspot Mode frame. The button keys
 // (added 2026-09-26) tell the companion this reader accepts them on POST.
-// Worst case with every uint8_t at 255 is 145 bytes, so 192 still fits.
+// Including sleepWakeIndicator, every uint8_t at 255 fits in 192 bytes.
 void handleGetPreferences(WebServer& server) {
   char json[192];
   const int written = snprintf(
       json, sizeof(json),
       "{\"startupApp\":%u,\"pocketDailySleepCover\":%u,\"sleepTimeoutMinutes\":%u,\"fontSize\":%u,"
-      "\"sideButtonLayout\":%u,\"frontButtonFollowOrientation\":%u}",
+      "\"sideButtonLayout\":%u,\"frontButtonFollowOrientation\":%u,\"sleepWakeIndicator\":%u}",
       static_cast<unsigned>(SETTINGS.startupApp), static_cast<unsigned>(SETTINGS.pocketDailySleepCover),
       static_cast<unsigned>(SETTINGS.sleepTimeoutMinutes),
       static_cast<unsigned>(LegacyFontSize::fromPoints(SETTINGS.fontPointSize)),
-      static_cast<unsigned>(SETTINGS.sideButtonLayout), static_cast<unsigned>(SETTINGS.frontButtonFollowOrientation));
+      static_cast<unsigned>(SETTINGS.sideButtonLayout), static_cast<unsigned>(SETTINGS.frontButtonFollowOrientation),
+      static_cast<unsigned>(SETTINGS.sleepWakeIndicator));
   if (written <= 0 || static_cast<size_t>(written) >= sizeof(json)) {
     server.send(500, "text/plain", "Could not encode Pocket preferences");
     return;
@@ -1106,10 +1107,12 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
     server.send(400, "text/plain", error ? error : "Invalid preferences");
     return;
   }
-  const uint8_t previous[6] = {SETTINGS.startupApp,          SETTINGS.pocketDailySleepCover,
+  const uint8_t previous[7] = {SETTINGS.startupApp,          SETTINGS.pocketDailySleepCover,
                                SETTINGS.sleepTimeoutMinutes, SETTINGS.fontPointSize,
-                               SETTINGS.sideButtonLayout,    SETTINGS.frontButtonFollowOrientation};
+                               SETTINGS.sideButtonLayout,    SETTINGS.frontButtonFollowOrientation,
+                               SETTINGS.sleepWakeIndicator};
   if (update.hasStartupApp) SETTINGS.startupApp = update.startupApp;
+  if (update.hasSleepWakeIndicator) SETTINGS.sleepWakeIndicator = update.sleepWakeIndicator;
   if (update.hasSleepCover) SETTINGS.pocketDailySleepCover = update.sleepCover;
   if (update.hasSleepTimeout) SETTINGS.sleepTimeoutMinutes = update.sleepTimeoutMinutes;
   if (update.hasFontSize) SETTINGS.fontPointSize = LegacyFontSize::toPoints(update.fontSize);
@@ -1125,6 +1128,7 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
     SETTINGS.fontPointSize = previous[3];
     SETTINGS.sideButtonLayout = previous[4];
     SETTINGS.frontButtonFollowOrientation = previous[5];
+    SETTINGS.sleepWakeIndicator = previous[6];
     server.send(500, "text/plain", "Could not save Pocket preferences");
     return;
   }

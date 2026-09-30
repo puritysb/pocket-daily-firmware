@@ -14,6 +14,21 @@ transcript. Current source and release records override dated observations.
   updater only accepts product stable tags. Stable release still requires
   exact-artifact X3/X4 sign-off in `docs/release-checklist.md`.
 
+## Sleep WAKE control — 2026-09-30
+
+- Optional `sleepWakeIndicator` GET/POST preference defaults on and persists in
+  Settings → Display. The companion gates editing/sending on GET presence.
+  Next sleep frame honors it in Brief, covers, custom/transparent and Quick
+  Resume modes. Seven preference fields roll back together if persistence fails.
+- PowerWakeCue now takes hardware/label inputs for shared host rendering;
+  portrait Brief sections reserve space below the tab. Additive host ABI options
+  let the app preview WAKE and cover independently; old ABI behavior is retained.
+- Verified 868 host tests, warning-free default build (69,912 B static RAM,
+  6,410,009 B flash). Full cppcheck still reports the existing 2 medium/210 low
+  findings. Companion Mac installed and iOS flow tested; firmware not installed
+  and physical sleep-frame/heap checks remain pending. Contract:
+  `docs/nearby-sync-v1.md`, host additions: `docs/live-studio-v1.md`.
+
 ## BLE integration and review — 2026-09-30
 
 - `codex/ble-sync-review` integrates held BLE `68a77147` onto main `ee188fe7`;
@@ -45,6 +60,15 @@ transcript. Current source and release records override dated observations.
   C3 fonts and certificate-verified TLS remain; wolfSSL is intentionally excluded.
   Prior baseline host 828/828 and default/production builds passed. Physical
   X3/X4 acceptance remains pending; see `docs/upstream-integration-1.6.5.md`.
+- 2026-09-29 Architecture assessment at ccc601c5 against fetched upstream/master
+  93e98bb7: `docs/architecture-assessment-2026-09-29.md`. Git 2.55.0 merge-tree
+  reports 112 unmerged paths (94 under src/lib), none in the two Pocket-only
+  directories; 125 inherited src/lib text paths changed on both sides since
+  2754a5ff. These are this assessment's measurements, not the earlier 106-path
+  dry-run. Current host configure/build and 527 tests pass (7 host compiler
+  warnings); no firmware/app build or hardware acceptance rerun. Recommends
+  retaining the seam while strengthening dependency/contract gates and planning
+  foundation reconciliation; recommendations are not implementation decisions.
 - 2026-09-29 Home menu is stock CrossPoint plus one entry. Articles moved from
   the Home menu into Pocket Reader: the Left front button on Pocket Daily's Home
   opens the Articles library and Back from Articles returns to Pocket Daily

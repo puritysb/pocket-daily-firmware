@@ -488,15 +488,20 @@ bool PocketDailyActivity::drawReadingCover(int x, int y, int width, int height) 
         const float scale = std::min((float)(width - 4) / bitmap.getWidth(), (float)(height - 4) / bitmap.getHeight());
         const int drawW = std::max(1, (int)(bitmap.getWidth() * scale));
         const int drawH = std::max(1, (int)(bitmap.getHeight() * scale));
-        renderer.drawBitmap(bitmap, x + (width - drawW) / 2, y + (height - drawH) / 2, drawW, drawH, 0, 0, true);
+        const int artX = x + (width - drawW) / 2;
+        const int artY = y + (height - drawH) / 2;
+        renderer.drawBitmap(bitmap, artX, artY, drawW, drawH, 0, 0, true);
+        renderer.drawRect(artX, artY, drawW, drawH, 2, true);
         coverDrawn = true;
       }
       coverFile.close();
     }
   }
 
-  renderer.drawRect(x, y, width, height, 2, true);
-  if (!coverDrawn) PocketDaily::HomeDraw::drawCoverPlaceholder(renderer, x, y, width, height);
+  if (!coverDrawn) {
+    renderer.drawRect(x, y, width, height, 2, true);
+    PocketDaily::HomeDraw::drawCoverPlaceholder(renderer, x, y, width, height);
+  }
   return coverDrawn;
 }
 
@@ -660,6 +665,8 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
   // Drawing is shared with the host preview (pocket_daily/home/HomeRenderer).
   PocketDaily::Home::BriefView view;
   view.isSleep = isSleep;
+  if (isSleep && SETTINGS.sleepWakeIndicator)
+    view.contentTopInset = PowerWakeCue::portraitContentTop(gpio.deviceIsX3());
   view.headerMeta = glanceHeaderMeta[0] ? glanceHeaderMeta : nullptr;
   view.glance = &g;
   view.reading = {renderReadingSnapshot.valid, renderReadingSnapshot.title, renderReadingSnapshot.author,
@@ -677,7 +684,7 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
   view.strings = homeStrings();
   PocketDaily::Home::renderBrief(renderer, view, homeEnv());
   if (isSleep) {
-    PowerWakeCue::draw(renderer);
+    if (SETTINGS.sleepWakeIndicator) PowerWakeCue::draw(renderer, gpio.deviceIsX3(), tr(STR_POCKET_WAKE_READ));
     // The panel holds this frame for hours or days: always clear the ghosting
     // with a full waveform (it is painted once, at power-off).
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);

@@ -100,15 +100,10 @@ PocketDaily::Home::Env hostEnv(GfxRenderer& renderer, const UserCards& cards) {
     r.drawLine(x + 20, y + height - 2, x + width - 20, y + height - 2, 2, true);
   };
   env.drawCover = [](void*, GfxRenderer& r, int x, int y, int width, int height) {
-    // A hatched stand-in: the preview has no book file to decode.
-    r.drawRect(x + 2, y + 2, width - 4, height - 4, 2, true);
-    for (int d = 0; d < width + height; d += 12) {
-      const int x0 = x + 2 + std::max(0, d - (height - 4));
-      const int y0 = y + 2 + std::min(d, height - 4);
-      const int x1 = x + 2 + std::min(d, width - 4);
-      const int y1 = y + 2 + std::max(0, d - (width - 4));
-      r.drawLine(x0, y0, x1, y1, 1, true);
-    }
+    // Use the device's no-art book illustration, inside the shared portrait
+    // frame. A sample is not a decoded cover or a connected-reader mirror.
+    r.drawRect(x, y, width, height, 2, true);
+    PocketDaily::HomeDraw::drawCoverPlaceholder(r, x, y, width, height);
     return true;
   };
   return env;

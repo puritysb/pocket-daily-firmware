@@ -2,19 +2,21 @@
 
 #include <EpdFontFamily.h>
 #include <GfxRenderer.h>
-#include <I18n.h>
 
 #include <algorithm>
 
-#include "HalGPIO.h"
 #include "fontIds.h"
 
 namespace PowerWakeCue {
 
+// Pocket Daily draws its sleep sections in portrait. Keep content below the
+// tab so cover-free reading progress and custom section orders stay visible.
+inline int portraitContentTop(const bool isX3) { return isX3 ? 58 : 124; }
+
 // A retained e-ink frame has no animation to suggest that the device is still
 // responsive. Anchor one compact, high-contrast tab to the real power switch
 // instead. X3's switch is on the top edge; X4's is on the upper-right edge.
-inline void draw(GfxRenderer& renderer) {
+inline void draw(GfxRenderer& renderer, const bool isX3, const char* label) {
   const auto original = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
   const int w = renderer.getScreenWidth();
@@ -28,7 +30,7 @@ inline void draw(GfxRenderer& renderer) {
   int labelX;
   int labelY;
 
-  if (gpio.deviceIsX3()) {
+  if (isX3) {
     constexpr int powerX = 473;
     tabW = 104;
     tabH = 52;
@@ -46,13 +48,13 @@ inline void draw(GfxRenderer& renderer) {
     y = std::max(0, powerY - tabH / 2);
     iconX = x + tabW / 2;
     iconY = y + 25;
-    labelX = x + (tabW - renderer.getTextWidth(SMALL_FONT_ID, tr(STR_POCKET_WAKE_READ), EpdFontFamily::BOLD)) / 2;
+    labelX = x + (tabW - renderer.getTextWidth(SMALL_FONT_ID, label, EpdFontFamily::BOLD)) / 2;
     labelY = y + 50;
   }
 
   // A white keyline keeps the tab visible even over a dark full-screen cover.
   renderer.fillRect(x, y, tabW, tabH, false);
-  renderer.fillRect(x + 2, y + (gpio.deviceIsX3() ? 0 : 2), tabW - 2, tabH - 4, true);
+  renderer.fillRect(x + 2, y + (isX3 ? 0 : 2), tabW - 2, tabH - 4, true);
 
   // Power glyph in knockout white. Its stem points directly into the chassis
   // edge, so the cue still works without a sentence or an imprecise arrow.
@@ -64,7 +66,7 @@ inline void draw(GfxRenderer& renderer) {
   renderer.drawLine(iconX + 5, iconY + 8, iconX + 9, iconY + 4, 2, false);
   renderer.drawLine(iconX + 9, iconY + 4, iconX + 9, iconY - 2, 2, false);
   renderer.drawLine(iconX + 9, iconY - 2, iconX + 5, iconY - 6, 2, false);
-  renderer.drawText(SMALL_FONT_ID, labelX, labelY, tr(STR_POCKET_WAKE_READ), false, EpdFontFamily::BOLD);
+  renderer.drawText(SMALL_FONT_ID, labelX, labelY, label, false, EpdFontFamily::BOLD);
 
   renderer.setOrientation(original);
 }
