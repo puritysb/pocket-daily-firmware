@@ -171,7 +171,8 @@ void ArticlesActivity::loop() {
       promptDelete(false);
       return;
     }
-    onSelectBook(path(selected));
+    // Leaving the article returns to this list (ActivityManager::leaveReader).
+    activityManager.goToReaderFrom(ReaderReturn::Articles, path(selected));
   }
 }
 void ArticlesActivity::render(RenderLock&&) {

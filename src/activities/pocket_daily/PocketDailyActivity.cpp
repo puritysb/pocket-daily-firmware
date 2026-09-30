@@ -97,9 +97,6 @@ void PocketDailyActivity::onEnter() {
   // when the preceding reader page used a rotated orientation.
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
-  exitRequested = false;
-  exitToReader = false;
-  exitToArticles = false;
   exitToNearbySync = false;
   viewMode = ViewMode::Overview;
   glanceReason = GlanceReason::Ambient;
@@ -127,27 +124,12 @@ void PocketDailyActivity::onEnter() {
   requestUpdate();
 }
 
-void PocketDailyActivity::loop() {
-  handleButtons();
-  if (!exitRequested) return;
-  exitRequested = false;
-  // Confirm on the reading row resumes the open book. Pocket Daily keeps the
-  // radio off, so no defrag restart is needed; Home's own book selection opens
-  // the reader the same way.
-  if (exitToReader && !APP_STATE.openEpubPath.empty() && WiFi.getMode() == WIFI_MODE_NULL) {
-    exitToReader = false;
-    activityManager.goToReader(APP_STATE.openEpubPath);
-    return;
-  }
-  // Left opens the Articles library the same way. With the radio unexpectedly
-  // up, finish() below takes onExit's defrag restart to Home instead.
-  if (exitToArticles && WiFi.getMode() == WIFI_MODE_NULL) {
-    exitToArticles = false;
-    activityManager.goToArticles();
-    return;
-  }
-  exitToArticles = false;
-  finish();
+void PocketDailyActivity::loop() { handleButtons(); }
+
+void PocketDailyActivity::resumeReading() {
+  // Leaving the book returns here (ActivityManager::leaveReader).
+  if (!APP_STATE.openEpubPath.empty())
+    activityManager.goToReaderFrom(ReaderReturn::PocketDaily, APP_STATE.openEpubPath);
 }
 
 void PocketDailyActivity::onExit() {
@@ -160,26 +142,11 @@ void PocketDailyActivity::onExit() {
   // to bounce straight back to Pocket. Reboot directly into the Nearby
   // activity: the retained e-ink popup hides the short reset, while the clean
   // heap makes BLE startup deterministic.
+  // onEnter turned the radio off and nothing here turns it on, so the other
+  // exits are plain activity switches.
   if (exitToNearbySync) {
-    if (WiFi.getMode() != WIFI_MODE_NULL) {
-      WiFi.disconnect(true);
-      WiFi.mode(WIFI_OFF);
-      delay(30);
-    }
     silentRestartToPocketNearbySync();
     return;  // ESP.restart() does not return; keeps static analysis honest.
-  }
-
-  if (WiFi.getMode() != WIFI_MODE_NULL) {
-    WiFi.disconnect(false);
-    delay(30);
-    // Defrag restart (mirrors CalibreConnectActivity::onExit). Confirm on the
-    // Daily Brief targets the reader; every other exit lands on Home.
-    if (exitToReader && !APP_STATE.openEpubPath.empty()) {
-      silentRestartToReader();
-    } else {
-      silentRestart();
-    }
   }
 }
 
@@ -374,8 +341,7 @@ void PocketDailyActivity::handleButtons() {
   }
   if (gpio.wasReleased(HalGPIO::BTN_CONFIRM) && n > 0) {
     if (rows[selected].reading) {
-      exitToReader = true;
-      exitRequested = true;
+      resumeReading();
     } else if (rows[selected].pocket) {
       strncpy(cardSid, rows[selected].sid, sizeof(cardSid) - 1);
       cardSid[sizeof(cardSid) - 1] = '\0';
@@ -387,8 +353,7 @@ void PocketDailyActivity::handleButtons() {
   // Left opens the Articles library: the companion's articles on SD, listed
   // and tidied on the reader (docs/articles-v1.md). Home stays stock CrossPoint.
   if (gpio.wasReleased(HalGPIO::BTN_LEFT)) {
-    exitToArticles = true;
-    exitRequested = true;
+    activityManager.goToArticles();
     return;
   }
   // Sync opens Pocket Nearby Sync, where the companion sends cards, the
@@ -401,13 +366,13 @@ void PocketDailyActivity::handleButtons() {
   // With neither a book nor a card row the ambient Daily Brief is the face;
   // Confirm there resumes the open book.
   if (ambientGlanceShown && gpio.wasReleased(HalGPIO::BTN_CONFIRM) && !APP_STATE.openEpubPath.empty()) {
-    exitToReader = true;
-    exitRequested = true;
+    resumeReading();
     return;
   }
 
-  // Back exits Pocket Daily (guard a stale release from a prior activity).
-  if (gpio.wasReleased(HalGPIO::BTN_BACK) && backPressMs != 0) exitRequested = true;
+  // Back (labelled Home) exits to CrossPoint Home; the guard ignores a stale
+  // release from a prior activity.
+  if (gpio.wasReleased(HalGPIO::BTN_BACK) && backPressMs != 0) finish();
 }
 
 bool PocketDailyActivity::closePocketCard(const PocketDaily::Card& card) {
@@ -692,8 +657,8 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
     // Confirm resumes the open book — label it only when there is one. Left
     // and Right are physical positions here (handleButtons reads raw gpio), so
     // they bypass the front-button remap the mapped labels follow.
-    auto labels = mappedInput.mapLabels(tr(STR_POCKET_LIBRARY),
-                                        APP_STATE.openEpubPath.empty() ? "" : tr(STR_POCKET_READ), "", "");
+    auto labels =
+        mappedInput.mapLabels(tr(STR_POCKET_HOME), APP_STATE.openEpubPath.empty() ? "" : tr(STR_POCKET_READ), "", "");
     labels.btn3 = tr(STR_ARTICLES);
     labels.btn4 = tr(STR_POCKET_SYNC);
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

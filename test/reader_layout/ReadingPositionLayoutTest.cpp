@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -438,6 +439,53 @@ TEST_F(ReadingPositionLayout, AppXPointersOpenThePageHoldingTheirCharacter) {
     }
     EXPECT_GT(mapped, 10) << fixtureFile;
   }
+}
+
+// Layout golden: every section file of two whole books, laid out plain, hyphenated narrow and
+// with focus reading, hashed byte for byte. A change that alters layout must bump the section
+// cache version and record the new digest here; a performance change must leave it alone
+// (docs/fork-delta-register.md U-EPUB-1). The elapsed build time is logged, not asserted.
+uint64_t fnv1a(const std::string& bytes, uint64_t hash) {
+  for (const unsigned char c : bytes) hash = (hash ^ c) * 1099511628211ULL;
+  return hash;
+}
+
+TEST_F(ReadingPositionLayout, SectionFilesMatchTheLayoutGolden) {
+  struct Pass {
+    bool hyphenation;
+    bool focus;
+    int width;
+  };
+  static constexpr Pass passes[] = {{false, false, 300}, {true, false, 180}, {false, true, 300}};
+  uint64_t digest = 14695981039346656037ULL;
+  size_t sectionBytes = 0;
+  double buildMs = 0;
+  for (const char* fixture : {"frankenstein-se.epub", "pocket-daily-epub-check.epub"}) {
+    const auto book = open(fixture);
+    ASSERT_TRUE(book) << fixture;
+    for (const Pass& pass : passes) {
+      layout.hyphenationEnabled = pass.hyphenation;
+      layout.focusReadingEnabled = pass.focus;
+      layout.viewportWidth = pass.width;
+      for (int spine = 0; spine < book->getSpineItemsCount(); ++spine) {
+        const auto start = std::chrono::steady_clock::now();
+        auto section = build(book, spine);
+        buildMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        ASSERT_TRUE(section) << fixture << " spine " << spine;
+        section.reset();
+        const std::string path = TestFs::root + book->getCachePath() + "/sections/" + std::to_string(spine) + ".bin";
+        std::ifstream in(path, std::ios::binary);
+        ASSERT_TRUE(in) << path;
+        const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        sectionBytes += bytes.size();
+        digest = fnv1a(bytes, digest);
+        ASSERT_EQ(std::remove(path.c_str()), 0);
+      }
+    }
+  }
+  std::printf("[layout golden] digest=0x%016llx section_bytes=%zu build_ms=%.1f\n",
+              static_cast<unsigned long long>(digest), sectionBytes, buildMs);
+  EXPECT_EQ(digest, 0x6b8020d1993c5848ULL);
 }
 
 // While a section is still building, a character past the pages laid out so far needs more

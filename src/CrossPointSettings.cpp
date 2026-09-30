@@ -14,6 +14,7 @@
 #include "ReaderFontSizes.h"
 #include "SettingsList.h"
 #include "fontIds.h"
+#include "pocket_daily/SettingsMigration.h"
 
 namespace {
 
@@ -101,6 +102,8 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
     doc["dictionaryName"] = dictionaryName;
   }
 
+  doc[PocketDaily::SettingsMigration::kLongPressOrderKey] = PocketDaily::SettingsMigration::kLongPressOrder;
+
   // Language -- managed by LanguageSelectActivity, not in SettingsList.
   // Stored as ISO code string ("EN", "DE", ...) for stability across enum reorders.
   doc["language"] = (language < getLanguageCount()) ? LANGUAGE_CODES[language] : "EN";
@@ -179,6 +182,18 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     }
   }
 
+  // Long-press numbering from fork builds that inserted Bilingual Toggle mid-enum.
+  {
+    const uint8_t migrated = PocketDaily::SettingsMigration::longPressFromFile(
+        longPressMenuFunction, !doc["startupApp"].isNull(),
+        !doc[PocketDaily::SettingsMigration::kLongPressOrderKey].isNull());
+    if (migrated != longPressMenuFunction) {
+      longPressMenuFunction = migrated;
+      needsResave = true;
+    }
+    if (doc[PocketDaily::SettingsMigration::kLongPressOrderKey].isNull()) needsResave = true;
+  }
+
   // Older files stored one combined touch mode under "touchReaderControls":
   // 0=off, 1=tap, 2=swipe, 3=inverted tap. Split it into the master toggle
   // plus the per-direction gesture pair (the generic loop above already folded
@@ -226,8 +241,8 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   if (BoardConfig::hasHomeKey() && doc["homeButtonLongPressAction"].isNull() &&
       !doc["longPressMenuFunction"].isNull()) {
     static constexpr HomeButtonAction LEGACY[] = {HomeButtonAction::Sync,       HomeButtonAction::Ignore,
-                                                  HomeButtonAction::Bookmark,   HomeButtonAction::Ignore,
-                                                  HomeButtonAction::Dictionary, HomeButtonAction::ReaderMenu};
+                                                  HomeButtonAction::Bookmark,   HomeButtonAction::Dictionary,
+                                                  HomeButtonAction::ReaderMenu, HomeButtonAction::Ignore};
     if (s.longPressMenuFunction < sizeof(LEGACY) / sizeof(LEGACY[0])) {
       s.homeButtonLongPressAction = static_cast<uint8_t>(LEGACY[s.longPressMenuFunction]);
       needsResave = true;

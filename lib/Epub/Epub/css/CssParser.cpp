@@ -1135,9 +1135,6 @@ CssParser::CacheLoadResult CssParser::loadFromCache() {
     clear();
     return CacheLoadResult::Invalid;
   }
-  auto hasRemainingBytes = [&file](const size_t neededBytes) -> bool {
-    return static_cast<size_t>(file.available()) >= neededBytes;
-  };
 
   auto selectorBuffer = ruleCount > 0 ? makeUniqueNoThrow<char[]>(MAX_SELECTOR_LENGTH) : nullptr;
   if (ruleCount > 0 && !selectorBuffer) {

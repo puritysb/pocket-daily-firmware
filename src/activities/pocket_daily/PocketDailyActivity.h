@@ -106,6 +106,7 @@ class PocketDailyActivity final : public Activity {
   static PocketDaily::Home::Strings homeStrings();
   PocketDaily::Home::Env homeEnv() const;
   void handleButtons();
+  void resumeReading();
   bool applyPocketChoice(const PocketDaily::Card& card, int optionCursor);
   bool closePocketCard(const PocketDaily::Card& card);
   void renderOverview(const OverviewRow* rows, int n);
@@ -120,7 +121,6 @@ class PocketDailyActivity final : public Activity {
 
   static constexpr uint32_t kDecisionCooldownMs = 400;  // debounce a card choice
 
-  bool exitRequested = false;
   ViewMode viewMode = ViewMode::Overview;
   int overviewCursor = 0;  // selected Reading/Study item in the Home carousel
   // Returns a script-appropriate SD CJK font id when available, else the given
@@ -141,12 +141,6 @@ class PocketDailyActivity final : public Activity {
   // its "resume reading" meaning only when that face is displayed — a stale
   // read is benign (one inert or late press), so no lock.
   bool ambientGlanceShown = false;
-  // Confirm on the Daily Brief: onExit restarts into the reader
-  // (silentRestartToReader) instead of Home.
-  bool exitToReader = false;
-  // Left on the Overview opens the Articles library (companion-sent EPUBs on
-  // SD). A plain activity switch while the radio is off, like resume reading.
-  bool exitToArticles = false;
   bool exitToNearbySync = false;
   bool sleepFramePending = false;  // render() must paint the sleep Daily Brief
 };

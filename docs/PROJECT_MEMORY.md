@@ -3,6 +3,28 @@
 This is concise, repository-owned context for future sessions. It is not a chat
 transcript. Current source and release records override dated observations.
 
+## Fork delta audit — 2026-10-01
+
+- `docs/fork-delta-register.md` classifies the 120 inherited `src/`/`lib/`
+  files the fork modifies against CrossPoint 1.6.5 (`93e98bb7`): upstream
+  candidates with recorded numbers and missing proof, device/fork patches,
+  product hooks, duplicates to delete, merge regressions and stock deviations.
+- Fixed the same day with tests: deferred progress save (upstream's synchronous
+  save had disabled it), line-break gap cache re-port (layout golden identical,
+  host layout −15 %), long-press enum migration (`SettingsMigration.h`), crash
+  logs kept on brownout/no-marker watchdog, boot-loop guard on reader resume,
+  duplicate retry counter. Found an upstream defect: `PageLink::href` tail was
+  written to section files uninitialized (fixed; U-EPUB-6).
+- Owner decisions 2026-10-01: Pocket Daily's first button reads Home; the Home
+  entry is named Pocket Daily; a book returns to the shell that opened it
+  (`ActivityManager::goToReaderFrom`/`leaveReader`); stock Home/Library/File
+  Browser host no BLE window; sleep default/Blank screens back to stock; UI packs
+  and live frame capture to be removed with the themes restored to stock.
+  Host 874/874, default build clean. Not yet on X3/X4.
+- The companion removed its `.uipack` encoder and live-frame fetching on
+  2026-09-25 (app `a98e879`); the firmware theme-metric routing and render-task
+  frame capture have no client today.
+
 ## Product version reset — 2026-09-30
 
 - Pocket Daily starts product firmware version `1.0.0` on CrossPoint 1.6.5

@@ -34,6 +34,10 @@ enum class HomeMenuItem { NONE, FILE_BROWSER, LIBRARY, OPDS_BROWSER, FILE_TRANSF
  * - No onPause/onResume, since we don't have a concept of background activities
  * - onActivityResult is implemented via a callback instead of a separate method, for simplicity
  */
+// Where leaving a book goes. Stock shells return Home; Pocket Daily and its
+// Articles list return to themselves.
+enum class ReaderReturn : uint8_t { Home, PocketDaily, Articles };
+
 class ActivityManager {
   friend class RenderLock;
 
@@ -51,6 +55,9 @@ class ActivityManager {
   std::unique_ptr<Activity> pendingActivity;
   enum class PendingAction { None, Push, Pop, Replace };
   PendingAction pendingAction = PendingAction::None;
+
+  // Product shell that opened the current book; leaving the book returns there.
+  ReaderReturn readerReturn = ReaderReturn::Home;
 
   // Task to render and display the activity
   TaskHandle_t renderTaskHandle = nullptr;
@@ -89,16 +96,19 @@ class ActivityManager {
 
   // goTo... functions are convenient wrapper for replaceActivity()
   void goToFileTransfer(bool autoJoinSavedNetwork = false);
-  void goToPocketDaily();
+  bool goToPocketDaily();
   void goToPocketNearbySync(bool autoJoinSavedNetwork = false);
   void goToSettings();
   void goToFileBrowser(std::string path = {});
-  void goToRecentBooks();
-  void goToArticles();
+  bool goToArticles();
   void goToUsbDrive();
   void goToLibrary();
   void goToBrowser();
   void goToReader(std::string path, bool allowFastInitialRefresh = false);
+  // Open a book from a product shell so that leaveReader() returns to it.
+  void goToReaderFrom(ReaderReturn origin, std::string path, bool allowFastInitialRefresh = false);
+  // Leave the book by Back or the end-of-book exit: the opening shell, else Home.
+  void leaveReader();
   void goToSleep(bool fromTimeout = false);
   void goToBoot();
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);

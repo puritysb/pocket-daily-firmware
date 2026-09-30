@@ -61,7 +61,10 @@ Host render tests do not sign off panel or radio behavior.
       the same text, including entities, long paragraphs, hyphenation and CJK.
 - [ ] Built-in and SD fonts, character/word spacing, bilingual pages, footnotes,
       RTL, grayscale images and UI packs work in all four orientations.
-- [ ] Home exposes one Pocket Reader entry; Articles opens from that entry.
+- [ ] Home exposes one Pocket Daily entry; Articles opens from Pocket Daily.
+- [ ] Pocket Daily's first button reads Home and opens CrossPoint Home.
+- [ ] A book opened from Pocket Daily returns there on Back; an article returns to
+      Articles; a book opened from Home returns to Home.
 - [ ] Page turning, background layout and repeated book/font changes retain
       over 50 KiB free heap in the reading acceptance scenario without leaks;
       record free heap, largest block and minimum-ever heap separately.
@@ -81,7 +84,8 @@ Host render tests do not sign off panel or radio behavior.
 
 - [ ] Complete `docs/ble-sync-review-2026-09-30.md` with actual list/offer completion,
       not advertising alone; record the app build and firmware image identity.
-- [ ] Verify book-close/Home/Library/pop, wake and sleep windows; memory skips,
+- [ ] Verify book-close (back to Pocket Daily), wake and sleep windows, and that
+      no window opens on Home, Library or the file browser; memory skips,
       early close during startup, safe radio handoff and deinit recovery.
 - [ ] Verify existing-bond reconnect including RPA, unbonded refusal, no new
       pairing or START_AP in an automatic window, app foreground/background,

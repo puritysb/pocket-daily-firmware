@@ -320,7 +320,7 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   // Confirm selects the current carousel item. Left opens the Articles library;
   // Right opens Pocket's account-free nearby transport, where the companion
   // sends cards and the glance.
-  HomeDraw::drawPocketActionStrip(renderer, view.isX3, env.labels, s.library, s.select, s.articles, s.sync);
+  HomeDraw::drawPocketActionStrip(renderer, view.isX3, env.labels, s.home, s.select, s.articles, s.sync);
 }
 
 void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {

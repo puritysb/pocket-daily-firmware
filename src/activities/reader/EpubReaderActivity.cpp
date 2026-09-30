@@ -1752,9 +1752,8 @@ void EpubReaderActivity::renderBook() {
       // A load can fail on a corrupt/partial SD cache. Normally we clear the cache and
       // requestUpdate() to re-parse and retry, but bound the retries: if the page keeps
       // failing, requestUpdate() would re-enter render() forever and trip the watchdog.
-      constexpr uint8_t MAX_PAGE_LOAD_RETRIES = 3;
-      if (pageLoadRetries >= MAX_PAGE_LOAD_RETRIES) {
-        LOG_ERR("ERS", "Page load failed %u times - giving up", pageLoadRetries);
+      if (pageLoadRetryCount >= MAX_PAGE_LOAD_RETRIES) {
+        LOG_ERR("ERS", "Page load failed %u times - giving up", pageLoadRetryCount);
         renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_PAGE_LOAD_ERROR), true, EpdFontFamily::BOLD);
         renderStatusBar();
         renderer.displayBuffer();
@@ -1762,8 +1761,8 @@ void EpubReaderActivity::renderBook() {
         showPendingSyncSaveError();
         return;
       }
-      pageLoadRetries++;
-      LOG_ERR("ERS", "Failed to load page from SD - clearing section cache (retry %u)", pageLoadRetries);
+      pageLoadRetryCount++;
+      LOG_ERR("ERS", "Failed to load page from SD - clearing section cache (retry %u)", pageLoadRetryCount);
       // Abandon (not suspend) any active build BEFORE clearing: clearCache deletes the files,
       // and the destructor's suspend would otherwise commit tables into a deleted handle.
       section->abandonBuild();
@@ -1774,10 +1773,8 @@ void EpubReaderActivity::renderBook() {
       showPendingSyncSaveError();
       return;
     }
-    pageLoadRetryCount = 0;
-
     // Page loaded successfully - reset the failure guard.
-    pageLoadRetries = 0;
+    pageLoadRetryCount = 0;
     Perf::mark(Perf::STAGE_PAGE);
 
     // Collect footnotes from the loaded page
@@ -1799,14 +1796,6 @@ void EpubReaderActivity::renderBook() {
     markPageRendered();
   }
 
-  if (currentSpineIndex != lastSavedSpineIndex || section->currentPage != lastSavedPage ||
-      section->pageCount != lastSavedPageCount) {
-    if (saveProgress(currentSpineIndex, section->currentPage, section->estimatedTotalPages())) {
-      lastSavedSpineIndex = currentSpineIndex;
-      lastSavedPage = section->currentPage;
-      lastSavedPageCount = section->estimatedTotalPages();
-    }
-  }
   // Only persist when the position actually changed. render() also runs on menu,
   // bookmark and screenshot re-renders, and writeAtomic is several FAT ops for 6 bytes.
   // The write itself waits for PROGRESS_SAVE_IDLE_MS of idle time in loop()

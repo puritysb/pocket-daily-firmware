@@ -193,7 +193,7 @@ bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* conte
     case Surface::None:
       return false;
     case Surface::Home: {
-      if (!visitStrings(context, visit, {s.library, s.select, s.sync})) return false;
+      if (!visitStrings(context, visit, {s.home, s.select, s.articles, s.sync})) return false;
       const Home::Row* first = frame.rowCount ? &frame.rows[0] : nullptr;
       if (first && first->reading) {
         if (!visitStrings(context, visit, {s.continueReading, frame.book.title, frame.book.author})) return false;

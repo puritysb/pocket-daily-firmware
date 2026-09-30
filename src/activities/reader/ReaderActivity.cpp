@@ -109,7 +109,7 @@ void ReaderActivity::onExit() {
 
 bool ReaderActivity::handleBackNavigation() {
   return ReaderUtils::handleBackNavigation(mappedInput, activityManager, bookPath.c_str(),
-                                           {this, [](void* ctx) { static_cast<ReaderActivity*>(ctx)->onGoHome(); }});
+                                           {this, [](void*) { activityManager.leaveReader(); }});
 }
 
 void ReaderActivity::clearEndOfBookOptionsIfNeeded() {
@@ -135,7 +135,7 @@ bool ReaderActivity::handleEndOfBookMenu(const bool suppressConfirmRelease) {
       activityManager.goToReader(openPath);
       return true;
     case EndOfBookOptions::Action::GoHome:
-      onGoHome();
+      activityManager.leaveReader();
       return true;
     case EndOfBookOptions::Action::LastPage:
       onReturnFromEndOfBook();
@@ -158,7 +158,7 @@ bool ReaderActivity::handleEndOfBookPageTurn(const bool prevTriggered, const boo
     return true;
   }
   if (nextTriggered) {
-    onGoHome();
+    activityManager.leaveReader();
   } else if (prevTriggered) {
     onReturnFromEndOfBook();
     requestUpdate();

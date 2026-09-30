@@ -527,7 +527,7 @@ void HomeActivity::render(RenderLock&&) {
   append(tr(STR_LIBRARY), Library);
   if (hasOpdsServers) append(tr(STR_OPDS_BROWSER), Blocks);
   append(tr(STR_FILE_TRANSFER), Transfer);
-  append(tr(STR_POCKET_DAILY_APP), AgentMark);
+  append(tr(STR_POCKET_DAILY_APP), Recent);
   append(tr(STR_SETTINGS_TITLE), Settings);
 
   const int menuTop = metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset;
