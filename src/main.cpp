@@ -55,19 +55,14 @@
 // Vector-font boards only: without TTF the stock loop stack has always sufficed,
 // and non-PSRAM boards need the 16KB back in DRAM.
 SET_LOOP_TASK_STACK_SIZE(24 * 1024)
-#endif
-
-// 16 KB loop task stack (Arduino default: 8 KB). The agent dashboard runs its
-// whole synchronous world on this task — WS pump + JSON dispatch, the feed
-// sync chain (esp_http_client → std::string body → ArduinoJson → deck persist
-// → SD), OTA receive, SD logging — and the 8 KB default was measured to within
-// ~1 KB of its limit at the WS-connect edge: X4 panicked at the stack-bottom
-// canary (printf-family frame, 1.15 KB) right after device_info, 3/3
-// reproducible on 23ccd9d1. Deferring the connect-edge fetch to a shallow
-// frame (PocketDailyActivity::loop) halves the pressure; this doubles the
-// budget so the whole class of "one more frame tips it over" is gone. C3 has
-// no PSRAM but ~380 KB RAM; 8 KB more is cheap insurance.
+#else
+// Pocket Daily: 16 KB loop task stack (Arduino default: 8 KB). Sized when the
+// removed AgentDeck dashboard ran WS/HTTP/JSON/OTA chains on this task (X4
+// canary panic at the WS-connect edge, 23ccd9d1). The companion web routes,
+// BLE sync and staged OTA still run here; lower it only after a measured
+// uxTaskGetStackHighWaterMark() across those paths (fork-delta-register R-10).
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+#endif
 
 GfxRenderer renderer(display);
 MappedInputManager mappedInputManager(gpio, renderer);
@@ -409,9 +404,6 @@ void setup() {
 #endif
 
   HalSystem::begin();
-  // checkPanic() clears the watchdog capture marker after a successful SD
-  // dump, so retain the boot classification for the later activity route.
-  const bool rebootedFromPanic = HalSystem::isRebootFromPanic();
 
   // Read-and-clear so a panic later in setup() doesn't loop into silent reboot.
   // Bound the target range too — RTC_NOINIT memory is uninitialized on cold boot.
@@ -632,21 +624,28 @@ void setup() {
     activityManager.goHome();
     landsOnShell = true;
   } else if (mappedInputManager.isPressed(MappedInputManager::Button::Back)) {
-    // The library is always one deliberate held button away, but is no longer
-    // the product's default boot identity.
-    activityManager.goHome();
-  } else if (mappedInputManager.isPressed(MappedInputManager::Button::Confirm) && !APP_STATE.openEpubPath.empty() &&
-             APP_STATE.readerActivityLoadCount == 0) {
-    LOG_INF("MAIN", "Pocket boot: resume reader (OK held)");
-    activityManager.goToReader(APP_STATE.openEpubPath);
-  } else {
+    // CrossPoint Home is always one deliberate held button away, but is no
+    // longer the product's default boot identity.
+    activityManager.goHome(HomeMenuItem::NONE, needsWakeRefresh);
+  } else if (!APP_STATE.openEpubPath.empty() && APP_STATE.readerActivityLoadCount == 0 &&
+             (mappedInputManager.isPressed(MappedInputManager::Button::Confirm) ||
+              (resume == BootResume::SplashlessWake && APP_STATE.lastSleepFromReader))) {
+    // OK held, or waking from the book's Quick Resume page, which promises the
+    // same page. Stock's boot-loop guard: a book that crashes the reader is not
+    // reopened on the next boot.
+    const auto path = APP_STATE.openEpubPath;
+    APP_STATE.openEpubPath = "";
+    APP_STATE.readerActivityLoadCount++;
+    APP_STATE.saveToFile();
+    const ReaderReturn origin =
+        SETTINGS.startupApp == CrossPointSettings::STARTUP_HOME ? ReaderReturn::Home : ReaderReturn::PocketDaily;
+    activityManager.goToReaderFrom(origin, path, allowFastInitialReaderRefresh);
+  } else if (SETTINGS.startupApp == CrossPointSettings::STARTUP_HOME) {
     // Pocket is the default product shell, but keep the persisted startup
-    // choice honest: users who explicitly chose Library must not be routed to
-    // Pocket anyway. AgentDeck availability never influences either route.
-    if (SETTINGS.startupApp == CrossPointSettings::STARTUP_HOME)
-      activityManager.goHome();
-    else
-      activityManager.goToPocketDaily();
+    // choice honest: users who explicitly chose Home are not routed to Pocket.
+    activityManager.goHome(HomeMenuItem::NONE, needsWakeRefresh);
+  } else {
+    activityManager.goToPocketDaily();
   }
 
   // Consumed on every boot (one-shot). A firmware image the companion

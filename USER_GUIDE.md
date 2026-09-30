@@ -99,7 +99,9 @@ To reboot the device (for example after a firmware update or if it's frozen), pr
 Upon turning the device on for the first time, you will be placed on the **[Home](#31-home-screen)** screen.
 
 > [!NOTE]
-> On subsequent restarts, the firmware will automatically reopen the last book you were reading.
+> This build opens **Pocket Daily** on power-on (choose Home instead under **Settings → System → Start on power-on**).
+> Waking from a **Quick Resume** sleep page reopens that book. Hold **OK** while powering on to reopen the last book,
+> or **Back** to open the Home screen.
 
 ---
 
