@@ -165,9 +165,6 @@ String buildStatusJson(const StatusInputs& in) {
     live["mode"] = (in.live.push && !in.live.suspended) ? "push" : "poll";
     if (in.live.push && !in.live.suspended) live["wsPort"] = in.live.wsPort;
     live["frameStream"] = in.live.push && !in.live.suspended;
-    live["uiPacks"] = true;  // LS-3: .uipack apply
-    live["activePack"] = in.live.activePackName[0] ? in.live.activePackName : nullptr;
-    live["activePackVersion"] = in.live.activePackVersion[0] ? in.live.activePackVersion : nullptr;
   }
 
   String json;

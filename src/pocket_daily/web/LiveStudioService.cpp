@@ -8,7 +8,6 @@
 #include "pocket_daily/live_studio/DevTrace.h"
 #include "pocket_daily/live_studio/LiveFrameCapture.h"
 #include "pocket_daily/live_studio/LiveStudioEvents.h"
-#include "pocket_daily/live_studio/UiPackStore.h"
 #include "pocket_daily/web/UploadStreamServer.h"
 
 namespace PocketDaily::Web {
@@ -244,20 +243,5 @@ void LiveStudioService::beginTransferFocus() {
 }
 
 void LiveStudioService::endTransferFocus() { transferFocus_.end(millis()); }
-
-bool LiveStudioService::onPackApplied(const char* name, const char* packVersion) {
-  if (!PocketDaily::LiveStudio::writeState(name, packVersion)) return false;
-  PocketDaily::LiveStudio::noteActive(name, packVersion);
-  return true;
-}
-
-bool LiveStudioService::onPackCleared() {
-  if (!PocketDaily::LiveStudio::clearState()) return false;
-  PocketDaily::LiveStudio::noteActive("", "");
-  return true;
-}
-
-const char* LiveStudioService::activePackName() const { return PocketDaily::LiveStudio::activeName(); }
-const char* LiveStudioService::activePackVersion() const { return PocketDaily::LiveStudio::activeVersion(); }
 
 }  // namespace PocketDaily::Web

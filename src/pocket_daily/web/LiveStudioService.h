@@ -64,16 +64,10 @@ class LiveStudioService final {
   void notifyPrefsChanged();
   void beginTransferFocus();
   void endTransferFocus();
-  // Pack apply/clear: persist + record the advertisement the status builder
-  // and the ui-packs listing read back.
-  bool onPackApplied(const char* name, const char* packVersion);
-  bool onPackCleared();
 
   // Status/listing inputs.
   bool pushActive() const { return liveStudioPush && host_ && host_->wsSlot && *host_->wsSlot; }
   bool listenerSuspended() const { return liveListenerSuspended; }
-  const char* activePackName() const;
-  const char* activePackVersion() const;
 
  private:
   void startListener();

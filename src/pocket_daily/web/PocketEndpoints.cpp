@@ -37,7 +37,6 @@
 #include "pocket_daily/live_studio/LiveFrameCapture.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/live_studio/StackReport.h"
-#include "pocket_daily/live_studio/UiPackStore.h"
 #include "pocket_daily/staged_firmware.h"
 #include "pocket_daily/web/DisplayState.h"
 #include "pocket_daily/web/ExactRouteDispatch.h"
@@ -1188,92 +1187,6 @@ void handleScreenLive(WebServer& server) {
   feedLoopWDT();
 }
 
-void handleUiPackList(WebServer& server, const RouteDeps& d) {
-  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server.send(200, "application/json", "");
-  server.sendContent("[");
-  char line[160];
-  bool first = true;
-  PocketDaily::LiveStudio::listPacks([&](const char* name, size_t size) {
-    const bool active = strcmp(name, d.liveStudio->activePackName()) == 0;
-    const int n = snprintf(line, sizeof(line), R"({"name":"%.32s","size":%u,"active":%s})", name,
-                           static_cast<unsigned>(size), active ? "true" : "false");
-    if (n <= 0 || static_cast<size_t>(n) >= sizeof(line)) return;
-    if (!first) server.sendContent(",");
-    first = false;
-    server.sendContent(line);
-  });
-  server.sendContent("]");
-  server.sendContent("");
-}
-
-// LS-3 apply: load + validate + layer over the current theme, persist the
-// choice, and ask for a repaint so the live frame shows the result. An empty
-// name reverts to the theme's own metrics.
-void handleUiPackApply(WebServer& server, const RouteDeps& d) {
-  JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, server.arg("plain"));
-  if (err) {
-    server.send(400, "text/plain", "Invalid JSON");
-    return;
-  }
-  if (!doc["name"].is<const char*>()) {
-    server.send(400, "text/plain", "Missing pack name");
-    return;
-  }
-  const char* name = doc["name"].as<const char*>();
-  if (name[0] == '\0') {
-    bool saved;
-    {
-      RenderLock lock;
-      saved = d.liveStudio->onPackCleared();
-      if (saved) UITheme::getInstance().adoptPackMetrics(nullptr, 0);
-    }
-    if (!saved) {
-      server.send(500, "text/plain", "Could not save pack state; active pack unchanged");
-      return;
-    }
-    repaint(d);
-    server.send(200, "application/json", "{\"applied\":false}");
-    return;
-  }
-  PocketDaily::LiveStudio::UiPackInfo info;
-  PocketDaily::LiveStudio::ThemeOverride* overrides = PocketDaily::LiveStudio::acquireOverrideBuffer();
-  if (!overrides) {
-    server.send(503, "text/plain", "Not enough memory to load the pack");
-    return;
-  }
-  PocketDaily::LiveStudio::UiPackResult validateError = PocketDaily::LiveStudio::UiPackResult::Ok;
-  const auto result = PocketDaily::LiveStudio::loadPackFromSd(
-      name, &info, overrides, PocketDaily::LiveStudio::UIPACK_MAX_THEME_OVERRIDES, &validateError);
-  if (result != PocketDaily::LiveStudio::StoreResult::Ok) {
-    PocketDaily::LiveStudio::releaseOverrideBuffer(overrides);
-    const int code = result == PocketDaily::LiveStudio::StoreResult::OpenFail ? 404 : 422;
-    char body[128];
-    snprintf(body, sizeof(body), "{\"applied\":false,\"error\":\"%s\"}",
-             PocketDaily::LiveStudio::storeResultName(result));
-    server.send(code, "application/json", body);
-    return;
-  }
-  overrides = PocketDaily::LiveStudio::compactOverrideBuffer(overrides, info.themeOverrideCount);
-  bool saved;
-  {
-    RenderLock lock;
-    saved = d.liveStudio->onPackApplied(info.name, info.packVersion);
-    if (saved) UITheme::getInstance().adoptPackMetrics(overrides, info.themeOverrideCount);
-  }
-  if (!saved) {
-    PocketDaily::LiveStudio::releaseOverrideBuffer(overrides);
-    server.send(500, "text/plain", "Could not save pack state; active pack unchanged");
-    return;
-  }
-  repaint(d);
-  char body[128];
-  snprintf(body, sizeof(body), "{\"applied\":true,\"name\":\"%.32s\",\"version\":\"%.16s\",\"overrides\":%u}",
-           info.name, info.packVersion, static_cast<unsigned>(info.themeOverrideCount));
-  server.send(200, "application/json", body);
-}
-
 #ifdef ENABLE_DEV_REMOTE_FLASH
 // Developer builds only. Validates and flashes the staged /update.bin, then
 // reboots; a one-shot marker makes the next boot rejoin the saved STA network.
@@ -1456,16 +1369,6 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
       handleScreenLive(*server);
     });
   }
-  // Both Sync profiles advertise uiPacks. Applying/reverting a data pack must
-  // remain available without a router or WebSocket listener.
-  routes.on("/api/pocket/v1/ui-packs", HTTP_GET, [server = &server, deps = &d] {
-    note(*deps);
-    handleUiPackList(*server, *deps);
-  });
-  routes.on("/api/pocket/v1/ui-pack/apply", HTTP_POST, [server = &server, deps = &d] {
-    note(*deps);
-    handleUiPackApply(*server, *deps);
-  });
 #if POCKET_HEAP_MAP_ENABLED
   // HN-2 evidence part 2: per-task stack high-water marks. Safe API per task
   // (no scheduler suspension, unlike uxTaskGetSystemState which hung).

@@ -501,8 +501,8 @@ void CrossPointWebServer::wireLiveStudioHost() {
 }
 
 // Pocket seam (SEAM.md): wire the route-table host hooks (session state,
-// upload activity, repaint, shared path/name validation, and the ui-pack
-// directory adapter) the endpoints module calls back through.
+// upload activity, repaint, shared path/name validation) the endpoints module
+// calls back through.
 void CrossPointWebServer::wirePocketRoutes() {
   pocketRoutes.profile = profile;
   pocketRoutes.apMode = apMode;
@@ -613,8 +613,6 @@ PocketDaily::Web::StatusInputs CrossPointWebServer::statusInputs() const {
   in.live.push = liveStudio.pushActive();
   in.live.suspended = liveStudio.listenerSuspended();
   in.live.wsPort = wsPort;
-  strlcpy(in.live.activePackName, liveStudio.activePackName(), sizeof(in.live.activePackName));
-  strlcpy(in.live.activePackVersion, liveStudio.activePackVersion(), sizeof(in.live.activePackVersion));
   return in;
 }
 

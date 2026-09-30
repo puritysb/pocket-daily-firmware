@@ -14,7 +14,6 @@
 #include "pocket_daily/PocketProfileStore.h"
 #include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/live_studio/NetHealth.h"
-#include "pocket_daily/live_studio/UiPackStore.h"
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
 #include "util/ScreenshotUtil.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
@@ -47,12 +46,9 @@ void begin(GfxRenderer& renderer, const bool& deepSleepInProgress) {
 
 void beginNetHealth() { PocketDaily::NetHealth::begin(); }
 
-void applyStartupUiPack() {
-  // Live Studio LS-3: layer the persisted UI pack over the selected theme
-  // before any surface renders.
-  PocketDaily::LiveStudio::applyStartupPack();
-  // Persisted Pocket Daily profile, loaded once into RAM with the other
-  // persisted presentation state so Home and sleep never parse SD.
+void loadPersistedState() {
+  // Persisted Pocket Daily profile, loaded once into RAM so Home and sleep
+  // never parse SD.
   PocketDaily::DailyProfile::loadAtBoot();
 }
 

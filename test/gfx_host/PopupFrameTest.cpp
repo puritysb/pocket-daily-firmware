@@ -10,33 +10,14 @@
 #include "components/themes/PopupFrame.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "components/themes/roundedraff/RoundedRaffTheme.h"
-#include "pocket_daily/live_studio/ThemeFieldIds.h"
 
 namespace {
-namespace Field = PocketDaily::LiveStudio::ThemeField;
-
 // UI_12_FONT_ID's family on the device (src/main.cpp), 1-bit and uncompressed.
 EpdFont uiRegular(&ubuntu_12_regular);
 EpdFont uiBold(&ubuntu_12_bold);
 constexpr int UI_FONT = 12;
 // The longest reader popup: EpubReaderActivity's build-error state clears the page first.
 constexpr char INDEX_FAILED[] = "Failed to index - invalid book or SD error";
-
-// Classic with the Live Studio pack found active on the X3
-// (/pocket-daily/ui-packs/studio-6c134a9368a44871.uipack): its popup records
-// round the corners and keep bold text, but leave the text colour alone.
-ThemeMetrics classicWithStudioPack() {
-  ThemeMetrics metrics = BaseMetrics::values;
-  Field::applyOverride(metrics, Field::kContentSidePadding, 1, 20);
-  Field::applyOverride(metrics, Field::kHeaderHeight, 1, 44);
-  Field::applyOverride(metrics, Field::kListRowHeight, 1, 56);
-  Field::applyOverride(metrics, Field::kMenuRowHeight, 1, 60);
-  Field::applyOverride(metrics, Field::kMenuSpacing, 1, 8);
-  Field::applyOverride(metrics, Field::kPopupCornerRadius, 1, 8);
-  Field::applyOverride(metrics, Field::kPopupTextBold, 2, 1);
-  Field::applyOverride(metrics, Field::kTabBarHeight, 1, 40);
-  return metrics;
-}
 
 struct Counts {
   size_t black = 0;
@@ -110,49 +91,6 @@ TEST(PopupFrameInk, NativeThemesKeepTheirPopups) {
     EXPECT_TRUE(ink.box);
     EXPECT_FALSE(ink.text);
   }
-}
-
-TEST(PopupFrameInk, TextAlwaysContrastsWithTheBoxWhateverThePackSets) {
-  ThemeMetrics metrics = BaseMetrics::values;
-  for (const int radius : {0, 8, 18}) {
-    for (const bool textBlack : {false, true}) {
-      Field::applyOverride(metrics, Field::kPopupCornerRadius, 1, radius);
-      Field::applyOverride(metrics, Field::kPopupTextInverted, 2, textBlack ? 1 : 0);
-      const auto ink = PopupFrame::inkFor(metrics);
-      EXPECT_EQ(ink.text, textBlack);
-      EXPECT_NE(ink.text, ink.box) << "radius " << radius;
-      EXPECT_NE(ink.frame, ink.box) << "radius " << radius;
-    }
-  }
-}
-
-// The X3 report: reading in Landscape CW with Classic plus the studio pack, the
-// build-error popup appeared as a solid black rounded bar along one long edge.
-TEST_F(PopupFrameHost, RoundedClassicPopupShowsItsMessageInLandscapeOnX3) {
-  const ThemeMetrics metrics = classicWithStudioPack();
-  renderer.setOrientation(GfxRenderer::LandscapeClockwise);
-  renderer.clearScreen();
-  const Rect box = PopupFrame::draw(renderer, metrics, UI_FONT, INDEX_FAILED);
-  EXPECT_EQ(panel.presentations, 0U);
-  EXPECT_TRUE(panel.guardsIntact());
-  writePbm("popup-x3-landscape-cw-classic-pack.pbm");
-
-  // Logical geometry: a long, short box near the logical top.
-  EXPECT_EQ(box.y, static_cast<int>(528 * metrics.popupTopOffsetRatio));
-  EXPECT_GT(box.width, 400);
-  EXPECT_LT(box.height, 80);
-
-  int x0, y0, x1, y1;
-  ASSERT_TRUE(inkBounds(x0, y0, x1, y1));
-  const int frame = metrics.popupFrameThickness;
-  EXPECT_EQ(x1 - x0 + 1, box.width + 2 * frame);
-  EXPECT_EQ(y1 - y0 + 1, box.height + 2 * frame);
-
-  // Inside the rounded corners, the box is white and carries black glyphs.
-  const int inset = frame + metrics.popupCornerRadius;
-  const Counts inside = count(x0 + inset, y0 + inset, x1 - inset, y1 - inset);
-  EXPECT_GT(inside.black, 1000U) << "no message glyphs";
-  EXPECT_GT(inside.white, inside.black) << "box filled in the text colour";
 }
 
 TEST_F(PopupFrameHost, NativeRoundedPopupStillDrawsWhiteTextOnBlack) {

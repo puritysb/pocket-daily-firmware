@@ -7,7 +7,6 @@
 
 #include "CrossPointSettings.h"
 #include "components/themes/BaseTheme.h"
-#include "pocket_daily/live_studio/UiPack.h"
 
 class CoverGridHomeUi;
 
@@ -37,12 +36,6 @@ class UITheme {
   static void drawCoverGridHome(CoverGridHomeUi& home);
   void reload();
   void setTheme(CrossPointSettings::UI_THEME type);
-  // Live Studio LS-3: apply a validated .uipack's theme overrides on top of
-  // the current theme. An empty list reverts to the theme's own metrics.
-  // Takes ownership of malloc-backed, already validated overrides; no allocation.
-  // Caller holds RenderLock when the render task is running.
-  void adoptPackMetrics(PocketDaily::LiveStudio::ThemeOverride* overrides, size_t count);
-  bool packActive() const { return packOverrides != nullptr; }
   static int getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,
                                      bool hasSubtitle, int extraReservedHeight = 0);
   static std::string getCoverThumbPath(std::string coverBmpPath, int coverHeight);
@@ -51,17 +44,9 @@ class UITheme {
   static int getProgressBarHeight();
 
  private:
-  void reapplyPackAfterThemeChange();
-
   BaseTheme fallbackTheme;
   const ThemeMetrics* currentMetrics = &BaseMetrics::values;
-  const ThemeMetrics* baseMetrics = nullptr;
   std::unique_ptr<BaseTheme> currentTheme;
-  // Pack state lives on the heap only while a pack is active - the File
-  // Transfer baseline must stay at its no-pack level (radio buffer budget).
-  ThemeMetrics packedMetrics{};
-  PocketDaily::LiveStudio::ThemeOverride* packOverrides = nullptr;
-  size_t packOverrideCount = 0;
   mutable ThemeMetrics adjustedMetrics;
   mutable bool metricsValid = false;
   mutable bool metricsForTouch = false;
