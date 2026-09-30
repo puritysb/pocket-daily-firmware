@@ -35,7 +35,6 @@ class LibraryListActivity final : public UiTabListActivity {
 
   void onEnter() override;
   void onExit() override;
-  bool allowsExchangeWindow() const override { return true; }
 
  protected:
   // --- UiListActivity / UiTabListActivity contract ---------------------------

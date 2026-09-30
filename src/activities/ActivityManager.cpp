@@ -9,6 +9,7 @@
 #include <VectorFontSupport.h>
 
 #include <algorithm>
+#include <utility>
 
 #include "CrossPointSettings.h"
 #include "OpdsServerStore.h"
@@ -286,13 +287,14 @@ void ActivityManager::goToFileTransfer(const bool autoJoinSavedNetwork) {
   replaceActivity(std::move(transfer));
 }
 
-void ActivityManager::goToPocketDaily() {
+bool ActivityManager::goToPocketDaily() {
   auto pocketDaily = makeUniqueNoThrow<PocketDailyActivity>(renderer, mappedInput);
   if (!pocketDaily) {
     LOG_ERR("ACT", "OOM: PocketDailyActivity");
-    return;
+    return false;
   }
   replaceActivity(std::move(pocketDaily));
+  return true;
 }
 
 void ActivityManager::goToPocketNearbySync(const bool autoJoinSavedNetwork) {
@@ -365,6 +367,28 @@ void ActivityManager::goToReader(std::string path, const bool allowFastInitialRe
   }
 }
 
+void ActivityManager::goToReaderFrom(const ReaderReturn origin, std::string path, const bool allowFastInitialRefresh) {
+  goToReader(std::move(path), allowFastInitialRefresh);
+  // Only a queued book records the origin; a failed open leaves no stale return.
+  if (pendingActivity && pendingActivity->isReaderActivity()) readerReturn = origin;
+}
+
+void ActivityManager::leaveReader() {
+  // The shell is constructed while the book is still alive; if that allocation
+  // fails, Home (smaller) is the fallback rather than staying in the book.
+  switch (std::exchange(readerReturn, ReaderReturn::Home)) {
+    case ReaderReturn::PocketDaily:
+      if (goToPocketDaily()) return;
+      break;
+    case ReaderReturn::Articles:
+      if (goToArticles()) return;
+      break;
+    case ReaderReturn::Home:
+      break;
+  }
+  goHome();
+}
+
 void ActivityManager::goToSleep(bool fromTimeout) {
   replaceActivity(std::make_unique<SleepActivity>(renderer, mappedInput, fromTimeout));
   loop();  // Important: sleep screen must be rendered immediately, the caller will go to sleep right after this returns
@@ -377,6 +401,7 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
 }
 
 void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefresh) {
+  readerReturn = ReaderReturn::Home;
   if (initialMenuItem == HomeMenuItem::NONE && currentActivity) {
     const auto& activityName = currentActivity->name;
     if (activityName == "FileBrowser") {
@@ -540,12 +565,13 @@ void RenderLock::unlock() {
  */
 bool RenderLock::peek() { return xQueuePeek(activityManager.renderingMutex, NULL, 0) != pdTRUE; };
 
-void ActivityManager::goToArticles() {
+bool ActivityManager::goToArticles() {
   // Screen-owned bounded index is released when entering the reader or network activities.
   auto activity = makeUniqueNoThrow<ArticlesActivity>(renderer, mappedInput);
   if (!activity) {
     LOG_ERR("ARTICLE", "Cannot allocate activity");
-    return;
+    return false;
   }
   replaceActivity(std::move(activity));
+  return true;
 }

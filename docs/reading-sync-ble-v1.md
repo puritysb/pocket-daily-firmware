@@ -30,8 +30,8 @@ window** at natural moments, while Wi-Fi is off and no book is open:
 
 | Trigger | Window |
 | --- | --- |
-| A book is closed (reader returns to Home/Library) | 45 s |
-| Wake from sleep, after Home is drawn | 45 s |
+| A book is closed (reader returns to Pocket Daily) | 45 s |
+| Wake from sleep, after Pocket Daily is drawn | 45 s |
 | Power button / auto-sleep, after the sleep screen is drawn, before deep sleep | 20 s |
 
 Rules:
@@ -70,9 +70,11 @@ Reader implementation notes (2026-09-30):
   drawn (render counter; at most 5 s wait). The wake trigger is a power-button
   wake onto the shell (not a silent restart, crash, recovery or developer boot).
   A sleep trigger during an open window keeps it open for exactly 20 s more.
-- The window closes before any screen other than Home, Pocket Daily, Library,
-  the file browser or the sleep screen is entered (a book, Settings, a dialog,
-  a Wi-Fi mode, the Nearby Sync restart). Teardown precedes `onEnter`; activity
+- The window closes before any screen other than Pocket Daily or the sleep
+  screen is entered (a book, stock CrossPoint Home/Library/file browser,
+  Settings, a dialog, a Wi-Fi mode, the Nearby Sync restart). Stock screens
+  never host a window (2026-10-01): a book read from Home syncs at the next
+  sleep or wake window instead. Teardown precedes `onEnter`; activity
   constructors may already have run. Library replaces the removed Recent Books
   screen in the 1.6.5 baseline. Book-close arming waits for all pending navigation
   to finish, including Pop-to-Home and returning to a stacked shell. A button press during the sleep window ends it and the

@@ -34,7 +34,7 @@ Strings deviceStrings() {
   s.weatherHint = tr(STR_POCKET_WEATHER_HINT);
   s.nextEvent = tr(STR_POCKET_NEXT_EVENT);
   s.today = tr(STR_POCKET_TODAY);
-  s.library = tr(STR_POCKET_LIBRARY);
+  s.home = tr(STR_POCKET_HOME);
   s.select = tr(STR_SELECT);
   s.articles = tr(STR_ARTICLES);
   s.sync = tr(STR_POCKET_SYNC);

@@ -22,7 +22,7 @@ class SyncRoutesTest(unittest.TestCase):
             self.assertFalse((root / path).exists())
 
     def test_articles_live_under_pocket_reader_not_home(self):
-        # Home stays the stock CrossPoint menu plus the single Pocket Reader
+        # Home stays the stock CrossPoint menu plus the single Pocket Daily
         # entry; the Articles library is reached from Pocket Daily's Home.
         root = Path(__file__).resolve().parents[1]
         home = (root / "src/activities/home/HomeActivity.cpp").read_text()
@@ -33,6 +33,34 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertNotIn("HomeMenuItem::ARTICLES", manager)
         self.assertIn("activityManager.goToArticles()", pocket)
         self.assertIn("activityManager.goToPocketDaily()", articles)
+
+    def test_books_return_to_the_shell_that_opened_them(self):
+        # Pocket Daily and Articles record themselves as the book's origin; the
+        # reader's Back and end-of-book exits go through leaveReader, and any
+        # trip Home clears the origin so a book opened there returns Home.
+        root = Path(__file__).resolve().parents[1]
+        pocket = (root / "src/activities/pocket_daily/PocketDailyActivity.cpp").read_text()
+        articles = (root / "src/activities/home/ArticlesActivity.cpp").read_text()
+        reader = (root / "src/activities/reader/ReaderActivity.cpp").read_text()
+        manager = (root / "src/activities/ActivityManager.cpp").read_text()
+        self.assertIn("goToReaderFrom(ReaderReturn::PocketDaily", pocket)
+        self.assertIn("goToReaderFrom(ReaderReturn::Articles", articles)
+        self.assertNotIn("onGoHome()", reader)
+        self.assertEqual(reader.count("activityManager.leaveReader()"), 3)
+        go_home = manager[manager.index("void ActivityManager::goHome("):]
+        self.assertIn("readerReturn = ReaderReturn::Home;", go_home[:go_home.index("\n}")])
+        # The first front button leads to CrossPoint Home and says so.
+        self.assertIn("mapLabels(tr(STR_POCKET_HOME)", pocket)
+        self.assertNotIn("STR_POCKET_LIBRARY", pocket)
+
+    def test_stock_screens_do_not_host_reading_sync_windows(self):
+        root = Path(__file__).resolve().parents[1]
+        for path in ("src/activities/home/HomeActivity.h", "src/activities/home/FileBrowserActivity.h",
+                     "src/activities/library/LibraryListActivity.h"):
+            self.assertNotIn("allowsExchangeWindow", (root / path).read_text(), path)
+        for path in ("src/activities/pocket_daily/PocketDailyActivity.h",
+                     "src/activities/boot_sleep/SleepActivity.h"):
+            self.assertIn("allowsExchangeWindow() const override { return true; }", (root / path).read_text(), path)
 
     def test_page_turns_defer_the_progress_write(self):
         # renderBook() queues the position; loop() writes it after PROGRESS_SAVE_IDLE_MS

@@ -71,7 +71,6 @@ class FileBrowserActivity final : public UiListActivity {
   explicit FileBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string initialPath = "/",
                                Mode mode = Mode::Books);
   void onEnter() override;
-  bool allowsExchangeWindow() const override { return true; }
   void onExit() override;
   void render(RenderLock&& lock) override;
 };
