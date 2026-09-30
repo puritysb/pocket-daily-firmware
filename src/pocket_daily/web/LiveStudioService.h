@@ -34,8 +34,8 @@ struct LiveHost {
 // Live Studio v1 (`docs/live-studio-v1.md`): subscription, change-signature,
 // and send pacing state for the WebSocket push channel, plus transfer focus
 // (uploads own the DMA pool; the listener's buffers are torn down for the
-// duration and rebuilt afterwards) and the persisted active-pack
-// advertisement. The wire encoding lives in LiveStudioEvents.h; this class
+// duration and rebuilt afterwards). The wire encoding lives in
+// LiveStudioEvents.h; this class
 // owns only per-connection state and lifecycle.
 class LiveStudioService final {
  public:

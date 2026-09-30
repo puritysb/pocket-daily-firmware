@@ -14,7 +14,6 @@ EXCEPTIONS = {
     },
     "src/pocket_daily/web/PocketEndpoints.cpp": {
         "RecentBooksStore.h": "reading sync and removal update the reader's recent list",
-        "activities/RenderLock.h": "pack adoption serializes with rendering",
         "articles/ArticleStorage.h": "product article storage used by app routes",
     },
 }

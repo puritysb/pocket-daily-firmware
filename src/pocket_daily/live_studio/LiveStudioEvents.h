@@ -23,7 +23,6 @@ namespace PocketDaily::LiveStudio {
 
 inline constexpr char kProtocol[] = "live-studio/1";
 inline constexpr uint32_t kMinStatusIntervalMs = 500;
-inline constexpr uint32_t kKeepaliveIntervalMs = 15000;
 
 // The WS listener gate, checked AFTER the server settles: the heap map
 // (2026-09-20) showed the DMA pool bottoming 3.5 KB from empty during

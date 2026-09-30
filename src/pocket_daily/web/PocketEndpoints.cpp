@@ -17,7 +17,6 @@
 
 #include "CrossPointSettings.h"
 #include "RecentBooksStore.h"
-#include "activities/RenderLock.h"
 #include "articles/ArticleStorage.h"
 #include "components/UITheme.h"
 #include "network/FirmwareFlasher.h"
