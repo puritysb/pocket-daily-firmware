@@ -34,8 +34,8 @@ struct LiveHost {
 // Live Studio v1 (`docs/live-studio-v1.md`): subscription, change-signature,
 // and send pacing state for the WebSocket push channel, plus transfer focus
 // (uploads own the DMA pool; the listener's buffers are torn down for the
-// duration and rebuilt afterwards) and the persisted active-pack
-// advertisement. The wire encoding lives in LiveStudioEvents.h; this class
+// duration and rebuilt afterwards). The wire encoding lives in
+// LiveStudioEvents.h; this class
 // owns only per-connection state and lifecycle.
 class LiveStudioService final {
  public:
@@ -50,8 +50,8 @@ class LiveStudioService final {
   // The server's stop() path: best-effort bye, close, reset slot, forget state.
   void onServerStopping();
 
-  // One handleClient slice when the listener exists: status push + frame
-  // events, gated on push capability and an active subscription.
+  // One handleClient slice when the listener exists: status push, gated on
+  // push capability and an active subscription.
   void tick();
 
   // WebSocket event routing (the legacy upload grammar stays with the host).
@@ -64,16 +64,10 @@ class LiveStudioService final {
   void notifyPrefsChanged();
   void beginTransferFocus();
   void endTransferFocus();
-  // Pack apply/clear: persist + record the advertisement the status builder
-  // and the ui-packs listing read back.
-  bool onPackApplied(const char* name, const char* packVersion);
-  bool onPackCleared();
 
   // Status/listing inputs.
   bool pushActive() const { return liveStudioPush && host_ && host_->wsSlot && *host_->wsSlot; }
   bool listenerSuspended() const { return liveListenerSuspended; }
-  const char* activePackName() const;
-  const char* activePackVersion() const;
 
  private:
   void startListener();

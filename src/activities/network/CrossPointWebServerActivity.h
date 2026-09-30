@@ -76,7 +76,6 @@ class CrossPointWebServerActivity final : public Activity {
   PocketDaily::Web::TransferFeedback transferDisplay{};  // copied under RenderLock
   unsigned long transferDisplayAt = 0;
   void renderTransfer() const;
-  bool completedDisplayFrame = false;  // accessed only under RenderLock
 
   // Server status
   std::string connectedIP;
@@ -120,9 +119,6 @@ class CrossPointWebServerActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
-  bool canCaptureFrame() const override {
-    return completedDisplayFrame && (!presentation.visible() || presentation.canCaptureFrame());
-  }
   bool skipLoopDelay() override { return webServer && webServer->isRunning(); }
   bool preventAutoSleep() override {
     return state == WebServerActivityState::NEARBY_STARTING || state == WebServerActivityState::NEARBY_HANDOFF ||

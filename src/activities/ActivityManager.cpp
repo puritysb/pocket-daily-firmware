@@ -26,7 +26,6 @@
 #include "network/UsbDriveActivity.h"
 #include "pocket_daily/PocketDailyActivity.h"
 #include "pocket_daily/live_studio/DevTrace.h"
-#include "pocket_daily/live_studio/LiveFrameCapture.h"
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
@@ -82,13 +81,6 @@ void ActivityManager::renderTaskLoop() {
       display.setInverted(SETTINGS.screenInverted != 0);
       currentActivity->render(std::move(lock));
       DEV_TRACE(PocketDaily::DevTrace::RENDER_DONE);
-      // Live Studio LS-2: publish the just-rendered 1-bit frame while a
-      // companion is subscribed. Cheap no-op otherwise; the capture policy
-      // bounds heap use and cadence (docs/live-studio-v1.md).
-      if (currentActivity->canCaptureFrame()) {
-        PocketDaily::LiveFrameCapture::maybeCapture(renderer.getFrameBuffer(), renderer.getDisplayWidth(),
-                                                    renderer.getDisplayHeight());
-      }
       completedRenders.fetch_add(1, std::memory_order_acq_rel);
       const UBaseType_t stackHeadroom = uxTaskGetStackHighWaterMark(nullptr);
       if (stackHeadroom < 1024)
@@ -482,8 +474,6 @@ bool ActivityManager::isReaderActivity() const {
 bool ActivityManager::handleForcedRefresh() { return currentActivity && currentActivity->handleForcedRefresh(); }
 
 bool ActivityManager::skipLoopDelay() const { return currentActivity && currentActivity->skipLoopDelay(); }
-
-bool ActivityManager::canCaptureFrame() const { return currentActivity && currentActivity->canCaptureFrame(); }
 
 ScreenshotInfo ActivityManager::getScreenshotInfo() const {
   if (currentActivity) {

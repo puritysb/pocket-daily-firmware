@@ -17,7 +17,6 @@
 
 #include "CrossPointSettings.h"
 #include "RecentBooksStore.h"
-#include "activities/RenderLock.h"
 #include "articles/ArticleStorage.h"
 #include "components/UITheme.h"
 #include "network/FirmwareFlasher.h"
@@ -27,17 +26,14 @@
 #include "pocket_daily/ContentSealStore.h"
 #include "pocket_daily/PocketGlanceStore.h"
 #include "pocket_daily/PocketProfileStore.h"
-#include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/ReadingExchange.h"
 #include "pocket_daily/ReadingProgress.h"
 #include "pocket_daily/StagedFirmwareStore.h"
 #include "pocket_daily/boot/DevBootReturn.h"
 #include "pocket_daily/live_studio/DevTrace.h"
 #include "pocket_daily/live_studio/HeapMap.h"
-#include "pocket_daily/live_studio/LiveFrameCapture.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/live_studio/StackReport.h"
-#include "pocket_daily/live_studio/UiPackStore.h"
 #include "pocket_daily/staged_firmware.h"
 #include "pocket_daily/web/DisplayState.h"
 #include "pocket_daily/web/ExactRouteDispatch.h"
@@ -59,24 +55,13 @@ namespace {
 // heap and return to the global loop between every piece. The previous 512 B
 // write loop could block inside lwIP long enough to trip the task watchdog.
 // Each diagnostic request reads one chunk into the shared static staging
-// buffer and answers with one bounded socket write. A 53 KB X3 frame needs
-// ~13 requests instead of ~52.
+// buffer and answers with one bounded socket write.
 constexpr size_t CRASH_REPORT_CHUNK_BYTES = 1024;
-constexpr size_t SCREEN_PREVIEW_CHUNK_BYTES = firmware_flash::STAGING_BUFFER_BYTES;
 // A diagnostic chunk send blocks the loop task. Unlike an SD write it can
 // hang forever if the peer vanishes, so the loop watchdog must stay armed;
 // bounding the socket below the 5 s task-WDT window guarantees the send
 // returns (completed or aborted) before the watchdog could fire.
 constexpr unsigned long DIAGNOSTIC_SEND_TIMEOUT_MS = 3000;
-
-// LS-2 live frame fetch: same chunked octet-stream contract as the one-shot
-// screen preview, but reading the latest captured frame. Single slot — the
-// companion associates the fetched bytes with the newest `frame` event.
-// The fetch gate sits below the diagnostics floor on purpose: a 4 KiB shared
-// -buffer read plus one bounded send is far lighter than the crash report,
-// and an X3 in STA File Transfer idles within a few hundred bytes of the
-// 10 KiB diagnostics floor, which starved multi-chunk fetches in testing.
-constexpr uint32_t LIVE_FETCH_MIN_FREE_HEAP = 6U * 1024U;
 
 void note(const RouteDeps& d) {
   if (d.host.noteClientActivity) d.host.noteClientActivity(d.host.self);
@@ -932,75 +917,6 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
           static_cast<unsigned>(expectedSize), static_cast<unsigned long>(uploadedCrc));
 }
 
-void handleScreenPreview(WebServer& server) {
-  HalSystem::setCrashBreadcrumb("nearby:screen-preview");
-  if (!diagnosticsAffordable()) {
-    server.send(503, "text/plain", "Reader memory is too low for diagnostics right now");
-    return;
-  }
-  HalFile preview = Storage.open(PocketDaily::SCREEN_PREVIEW_PATH);
-  if (!preview || preview.isDirectory()) {
-    if (preview) preview.close();
-    server.send(404, "text/plain", "No Pocket Daily screen preview available");
-    return;
-  }
-
-  if (!server.hasArg("offset")) {
-    preview.close();
-    server.send(400, "text/plain", "Missing screen preview offset");
-    return;
-  }
-
-  const String offsetText = server.arg("offset");
-  if (offsetText.isEmpty()) {
-    preview.close();
-    server.send(400, "text/plain", "Invalid screen preview offset");
-    return;
-  }
-  for (size_t i = 0; i < offsetText.length(); i++) {
-    if (offsetText[i] < '0' || offsetText[i] > '9') {
-      preview.close();
-      server.send(400, "text/plain", "Invalid screen preview offset");
-      return;
-    }
-  }
-
-  const size_t previewSize = preview.size();
-  const size_t offset = static_cast<size_t>(offsetText.toInt());
-  if (offset >= previewSize || !preview.seek(offset)) {
-    preview.close();
-    server.send(416, "text/plain", "Screen preview offset out of range");
-    return;
-  }
-
-  uint8_t* body = firmware_flash::sharedStagingBuffer();
-  const size_t requested = std::min(previewSize - offset, SCREEN_PREVIEW_CHUNK_BYTES);
-  const int count = preview.read(body, requested);
-  preview.close();
-  if (count <= 0) {
-    server.send(500, "text/plain", "Could not read screen preview chunk");
-    return;
-  }
-
-  // The blocking TCP send can exceed the private-AP loop watchdog window on a
-  // weak link (measured: a task-watchdog reset at nearby:screen-preview while
-  // streaming 4 KiB chunks). Suspend the loop task's watchdog around the send,
-  // exactly as the SD upload path does, and bound the peer wait so a vanished
-  // companion cannot hang the reader while the watchdog is off.
-  // Keep the watchdog armed; the bounded socket timeout, not a WDT suspension,
-  // is what prevents a stuck send from either hanging the reader or tripping
-  // the 5 s task watchdog.
-  server.client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
-  feedLoopWDT();
-  server.setContentLength(static_cast<size_t>(count));
-  server.sendHeader("Cache-Control", "no-store");
-  server.send(200, "application/octet-stream", "");
-  server.sendContent(reinterpret_cast<const char*>(body), static_cast<size_t>(count));
-  feedLoopWDT();
-  LOG_DBG("WEB", "Pocket screen preview offset=%u bytes=%u total=%u", static_cast<unsigned>(offset),
-          static_cast<unsigned>(count), static_cast<unsigned>(previewSize));
-}
-
 // One chunk of one file of a published revision, so the companion can load
 // the reader's cards back into its editor. Published revisions are immutable
 // and content-addressed; this reads only <content>/<revision>/<leaf> and never
@@ -1137,143 +1053,6 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
   d.liveStudio->notifyPrefsChanged();
 }
 
-void handleScreenLive(WebServer& server) {
-  HalSystem::setCrashBreadcrumb("nearby:screen-live");
-  if (ESP.getFreeHeap() < LIVE_FETCH_MIN_FREE_HEAP) {
-    server.send(503, "text/plain", "Reader memory is too low for the live frame right now");
-    return;
-  }
-  HalFile frame = Storage.open(PocketDaily::LiveFrameCapture::LIVE_FRAME_PATH);
-  if (!frame || frame.isDirectory()) {
-    if (frame) frame.close();
-    server.send(404, "text/plain", "No live frame captured yet");
-    return;
-  }
-  if (!server.hasArg("offset")) {
-    frame.close();
-    server.send(400, "text/plain", "Missing live frame offset");
-    return;
-  }
-  const String offsetText = server.arg("offset");
-  bool offsetValid = !offsetText.isEmpty();
-  for (size_t i = 0; offsetValid && i < offsetText.length(); i++) {
-    if (offsetText[i] < '0' || offsetText[i] > '9') offsetValid = false;
-  }
-  if (!offsetValid) {
-    frame.close();
-    server.send(400, "text/plain", "Invalid live frame offset");
-    return;
-  }
-  const size_t frameSize = frame.size();
-  const size_t offset = static_cast<size_t>(offsetText.toInt());
-  if (offset >= frameSize || !frame.seek(offset)) {
-    frame.close();
-    server.send(416, "text/plain", "Live frame offset out of range");
-    return;
-  }
-  uint8_t* body = firmware_flash::sharedStagingBuffer();
-  const size_t requested = std::min(frameSize - offset, SCREEN_PREVIEW_CHUNK_BYTES);
-  const int count = frame.read(body, requested);
-  frame.close();
-  if (count <= 0) {
-    server.send(500, "text/plain", "Could not read live frame chunk");
-    return;
-  }
-  server.client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
-  feedLoopWDT();
-  server.setContentLength(static_cast<size_t>(count));
-  server.sendHeader("Cache-Control", "no-store");
-  server.send(200, "application/octet-stream", "");
-  server.sendContent(reinterpret_cast<const char*>(body), static_cast<size_t>(count));
-  feedLoopWDT();
-}
-
-void handleUiPackList(WebServer& server, const RouteDeps& d) {
-  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server.send(200, "application/json", "");
-  server.sendContent("[");
-  char line[160];
-  bool first = true;
-  PocketDaily::LiveStudio::listPacks([&](const char* name, size_t size) {
-    const bool active = strcmp(name, d.liveStudio->activePackName()) == 0;
-    const int n = snprintf(line, sizeof(line), R"({"name":"%.32s","size":%u,"active":%s})", name,
-                           static_cast<unsigned>(size), active ? "true" : "false");
-    if (n <= 0 || static_cast<size_t>(n) >= sizeof(line)) return;
-    if (!first) server.sendContent(",");
-    first = false;
-    server.sendContent(line);
-  });
-  server.sendContent("]");
-  server.sendContent("");
-}
-
-// LS-3 apply: load + validate + layer over the current theme, persist the
-// choice, and ask for a repaint so the live frame shows the result. An empty
-// name reverts to the theme's own metrics.
-void handleUiPackApply(WebServer& server, const RouteDeps& d) {
-  JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, server.arg("plain"));
-  if (err) {
-    server.send(400, "text/plain", "Invalid JSON");
-    return;
-  }
-  if (!doc["name"].is<const char*>()) {
-    server.send(400, "text/plain", "Missing pack name");
-    return;
-  }
-  const char* name = doc["name"].as<const char*>();
-  if (name[0] == '\0') {
-    bool saved;
-    {
-      RenderLock lock;
-      saved = d.liveStudio->onPackCleared();
-      if (saved) UITheme::getInstance().adoptPackMetrics(nullptr, 0);
-    }
-    if (!saved) {
-      server.send(500, "text/plain", "Could not save pack state; active pack unchanged");
-      return;
-    }
-    repaint(d);
-    server.send(200, "application/json", "{\"applied\":false}");
-    return;
-  }
-  PocketDaily::LiveStudio::UiPackInfo info;
-  PocketDaily::LiveStudio::ThemeOverride* overrides = PocketDaily::LiveStudio::acquireOverrideBuffer();
-  if (!overrides) {
-    server.send(503, "text/plain", "Not enough memory to load the pack");
-    return;
-  }
-  PocketDaily::LiveStudio::UiPackResult validateError = PocketDaily::LiveStudio::UiPackResult::Ok;
-  const auto result = PocketDaily::LiveStudio::loadPackFromSd(
-      name, &info, overrides, PocketDaily::LiveStudio::UIPACK_MAX_THEME_OVERRIDES, &validateError);
-  if (result != PocketDaily::LiveStudio::StoreResult::Ok) {
-    PocketDaily::LiveStudio::releaseOverrideBuffer(overrides);
-    const int code = result == PocketDaily::LiveStudio::StoreResult::OpenFail ? 404 : 422;
-    char body[128];
-    snprintf(body, sizeof(body), "{\"applied\":false,\"error\":\"%s\"}",
-             PocketDaily::LiveStudio::storeResultName(result));
-    server.send(code, "application/json", body);
-    return;
-  }
-  overrides = PocketDaily::LiveStudio::compactOverrideBuffer(overrides, info.themeOverrideCount);
-  bool saved;
-  {
-    RenderLock lock;
-    saved = d.liveStudio->onPackApplied(info.name, info.packVersion);
-    if (saved) UITheme::getInstance().adoptPackMetrics(overrides, info.themeOverrideCount);
-  }
-  if (!saved) {
-    PocketDaily::LiveStudio::releaseOverrideBuffer(overrides);
-    server.send(500, "text/plain", "Could not save pack state; active pack unchanged");
-    return;
-  }
-  repaint(d);
-  char body[128];
-  snprintf(body, sizeof(body), "{\"applied\":true,\"name\":\"%.32s\",\"version\":\"%.16s\",\"overrides\":%u}",
-           info.name, info.packVersion, static_cast<unsigned>(info.themeOverrideCount));
-  server.send(200, "application/json", body);
-}
-
 #ifdef ENABLE_DEV_REMOTE_FLASH
 // Developer builds only. Validates and flashes the staged /update.bin, then
 // reboots; a one-shot marker makes the next boot rejoin the saved STA network.
@@ -1398,12 +1177,6 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     handleCommitUpload(*server, *deps);
   });
 
-  if (d.profile == Profile::POCKET_SYNC) {
-    routes.on("/api/pocket/v1/screen-preview", HTTP_GET, [server = &server, deps = &d] {
-      note(*deps);
-      handleScreenPreview(*server);
-    });
-  }
   if (isSyncProfile(d.profile)) {
     routes.on("/api/pocket/v1/files", HTTP_GET, [server = &server, deps = &d] {
       note(*deps);
@@ -1448,24 +1221,6 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
       handlePostPreferences(*server, *deps);
     });
   }
-  if (!isSyncProfile(d.profile)) {
-    // Frame streaming is optional browser functionality, not a dependency
-    // of content/theme editing on either dedicated Sync bearer.
-    routes.on("/api/pocket/v1/screen-live", HTTP_GET, [server = &server, deps = &d] {
-      note(*deps);
-      handleScreenLive(*server);
-    });
-  }
-  // Both Sync profiles advertise uiPacks. Applying/reverting a data pack must
-  // remain available without a router or WebSocket listener.
-  routes.on("/api/pocket/v1/ui-packs", HTTP_GET, [server = &server, deps = &d] {
-    note(*deps);
-    handleUiPackList(*server, *deps);
-  });
-  routes.on("/api/pocket/v1/ui-pack/apply", HTTP_POST, [server = &server, deps = &d] {
-    note(*deps);
-    handleUiPackApply(*server, *deps);
-  });
 #if POCKET_HEAP_MAP_ENABLED
   // HN-2 evidence part 2: per-task stack high-water marks. Safe API per task
   // (no scheduler suspension, unlike uxTaskGetSystemState which hung).
@@ -1490,25 +1245,6 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
   // Developer builds only: flash the staged /update.bin over the LAN so
   // iteration does not walk the on-device Settings menus. Absent from
   // gh_release builds by build flag, not by request filtering.
-  // Host/device parity evidence (docs/pocket-profile-v1.md P1-1): capture the
-  // completed content frame, then read it in chunks like screen-live.
-  if (d.presentation.captureFrame) {
-    routes.on("/api/pocket/v1/dev/capture", HTTP_POST, [server = &server, deps = &d] {
-      note(*deps);
-      const uint32_t bytes = deps->presentation.captureFrame(deps->presentation.self);
-      if (!bytes) {
-        server->send(409, "text/plain", "No completed content frame to capture");
-        return;
-      }
-      char json[48];
-      snprintf(json, sizeof(json), "{\"bytes\":%lu}", static_cast<unsigned long>(bytes));
-      server->send(200, "application/json", json);
-    });
-    routes.on("/api/pocket/v1/dev/frame", HTTP_GET, [server = &server, deps = &d] {
-      note(*deps);
-      handleScreenLive(*server);
-    });
-  }
   routes.on("/api/pocket/v1/dev/transfer-stats", HTTP_GET, [server = &server, deps = &d] {
     note(*deps);
     if (!deps->stream || deps->stream->receiving()) {

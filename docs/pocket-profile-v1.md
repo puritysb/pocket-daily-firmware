@@ -17,9 +17,10 @@ Contract between this repository and the companion app (`pocket-daily`).
 ## Why
 
 The companion should configure Pocket Daily itself — which Home items appear,
-in what order, and what the sleep frame shows — without reflashing. Today only
-theme metrics (63 `.uipack` fields) and four preferences are data-driven; Home
-composition and feature behaviour are C++ in `PocketDailyActivity`.
+in what order, and what the sleep frame shows — without reflashing. Before this
+contract only theme metrics (UI packs, removed 2026-10-01) and four preferences
+were data-driven; Home composition and feature behaviour were C++ in
+`PocketDailyActivity`.
 
 ## P0 inventory (firmware 77953e61)
 
@@ -122,8 +123,9 @@ theme is Lyra (spacing 16), so the "exact" canvas differed on default readers.
 
 ## Device storage and application
 
-- A fixed binary struct (< 32B) lives in RAM, loaded once at boot next to the
-  startup UI pack. No SD parse or allocation on the Home paint or sleep path.
+- A fixed binary struct (< 32B) lives in RAM, loaded once at boot
+  (`ProductBoot::loadPersistedState`). No SD parse or allocation on the Home
+  paint or sleep path.
 - Persisted as two alternating slots `/.crosspoint/pocket-profile.{0,1}.bin`
   (magic, schema, generation, payload, CRC32). A write goes to the inactive
   slot and is read back before RAM changes; the newest valid slot wins at
@@ -143,21 +145,20 @@ theme is Lyra (spacing 16), so the "exact" canvas differed on default readers.
   generation. 409 identity or generation mismatch, 400 invalid, 503 when heap
   is below the existing content-operation floor.
 - `GET /api/pocket/v1/display?deviceID=` → resolved render inputs: theme,
-  orientation, active UI pack, content-page padding/spacing from the effective
-  metrics, and the localized, button-remapped strings the reader would draw.
+  orientation, font family and size, content-page padding/spacing from
+  the theme metrics, and the localized, button-remapped strings the reader
+  would draw.
 - Implementation: `PocketProfile.{h,cpp}` (model, strict ArduinoJson parser,
   response writer, 32-byte record), `PocketProfileStore.{h,cpp}` (slots,
-  boot load in `ProductBoot::applyStartupUiPack`), `GET/POST
+  boot load in `ProductBoot::loadPersistedState`), `GET/POST
   /api/pocket/v1/profile` on both Sync profiles, `/api/status`
   `pocketProfile: 1`. Host tests fetch ArduinoJson 7.4.2 like the firmware.
 - `display` is registered with content presentation; the app reads it once
-  per connection and after a UI pack apply/revert, inside its sequential reader
-  lane. A 404 (older firmware) means the labelled reference preview. The
+  per connection, inside its sequential reader lane. A 404 (older firmware) means the labelled reference preview. The
   profile endpoints will be advertised in `/api/status` when they land.
-- Developer builds only: `POST /api/pocket/v1/dev/capture` stores the
-  completed content frame (409 unless the presentation receipt is rendered)
-  and `GET /api/pocket/v1/dev/frame?offset=` reads it in chunks, for the
-  host/device parity check (`MacTests/PocketParityTests.swift` in the app).
+- The developer `dev/capture` and `dev/frame` routes used for the P1-1
+  host/device parity check were removed 2026-10-01 with live frame capture;
+  a new parity check needs another way to read the device frame.
 
 P1-1 device finding (X3 wbfc03fa5): the tested reader runs the **classic**
 theme (spacing 10) and draws "« Back", while the old app preview assumed Base

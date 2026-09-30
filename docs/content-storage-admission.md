@@ -4,7 +4,7 @@
 per-file ingress ceiling anywhere under `/pocket-daily/content-staging`, including
 temporary `.part` and `.davtmp` files. Matching is ASCII case-insensitive with a
 segment boundary, consistent with FAT path protection; prefix lookalikes and
-ordinary EPUB, firmware, learning and UI-pack destinations retain their existing
+ordinary EPUB, firmware and learning destinations retain their existing
 behavior. The separate generic path policy still rejects unsafe paths.
 
 This is **not** free-space admission, a total staging quota, or manifest-authorized

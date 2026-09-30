@@ -134,8 +134,6 @@ class ActivityManager {
   uint32_t renderCount() const { return completedRenders.load(std::memory_order_acquire); }
   bool skipLoopDelay() const;
   ScreenshotInfo getScreenshotInfo() const;
-  // Caller must hold RenderLock so activity lifetime and framebuffer agree.
-  bool canCaptureFrame() const;
 
   // If immediate is true, the update will be triggered immediately.
   // Otherwise, it will be deferred until the end of the current loop iteration.

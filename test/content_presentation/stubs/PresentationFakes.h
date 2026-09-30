@@ -85,14 +85,3 @@ struct FakeFontSystem {
   void releaseLoaded(GfxRenderer&) { ++PresentationFake::releases; }
 };
 inline FakeFontSystem sdFontSystem;
-struct FakeTheme {
-  bool drawContentPage(GfxRenderer&, const PocketDaily::Content::ContentCard* card, const char*, int,
-                       const char* const* labels) {
-    PresentationFake::labels.assign(labels, labels + 4);
-    ++PresentationFake::draws;
-    PresentationFake::titles.push_back(card ? card->card.title[0] : '-');
-    return PresentationFake::drawSucceeds;
-  }
-};
-inline FakeTheme fakeTheme;
-#define GUI fakeTheme

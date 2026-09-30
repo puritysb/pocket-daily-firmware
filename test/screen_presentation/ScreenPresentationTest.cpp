@@ -13,6 +13,18 @@
 #include "pocket_daily/ScreenFrame.h"
 #include "pocket_daily/web/GenerationArgument.h"
 
+namespace {
+// The frame on the panel is the completed one (formerly canCaptureFrame, which
+// fed the removed frame capture).
+bool rendered(const PocketDaily::Screen::ScreenPresentation& screen) {
+  return screen.receipt().phase == PocketDaily::Content::PresentationPhase::Rendered;
+}
+bool rendered(const PocketDaily::PresentationSlot& slot) {
+  return slot.screen.visible() ? rendered(slot.screen)
+                               : slot.content.receipt().phase == PocketDaily::Content::PresentationPhase::Rendered;
+}
+}  // namespace
+
 TEST(ScreenGenerationArgument, AcceptsOnlyBoundedDecimalWithoutChangingOutputOnFailure) {
   uint32_t value = 42;
   for (const auto text : {"", "-1", "+1", " 1", "1 ", "1x", "1.0", "4294967296", "9999999999", "00000000000"}) {
@@ -141,7 +153,6 @@ class ScreenPresentationTest : public testing::Test {
     EXPECT_EQ(screen.receipt().failure, failure);
     EXPECT_FALSE(screen.busy());
     EXPECT_FALSE(screen.holdsInputs());
-    EXPECT_FALSE(screen.canCaptureFrame());
   }
   ScreenPresentation screen;
   GfxRenderer renderer;
@@ -186,7 +197,7 @@ TEST_F(ScreenPresentationTest, LatinFramePaintsInPortraitWithoutFontsAndReleases
   PresentationFake::duringDisplay = [&] {
     EXPECT_TRUE(screen.busy());
     EXPECT_EQ(screen.receipt().phase, PresentationPhase::Queued);
-    EXPECT_FALSE(screen.canCaptureFrame());
+    EXPECT_FALSE(rendered(screen));
   };
   EXPECT_TRUE(screen.render(renderer));
   EXPECT_EQ(ScreenFake::draws, 1);
@@ -197,7 +208,7 @@ TEST_F(ScreenPresentationTest, LatinFramePaintsInPortraitWithoutFontsAndReleases
   EXPECT_EQ(PresentationFake::releases, 0);
   EXPECT_FALSE(screen.busy());
   EXPECT_FALSE(screen.holdsInputs());
-  EXPECT_TRUE(screen.canCaptureFrame());
+  EXPECT_TRUE(rendered(screen));
   EXPECT_EQ(screen.receipt().phase, PresentationPhase::Rendered);
   EXPECT_EQ(screen.receipt().surface, Surface::Brief);
   // RSSI/heartbeat repaints never redraw the presented frame.
@@ -374,7 +385,7 @@ TEST_F(PresentationSlotTest, ScreenRequestReplacesARenderedCardPageAndItsReceipt
   EXPECT_TRUE(slot.render(renderer, input));
   EXPECT_EQ(ScreenFake::draws, 1);
   EXPECT_EQ(PresentationFake::draws, 1);  // no card page redraw
-  EXPECT_TRUE(slot.canCaptureFrame());
+  EXPECT_TRUE(rendered(slot));
   EXPECT_EQ(slot.screen.receipt().phase, PresentationPhase::Rendered);
 }
 
@@ -437,18 +448,18 @@ TEST_F(PresentationSlotTest, BackDismissesEitherKindAndCardNavigationNeedsAVisib
 }
 
 TEST_F(PresentationSlotTest, HideReleasesBothKindsAndCaptureFollowsTheVisibleKind) {
-  EXPECT_FALSE(slot.canCaptureFrame());
+  EXPECT_FALSE(rendered(slot));
   ScreenFake::texts = {"포켓 데일리"};
   ASSERT_TRUE(slot.enqueueScreen(Surface::Home, 7, renderer));
   ASSERT_TRUE(slot.service(renderer, 20000, 8000));
-  EXPECT_FALSE(slot.canCaptureFrame());
+  EXPECT_FALSE(rendered(slot));
   slot.hide(renderer);  // activity exit while queued
   EXPECT_FALSE(slot.busy());
   EXPECT_FALSE(slot.visible());
   EXPECT_FALSE(slot.screen.holdsInputs());
   EXPECT_EQ(PresentationFake::releases, 1);
   EXPECT_FALSE(slot.render(renderer, input));
-  EXPECT_FALSE(slot.canCaptureFrame());
+  EXPECT_FALSE(rendered(slot));
 
   // A failed screen paint never exposes a capturable frame.
   ScreenFake::drawSucceeds = false;
@@ -456,6 +467,6 @@ TEST_F(PresentationSlotTest, HideReleasesBothKindsAndCaptureFollowsTheVisibleKin
   ASSERT_TRUE(slot.service(renderer, 20000, 8000));
   EXPECT_TRUE(slot.render(renderer, input));
   EXPECT_TRUE(slot.visible());
-  EXPECT_FALSE(slot.canCaptureFrame());
+  EXPECT_FALSE(rendered(slot));
   EXPECT_EQ(PresentationFake::displays, 0);
 }

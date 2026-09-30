@@ -16,6 +16,17 @@
 #include "util/BookCacheUtils.h"
 #include "util/UiCjkFont.h"
 
+namespace {
+// Two-line rows (title, then status and source) in the stock list metrics.
+// Articles draws them itself: the inherited themes carry no list painter.
+int rowsThatFit(const GfxRenderer& renderer) {
+  const auto& m = UITheme::getInstance().getMetrics();
+  const int available =
+      renderer.getScreenHeight() - m.topPadding - m.headerHeight - 2 * m.verticalSpacing - m.buttonHintsHeight;
+  return available / std::max(1, m.listWithSubtitleRowHeight);
+}
+}  // namespace
+
 std::string ArticlesActivity::path(size_t index) const {
   return std::string(Articles::DIRECTORY) + "/" + state->entries[index].filename;
 }
@@ -28,9 +39,8 @@ void ArticlesActivity::onEnter() {
     requestUpdate();
     return;
   }
-  rowsPerPage = std::max(
-      1,
-      std::min(int(PAGE_ROWS), UITheme::getInstance().getNumberOfItemsPerPage(renderer, true, false, true, true) - 1));
+  // One row's height is left for the hint line under the list.
+  rowsPerPage = std::max(1, std::min(int(PAGE_ROWS), rowsThatFit(renderer) - 1));
   inputLocked = mappedInput.isPressed(MappedInputManager::Button::Confirm);
   load();
   requestUpdate();
@@ -189,35 +199,41 @@ void ArticlesActivity::render(RenderLock&&) {
                       metrics.contentSidePadding, top, tr(STR_ARTICLES_EMPTY));
   } else {
     const size_t visible = std::min(rowsPerPage, count + 1 - pageStart);
-    GUI.drawList(
-        renderer,
-        Rect{0, top, width,
-             renderer.getScreenHeight() - top - metrics.buttonHintsHeight - renderer.getLineHeight(UI_10_FONT_ID) -
-                 metrics.verticalSpacing},
-        visible, selected - pageStart,
-        [this](int row) -> std::string {
-          if (pageStart + row == count) return tr(STR_ARTICLES_CLEANUP);
-          return state->status[row] == ReadingState::Unavailable ? tr(STR_ARTICLES_ERROR) : state->rows[row].title();
-        },
-        [this](int row) -> std::string {
-          if (pageStart + row == count || state->status[row] == ReadingState::Unavailable) return "";
-          const char* status = "";
-          switch (state->status[row]) {
-            case ReadingState::New:
-              status = tr(STR_ARTICLES_NEW);
-              break;
-            case ReadingState::Reading:
-              status = tr(STR_ARTICLES_READING);
-              break;
-            case ReadingState::Read:
-              status = tr(STR_ARTICLES_READ);
-              break;
-            case ReadingState::Unavailable:
-              break;
-          }
-          return std::string(status) + " · " + state->rows[row].source();
-        },
-        [](int) { return UITheme::getFileIcon("article.epub"); });
+    const int rowHeight = metrics.listWithSubtitleRowHeight;
+    const int textX = metrics.contentSidePadding;
+    const int textWidth = width - 2 * metrics.contentSidePadding;
+    for (size_t row = 0; row < visible; ++row) {
+      const int y = top + static_cast<int>(row) * rowHeight;
+      const bool highlighted = pageStart + row == selected;
+      if (highlighted) renderer.fillRect(0, y - 2, width, rowHeight);
+      const bool cleanup = pageStart + row == count;
+      const bool unavailable = !cleanup && state->status[row] == ReadingState::Unavailable;
+      const std::string title = cleanup       ? tr(STR_ARTICLES_CLEANUP)
+                                : unavailable ? tr(STR_ARTICLES_ERROR)
+                                              : state->rows[row].title();
+      const int titleFont = UiCjkFont::fontForText(renderer, title.c_str(), UI_10_FONT_ID);
+      renderer.drawText(titleFont, textX, y, renderer.truncatedText(titleFont, title.c_str(), textWidth).c_str(),
+                        !highlighted);
+      if (cleanup || unavailable) continue;
+      const char* status = "";
+      switch (state->status[row]) {
+        case ReadingState::New:
+          status = tr(STR_ARTICLES_NEW);
+          break;
+        case ReadingState::Reading:
+          status = tr(STR_ARTICLES_READING);
+          break;
+        case ReadingState::Read:
+          status = tr(STR_ARTICLES_READ);
+          break;
+        case ReadingState::Unavailable:
+          break;
+      }
+      const std::string subtitle = std::string(status) + " · " + state->rows[row].source();
+      const int subtitleFont = UiCjkFont::fontForText(renderer, subtitle.c_str(), SMALL_FONT_ID);
+      renderer.drawText(subtitleFont, textX, y + 22,
+                        renderer.truncatedText(subtitleFont, subtitle.c_str(), textWidth).c_str(), !highlighted);
+    }
     const char* hint = limited ? tr(STR_ARTICLES_LIMIT) : tr(STR_HOLD_OPEN_TO_DELETE);
     renderer.drawText(UiCjkFont::fontForText(renderer, hint, UI_10_FONT_ID), metrics.contentSidePadding,
                       renderer.getScreenHeight() - metrics.buttonHintsHeight - renderer.getLineHeight(UI_10_FONT_ID),

@@ -9,18 +9,17 @@
 
 #include "pocket_daily/BuildFailureLog.h"
 #include "pocket_daily/FirmwareIdentity.h"
-#include "pocket_daily/PocketScreenPreview.h"
 #include "pocket_daily/ReaderPerf.h"
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
 #include "pocket_daily/web/UploadStreamServer.h"
 
 namespace PocketDaily::Web {
 namespace {
-// Measured X3 private AP: ~6-7 KB free heap. Serving a 53 KB screen preview
+// Measured X3 private AP: ~6-7 KB free heap. Serving a 53 KB diagnostic file
 // there tripped the task watchdog inside lwIP (crash breadcrumb
-// nearby:screen-preview). Below this free-heap floor the reader reports the
-// diagnostics as unavailable and answers 503 so the companion never queues
-// dozens of requests at a starved reader; transfers remain available.
+// nearby:screen-preview, a route since removed). Below this free-heap floor the
+// reader reports diagnostics as unavailable and answers 503 so the companion
+// never queues dozens of requests at a starved reader; transfers remain.
 constexpr uint32_t DIAGNOSTIC_MIN_FREE_HEAP = 10U * 1024U;
 }  // namespace
 
@@ -98,16 +97,6 @@ String buildStatusJson(const StatusInputs& in) {
   // automatic advertisement; content redraw uses its own verified receipt.
   const bool affordable = !isSyncProfile(in.profile) && diagnosticsAffordable();
   doc["diagnosticsAffordable"] = affordable;
-  bool screenPreviewAvailable = false;
-  int screenPreviewBytes = 0;
-  if (in.profile == Profile::POCKET_SYNC && affordable && Storage.exists(PocketDaily::SCREEN_PREVIEW_PATH)) {
-    HalFile preview = Storage.open(PocketDaily::SCREEN_PREVIEW_PATH);
-    screenPreviewAvailable = static_cast<bool>(preview) && !preview.isDirectory();
-    screenPreviewBytes = preview ? preview.size() : 0;
-    if (preview) preview.close();
-  }
-  doc["screenPreviewAvailable"] = screenPreviewAvailable;
-  doc["screenPreviewBytes"] = screenPreviewBytes;
   if (affordable && Storage.exists("/crash_report.txt")) {
     HalFile report = Storage.open("/crash_report.txt");
     doc["crashReportAvailable"] = static_cast<bool>(report);
@@ -164,10 +153,6 @@ String buildStatusJson(const StatusInputs& in) {
     JsonObject live = doc["liveStudio"].to<JsonObject>();
     live["mode"] = (in.live.push && !in.live.suspended) ? "push" : "poll";
     if (in.live.push && !in.live.suspended) live["wsPort"] = in.live.wsPort;
-    live["frameStream"] = in.live.push && !in.live.suspended;
-    live["uiPacks"] = true;  // LS-3: .uipack apply
-    live["activePack"] = in.live.activePackName[0] ? in.live.activePackName : nullptr;
-    live["activePackVersion"] = in.live.activePackVersion[0] ? in.live.activePackVersion : nullptr;
   }
 
   String json;

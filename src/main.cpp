@@ -486,7 +486,7 @@ void setup() {
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
   UITheme::getInstance().reload();
-  PocketDaily::Boot::applyStartupUiPack();
+  PocketDaily::Boot::loadPersistedState();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
   // Prewarm the static settings metadata before the web server/File Transfer

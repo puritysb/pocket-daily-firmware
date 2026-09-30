@@ -16,8 +16,6 @@ struct LiveInputs {
   bool push = false;       // listener can serve event push (STA, heap allows)
   bool suspended = false;  // torn down for transfer focus
   uint16_t wsPort = 0;
-  char activePackName[33] = {};
-  char activePackVersion[17] = {};
 };
 
 // Everything buildStatusJson reads from its host. Value snapshot on purpose:

@@ -28,18 +28,18 @@ conflicts can only land at hook sites and carried patches.
 | `web/Profile.h` | `Profile` enum (FULL / POCKET_SYNC / POCKET_NEARBY_SYNC gating) |
 | `web/UploadStreamServer.{h,cpp}` | port-82 upload data plane, `StagedUpload` ledger, `publishHttpStaged()` |
 | `web/PocketStatus.{h,cpp}` | `/api/status` JSON builder + `diagnosticsAffordable()` |
-| `web/LiveStudioService.{h,cpp}` | WS push listener, subscriptions, transfer focus, active-pack state |
+| `web/LiveStudioService.{h,cpp}` | WS status/prefs push listener, subscriptions, transfer focus |
 | `web/PocketEndpoints.{h,cpp}` | every `/api/pocket/v1/*` route (registration + handlers) |
 | `web/Host.h` / `RouteDeps` | plain-function-pointer host reach-in bundles |
 | `web/PrivateApPolicy.{h,cpp}` | private-AP credentials, heap start gates, profile select, watchdog, `apBootLog` |
 | `web/StaRadioWatch.{h,cpp}` | passive STA association tracking (`StaAction`) |
 | `web/RadioHealthPolicy.h` | association grace/repaint policy (host-testable, header-only) |
-| `boot/ProductBoot.{h,cpp}` | JP font install, silent restarts, NetHealth boot, startup pack, dev-boot return |
-| `live_studio/UiPackStore.{h,cpp}` | `.uipack` storage incl. `listPacks()` streaming scan |
+| `boot/ProductBoot.{h,cpp}` | JP font install, silent restarts, NetHealth boot, Pocket profile load, dev-boot return |
 
 Older Pocket modules (`nearby_sync/`, `upload_stream_protocol.*`,
-`direct_session.h`, `live_studio/*` evidence tooling) predate the sprint and
-were already seam-shaped.
+`direct_session.h`, `live_studio/` event grammar and evidence tooling —
+`LiveStudioEvents`, `DevTrace`, `HeapMap`, `NetHealth`, `StackReport`)
+predate the sprint and were already seam-shaped.
 
 ## Hook inventory
 
@@ -114,7 +114,7 @@ block-ACK window, using no heap. Diagnostic buffers are separately gated by
 - `#include "pocket_daily/boot/ProductBoot.h"`.
 - Boot hooks after SD init: `PocketDaily::Boot::begin(renderer,
   deepSleepInProgress)` + `installJapaneseFont()`; `beginNetHealth()`;
-  `applyStartupUiPack()` (also loads the Pocket Daily profile).
+  `loadPersistedState()` (loads the Pocket Daily profile).
 - Quick-resume wake: `paintWakeCue(renderer)` replaces upstream's corner
   `LoadingIcon` draw (and its include) with a full-width wake band.
 - Routing: `consumeDevBootReturn()` else-if; silent-reboot else-ifs keyed on
@@ -146,15 +146,15 @@ block-ACK window, using no heap. Diagnostic buffers are separately gated by
 - The NearbySync state-machine drive and render stay here by design (already
   exemplary in shape; extraction is not a merge problem).
 - `setContentPresentation(...)` thunk block: enqueue/receipt/busy plus
-  `describe` (resolved display inputs via `ContentPresentation::describe`) and
-  the developer `captureFrame` (`LiveFrameCapture::captureNow` under
-  RenderLock, only for a completed content frame); one `LiveFrameCapture.h`
-  include.
+  `describe` (resolved display inputs via `ContentPresentation::describe`).
+  The live-frame capture thunk and its include were removed 2026-10-01.
 
 ### Already-clean registrations
 
-`ActivityManager`, `Home`, `UITheme`, `OtaUpdater` carry only registration-level
-Pocket lines (member + one-line dispatch).
+`ActivityManager`, `Home`, `OtaUpdater` carry only registration-level
+Pocket lines (member + one-line dispatch). `UITheme` is upstream's again
+(2026-10-01): the pack metric layering and the render-task frame capture
+hook in `ActivityManager` are gone.
 
 ## Registered exceptions (E1–E5)
 
@@ -207,13 +207,16 @@ follow-up, never send product stack upstream):
 
 Fork-resident product patches (no upstream intent):
 
-- `src/components/themes/{BaseTheme,lyra/*,roundedraff/*}.cpp` — runtime
-  metric reads go through `UITheme::getInstance().getMetrics()`, including
-  formerly constexpr button dimensions. Native constants remain in headers and
-  UITheme's theme selection. This prevents draw/layout paths from bypassing
-  active UI packs. Pagination uses Pocket's bounded `MetricGeometry` helpers;
-  tiny rectangles never produce a zero page-count divisor. Keep the source
-  boundary test `ThemeMetricBindings` when reconciling upstream theme changes.
+- `src/components/themes/` — upstream's themes (restored 2026-10-01,
+  `6a9b8c8c`) plus only: per-label `UiCjkFont::fontForText` at text sites
+  (upstream's UI fallback is off without PSRAM), `StatusBarTitle` (CJK book
+  titles in the reader status lane) and minimal Home menu paging
+  (`BaseTheme::drawMenuPageArrows`). No Pocket product code lives there;
+  Pocket screens draw their own content (`PocketDaily::Content::drawContentPage`,
+  `ArticlesActivity` rows). `scripts/test_sync_routes.py`
+  (`test_stock_themes_carry_no_product_code`) keeps `pocket_daily/` includes
+  and the removed theme API out of `src/components`. On a merge, take
+  upstream's theme and re-apply those three additions.
 - `src/network/FirmwareFlasher.{h,cpp}` — shared staging buffer + image
   validation used by Pocket transfer/diagnostics; `validateImageFile` takes an
   optional chunk observer (the staged prompt reads the image version in the
@@ -294,10 +297,7 @@ in the same commit:
 3. **Reboot target values.** Upstream owns HOME=0 and READER=1; Pocket owns
    PocketDaily=2 and PocketNearbySync=3, with `kRebootTargetMax` as the
    read-and-clear bound. Renumbering breaks boot routing across the seam.
-4. **Hidden-file rule.** `UiPackStore::listPacks()` mirrors `scanFiles`' dot
-   rule (`SETTINGS.showHiddenFiles`); a change to one scan's rule should be
-   reflected in the other.
-5. **StaRadioWatch association semantics.** Repaint is always assigned, once
+4. **StaRadioWatch association semantics.** Repaint is always assigned, once
    on observed loss/recovery. Only actual sustained disconnection (>5 minutes)
    can abandon the activity. Application-port timeouts cannot request a radio
    restart. Elapsed-time subtraction is uint32 wrap-safe across one wrap.

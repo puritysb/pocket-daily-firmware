@@ -43,13 +43,6 @@ bool encodeStatusEvent(char* out, size_t cap, const char* statusJson) {
   return true;
 }
 
-bool encodeFrameEvent(char* out, size_t cap, uint32_t seq, uint32_t bytes) {
-  if (!out || cap == 0) return false;
-  const int written = std::snprintf(out, cap, "{\"frame\":{\"seq\":%lu,\"bytes\":%lu}}",
-                                    static_cast<unsigned long>(seq), static_cast<unsigned long>(bytes));
-  return written > 0 && static_cast<size_t>(written) < cap;
-}
-
 namespace {
 
 // Bounded search for `"key"` inside [begin, end). Returns nullptr when absent.
@@ -61,65 +54,17 @@ const char* findKey(const char* begin, const char* end, const char* key) {
   return nullptr;
 }
 
-uint32_t parseNumberAfter(const char* p, const char* end, bool* ok) {
-  while (p < end && (*p == ' ' || *p == ':')) p++;
-  uint32_t value = 0;
-  bool any = false;
-  while (p < end && *p >= '0' && *p <= '9') {
-    // Saturate instead of overflowing on absurd input.
-    if (value < 429496729u) value = value * 10 + static_cast<uint32_t>(*p - '0');
-    any = true;
-    p++;
-  }
-  *ok = any;
-  return value;
-}
-
-uint32_t clampInterval(uint32_t requested) {
-  if (requested < kMinCaptureIntervalMs) return kMinCaptureIntervalMs;
-  if (requested > 60000) return 60000;
-  return requested;
-}
-
 }  // namespace
 
-ClientMessage parseClientMessage(const char* payload, size_t length, Subscription* out) {
+ClientMessage parseClientMessage(const char* payload, size_t length) {
   if (!payload || length == 0 || payload[0] != '{') return ClientMessage::None;
   const char* begin = payload;
   const char* end = payload + length;
 
   if (findKey(begin, end, "\"ping\"") != nullptr) return ClientMessage::Ping;
   if (findKey(begin, end, "\"unsubscribe\"") != nullptr) return ClientMessage::Unsubscribe;
-
-  const char* subscribe = findKey(begin, end, "\"subscribe\"");
-  if (subscribe == nullptr) return ClientMessage::None;
-  if (out == nullptr) return ClientMessage::Subscribe;
-
-  Subscription parsed;
-  // Scan only within a bounded window after the key; the messages are tiny.
-  const char* scanEnd = (end - subscribe > 128) ? subscribe + 128 : end;
-  const char* frames = findKey(subscribe, scanEnd, "\"frames\":true");
-  if (frames != nullptr) {
-    parsed.frames = true;
-  }
-  const char* interval = findKey(subscribe, scanEnd, "\"minIntervalMs\":");
-  if (interval != nullptr) {
-    bool ok = false;
-    const uint32_t requested = parseNumberAfter(interval + 15, scanEnd, &ok);
-    if (ok) parsed.minIntervalMs = clampInterval(requested);
-  }
-  *out = parsed;
-  return ClientMessage::Subscribe;
-}
-
-bool shouldCaptureFrame(uint32_t freeHeap, uint32_t nowMs, uint32_t lastCaptureMs) {
-  return shouldCaptureFrameAt(freeHeap, nowMs, lastCaptureMs, kMinCaptureIntervalMs);
-}
-
-bool shouldCaptureFrameAt(uint32_t freeHeap, uint32_t nowMs, uint32_t lastCaptureMs, uint32_t intervalMs) {
-  if (freeHeap < kMinCaptureFreeHeap) return false;
-  if (intervalMs < kMinCaptureIntervalMs) intervalMs = kMinCaptureIntervalMs;
-  return static_cast<uint32_t>(nowMs - lastCaptureMs) >= intervalMs;
+  if (findKey(begin, end, "\"subscribe\"") != nullptr) return ClientMessage::Subscribe;
+  return ClientMessage::None;
 }
 
 }  // namespace PocketDaily::LiveStudio

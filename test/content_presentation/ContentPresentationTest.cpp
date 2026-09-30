@@ -247,27 +247,28 @@ TEST_F(ContentPresentationTest, FailedPaintRecoversOnlyThroughExplicitNewPrepara
   EXPECT_EQ(PresentationFake::releases, 2);
 }
 
-TEST_F(ContentPresentationTest, CaptureRequiresCompletedDisplayAndRejectsPendingFailedOrHiddenFrames) {
-  EXPECT_FALSE(presentation.canCaptureFrame());
+TEST_F(ContentPresentationTest, RenderedOnlyAfterCompletedDisplayNotWhilePendingFailedOrHidden) {
+  const auto rendered = [&] { return presentation.receipt().phase == PresentationPhase::Rendered; };
+  EXPECT_FALSE(rendered());
   ASSERT_TRUE(presentation.prepare(revision, renderer));
-  EXPECT_FALSE(presentation.canCaptureFrame());
-  PresentationFake::duringDisplay = [&] { EXPECT_FALSE(presentation.canCaptureFrame()); };
+  EXPECT_FALSE(rendered());
+  PresentationFake::duringDisplay = [&] { EXPECT_FALSE(rendered()); };
   presentation.render(renderer, input);
-  EXPECT_TRUE(presentation.canCaptureFrame());
+  EXPECT_TRUE(rendered());
   ASSERT_TRUE(presentation.navigate(true, renderer));
-  EXPECT_FALSE(presentation.canCaptureFrame());
+  EXPECT_FALSE(rendered());
   PresentationFake::drawSucceeds = false;
   presentation.render(renderer, input);
-  EXPECT_FALSE(presentation.canCaptureFrame());
+  EXPECT_FALSE(rendered());
   presentation.hide(renderer);
-  EXPECT_FALSE(presentation.canCaptureFrame());
+  EXPECT_FALSE(rendered());
   PresentationFake::drawSucceeds = true;
   ASSERT_TRUE(presentation.prepare(revision, renderer));
   presentation.render(renderer, input);
-  EXPECT_TRUE(presentation.canCaptureFrame());
+  EXPECT_TRUE(rendered());
   PresentationFake::loadResult = ContentViewState::LoadResult::Unavailable;
   EXPECT_FALSE(presentation.prepare(revision, renderer));
-  EXPECT_FALSE(presentation.canCaptureFrame());
+  EXPECT_FALSE(rendered());
 }
 
 TEST_F(ContentPresentationTest, DescribeReportsExactlyTheInputsRenderDraws) {

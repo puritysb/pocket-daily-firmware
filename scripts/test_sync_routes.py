@@ -216,20 +216,47 @@ class SyncRoutesTest(unittest.TestCase):
             self.assertNotIn(gone, activity)
         self.assertFalse((root / "src/agentdeck").exists())
 
-    def test_theme_routes_are_unconditional_in_production_registration(self):
+    def test_ui_packs_are_not_part_of_the_firmware(self):
+        # The companion dropped .uipack editing on 2026-09-25 (app a98e879);
+        # themes read their own metrics and no route or status field offers packs.
         root = Path(__file__).resolve().parents[1]
-        source = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
-        body = source[source.index("void configurePocketRoutes("):source.index("void registerPocketRoutes(")]
+        routes = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
         for route in ("/api/pocket/v1/ui-packs", "/api/pocket/v1/ui-pack/apply"):
-            with self.subTest(route=route):
-                marker = 'routes.on("' + route + '"'
-                self.assertEqual(body.count(marker), 1)
-                prefix = body[:body.index(marker)]
-                # Ignore comments and quoted literals before counting lexical
-                # scope. Registration must sit at function scope, not in an if.
-                prefix = re.sub(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"',
-                                "", prefix, flags=re.S)
-                self.assertEqual(prefix.count("{") - prefix.count("}"), 1)
+            self.assertNotIn(route, routes)
+        status = (root / "src/pocket_daily/web/PocketStatus.cpp").read_text()
+        for field in ('"uiPacks"', '"activePack"', '"activePackVersion"'):
+            self.assertNotIn(field, status)
+        self.assertNotIn("adoptPackMetrics", (root / "src/components/UITheme.h").read_text())
+        self.assertFalse((root / "src/pocket_daily/live_studio/UiPackStore.cpp").exists())
+
+    def test_stock_themes_carry_no_product_code(self):
+        # Themes stay upstream's except per-label CJK fonts (UiCjkFont), the
+        # status-bar title fit and minimal Home menu paging; Pocket screens draw
+        # their own content (docs/fork-delta-register.md).
+        root = Path(__file__).resolve().parents[1]
+        for path in sorted((root / "src/components").rglob("*")):
+            if path.suffix not in (".h", ".cpp"):
+                continue
+            text = path.read_text()
+            self.assertNotIn("pocket_daily/", text, path.name)
+            for gone in ("drawList(", "drawTabBar(", "drawKeyboardKey(", "drawContentPage(", "adoptPackMetrics"):
+                self.assertNotIn(gone, text, f"{path.name}: {gone}")
+
+    def test_live_frame_capture_is_not_part_of_the_firmware(self):
+        # The companion dropped reader-screen capture on 2026-09-25; the render
+        # loop publishes no frames and the status/push channel stays.
+        root = Path(__file__).resolve().parents[1]
+        routes = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
+        for route in ("/api/pocket/v1/screen-live", "/api/pocket/v1/dev/capture", "/api/pocket/v1/dev/frame"):
+            self.assertNotIn(route, routes)
+        self.assertNotIn("LiveFrameCapture", (root / "src/activities/ActivityManager.cpp").read_text())
+        status = (root / "src/pocket_daily/web/PocketStatus.cpp").read_text()
+        self.assertNotIn('"frameStream"', status)
+        # The companion decodes liveStudio.mode as required.
+        self.assertIn('live["mode"]', status)
+        # The saved Pocket screen preview went with it.
+        self.assertNotIn("/api/pocket/v1/screen-preview", routes)
+        self.assertNotIn('"screenPreviewAvailable"', status)
 
     def test_screen_presentation_is_sync_only_identity_first_and_advertised(self):
         root = Path(__file__).resolve().parents[1]

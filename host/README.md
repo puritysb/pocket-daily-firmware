@@ -12,9 +12,11 @@ cmake --build build/pdui-host
 
 Public C/Swift import surface: `include/PocketUIHost.h` and
 `include/module.modulemap`. Link the archive, platform C++ runtime and zlib.
-The version1 API currently renders **content cards and empty content only**.
-It does not implement UI-pack application, home/settings/confirmation surfaces
-or app UI. Apple packaging and provenance verification are described below.
+The version1 API renders content cards and empty content, and (additively)
+Pocket Daily Home, Daily Brief and sleep-brief layout previews with the
+companion's own cards (`pdui_render_home`, `pdui_render_brief`,
+`pdui_render_sleep_brief`, `pdui_set_cards`). It does not implement
+settings/confirmation surfaces or app UI. Apple packaging and provenance verification are described below.
 The output is shared production rasterization, not physical-panel parity.
 
 ## Lifetime and failures

@@ -47,9 +47,6 @@ class ScreenPresentation {
   bool render(GfxRenderer& renderer);
   bool visible() const { return phase_.load(std::memory_order_acquire) != Content::PresentationPhase::Idle; }
   bool busy() const { return drawing_.load(std::memory_order_acquire); }
-  bool canCaptureFrame() const {
-    return phase_.load(std::memory_order_acquire) == Content::PresentationPhase::Rendered;
-  }
   void hide(GfxRenderer& renderer);
   Receipt receipt() const;
   // True while per-paint inputs are held (queued or drawing); for tests.

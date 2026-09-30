@@ -48,9 +48,10 @@ Reader-dedicated (must not be resident during transfer/BLE):
   measurement says otherwise.
 - **Book section arenas / parser state** — owned by the reader activity and
   destroyed with it (`replaceActivity`). Not separately managed today.
-- **Startup UI pack metrics** — applied to `UITheme` at boot
-  (`ProductBoot::applyStartupUiPack()`), buffer freed immediately; resident
-  cost is metrics only. Cheap; leave as is.
+- **Pocket profile** — loaded once at boot
+  (`ProductBoot::loadPersistedState()`) into a fixed struct under 32 bytes;
+  no buffer is held. Cheap; leave as is. (The startup UI pack apply was
+  removed 2026-10-01.)
 
 Transfer-dedicated (must not be resident in reader shell):
 

@@ -8,7 +8,6 @@
 #include <Memory.h>
 
 #include <algorithm>
-#include <cstdlib>
 #include <memory>
 
 #include "MappedInputManager.h"
@@ -18,9 +17,6 @@
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "components/themes/roundedraff/RoundedRaffTheme.h"
-#include "pocket_daily/live_studio/MetricGeometry.h"
-#include "pocket_daily/live_studio/ThemeFieldIds.h"
-#include "pocket_daily/live_studio/UiPackMetrics.h"
 
 UITheme UITheme::instance;
 
@@ -73,46 +69,7 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
       currentMetrics = &Lyra3CoversMetrics::values;
       break;
   }
-  baseMetrics = currentMetrics;
-  reapplyPackAfterThemeChange();
-}
-
-void UITheme::adoptPackMetrics(PocketDaily::LiveStudio::ThemeOverride* overrides, size_t count) {
-  free(packOverrides);
-  packOverrides = overrides;
-  packOverrideCount = count;
-  reapplyPackAfterThemeChange();
-}
-
-// Rebuilds the packed metrics copy over whatever theme is currently active,
-// so a settings theme change keeps the pack applied (the pack layers on top
-// of the selected theme, it does not replace it).
-void UITheme::reapplyPackAfterThemeChange() {
   metricsValid = false;
-  currentMetrics = baseMetrics;
-  if (packOverrideCount == 0 || baseMetrics == nullptr) return;
-  PocketDaily::LiveStudio::composePackMetrics(*baseMetrics, packOverrides, packOverrideCount, packedMetrics);
-  currentMetrics = &packedMetrics;
-}
-
-int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,
-                                     bool hasSubtitle, int extraReservedHeight) {
-  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
-  auto orientation = renderer.getOrientation();
-  int64_t reservedHeight = metrics.topPadding;
-  if (hasHeader) {
-    reservedHeight += static_cast<int64_t>(metrics.headerHeight) + metrics.verticalSpacing;
-  }
-  if (hasTabBar) {
-    reservedHeight += metrics.tabBarHeight;
-  }
-  if (hasButtonHints && orientation != GfxRenderer::Orientation::LandscapeClockwise &&
-      orientation != GfxRenderer::Orientation::LandscapeCounterClockwise) {
-    reservedHeight += static_cast<int64_t>(metrics.verticalSpacing) + metrics.buttonHintsHeight;
-  }
-  const int64_t availableHeight = renderer.getScreenHeight() - reservedHeight - extraReservedHeight;
-  int rowHeight = hasSubtitle ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight;
-  return PocketDaily::LiveStudio::MetricGeometry::pageItems(availableHeight, rowHeight);
 }
 
 const ThemeMetrics& UITheme::getMetrics() const {

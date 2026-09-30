@@ -235,8 +235,8 @@ checkpoints.
 Every HTTP profile exposes `GET /api/pocket/v1/crash-report?offset=N`;
 `/api/status` advertises `crashReportAvailable` and `crashReportBytes`. Each
 request returns at most 1 KiB (160 bytes when the transient batch cannot be
-allocated) and then yields to the physical-button loop; the screen preview uses
-the same pattern with 4 KiB batches and a 1 KiB fallback.
+allocated) and then yields to the physical-button loop. (The saved screen
+preview that used the same pattern was removed 2026-10-01.)
 Under the same gate, `/api/status` also reports the last failed EPUB chapter
 build as `lastBuildError` (docs/build-failure-log.md) and the reader's recorded
 page-turn timings as `readerPerf` (docs/reader-perf.md).

@@ -1,13 +1,16 @@
+#include "pocket_daily/ContentPage.h"
+
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <I18n.h>
+#include <Logging.h>
 
 #include <cstdio>
 
 #include "SdCardFontSystem.h"
 #include "components/UITheme.h"
-#include "components/themes/BaseTheme.h"
+#include "pocket_daily/ContentImageRenderer.h"
 #include "pocket_daily/ContentPageRenderer.h"
 #include "pocket_daily/ContentPageStyle.h"
 #include "pocket_daily/ContentRevisionStore.h"
@@ -25,7 +28,7 @@ bool image(const GfxRenderer& renderer, const char* revision, const char* name, 
         auto& file = *static_cast<HalFile*>(context);
         return file.seek(offset) && file.read(bytes, count) == static_cast<int>(count);
       }};
-  return GUI.drawContentImage(renderer, source, x, y, w, h);
+  return PocketDaily::Content::drawContentImage(renderer, source, x, y, w, h);
 }
 }  // namespace
 
@@ -35,10 +38,16 @@ ContentPageStyle currentContentPageStyle() {
   return {static_cast<int16_t>(m.contentSidePadding), static_cast<int16_t>(m.topPadding),
           static_cast<int16_t>(m.verticalSpacing), tr(STR_POCKET_TITLE), tr(STR_POCKET_EMPTY)};
 }
-}  // namespace PocketDaily::Content
 
-bool BaseTheme::drawContentPage(GfxRenderer& renderer, const PocketDaily::Content::ContentCard* card,
-                                const char* revision, int fontId, const char* const labels[4]) const {
+bool drawContentImage(const GfxRenderer& renderer, const ManifestSource& source, int x, int y, int width, int height) {
+  const auto result = renderContentImage(renderer, source, x, y, width, height);
+  if (result == ImageResult::Ok) return true;
+  LOG_ERR("CONTENT", "Image render failed: %u", static_cast<unsigned>(result));
+  return false;
+}
+
+bool drawContentPage(GfxRenderer& renderer, const ContentCard* card, const char* revision, int fontId,
+                     const char* const labels[4]) {
   if (!sdFontSystem.boundedUiFontReady(fontId)) return false;
   // Same values the display endpoint reports (ContentPageStyle.h).
   const auto style = PocketDaily::Content::currentContentPageStyle();
@@ -61,3 +70,4 @@ bool BaseTheme::drawContentPage(GfxRenderer& renderer, const PocketDaily::Conten
   return PocketDaily::Content::renderContentPage(renderer, card, options, images) &&
          sdFontSystem.boundedUiFontReady(fontId);
 }
+}  // namespace PocketDaily::Content

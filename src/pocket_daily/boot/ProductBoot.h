@@ -25,10 +25,9 @@ void begin(GfxRenderer& renderer, const bool& deepSleepInProgress);
 void installJapaneseFont();
 
 // Boot-time init split in two to preserve ordering: the net-health ring
-// starts before settings load; the persisted UI pack layers over the theme
-// only after the theme has reloaded.
+// starts before settings load; persisted Pocket state loads after them.
 void beginNetHealth();
-void applyStartupUiPack();
+void loadPersistedState();
 
 // Quick-resume wake: over the restored sleep frame, replace the bottom status
 // line with one full-width band (power glyph, progress dots, "Waking up") so

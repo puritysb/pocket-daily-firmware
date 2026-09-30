@@ -6,9 +6,7 @@
 #include <Memory.h>
 
 #include "pocket_daily/live_studio/DevTrace.h"
-#include "pocket_daily/live_studio/LiveFrameCapture.h"
 #include "pocket_daily/live_studio/LiveStudioEvents.h"
-#include "pocket_daily/live_studio/UiPackStore.h"
 #include "pocket_daily/web/UploadStreamServer.h"
 
 namespace PocketDaily::Web {
@@ -66,7 +64,6 @@ void LiveStudioService::onServerStopping() {
   liveStudioPush = false;
   liveStudioClientAttached = false;
   liveStudioSubscribed = false;
-  PocketDaily::LiveFrameCapture::clear();
   LOG_DBG("WEB", "WebSocket server stopped");
 }
 
@@ -76,7 +73,6 @@ void LiveStudioService::suspendListener() {
   liveStudioSubscribed = false;
   liveStudioClientAttached = false;
   liveStudioClientNum = 255;
-  PocketDaily::LiveFrameCapture::clear();
   LOG_INF("WEB", "Live listener suspended for transfer focus");
   if (host_->unwireListener) host_->unwireListener(host_->self);
   (*host_->wsSlot)->close();
@@ -105,7 +101,6 @@ void LiveStudioService::sendLine(const char* line) {
     liveStudioSubscribed = false;
     liveStudioClientAttached = false;
     liveStudioClientNum = 255;
-    PocketDaily::LiveFrameCapture::clear();
     return;
   }
   DEV_TRACE(PocketDaily::DevTrace::SEND_START);
@@ -158,15 +153,6 @@ void LiveStudioService::tick() {
   resumeListener();
   if (!liveStudioPush || !liveStudioSubscribed) return;
   pushStatusIfChanged();
-  // A frame landed since the last tick: notify, and the companion fetches
-  // it over the chunked HTTP path.
-  if (PocketDaily::LiveFrameCapture::consumeReady()) {
-    char event[96];
-    if (PocketDaily::LiveStudio::encodeFrameEvent(event, sizeof(event), PocketDaily::LiveFrameCapture::seq(),
-                                                  PocketDaily::LiveFrameCapture::bytes())) {
-      sendLine(event);
-    }
-  }
 }
 
 void LiveStudioService::onWsConnected(uint8_t num) {
@@ -188,7 +174,6 @@ void LiveStudioService::onWsDisconnected(uint8_t num) {
     liveStudioClientAttached = false;
     liveStudioSubscribed = false;
     liveStudioClientNum = 255;
-    PocketDaily::LiveFrameCapture::clear();
   }
 }
 
@@ -197,26 +182,20 @@ bool LiveStudioService::onWsText(uint8_t num, const uint8_t* payload, size_t len
   // grammar is line-based and never starts with '{'. JSON wins on every
   // profile so a browser client cannot trigger upload state off-profile.
   if (length == 0 || payload[0] != '{') return false;
-  PocketDaily::LiveStudio::Subscription subscription;
-  switch (PocketDaily::LiveStudio::parseClientMessage(reinterpret_cast<const char*>(payload), length, &subscription)) {
+  switch (PocketDaily::LiveStudio::parseClientMessage(reinterpret_cast<const char*>(payload), length)) {
     case PocketDaily::LiveStudio::ClientMessage::Subscribe:
       liveStudioSubscribed = true;
       liveStudioClientAttached = true;
-      // Frame capture runs only where the push listener runs (STA);
-      // elsewhere the subscription is a status-only subscription.
-      PocketDaily::LiveFrameCapture::setRequested(liveStudioPush && subscription.frames, subscription.minIntervalMs);
       // Snapshot immediately: the studio should not wait for a change
       // to learn the current state.
       liveStudioLastCheckMs = 0;
       liveStudioLastSignatureMs = 0;
       liveStudioSignature[0] = '\0';
-      LOG_DBG("WS", "Live studio subscribed (frames=%d minIntervalMs=%lu)", subscription.frames,
-              static_cast<unsigned long>(subscription.minIntervalMs));
+      LOG_DBG("WS", "Live studio subscribed");
       pushStatusIfChanged();
       break;
     case PocketDaily::LiveStudio::ClientMessage::Unsubscribe:
       liveStudioSubscribed = false;
-      PocketDaily::LiveFrameCapture::clear();
       break;
     case PocketDaily::LiveStudio::ClientMessage::Ping: {
       char pong[32];
@@ -244,20 +223,5 @@ void LiveStudioService::beginTransferFocus() {
 }
 
 void LiveStudioService::endTransferFocus() { transferFocus_.end(millis()); }
-
-bool LiveStudioService::onPackApplied(const char* name, const char* packVersion) {
-  if (!PocketDaily::LiveStudio::writeState(name, packVersion)) return false;
-  PocketDaily::LiveStudio::noteActive(name, packVersion);
-  return true;
-}
-
-bool LiveStudioService::onPackCleared() {
-  if (!PocketDaily::LiveStudio::clearState()) return false;
-  PocketDaily::LiveStudio::noteActive("", "");
-  return true;
-}
-
-const char* LiveStudioService::activePackName() const { return PocketDaily::LiveStudio::activeName(); }
-const char* LiveStudioService::activePackVersion() const { return PocketDaily::LiveStudio::activeVersion(); }
 
 }  // namespace PocketDaily::Web

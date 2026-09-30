@@ -8,7 +8,7 @@ Readers lacking bit4 reject these revisions; old v1 revision bytes stay unchange
 Status: **implemented in the local revision/activation runtime; physical acceptance remains pending.**
 Companion `Sources/Studio/ContentManifest.swift` writes this format;
 [`ContentManifest.cpp`](../src/pocket_daily/ContentManifest.cpp) checks its
-structure with bounded reads. It is separate from `.pdl` and `.uipack`.
+structure with bounded reads. It is separate from `.pdl`.
 It enables a revision to describe small card and monochrome-image files without
 rebuilding the firmware. ContentRevisionStore/ContentActiveStore provide the
 separate validation/activation implementation; a manifest alone is not proof

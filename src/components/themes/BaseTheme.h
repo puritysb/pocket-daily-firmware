@@ -24,11 +24,6 @@ struct Rect {
   explicit Rect(int x = 0, int y = 0, int width = 0, int height = 0) : x(x), y(y), width(width), height(height) {}
 };
 
-struct TabInfo {
-  const char* label;
-  bool selected;
-};
-
 struct ThemeMetrics {
   int batteryWidth;
   int batteryHeight;
@@ -131,17 +126,6 @@ struct ThemeMetrics {
   int controlRadius;
   int sheetRadius;
   int capsuleRadius;
-  int keyboardKeyWidth = 22;
-  int keyboardBottomKeyHeight = 35;
-  int keyboardBottomKeySpacing = 5;
-  bool keyboardBottomAligned = true;
-  int keyboardKeyCornerRadius = 0;
-  bool keyboardFillUnselected = false;
-  bool keyboardOutlineAllUnselected = false;
-  bool keyboardDrawSpecialOutlineWhenUnselected = true;
-  int keyboardSecondaryLabelRightPadding = 1;
-  int keyboardSecondaryLabelTopPadding = 0;
-  int keyboardMinArrowHeadSize = 0;
 };
 
 enum UIIcon {
@@ -158,12 +142,9 @@ enum UIIcon {
   Wifi,
   Hotspot,
   Bookmark,
-  AgentMark,
   Usb,
   Blocks
 };
-
-enum class KeyboardKeyType { Normal, Shift, Mode, Space, Del, Ok, Disabled };
 
 // Default theme implementation (Classic Theme)
 // Additional themes can inherit from this and override methods as needed
@@ -244,31 +225,8 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .capsuleRadius = 0};
 }
 
-namespace PocketDaily::Content {
-struct ManifestSource;
-struct ContentCard;
-}  // namespace PocketDaily::Content
-
 class BaseTheme {
  public:
-  virtual void drawKeyboardKey(const GfxRenderer& renderer, Rect rect, const char* label, const bool isSelected,
-                               const char* secondaryLabel = nullptr, KeyboardKeyType keyType = KeyboardKeyType::Normal,
-                               bool inactiveSelection = false) const;
-  virtual void drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,
-                          bool selected) const;
-  virtual void drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
-                        const std::function<std::string(int index)>& rowTitle,
-                        const std::function<std::string(int index)>& rowSubtitle = nullptr,
-                        const std::function<UIIcon(int index)>& rowIcon = nullptr,
-                        const std::function<std::string(int index)>& rowValue = nullptr, bool highlightValue = false,
-                        const std::function<bool(int index)>& rowDimmed = nullptr) const;
-  virtual int getListPageItems(int contentHeight, bool hasSubtitle) const;
-  // Uses one already-loaded bounded SD font; never invokes font discovery or
-  // switches back to the cached EPUB font path while a live session is open.
-  bool drawContentPage(GfxRenderer& renderer, const PocketDaily::Content::ContentCard* card, const char* revision,
-                       int fontId, const char* const labels[4]) const;
-  bool drawContentImage(const GfxRenderer& renderer, const PocketDaily::Content::ManifestSource& source, int x, int y,
-                        int width, int height) const;
   virtual ~BaseTheme() = default;
 
   // Component drawing methods
@@ -286,6 +244,8 @@ class BaseTheme {
   // wrapping to two lines rather than overflowing when it's too wide to fit.
   static void drawHintLabel(const GfxRenderer& renderer, int fontId, const char* label, int x, int boxWidth, int boxTop,
                             int boxHeight, int singleLineYOffset);
+  // Pocket Daily: up/down marks beside a paged drawButtonMenu (Home with OPDS).
+  static void drawMenuPageArrows(const GfxRenderer& renderer, Rect rect, bool above, bool below);
   virtual void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const;
   // Menu row height as DRAWN by drawButtonMenu. HomeActivity builds its touch
   // grid from this, so hit bands always match the visuals (RoundedRaff derives

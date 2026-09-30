@@ -29,7 +29,7 @@ must uphold that same ownership through the complete operation.
 The manifest must match its SHA-256 directory name and pass its schema, CRC,
 filename and capability validation. At most16 listed assets are removed through
 HalStorage, followed by the closed manifest and a **non-recursive** `rmdir`.
-Unknown files/subdirectories, books, UI packs, staging and active records are
+Unknown files/subdirectories, books, staging and active records are
 never deletion targets. The workspace is one checked temporary allocation of
 at most272 bytes, reused across entries, not an unbounded directory inventory.
 HAL file handles retain their existing checked allocations and storage mutex.
