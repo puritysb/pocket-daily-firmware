@@ -50,8 +50,8 @@ class LiveStudioService final {
   // The server's stop() path: best-effort bye, close, reset slot, forget state.
   void onServerStopping();
 
-  // One handleClient slice when the listener exists: status push + frame
-  // events, gated on push capability and an active subscription.
+  // One handleClient slice when the listener exists: status push, gated on
+  // push capability and an active subscription.
   void tick();
 
   // WebSocket event routing (the legacy upload grammar stays with the host).

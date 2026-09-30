@@ -23,7 +23,6 @@
 #include "activities/settings/OtaUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "pocket_daily/live_studio/LiveFrameCapture.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "util/QrUtils.h"
 #include "util/TaskWatchdog.h"
@@ -636,16 +635,6 @@ void CrossPointWebServerActivity::startWebServer() {
          auto& activity = *static_cast<CrossPointWebServerActivity*>(self);
          page = PocketDaily::Content::ContentPresentation::describe(activity.renderer, activity.mappedInput);
          return true;
-       },
-       [](void* self) -> uint32_t {
-         // Only a presented frame the display driver completed qualifies
-         // (a card page, or the saved Home / Daily Brief).
-         auto& activity = *static_cast<CrossPointWebServerActivity*>(self);
-         RenderLock lock;
-         if (!activity.presentation.visible() || !activity.presentation.canCaptureFrame()) return 0;
-         return PocketDaily::LiveFrameCapture::captureNow(activity.renderer.getFrameBuffer(),
-                                                          activity.renderer.getDisplayWidth(),
-                                                          activity.renderer.getDisplayHeight());
        }});
   // Home / Daily Brief in the same slot (docs/pocket-screen-present-v1.md).
   // The server registers the routes and the status flag on Sync profiles only.
@@ -843,7 +832,6 @@ void CrossPointWebServerActivity::loop() {
 }
 
 void CrossPointWebServerActivity::render(RenderLock&&) {
-  completedDisplayFrame = false;
   if (state == WebServerActivityState::SERVER_RUNNING &&
       transferDisplay.phase != PocketDaily::Web::TransferPhase::Idle) {
     renderTransfer();
@@ -851,14 +839,12 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
     return;
   }
   if (state == WebServerActivityState::SERVER_RUNNING && presentation.render(renderer, mappedInput)) {
-    completedDisplayFrame = presentation.canCaptureFrame();
     return;
   }
   if (state == WebServerActivityState::NEARBY_STARTING || state == WebServerActivityState::NEARBY_READY ||
       state == WebServerActivityState::NEARBY_HANDOFF) {
     renderNearbySync();
     renderer.displayBuffer();
-    completedDisplayFrame = true;
     return;
   }
 
@@ -891,7 +877,6 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
                                                                                     : tr(STR_STARTING_FILE_TRANSFER)));
     }
     renderer.displayBuffer();
-    completedDisplayFrame = true;
   }
 }
 

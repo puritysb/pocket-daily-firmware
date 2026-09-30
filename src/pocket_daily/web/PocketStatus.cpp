@@ -164,7 +164,6 @@ String buildStatusJson(const StatusInputs& in) {
     JsonObject live = doc["liveStudio"].to<JsonObject>();
     live["mode"] = (in.live.push && !in.live.suspended) ? "push" : "poll";
     if (in.live.push && !in.live.suspended) live["wsPort"] = in.live.wsPort;
-    live["frameStream"] = in.live.push && !in.live.suspended;
   }
 
   String json;

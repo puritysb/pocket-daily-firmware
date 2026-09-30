@@ -34,7 +34,6 @@
 #include "pocket_daily/boot/DevBootReturn.h"
 #include "pocket_daily/live_studio/DevTrace.h"
 #include "pocket_daily/live_studio/HeapMap.h"
-#include "pocket_daily/live_studio/LiveFrameCapture.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/live_studio/StackReport.h"
 #include "pocket_daily/staged_firmware.h"
@@ -1136,57 +1135,6 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
   d.liveStudio->notifyPrefsChanged();
 }
 
-void handleScreenLive(WebServer& server) {
-  HalSystem::setCrashBreadcrumb("nearby:screen-live");
-  if (ESP.getFreeHeap() < LIVE_FETCH_MIN_FREE_HEAP) {
-    server.send(503, "text/plain", "Reader memory is too low for the live frame right now");
-    return;
-  }
-  HalFile frame = Storage.open(PocketDaily::LiveFrameCapture::LIVE_FRAME_PATH);
-  if (!frame || frame.isDirectory()) {
-    if (frame) frame.close();
-    server.send(404, "text/plain", "No live frame captured yet");
-    return;
-  }
-  if (!server.hasArg("offset")) {
-    frame.close();
-    server.send(400, "text/plain", "Missing live frame offset");
-    return;
-  }
-  const String offsetText = server.arg("offset");
-  bool offsetValid = !offsetText.isEmpty();
-  for (size_t i = 0; offsetValid && i < offsetText.length(); i++) {
-    if (offsetText[i] < '0' || offsetText[i] > '9') offsetValid = false;
-  }
-  if (!offsetValid) {
-    frame.close();
-    server.send(400, "text/plain", "Invalid live frame offset");
-    return;
-  }
-  const size_t frameSize = frame.size();
-  const size_t offset = static_cast<size_t>(offsetText.toInt());
-  if (offset >= frameSize || !frame.seek(offset)) {
-    frame.close();
-    server.send(416, "text/plain", "Live frame offset out of range");
-    return;
-  }
-  uint8_t* body = firmware_flash::sharedStagingBuffer();
-  const size_t requested = std::min(frameSize - offset, SCREEN_PREVIEW_CHUNK_BYTES);
-  const int count = frame.read(body, requested);
-  frame.close();
-  if (count <= 0) {
-    server.send(500, "text/plain", "Could not read live frame chunk");
-    return;
-  }
-  server.client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
-  feedLoopWDT();
-  server.setContentLength(static_cast<size_t>(count));
-  server.sendHeader("Cache-Control", "no-store");
-  server.send(200, "application/octet-stream", "");
-  server.sendContent(reinterpret_cast<const char*>(body), static_cast<size_t>(count));
-  feedLoopWDT();
-}
-
 #ifdef ENABLE_DEV_REMOTE_FLASH
 // Developer builds only. Validates and flashes the staged /update.bin, then
 // reboots; a one-shot marker makes the next boot rejoin the saved STA network.
@@ -1361,14 +1309,6 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
       handlePostPreferences(*server, *deps);
     });
   }
-  if (!isSyncProfile(d.profile)) {
-    // Frame streaming is optional browser functionality, not a dependency
-    // of content/theme editing on either dedicated Sync bearer.
-    routes.on("/api/pocket/v1/screen-live", HTTP_GET, [server = &server, deps = &d] {
-      note(*deps);
-      handleScreenLive(*server);
-    });
-  }
 #if POCKET_HEAP_MAP_ENABLED
   // HN-2 evidence part 2: per-task stack high-water marks. Safe API per task
   // (no scheduler suspension, unlike uxTaskGetSystemState which hung).
@@ -1393,25 +1333,6 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
   // Developer builds only: flash the staged /update.bin over the LAN so
   // iteration does not walk the on-device Settings menus. Absent from
   // gh_release builds by build flag, not by request filtering.
-  // Host/device parity evidence (docs/pocket-profile-v1.md P1-1): capture the
-  // completed content frame, then read it in chunks like screen-live.
-  if (d.presentation.captureFrame) {
-    routes.on("/api/pocket/v1/dev/capture", HTTP_POST, [server = &server, deps = &d] {
-      note(*deps);
-      const uint32_t bytes = deps->presentation.captureFrame(deps->presentation.self);
-      if (!bytes) {
-        server->send(409, "text/plain", "No completed content frame to capture");
-        return;
-      }
-      char json[48];
-      snprintf(json, sizeof(json), "{\"bytes\":%lu}", static_cast<unsigned long>(bytes));
-      server->send(200, "application/json", json);
-    });
-    routes.on("/api/pocket/v1/dev/frame", HTTP_GET, [server = &server, deps = &d] {
-      note(*deps);
-      handleScreenLive(*server);
-    });
-  }
   routes.on("/api/pocket/v1/dev/transfer-stats", HTTP_GET, [server = &server, deps = &d] {
     note(*deps);
     if (!deps->stream || deps->stream->receiving()) {

@@ -11,9 +11,11 @@
 // consumer. Every message is a single-key JSON object:
 //
 //   Reader -> app: {"hello":{...}}, {"status":{...}}, {"prefs":{"changed":true}},
-//               {"frame":{"seq":N,...}}   (LS-2), {"bye":{}}
-//   App -> reader: {"subscribe":{"frames":bool,"minIntervalMs":N}},
-//               {"unsubscribe":{}}, {"ping":{}}
+//               {"bye":{}}
+//   App -> reader: {"subscribe":{...}}, {"unsubscribe":{}}, {"ping":{}}
+//
+// Frame streaming (LS-2) was removed on 2026-10-01; older companions may still
+// send {"subscribe":{"frames":true}}, which is a plain status subscription.
 //
 // The listener runs only on STA with enough free heap; a reader that cannot
 // run it advertises mode "poll" in /api/status and stays on HTTP.
@@ -23,21 +25,12 @@ inline constexpr char kProtocol[] = "live-studio/1";
 inline constexpr uint32_t kMinStatusIntervalMs = 500;
 inline constexpr uint32_t kKeepaliveIntervalMs = 15000;
 
-// Capture gating for the LS-2 frame stream. Documented and host-tested with
-// LS-1 so the policy is fixed before the capture path exists.
-inline constexpr uint32_t kMinCaptureIntervalMs = 250;
-inline constexpr uint32_t kMinCaptureFreeHeap = 10 * 1024;
 // The WS listener gate, checked AFTER the server settles: the heap map
 // (2026-09-20) showed the DMA pool bottoming 3.5 KB from empty during
 // transfers at an 8.7 KB settle, and the morning's stable build settled
 // ~13.6 KB. The listener's ~3 KB must not ride on builds that settle this
 // tight - below 16 KB at start, the reader stays poll-only.
 inline constexpr uint32_t kMinListenerFreeHeap = 16 * 1024;
-
-struct Subscription {
-  bool frames = false;  // LS-2: accepted, not yet served
-  uint32_t minIntervalMs = kMinCaptureIntervalMs;
-};
 
 enum class ClientMessage : uint8_t { None, Subscribe, Unsubscribe, Ping };
 
@@ -49,22 +42,9 @@ bool encodeBye(char* out, size_t cap);
 bool encodePrefsChanged(char* out, size_t cap);
 // `statusJson` (the exact /api/status body) is embedded verbatim.
 bool encodeStatusEvent(char* out, size_t cap, const char* statusJson);
-// LS-2 frame notification. Integrity is transport-level (TCP checksums) plus
-// the app-side BMP validation; a per-frame content hash was deliberately
-// left out of v1 to avoid re-reading the frame from SD just to hash it.
-bool encodeFrameEvent(char* out, size_t cap, uint32_t seq, uint32_t bytes);
 
 // Deterministic scanner for the app -> reader messages. Unknown or malformed
-// input decodes to ClientMessage::None; `out` (optional) receives the
-// clamped subscription on Subscribe.
-ClientMessage parseClientMessage(const char* payload, size_t length, Subscription* out);
-
-// Pure capture gate for the LS-2 frame stream: heap floor plus minimum
-// spacing since the previous capture, using wrap-safe millisecond math.
-bool shouldCaptureFrame(uint32_t freeHeap, uint32_t nowMs, uint32_t lastCaptureMs);
-
-// Same gate with a caller-supplied spacing (the subscription interval),
-// clamped up to kMinCaptureIntervalMs.
-bool shouldCaptureFrameAt(uint32_t freeHeap, uint32_t nowMs, uint32_t lastCaptureMs, uint32_t intervalMs);
+// input decodes to ClientMessage::None.
+ClientMessage parseClientMessage(const char* payload, size_t length);
 
 }  // namespace PocketDaily::LiveStudio

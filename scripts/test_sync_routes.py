@@ -229,6 +229,19 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertNotIn("adoptPackMetrics", (root / "src/components/UITheme.h").read_text())
         self.assertFalse((root / "src/pocket_daily/live_studio/UiPackStore.cpp").exists())
 
+    def test_live_frame_capture_is_not_part_of_the_firmware(self):
+        # The companion dropped reader-screen capture on 2026-09-25; the render
+        # loop publishes no frames and the status/push channel stays.
+        root = Path(__file__).resolve().parents[1]
+        routes = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
+        for route in ("/api/pocket/v1/screen-live", "/api/pocket/v1/dev/capture", "/api/pocket/v1/dev/frame"):
+            self.assertNotIn(route, routes)
+        self.assertNotIn("LiveFrameCapture", (root / "src/activities/ActivityManager.cpp").read_text())
+        status = (root / "src/pocket_daily/web/PocketStatus.cpp").read_text()
+        self.assertNotIn('"frameStream"', status)
+        # The companion decodes liveStudio.mode as required.
+        self.assertIn('live["mode"]', status)
+
     def test_screen_presentation_is_sync_only_identity_first_and_advertised(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()

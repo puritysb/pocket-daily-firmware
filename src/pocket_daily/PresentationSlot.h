@@ -31,7 +31,6 @@ class PresentationSlot {
   bool busy() const { return content.busy() || screen.busy(); }
   // Card navigation exists only on a visible card page.
   bool navigationAvailable() const { return content.visible(); }
-  bool canCaptureFrame() const { return screen.visible() ? screen.canCaptureFrame() : content.canCaptureFrame(); }
   // Back/Dismiss and activity exit: both kinds, fonts and inputs released.
   void hide(GfxRenderer& renderer);
 };

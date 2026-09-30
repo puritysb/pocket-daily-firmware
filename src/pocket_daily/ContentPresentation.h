@@ -43,7 +43,6 @@ class ContentPresentation {
   bool render(GfxRenderer& renderer, const MappedInputManager& input);
   bool visible() const { return phase_ != PresentationPhase::Idle; }
   bool busy() const { return drawing_.load(std::memory_order_acquire); }
-  bool canCaptureFrame() const { return phase_.load(std::memory_order_acquire) == PresentationPhase::Rendered; }
   bool navigate(bool next, GfxRenderer& renderer);
   void hide(GfxRenderer& renderer);
   PresentationReceipt receipt() const;
@@ -72,7 +71,5 @@ struct PresentationHost {
   PresentationReceipt (*state)(void*) = nullptr;
   bool (*busy)(void*) = nullptr;
   bool (*describe)(void*, PageDescription&) = nullptr;
-  // Developer parity evidence: capture the completed content frame (BMP bytes, 0 = none).
-  uint32_t (*captureFrame)(void*) = nullptr;
 };
 }  // namespace PocketDaily::Content
