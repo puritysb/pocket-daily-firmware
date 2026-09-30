@@ -17,7 +17,6 @@
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "components/themes/roundedraff/RoundedRaffTheme.h"
-#include "pocket_daily/live_studio/MetricGeometry.h"
 
 UITheme UITheme::instance;
 
@@ -71,26 +70,6 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
       break;
   }
   metricsValid = false;
-}
-
-int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,
-                                     bool hasSubtitle, int extraReservedHeight) {
-  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
-  auto orientation = renderer.getOrientation();
-  int64_t reservedHeight = metrics.topPadding;
-  if (hasHeader) {
-    reservedHeight += static_cast<int64_t>(metrics.headerHeight) + metrics.verticalSpacing;
-  }
-  if (hasTabBar) {
-    reservedHeight += metrics.tabBarHeight;
-  }
-  if (hasButtonHints && orientation != GfxRenderer::Orientation::LandscapeClockwise &&
-      orientation != GfxRenderer::Orientation::LandscapeCounterClockwise) {
-    reservedHeight += static_cast<int64_t>(metrics.verticalSpacing) + metrics.buttonHintsHeight;
-  }
-  const int64_t availableHeight = renderer.getScreenHeight() - reservedHeight - extraReservedHeight;
-  int rowHeight = hasSubtitle ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight;
-  return PocketDaily::LiveStudio::MetricGeometry::pageItems(availableHeight, rowHeight);
 }
 
 const ThemeMetrics& UITheme::getMetrics() const {

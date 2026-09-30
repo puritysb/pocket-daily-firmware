@@ -91,17 +91,6 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
 
 class RoundedRaffTheme : public BaseTheme {
  public:
-  void drawKeyboardKey(const GfxRenderer& renderer, Rect rect, const char* label, bool isSelected,
-                       const char* secondaryLabel = nullptr, KeyboardKeyType keyType = KeyboardKeyType::Normal,
-                       bool inactiveSelection = false) const override;
-  void drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,
-                  bool selected) const override;
-  void drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
-                const std::function<std::string(int index)>& rowTitle,
-                const std::function<std::string(int index)>& rowSubtitle = nullptr,
-                const std::function<UIIcon(int index)>& rowIcon = nullptr,
-                const std::function<std::string(int index)>& rowValue = nullptr, bool highlightValue = false,
-                const std::function<bool(int index)>& rowDimmed = nullptr) const override;
   void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle = nullptr,
                   bool backButton = true) const override;
   void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,

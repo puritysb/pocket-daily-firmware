@@ -229,6 +229,19 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertNotIn("adoptPackMetrics", (root / "src/components/UITheme.h").read_text())
         self.assertFalse((root / "src/pocket_daily/live_studio/UiPackStore.cpp").exists())
 
+    def test_stock_themes_carry_no_product_code(self):
+        # Themes stay upstream's except per-label CJK fonts (UiCjkFont), the
+        # status-bar title fit and minimal Home menu paging; Pocket screens draw
+        # their own content (docs/fork-delta-register.md).
+        root = Path(__file__).resolve().parents[1]
+        for path in sorted((root / "src/components").rglob("*")):
+            if path.suffix not in (".h", ".cpp"):
+                continue
+            text = path.read_text()
+            self.assertNotIn("pocket_daily/", text, path.name)
+            for gone in ("drawList(", "drawTabBar(", "drawKeyboardKey(", "drawContentPage(", "adoptPackMetrics"):
+                self.assertNotIn(gone, text, f"{path.name}: {gone}")
+
     def test_live_frame_capture_is_not_part_of_the_firmware(self):
         # The companion dropped reader-screen capture on 2026-09-25; the render
         # loop publishes no frames and the status/push channel stays.
