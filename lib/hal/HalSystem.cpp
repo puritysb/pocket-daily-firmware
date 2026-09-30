@@ -170,15 +170,23 @@ void begin() {
     previousBootBreadcrumb[0] = '\0';
   }
 
-  // On a panic reboot, preserve diagnostics until checkPanic() has tried to write them to the SD card.
+  // On any reboot checkPanic() reports (panic, watchdog, brownout, lockup),
+  // preserve diagnostics until it has tried to write them to the SD card.
   // Ordinary boots clear any stale retained diagnostics.
-  if (!isRebootFromPanic()) {
+  if (!isRebootFromCrash()) {
     clearPanic();
   } else {
-    // Panic reboot: preserve logs and panic info, but clamp logHead in case the
-    // panic occurred before begin() ever ran (e.g. in a static constructor).
-    // If logHead was out of range, logMessages is also garbage — clear it so
-    // getLastLogs() does not dump corrupt data into the crash report.
+    if (!isRebootFromPanic()) {
+      // No panic hook ran (hardware watchdog, brownout, lockup): the message and
+      // stack are not from this crash, but the logs and breadcrumb are.
+      panicMessage[0] = '\0';
+      for (size_t i = 0; i < MAX_PANIC_STACK_DEPTH; i++) panicStack[i].sp = 0;
+    }
+    panicMessage[sizeof(panicMessage) - 1] = '\0';
+    crashBreadcrumb[sizeof(crashBreadcrumb) - 1] = '\0';
+    // Clamp logHead in case the crash happened before begin() ever ran (e.g. in a
+    // static constructor). If logHead was out of range, logMessages is also
+    // garbage — clear it so getLastLogs() does not dump corrupt data into the report.
     if (sanitizeLogHead()) {
       clearLastLogs();
     }
