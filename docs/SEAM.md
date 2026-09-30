@@ -190,6 +190,11 @@ The original plan's "route table data" exception landed entirely pocket-side
 Product changes to inherited files that are behavior, not seam plumbing. On an
 upstream merge these need semantic reconciliation, not mechanical re-hooking.
 
+The authoritative per-change classification (upstream candidate, device
+patch, product, duplicate, regression, stock deviation) with evidence and
+missing proof is `docs/fork-delta-register.md`; this section keeps the
+merge-time summary.
+
 Upstream-PR candidates (generic repairs; extracting them upstream is a
 follow-up, never send product stack upstream):
 
