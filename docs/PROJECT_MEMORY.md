@@ -38,12 +38,13 @@ transcript. Current source and release records override dated observations.
   fixes, Pocket shell routing/labels, stock sleep screens, UI packs / frame
   capture / screen preview removed, stock themes restored. CI green on both;
   no X3/X4 hardware pass yet (release-checklist items added).
-- Upstream PR branches pushed to `origin`, not yet opened upstream:
-  `upstream-pr/pagelink-zero-href` (U-EPUB-6) and
-  `upstream-pr/linebreak-gap-once` (U-EPUB-1), each with a failing-before
-  upstream test; upstream suite 375/375.
-- Companion cleanup is deferred: the app repo had uncommitted work in the same
-  files. Dead app code once that lands: `LiveSyncClient` `.frame` case and
+- Upstream PRs opened against `develop` (upstream's default branch):
+  crosspoint-reader#3813 (PageLink href zeroing, U-EPUB-6) and #3814 (line-break
+  gap once, U-EPUB-1; cites closed #1528, which bundled it with map caches the
+  maintainers held back for heap fragmentation). Each has a failing-before
+  upstream test; upstream suite 418/418 on `develop` 099e89bc.
+- Companion cleanup is deferred: another session has uncommitted work in the
+  same app files; the cleanup list was sent to that session. Dead app code once that lands: `LiveSyncClient` `.frame` case and
   `frames:true` subscribe, `CrossPointClient` `uiPacks`/`frameStream`/
   `activePack*`/`screenPreview*` fields, `DeviceCore` pack state, related
   tests/fixtures, `MacTests/PocketParityTests` (`dev/capture`), and a
