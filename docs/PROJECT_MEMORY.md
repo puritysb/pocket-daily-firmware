@@ -32,6 +32,24 @@ transcript. Current source and release records override dated observations.
   Host 848/848, default build clean (static RAM 69,912 → 69,496 B, flash
   6,396,307 → 6,369,675 B). Not yet on X3/X4.
 
+## Delta alignment merged — 2026-10-01
+
+- PR #8 (`a4b22398`) and PR #9 (`11e40dc4`) are on `main`: merge-regression
+  fixes, Pocket shell routing/labels, stock sleep screens, UI packs / frame
+  capture / screen preview removed, stock themes restored. CI green on both;
+  no X3/X4 hardware pass yet (release-checklist items added).
+- Upstream PR branches pushed to `origin`, not yet opened upstream:
+  `upstream-pr/pagelink-zero-href` (U-EPUB-6) and
+  `upstream-pr/linebreak-gap-once` (U-EPUB-1), each with a failing-before
+  upstream test; upstream suite 375/375.
+- Companion cleanup is deferred: the app repo had uncommitted work in the same
+  files. Dead app code once that lands: `LiveSyncClient` `.frame` case and
+  `frames:true` subscribe, `CrossPointClient` `uiPacks`/`frameStream`/
+  `activePack*`/`screenPreview*` fields, `DeviceCore` pack state, related
+  tests/fixtures, `MacTests/PocketParityTests` (`dev/capture`), and a
+  PocketUIHost re-import (source hash changed). Keep decoding
+  `liveStudio.mode` as required. The current app keeps working unchanged.
+
 ## Product version reset — 2026-09-30
 
 - Pocket Daily starts product firmware version `1.0.0` on CrossPoint 1.6.5
