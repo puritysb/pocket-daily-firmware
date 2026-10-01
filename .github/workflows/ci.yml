@@ -193,6 +193,7 @@ jobs:
           python3 -m unittest discover -s scripts -p test_patch_storage_sdk.py
           python3 -m unittest discover -s scripts -p test_patch_pio_scons.py
           python3 -m unittest discover -s scripts -p test_sync_routes.py
+          python3 -m unittest discover -s scripts -p test_heap_log_summary.py
           python3 -m unittest discover -s scripts -p test_build_host_apple.py
 
       - name: Configure

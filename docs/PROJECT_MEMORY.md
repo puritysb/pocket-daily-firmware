@@ -51,6 +51,16 @@ transcript. Current source and release records override dated observations.
   delta). Fork branch `fix/linebreak-gap-stack-window`; upstream commit is
   local only until the owner approves the reply. Not measured on a device yet.
 - Register evidence standard gained "Heap history" and "Disclosure" rules.
+- Posted 2026-10-01 with the owner's approval: fix commit 2e53b6f4 and a reply
+  on #3814, the PR converted to draft, both PR descriptions corrected (#3813:
+  256-byte buffer; both: host-only verification and an accurate AI-usage
+  line). Fork fix merged as PR #14.
+- Pending device A/B on the owner's X3 with upstream dev images (develop
+  099e89bc, vector 1d749dee as the control that must reproduce the drop,
+  window 2e53b6f4): `build/upstream-3814-measure/measure.sh <variant>` flashes
+  over USB and captures serial; `scripts/heap_log_summary.py --skip 6 a.log
+  b.log` reports the largest-block medians. Delete the book cache before each
+  run (cold layout), hyphenation off. `measure.sh restore` flashes Pocket back.
 
 ## Delta alignment merged — 2026-10-01
 
