@@ -50,6 +50,10 @@ Purpose: a book that exists only on the reader can be added to the app Library
 on an explicit user action ("Add to Library"). Never automatic or in the
 background. Agreed between the firmware and app sessions; the firmware side
 needs owner approval before it is built.
+The app accepted it unchanged (2026-10-01): it gates listing/delete/storage on
+`readerFiles >= 1` and download on `readerFiles >= 2`, restarts from offset 0
+at most once on `409`, and tests pieces, backoff, restart, `416` and size
+mismatch against a fake server.
 
 Matching first, without new firmware: `GET /api/pocket/v1/reading` (recent
 EPUBs with partial-MD5 `document`) gives exact matches; `GET /files` name+size
