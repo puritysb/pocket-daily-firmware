@@ -3,6 +3,9 @@
 #include <SDCardManager.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <vector>
+
 class StorageAllocation : public testing::Test {
  protected:
   void SetUp() override {
@@ -191,6 +194,106 @@ TEST(ReaderFilesPolicy, ProtectsSystemPathsAndOnlyDeletesReadingFiles) {
   EXPECT_TRUE(deletableReaderFile("/Articles/note.txt"));
   EXPECT_FALSE(deletableReaderFile("/firmware.bin"));
   EXPECT_FALSE(deletableReaderFile("/crash_report.txt"));
+}
+
+TEST(ReaderFilesPolicy, DownloadsOnlyFormatsTheAppReads) {
+  using namespace PocketDaily::Web;
+  EXPECT_TRUE(downloadableReaderFile("/Books/BOOK.EPUB"));
+  EXPECT_TRUE(downloadableReaderFile("/Articles/note.md"));
+  EXPECT_TRUE(downloadableReaderFile("/notes.TXT"));
+  for (const auto path : {"/Books/comic.xtc", "/firmware.bin", "/crash_report.txt", "/.crosspoint/progress.bin",
+                          "/pocket-daily/learning/jp.pdl", "/Books", "Books/a.epub", "/a.epub/"})
+    EXPECT_FALSE(downloadableReaderFile(path)) << path;
+}
+
+TEST(ReaderFilesPolicy, ByteCountsAreUnsignedDecimalsWithoutOverflow) {
+  using namespace PocketDaily::Web;
+  uint64_t value = 7;
+  EXPECT_TRUE(parseByteCount("0", value));
+  EXPECT_EQ(value, 0U);
+  EXPECT_TRUE(parseByteCount("18446744073709551615", value));
+  EXPECT_EQ(value, UINT64_MAX);
+  value = 7;
+  for (const auto text : {"", "-1", "+1", " 1", "1 ", "1x", "0x10", "18446744073709551616", "999999999999999999999"}) {
+    EXPECT_FALSE(parseByteCount(text, value)) << text;
+    EXPECT_EQ(value, 7U) << text;
+  }
+}
+
+TEST(ReaderFilesPolicy, PiecesStayBoundedAndRejectChangedFilesAndPastTheEnd) {
+  using namespace PocketDaily::Web;
+  // 10,000-byte file, Same Wi-Fi pieces: 4096, 4096, 1808, then 416.
+  auto piece = planDownloadPiece(10000, 10000, 0, kDownloadPieceSameWifi);
+  EXPECT_EQ(piece.result, PieceResult::Ok);
+  EXPECT_EQ(piece.length, 4096U);
+  piece = planDownloadPiece(10000, 10000, 8192, kDownloadPieceSameWifi);
+  EXPECT_EQ(piece.result, PieceResult::Ok);
+  EXPECT_EQ(piece.length, 1808U);
+  EXPECT_EQ(planDownloadPiece(10000, 10000, 10000, kDownloadPieceSameWifi).result, PieceResult::OutOfRange);
+  EXPECT_EQ(planDownloadPiece(0, 0, 0, kDownloadPieceSameWifi).result, PieceResult::OutOfRange);
+  // Direct pieces are smaller; a size the app did not list is a changed file.
+  EXPECT_EQ(planDownloadPiece(10000, 10000, 0, kDownloadPieceDirect).length, 1024U);
+  EXPECT_EQ(planDownloadPiece(10001, 10000, 0, kDownloadPieceSameWifi).result, PieceResult::SizeChanged);
+  // Files past 4 GiB still plan correctly (offsets are 64-bit).
+  piece = planDownloadPiece(5000000000ULL, 5000000000ULL, 4999999000ULL, kDownloadPieceSameWifi);
+  EXPECT_EQ(piece.result, PieceResult::Ok);
+  EXPECT_EQ(piece.length, 1000U);
+}
+
+namespace {
+// In-memory stand-in for a reader file. Every request opens the file again, so each
+// piece starts from a fresh handle at position 0.
+struct MemoryFile {
+  const std::vector<uint8_t>& bytes;
+  uint64_t position = 0;
+  bool seek64(const uint64_t target) {
+    if (target > bytes.size()) return false;
+    position = target;
+    return true;
+  }
+  int read(void* out, const size_t count) {
+    const size_t available = std::min<size_t>(count, bytes.size() - position);
+    std::copy_n(bytes.begin() + position, available, static_cast<uint8_t*>(out));
+    position += available;
+    return static_cast<int>(available);
+  }
+};
+}  // namespace
+
+TEST(ReaderFilesPolicy, PiecesReassembleToTheFileOnBothBearers) {
+  using namespace PocketDaily::Web;
+  EXPECT_EQ(downloadPieceLimit(/*directSession=*/true), 1024U);
+  EXPECT_EQ(downloadPieceLimit(/*directSession=*/false), 4096U);
+  // Not periodic in 1024 or 4096, so a piece read from the wrong offset cannot match.
+  std::vector<uint8_t> original(10000);
+  for (size_t i = 0; i < original.size(); ++i) original[i] = static_cast<uint8_t>(i * 31 + i / 251);
+  for (const bool direct : {true, false}) {
+    const size_t limit = downloadPieceLimit(direct);
+    std::vector<uint8_t> received;
+    size_t pieces = 0;
+    for (uint64_t offset = 0;; ++pieces) {
+      const auto piece = planDownloadPiece(original.size(), original.size(), offset, limit);
+      if (piece.result != PieceResult::Ok) {
+        EXPECT_EQ(piece.result, PieceResult::OutOfRange);
+        break;
+      }
+      ASSERT_LE(piece.length, limit);
+      uint8_t buffer[kDownloadPieceSameWifi];
+      MemoryFile file{original};
+      ASSERT_TRUE(readDownloadPiece(file, offset, buffer, piece.length));
+      received.insert(received.end(), buffer, buffer + piece.length);
+      offset += piece.length;
+    }
+    EXPECT_EQ(received, original);
+    EXPECT_EQ(pieces, (original.size() + limit - 1) / limit);
+  }
+  // A truncated file (shorter than the size the request named) is a failed read, not short data.
+  uint8_t buffer[16];
+  const std::vector<uint8_t> shortFile(8, 1);
+  MemoryFile file{shortFile};
+  EXPECT_FALSE(readDownloadPiece(file, 0, buffer, sizeof(buffer)));
+  MemoryFile past{shortFile};
+  EXPECT_FALSE(readDownloadPiece(past, 9, buffer, 1));
 }
 
 TEST_F(StorageAllocation, SpaceScanIsChunkedAndStopsOnIOFailure) {

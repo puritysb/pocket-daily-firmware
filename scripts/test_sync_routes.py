@@ -242,6 +242,25 @@ class SyncRoutesTest(unittest.TestCase):
             for gone in ("drawList(", "drawTabBar(", "drawKeyboardKey(", "drawContentPage(", "adoptPackMetrics"):
                 self.assertNotIn(gone, text, f"{path.name}: {gone}")
 
+    def test_reader_file_download_is_sync_only_and_advertised(self):
+        # docs/reader-files.md: piece download is a Sync route next to the file
+        # listing, advertised as readerFiles: 2, one bounded write per request.
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
+        body = source[source.index("void configurePocketRoutes("):source.index("void registerPocketRoutes(")]
+        sync = body[body.index("if (isSyncProfile(d.profile)) {"):]
+        self.assertIn('routes.on("/api/pocket/v1/files/content", HTTP_GET', sync)
+        handler = source[source.index("void handleReaderFileContent("):source.index("enum class ReaderFileAction")]
+        self.assertIn("admitContentOperation", handler)
+        self.assertIn("downloadableReaderFile", handler)
+        self.assertIn("firmware_flash::sharedStagingBuffer()", handler)
+        # The tested helpers carry the data path: bearer piece limit, offset read.
+        self.assertIn("downloadPieceLimit(d.profile == Profile::POCKET_SYNC)", handler)
+        self.assertIn("readDownloadPiece(file, offset, body, piece.length)", handler)
+        self.assertNotIn("CONTENT_LENGTH_UNKNOWN", handler)
+        status = (root / "src/pocket_daily/web/PocketStatus.cpp").read_text()
+        self.assertIn('doc["readerFiles"] = 2;', status)
+
     def test_live_frame_capture_is_not_part_of_the_firmware(self):
         # The companion dropped reader-screen capture on 2026-09-25; the render
         # loop publishes no frames and the status/push channel stays.
