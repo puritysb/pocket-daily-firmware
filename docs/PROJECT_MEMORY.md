@@ -62,8 +62,12 @@ transcript. Current source and release records override dated observations.
   Second revision: 32-entry window, one measuring site, frame 240 B, no
   helper (`-fstack-usage`); heap trace still equals develop; dense lines over
   32 words keep only part of the saving. Fork branch
-  `fix/linebreak-gap-window-stack`; upstream commit 6b363b11 is local until
-  the owner approves the reply. The reviewer's run covers the largest-block
+  `fix/linebreak-gap-window-stack` (PR #16); upstream commit 236cde79 pushed
+  2026-10-02 with a reply and corrected description, PR still a draft.
+  Self-review before posting found that the long-line test added with the
+  64-entry version passed under every injected window bug (uniform 4 px stub
+  gaps); it was replaced by `CachedGapsMatchDirectMeasurement` (pair-dependent
+  gaps against an independent reference), and the reply says so. The reviewer's run covers the largest-block
   measurement we had promised; `measure.sh` remains for our own checks.
 - Pending device A/B on the owner's X3 with upstream dev images (develop
   099e89bc, vector 1d749dee as the control that must reproduce the drop,
