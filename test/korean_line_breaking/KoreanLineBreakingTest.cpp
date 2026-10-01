@@ -93,3 +93,33 @@ TEST(KoreanLineBreaking, HyphenationOnSplitsBetweenDigitAndHangul) {
   const std::vector<std::vector<std::string>> expected{{"가나다", "12"}, {"월부터", "자"}};
   EXPECT_EQ(wordsOf(lines), expected);
 }
+
+TEST(LineBreakCost, MeasuresEachWordGapOnceInTheBreakSearch) {
+  // The optimal-break search reaches the gap before word j from every line start
+  // within a line of it. Measuring it there each time costs ~words x words-per-line
+  // lookups (a UTF-8 decode and an advance/kerning lookup each, SD-backed on device).
+  GfxRenderer renderer;
+  BlockStyle style;
+  ParsedText text(false, false, false, style);
+  constexpr int kWords = 400;
+  for (int i = 0; i < kWords; ++i) text.addWord("word", EpdFontFamily::REGULAR);
+  GfxRenderer::spaceAdvanceCalls = 0;
+  size_t lines = 0;
+  text.layoutAndExtractLines(renderer, 0, 480, [&](std::unique_ptr<TextBlock>, auto) { ++lines; });
+  EXPECT_GT(lines, 20U);
+  EXPECT_LE(GfxRenderer::spaceAdvanceCalls, 3 * kWords) << "gap measured more than once per word";
+}
+
+TEST(LineBreakCost, LinesLongerThanTheGapWindowBreakTheSame) {
+  // 300 one-letter words (8 px + 4 px space) on a 2000 px line: 167 fit, far more than the
+  // 64-entry gap window, so most gaps on a line are measured directly. The optimal breaks
+  // must not depend on which path supplied a gap: the first line is filled, the rest follows.
+  GfxRenderer renderer;
+  BlockStyle style;
+  ParsedText text(/*extraParagraphSpacing=*/true, false, false, style);  // no first-line indent
+  for (int i = 0; i < 300; ++i) text.addWord("a", EpdFontFamily::REGULAR);
+  std::vector<uint16_t> wordsPerLine;
+  text.layoutAndExtractLines(
+      renderer, 0, 2000, [&](std::unique_ptr<TextBlock> block, auto) { wordsPerLine.push_back(block->wordCount()); });
+  EXPECT_EQ(wordsPerLine, (std::vector<uint16_t>{167, 133}));
+}
