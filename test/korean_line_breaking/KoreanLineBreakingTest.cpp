@@ -112,7 +112,7 @@ TEST(LineBreakCost, MeasuresEachWordGapOnceInTheBreakSearch) {
 
 TEST(LineBreakCost, LinesLongerThanTheGapWindowBreakTheSame) {
   // 300 one-letter words (8 px + 4 px space) on a 2000 px line: 167 fit, far more than the
-  // 64-entry gap window, so most gaps on a line are measured directly. The optimal breaks
+  // 32-entry gap window, so most gaps on a line are measured directly. The optimal breaks
   // must not depend on which path supplied a gap: the first line is filled, the rest follows.
   GfxRenderer renderer;
   BlockStyle style;
