@@ -43,7 +43,8 @@ transcript. Current source and release records override dated observations.
   argued fragmentation safety from lifetimes without a device or allocation
   measurement; the re-port used `int` (4 B/word) where fd4a58df used `int16_t`;
   the PR bodies did not say "not verified on hardware" and the AI-usage line
-  said "verified by me".
+  said "verified by me". #3813's text also understated the buffer (256 B
+  `FOOTNOTE_HREF_LEN`, not 128; up to 255 stale bytes per link, not ~120).
 - Fix: 64-entry `int16_t` stack window (128 B), no heap. Host allocation trace
   equals the pre-change baseline (1,549 allocations, peak 49,664 B for 3,328
   words; the vector version was +1 allocation, +13,312 B, the reviewer's
