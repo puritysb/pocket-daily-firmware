@@ -590,6 +590,68 @@ void handleCrashReport(WebServer& server) {
           static_cast<unsigned>(count), static_cast<unsigned>(reportSize));
 }
 
+// docs/reader-files.md "Reader file download": one bounded piece per request.
+static_assert(kDownloadPieceSameWifi <= firmware_flash::STAGING_BUFFER_BYTES, "piece must fit the staging buffer");
+void handleReaderFileContent(WebServer& server, const RouteDeps& d) {
+  HalSystem::setCrashBreadcrumb("nearby:file-piece");
+  char deviceId[9];
+  if (!admitContentOperation(server, d, deviceId)) return;
+  if (d.presentation.busy && d.presentation.busy(d.presentation.self)) {
+    server.send(409, "text/plain", "Reader is drawing; retry the download");
+    return;
+  }
+  if (!diagnosticsAffordable()) {
+    server.send(503, "text/plain", "Reader memory is too low for the download right now");
+    return;
+  }
+  const String path = server.arg("path");
+  const std::string_view pathView{path.c_str(), path.length()};
+  if (!downloadableReaderFile(pathView)) {
+    server.send(403, "text/plain", "Only EPUB, TXT and MD reading files can be downloaded");
+    return;
+  }
+  uint64_t expectedSize = 0;
+  uint64_t offset = 0;
+  const String sizeArg = server.arg("size");
+  const String offsetArg = server.arg("offset");
+  if (!parseByteCount({sizeArg.c_str(), sizeArg.length()}, expectedSize) ||
+      !parseByteCount({offsetArg.c_str(), offsetArg.length()}, offset)) {
+    server.send(400, "text/plain", "Invalid size or offset");
+    return;
+  }
+  HalFile file = Storage.open(path.c_str());
+  if (!file || file.isDirectory()) {
+    server.send(404, "text/plain", "File not found");
+    return;
+  }
+  const size_t maxPiece = d.profile == Profile::POCKET_SYNC ? kDownloadPieceDirect : kDownloadPieceSameWifi;
+  const auto piece = planDownloadPiece(file.fileSize64(), expectedSize, offset, maxPiece);
+  switch (piece.result) {
+    case PieceResult::SizeChanged:
+      server.send(409, "text/plain", "File changed; restart the download");
+      return;
+    case PieceResult::OutOfRange:
+      server.send(416, "text/plain", "Offset out of range");
+      return;
+    case PieceResult::Ok:
+      break;
+  }
+  // Shared static staging buffer (4 KiB): no allocation per piece.
+  uint8_t* body = firmware_flash::sharedStagingBuffer();
+  if (!file.seek64(offset) || file.read(body, piece.length) != static_cast<int>(piece.length)) {
+    server.send(500, "text/plain", "Could not read the file; retry");
+    return;
+  }
+  file.close();
+  server.client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
+  feedLoopWDT();
+  server.setContentLength(piece.length);
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/octet-stream", "");
+  server.sendContent(reinterpret_cast<const char*>(body), piece.length);
+  feedLoopWDT();
+}
+
 enum class ReaderFileAction { List, Remove, Space };
 void handleReaderFiles(WebServer& server, const RouteDeps& d, ReaderFileAction action) {
   char deviceId[9];
@@ -1185,6 +1247,10 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     routes.on("/api/pocket/v1/files", HTTP_DELETE, [server = &server, deps = &d] {
       note(*deps);
       handleReaderFiles(*server, *deps, ReaderFileAction::Remove);
+    });
+    routes.on("/api/pocket/v1/files/content", HTTP_GET, [server = &server, deps = &d] {
+      note(*deps);
+      handleReaderFileContent(*server, *deps);
     });
     routes.on("/api/pocket/v1/storage", HTTP_GET, [server = &server, deps = &d] {
       note(*deps);

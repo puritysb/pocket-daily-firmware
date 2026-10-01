@@ -54,7 +54,8 @@ String buildStatusJson(const StatusInputs& in) {
   doc["rssi"] = in.apMode ? 0 : WiFi.RSSI();
   doc["freeHeap"] = ESP.getFreeHeap();
   doc["totalHeap"] = ESP.getHeapSize();
-  if (isSyncProfile(in.profile)) doc["readerFiles"] = 1;
+  // 2: list/delete/storage plus piece download (docs/reader-files.md).
+  if (isSyncProfile(in.profile)) doc["readerFiles"] = 2;
   // GET/POST /api/pocket/v1/reading (docs/reading-progress-v1.md), Sync profiles only.
   if (isSyncProfile(in.profile)) doc["readingProgress"] = 1;
   doc["uptime"] = millis() / 1000;

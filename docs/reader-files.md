@@ -44,12 +44,15 @@ SdFat's entry iterator: exceptionally sparse/damaged directories still require
 hardware timing validation. Reboot/SD removal during a delete may leave cleanup
 incomplete; refresh the folder to establish whether the file remains.
 
-## Reader file download (agreed 2026-10-01, firmware not yet implemented)
+## Reader file download (agreed and implemented 2026-10-01; hardware pending)
 
 Purpose: a book that exists only on the reader can be added to the app Library
 on an explicit user action ("Add to Library"). Never automatic or in the
-background. Agreed between the firmware and app sessions; the firmware side
-needs owner approval before it is built.
+background. Agreed between the firmware and app sessions. Firmware:
+`handleReaderFileContent` (`src/pocket_daily/web/PocketEndpoints.cpp`) with the
+rules in `ReaderFilesPolicy.h` (`downloadableReaderFile`, `parseByteCount`,
+`planDownloadPiece`); host tests in `test/hal_storage` (`ReaderFilesPolicy.*`)
+and the route guard in `scripts/test_sync_routes.py`. Not yet run on X3/X4.
 The app accepted it unchanged (2026-10-01): it gates listing/delete/storage on
 `readerFiles >= 1` and download on `readerFiles >= 2`, restarts from offset 0
 at most once on `409`, and tests pieces, backoff, restart, `416` and size

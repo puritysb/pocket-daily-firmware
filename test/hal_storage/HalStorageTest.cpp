@@ -193,6 +193,50 @@ TEST(ReaderFilesPolicy, ProtectsSystemPathsAndOnlyDeletesReadingFiles) {
   EXPECT_FALSE(deletableReaderFile("/crash_report.txt"));
 }
 
+TEST(ReaderFilesPolicy, DownloadsOnlyFormatsTheAppReads) {
+  using namespace PocketDaily::Web;
+  EXPECT_TRUE(downloadableReaderFile("/Books/BOOK.EPUB"));
+  EXPECT_TRUE(downloadableReaderFile("/Articles/note.md"));
+  EXPECT_TRUE(downloadableReaderFile("/notes.TXT"));
+  for (const auto path : {"/Books/comic.xtc", "/firmware.bin", "/crash_report.txt", "/.crosspoint/progress.bin",
+                          "/pocket-daily/learning/jp.pdl", "/Books", "Books/a.epub", "/a.epub/"})
+    EXPECT_FALSE(downloadableReaderFile(path)) << path;
+}
+
+TEST(ReaderFilesPolicy, ByteCountsAreUnsignedDecimalsWithoutOverflow) {
+  using namespace PocketDaily::Web;
+  uint64_t value = 7;
+  EXPECT_TRUE(parseByteCount("0", value));
+  EXPECT_EQ(value, 0U);
+  EXPECT_TRUE(parseByteCount("18446744073709551615", value));
+  EXPECT_EQ(value, UINT64_MAX);
+  value = 7;
+  for (const auto text : {"", "-1", "+1", " 1", "1 ", "1x", "0x10", "18446744073709551616", "999999999999999999999"}) {
+    EXPECT_FALSE(parseByteCount(text, value)) << text;
+    EXPECT_EQ(value, 7U) << text;
+  }
+}
+
+TEST(ReaderFilesPolicy, PiecesStayBoundedAndRejectChangedFilesAndPastTheEnd) {
+  using namespace PocketDaily::Web;
+  // 10,000-byte file, Same Wi-Fi pieces: 4096, 4096, 1808, then 416.
+  auto piece = planDownloadPiece(10000, 10000, 0, kDownloadPieceSameWifi);
+  EXPECT_EQ(piece.result, PieceResult::Ok);
+  EXPECT_EQ(piece.length, 4096U);
+  piece = planDownloadPiece(10000, 10000, 8192, kDownloadPieceSameWifi);
+  EXPECT_EQ(piece.result, PieceResult::Ok);
+  EXPECT_EQ(piece.length, 1808U);
+  EXPECT_EQ(planDownloadPiece(10000, 10000, 10000, kDownloadPieceSameWifi).result, PieceResult::OutOfRange);
+  EXPECT_EQ(planDownloadPiece(0, 0, 0, kDownloadPieceSameWifi).result, PieceResult::OutOfRange);
+  // Direct pieces are smaller; a size the app did not list is a changed file.
+  EXPECT_EQ(planDownloadPiece(10000, 10000, 0, kDownloadPieceDirect).length, 1024U);
+  EXPECT_EQ(planDownloadPiece(10001, 10000, 0, kDownloadPieceSameWifi).result, PieceResult::SizeChanged);
+  // Files past 4 GiB still plan correctly (offsets are 64-bit).
+  piece = planDownloadPiece(5000000000ULL, 5000000000ULL, 4999999000ULL, kDownloadPieceSameWifi);
+  EXPECT_EQ(piece.result, PieceResult::Ok);
+  EXPECT_EQ(piece.length, 1000U);
+}
+
 TEST_F(StorageAllocation, SpaceScanIsChunkedAndStopsOnIOFailure) {
   FakeSDK::clusters = 8192;
   HalStorage::SpaceChunk result;
