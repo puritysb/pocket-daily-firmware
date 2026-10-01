@@ -32,6 +32,36 @@ transcript. Current source and release records override dated observations.
   Host 848/848, default build clean (static RAM 69,912 → 69,496 B, flash
   6,396,307 → 6,369,675 B). Not yet on X3/X4.
 
+## Upstream review of the line-break PR — 2026-10-01
+
+- crosspoint-reader#3814: contributor `serialx` measured on an X3 that the
+  per-paragraph `gapBefore` vector (4 B/word, transient) left a smaller largest
+  free block after page turns on a Korean book (30,708 → 17,396 B; total free
+  heap unchanged) and asked for that to be solved before merge. Timing gain
+  with that version: initial layout −10.8 % English, −4.1 % Korean.
+- The same vector was on fork `main` since PR #8. Mistakes on our side: the PR
+  argued fragmentation safety from lifetimes without a device or allocation
+  measurement; the re-port used `int` (4 B/word) where fd4a58df used `int16_t`;
+  the PR bodies did not say "not verified on hardware" and the AI-usage line
+  said "verified by me". #3813's text also understated the buffer (256 B
+  `FOOTNOTE_HREF_LEN`, not 128; up to 255 stale bytes per link, not ~120).
+- Fix: 64-entry `int16_t` stack window (128 B), no heap. Host allocation trace
+  equals the pre-change baseline (1,549 allocations, peak 49,664 B for 3,328
+  words; the vector version was +1 allocation, +13,312 B, the reviewer's
+  delta). Fork branch `fix/linebreak-gap-stack-window`; upstream commit is
+  local only until the owner approves the reply. Not measured on a device yet.
+- Register evidence standard gained "Heap history" and "Disclosure" rules.
+- Posted 2026-10-01 with the owner's approval: fix commit 2e53b6f4 and a reply
+  on #3814, the PR converted to draft, both PR descriptions corrected (#3813:
+  256-byte buffer; both: host-only verification and an accurate AI-usage
+  line). Fork fix merged as PR #14.
+- Pending device A/B on the owner's X3 with upstream dev images (develop
+  099e89bc, vector 1d749dee as the control that must reproduce the drop,
+  window 2e53b6f4): `build/upstream-3814-measure/measure.sh <variant>` flashes
+  over USB and captures serial; `scripts/heap_log_summary.py --skip 6 a.log
+  b.log` reports the largest-block medians. Delete the book cache before each
+  run (cold layout), hyphenation off. `measure.sh restore` flashes Pocket back.
+
 ## Delta alignment merged — 2026-10-01
 
 - PR #8 (`a4b22398`) and PR #9 (`11e40dc4`) are on `main`: merge-regression
