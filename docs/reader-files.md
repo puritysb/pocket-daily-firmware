@@ -51,8 +51,11 @@ on an explicit user action ("Add to Library"). Never automatic or in the
 background. Agreed between the firmware and app sessions. Firmware:
 `handleReaderFileContent` (`src/pocket_daily/web/PocketEndpoints.cpp`) with the
 rules in `ReaderFilesPolicy.h` (`downloadableReaderFile`, `parseByteCount`,
-`planDownloadPiece`); host tests in `test/hal_storage` (`ReaderFilesPolicy.*`)
-and the route guard in `scripts/test_sync_routes.py`. Not yet run on X3/X4.
+`planDownloadPiece`, `downloadPieceLimit`, `readDownloadPiece`); host tests in
+`test/hal_storage` (`ReaderFilesPolicy.*`, including a reassembly test over both
+piece limits that fails if a piece is read from the wrong offset) and the
+route guard in `scripts/test_sync_routes.py`. The HTTP layer itself (status
+codes, headers) is only checked on a device. Not yet run on X3/X4.
 The app accepted it unchanged (2026-10-01): it gates listing/delete/storage on
 `readerFiles >= 1` and download on `readerFiles >= 2`, restarts from offset 0
 at most once on `409`, and tests pieces, backoff, restart, `416` and size
@@ -91,7 +94,10 @@ recent books, so the listing stays a cheap directory walk.
   on an X3 Direct session; prefer Same Wi-Fi in the UI.
 - Integrity: the app requires `sum(pieces) == size`; for EPUBs it may compare
   its own partial MD5 with `/reading`'s `document` when present. The reader
-  does not hash whole files.
+  does not hash whole files. The size check cannot detect wrong content
+  of the right length: an EPUB is caught by its ZIP CRCs when the app imports
+  it, a TXT/MD file is not, so byte-identity on a device (SHA-256 of 1 MB and
+  20 MB files, both bearers) is the acceptance test for this route.
 - One download at a time; each piece counts as client activity for the session
   timeout. No firmware size limit beyond the SD file system; the app should
   confirm unusually large files. Throughput is unmeasured: one request per

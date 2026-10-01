@@ -66,6 +66,9 @@ inline bool parseByteCount(std::string_view text, uint64_t& out) {
 // X3 (docs/TRANSFER_BENCHMARK.md). Direct (private AP) idles with less heap.
 inline constexpr size_t kDownloadPieceSameWifi = 4096;
 inline constexpr size_t kDownloadPieceDirect = 1024;
+inline constexpr size_t downloadPieceLimit(const bool directSession) {
+  return directSession ? kDownloadPieceDirect : kDownloadPieceSameWifi;
+}
 
 enum class PieceResult : uint8_t { Ok, SizeChanged, OutOfRange };
 struct DownloadPiece {
@@ -77,5 +80,13 @@ inline DownloadPiece planDownloadPiece(const uint64_t fileSize, const uint64_t e
   if (fileSize != expectedSize) return {PieceResult::SizeChanged, 0};
   if (offset >= fileSize) return {PieceResult::OutOfRange, 0};
   return {PieceResult::Ok, static_cast<size_t>(std::min<uint64_t>(maxPiece, fileSize - offset))};
+}
+
+// Exactly `length` bytes at `offset` of a freshly opened file (each request opens the
+// file again). False on a failed seek or a short read. A template so the host tests can
+// drive the same code with an in-memory file.
+template <typename File>
+bool readDownloadPiece(File& file, const uint64_t offset, uint8_t* out, const size_t length) {
+  return file.seek64(offset) && file.read(out, length) == static_cast<int>(length);
 }
 }  // namespace PocketDaily::Web

@@ -624,7 +624,7 @@ void handleReaderFileContent(WebServer& server, const RouteDeps& d) {
     server.send(404, "text/plain", "File not found");
     return;
   }
-  const size_t maxPiece = d.profile == Profile::POCKET_SYNC ? kDownloadPieceDirect : kDownloadPieceSameWifi;
+  const size_t maxPiece = downloadPieceLimit(d.profile == Profile::POCKET_SYNC);
   const auto piece = planDownloadPiece(file.fileSize64(), expectedSize, offset, maxPiece);
   switch (piece.result) {
     case PieceResult::SizeChanged:
@@ -638,7 +638,7 @@ void handleReaderFileContent(WebServer& server, const RouteDeps& d) {
   }
   // Shared static staging buffer (4 KiB): no allocation per piece.
   uint8_t* body = firmware_flash::sharedStagingBuffer();
-  if (!file.seek64(offset) || file.read(body, piece.length) != static_cast<int>(piece.length)) {
+  if (!readDownloadPiece(file, offset, body, piece.length)) {
     server.send(500, "text/plain", "Could not read the file; retry");
     return;
   }

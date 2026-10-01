@@ -254,6 +254,9 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertIn("admitContentOperation", handler)
         self.assertIn("downloadableReaderFile", handler)
         self.assertIn("firmware_flash::sharedStagingBuffer()", handler)
+        # The tested helpers carry the data path: bearer piece limit, offset read.
+        self.assertIn("downloadPieceLimit(d.profile == Profile::POCKET_SYNC)", handler)
+        self.assertIn("readDownloadPiece(file, offset, body, piece.length)", handler)
         self.assertNotIn("CONTENT_LENGTH_UNKNOWN", handler)
         status = (root / "src/pocket_daily/web/PocketStatus.cpp").read_text()
         self.assertIn('doc["readerFiles"] = 2;', status)
