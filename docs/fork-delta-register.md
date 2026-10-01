@@ -42,7 +42,11 @@ fact. Anything missing stays listed under "Missing proof".
    (section `.bin`, rendered frames), heap floor and largest block, and the
    existing host suite.
 5. **Tests:** host tests that fail before and pass after, runnable on
-   `upstream/master` plus the change alone.
+   `upstream/master` plus the change alone. A test that guards new logic
+   must also fail under an injected fault in that logic (off-by-one, wrong
+   index), and its fixture must be able to tell the cases apart: the first
+   long-line test for the #3814 gap window passed with every slot bug because
+   the stub renderer's space advance was a uniform 4 px.
 6. **Extraction:** the change applies as a standalone commit on
    `upstream/master` with no `pocket_daily` include and no fork-only format.
 7. **Heap history:** a change that adds or enlarges a heap allocation, even a
@@ -52,7 +56,11 @@ fact. Anything missing stays listed under "Missing proof".
    free heap is not enough, and reasoning about lifetimes is not evidence: a
    transient vector moves where the next long-lived allocations land
    (crosspoint-reader#3814 review, 2026-10-01: −13,312 B largest block on X3
-   from a 4 B/word temporary).
+   from a 4 B/word temporary). A stack alternative needs the
+   compiler-reported frame of the function and any helper it adds
+   (`PLATFORMIO_BUILD_FLAGS=-fstack-usage`, then the `.su` file next to the
+   object): the same review counted +128 B of frame and an 80 B lambda frame
+   that the first stack version had not disclosed.
 8. **Disclosure:** the PR body states what was verified on a host and what was
    not verified on hardware, and the AI-usage line says who verified what. Do
    not write "verified by me" for checks the account owner did not perform.
@@ -78,7 +86,7 @@ cited commit or document and have not been re-measured in this audit.
 |---|---|---|---|---|---|
 | U-HAL-1 | `HalFile` write-behind buffer (`HalFile::setWriteBuffer`, `lib/hal/HalStorage.h:139`; used by `Section.cpp:395`) — fd4a58df | candidate | ~59,000 → 83 `write` calls per 100 KB of chapter (fd4a58df, `docs/reader-perf.md`) | `test/hal_storage` `WriteBufferBatchesSmallWritesWithoutChangingBytes` | Device chapter-build time before/after; section `.bin` byte identity on a corpus; peak heap +2 KB. Split from the `ParsedText` half of fd4a58df |
 | U-HAL-2 | OOM-safe `HalFile` (`makeUniqueNoThrow<Impl>`, no `assert(impl)`) — 391e12fd, b818e819 | candidate | — (correctness) | `test/hal_storage` StorageAllocation cases | Allocation-failure host test on upstream baseline |
-| U-EPUB-1 | Measure each line-break gap once in `ParsedText::computeLineBreaks` — fd4a58df, re-ported 2026-10-01 onto upstream's gap rule | **pr-open, changes requested** [#3814](https://github.com/crosspoint-reader/crosspoint-reader/pull/3814): a contributor measured on X3 a smaller largest free block after page turns (Korean book: 30,708 → 17,396 B) from the per-paragraph gap vector. Reworked to a 64-entry `int16_t` stack window (no heap): fork PR #14 (merged), upstream commit 2e53b6f4 pushed with a reply; the PR is a **draft** until the largest free block is measured on an X3 (`build/upstream-3814-measure/measure.sh`, `scripts/heap_log_summary.py`); overlaps closed #1528 | Host allocation trace, 3,328-word paragraph: baseline 1,549 allocations / peak 49,664 B; gap vector 1,550 / 62,976 B (+13,312 B, the reviewer's delta); stack window 1,549 / 49,664 B with the same size sequence. Lookups (400 words, 480 px): 5,847 → 1,137. Reviewer's X3 timing with the vector version: initial layout −10.8 % (English), −4.1 % (Korean); page rendering unchanged. Fork golden digest unchanged `0x6b8020d1993c5848`, host layout 157–165 ms (baseline 181–204 ms) | `LineBreakCost.MeasuresEachWordGapOnceInTheBreakSearch`, `LineBreakCost.LinesLongerThanTheGapWindowBreakTheSame` (fork and upstream branch); fork `ReadingPositionLayout.SectionFilesMatchTheLayoutGolden`; upstream suite 419/419 on develop | Device largest-free-block re-measurement of the stack-window version (reviewer's rig or our X3) |
+| U-EPUB-1 | Measure each line-break gap once in `ParsedText::computeLineBreaks` — fd4a58df, re-ported 2026-10-01 onto upstream's gap rule | **pr-open (draft), second revision prepared** [#3814](https://github.com/crosspoint-reader/crosspoint-reader/pull/3814): heap vector → 64-entry stack window (2e53b6f4; reviewer re-measured on X3: heap penalty gone, layout gain kept, but frame 176 → 304 B plus an 80 B helper) → 32-entry window with one measuring site (frame 240 B, no helper; fork PR #16, upstream commit 236cde79 pushed 2026-10-02 with a reply and corrected description; still a draft until that revision runs on a device); overlaps closed #1528 | Host allocation trace, 3,328-word paragraph: baseline 1,549 allocations / peak 49,664 B; gap vector 1,550 / 62,976 B (+13,312 B, the reviewer's delta); stack window 1,549 / 49,664 B with the same size sequence. Lookups (400 words, 480 px): 5,847 → 1,137. Reviewer's X3 timing with the vector version: initial layout −10.8 % (English), −4.1 % (Korean); page rendering unchanged. Fork golden digest unchanged `0x6b8020d1993c5848`, host layout 157–165 ms (baseline 181–204 ms). Frames (RISC-V `-fstack-usage`): develop 176 B; 64-entry 304 B + 80 B helper; 32-entry 240 B. Lookups with 32 entries: 13 words/line 5,847 → 1,137; 24/line 51,532 → 5,831; 40/line 83,080 → 21,607; 66/line 135,662 → 74,189. Reviewer's X3 re-test of 2e53b6f4: initial layout −11.1 % English, −3.8 % Korean; largest block equal to baseline (17,396 B median) | `LineBreakCost.MeasuresEachWordGapOnceInTheBreakSearch`, `LineBreakCost.CachedGapsMatchDirectMeasurement` (pair-dependent gaps vs an independent reference, 200 paragraphs, mutation-checked; fork and upstream branch); off-tree differential run of 4,000 random paragraphs identical on develop and all three revisions, also under ASan/UBSan; fork `ReadingPositionLayout.SectionFilesMatchTheLayoutGolden`; upstream suite 419/419 on develop | Device largest-free-block re-measurement of the stack-window version (reviewer's rig or our X3) |
 | U-EPUB-2 | nothrow `Page` allocation plus `outOfMemory_` in `ChapterHtmlSlimParser` — 5f1806a3 | candidate | Field abort at 12,276 B largest block (51191628) | none | Allocation-failure host test proving a clean build failure and no committed partial; hand-split from text-offset hunks |
 | U-EPUB-3 | `Section::mayHaveMorePages()` / `isCatchingUp()` so a suspended partial does not skip the rest of the chapter — 5f1806a3 | candidate | — | `test/reader_layout` uses it, no dedicated case | Host test: paused partial, forward turn, assert same spine |
 | U-EPUB-4 | Replace U+FFFD titles with the filename, clear U+FFFD authors (`Epub.cpp:17-45`) — 5bdacea0, 819ecd3d | candidate | — | none | Unit test on metadata sanitizing; exclude the `recent.bin` migration |

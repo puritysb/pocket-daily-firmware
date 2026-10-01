@@ -55,6 +55,20 @@ transcript. Current source and release records override dated observations.
   on #3814, the PR converted to draft, both PR descriptions corrected (#3813:
   256-byte buffer; both: host-only verification and an accurate AI-usage
   line). Fork fix merged as PR #14.
+- 2026-10-01 reviewer re-test of 2e53b6f4 on X3: the consistent Korean heap
+  penalty did not reproduce (largest block 17,396 B median on both; baseline
+  itself varied 30,708/17,396 with reading history), layout gain kept, but
+  the frame grew 176 → 304 B plus an 80 B lambda frame we had not disclosed.
+  Second revision: 32-entry window, one measuring site, frame 240 B, no
+  helper (`-fstack-usage`); heap trace still equals develop; dense lines over
+  32 words keep only part of the saving. Fork branch
+  `fix/linebreak-gap-window-stack` (PR #16); upstream commit 236cde79 pushed
+  2026-10-02 with a reply and corrected description, PR still a draft.
+  Self-review before posting found that the long-line test added with the
+  64-entry version passed under every injected window bug (uniform 4 px stub
+  gaps); it was replaced by `CachedGapsMatchDirectMeasurement` (pair-dependent
+  gaps against an independent reference), and the reply says so. The reviewer's run covers the largest-block
+  measurement we had promised; `measure.sh` remains for our own checks.
 - Pending device A/B on the owner's X3 with upstream dev images (develop
   099e89bc, vector 1d749dee as the control that must reproduce the drop,
   window 2e53b6f4): `build/upstream-3814-measure/measure.sh <variant>` flashes
