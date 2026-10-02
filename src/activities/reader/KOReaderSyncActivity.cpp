@@ -94,7 +94,7 @@ void KOReaderSyncActivity::saveProgressAndReturn(int spineIndex, int page) {
   returnToReader();
 }
 
-void KOReaderSyncActivity::returnToReader() { activityManager.goToReader(epubPath); }
+void KOReaderSyncActivity::returnToReader() { activityManager.resumeReader(epubPath); }
 
 bool KOReaderSyncActivity::smartSyncEnabled() const {
   return KOREADER_STORE.getSyncBehavior() == KOReaderSyncBehavior::SMART;

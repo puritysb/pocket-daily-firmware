@@ -107,6 +107,9 @@ class ActivityManager {
   void goToReader(std::string path, bool allowFastInitialRefresh = false);
   // Open a book from a product shell so that leaveReader() returns to it.
   void goToReaderFrom(ReaderReturn origin, std::string path, bool allowFastInitialRefresh = false);
+  // Reopen a book from inside the reader flow (after KOReader sync, the next
+  // book from the end-of-book menu): the origin of the current book is kept.
+  void resumeReader(std::string path);
   // Leave the book by Back or the end-of-book exit: the opening shell, else Home.
   void leaveReader();
   void goToSleep(bool fromTimeout = false);

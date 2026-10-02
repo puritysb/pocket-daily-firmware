@@ -68,6 +68,8 @@ Host render tests do not sign off panel or radio behavior.
 - [ ] Pocket Daily's first button reads Home and opens CrossPoint Home.
 - [ ] A book opened from Pocket Daily returns there on Back; an article returns to
       Articles; a book opened from Home returns to Home.
+- [ ] With "Back goes to the file browser" on: Pocket Daily book → Back to the file
+      browser → open another book → Back returns Home, not Pocket Daily.
 - [ ] Page turning, background layout and repeated book/font changes retain
       over 50 KiB free heap in the reading acceptance scenario without leaks;
       record free heap, largest block and minimum-ever heap separately.
