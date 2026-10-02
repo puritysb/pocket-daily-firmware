@@ -32,6 +32,20 @@ transcript. Current source and release records override dated observations.
   Host 848/848, default build clean (static RAM 69,912 → 69,496 B, flash
   6,396,307 → 6,369,675 B). Not yet on X3/X4.
 
+## Post-merge self-review — 2026-10-02
+
+- Re-reading the merged, device-only changes found a stale book origin: Pocket
+  Daily book → Back to the file browser → another book → Back went to Pocket
+  Daily. `goToReader()` now resets the origin to Home; `resumeReader()` keeps it
+  for the reader's own re-opens (KOReader sync return, next book). Source guard
+  only (ActivityManager is not host-buildable); hardware checklist item added.
+- Checked and left unchanged: crash-log retention after brownout (RTC log ring
+  is magic-guarded and length-bounded), boot routing with the stock boot-loop
+  guard, sleep screens against upstream (only the WAKE cue and the fork's
+  `drawBitmap` signature differ).
+- Upstream PR rules now live in the `fork-sync` skill (PR #17); earlier upstream
+  PRs by this account: #2465 and #2498 (bilingual, closed 2026-07/09).
+
 ## Upstream review of the line-break PR — 2026-10-01
 
 - crosspoint-reader#3814: contributor `serialx` measured on an X3 that the
