@@ -32,6 +32,21 @@ transcript. Current source and release records override dated observations.
   Host 848/848, default build clean (static RAM 69,912 → 69,496 B, flash
   6,396,307 → 6,369,675 B). Not yet on X3/X4.
 
+## Version series reset to 0.x — 2026-10-03 (prepared, not released)
+
+- Owner decision relayed by the app session: development releases are 0.x,
+  published as normal (latest) GitHub releases; first is `pocket-v0.1.0`;
+  `1.0.0` is the first stabilized release. Reason: `/releases/latest` returned
+  the historical `v1.6.6` because every `pocket-v…` release was a pre-release,
+  so the reader's updater and the app's stable channel found nothing usable.
+- Branch `chore/release-0.1.0`: `platformio.ini` version 0.1.0,
+  `firmwareLineage` 2 (lineage 1 = the `1.0.0-beta.*`/`1.0.0-dev-*` builds),
+  comparison tests for 0.x, `docs/product-versioning.md` rewritten, a
+  development-release device pass added to `docs/release-checklist.md`. The
+  release workflow already publishes `pocket-v<version>` as latest.
+- Not done: merge, tag, publish. They wait for the owner's direct
+  confirmation in this session and the device pass on the exact image.
+
 ## Post-merge self-review — 2026-10-02
 
 - Re-reading the merged, device-only changes found a stale book origin: Pocket
