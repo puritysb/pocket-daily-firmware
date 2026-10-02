@@ -48,6 +48,22 @@ TEST(FirmwareVersion, ProductStableUpgradeNeverOffersHistoricalTags) {
   EXPECT_FALSE(FirmwareVersion::isNewerStable("pocket-v1.0.0", "1.0.1"));
 }
 
+TEST(FirmwareVersion, DevelopmentSeriesComparesNumericallyBelowOne) {
+  // 0.x releases are published as normal releases, so /releases/latest returns them.
+  EXPECT_FALSE(FirmwareVersion::isNewerStable("pocket-v0.1.0", "0.1.0"));  // up to date, no error
+  EXPECT_TRUE(FirmwareVersion::isNewerStable("pocket-v0.1.0", "0.1.0-dev-main-abcd-w123"));
+  EXPECT_TRUE(FirmwareVersion::isNewerStable("pocket-v0.1.1", "0.1.0"));
+  EXPECT_TRUE(FirmwareVersion::isNewerStable("pocket-v0.2.0", "0.1.9"));
+  EXPECT_TRUE(FirmwareVersion::isNewerStable("pocket-v1.0.0", "0.9.3"));
+  EXPECT_FALSE(FirmwareVersion::isNewerStable("pocket-v0.1.0", "0.2.0"));
+  // Readers still on the pre-reset 1.0.0 builds (lineage 1) do not see 0.x through
+  // their own updater; the companion migrates them (docs/product-versioning.md).
+  EXPECT_FALSE(FirmwareVersion::isNewerStable("pocket-v0.1.0", "1.0.0-beta.1"));
+  EXPECT_FALSE(FirmwareVersion::isNewerStable("pocket-v0.1.0", "1.0.0-dev-main-abcd"));
+  // The historical latest tag is never an update for the 0.x series either.
+  EXPECT_FALSE(FirmwareVersion::isNewerStable("v1.6.6", "0.1.0"));
+}
+
 TEST(FirmwareVersion, RejectsMalformedAndPrereleaseLatestTags) {
   EXPECT_FALSE(FirmwareVersion::isNewerStable("pocket-v1.0.0-beta.1", "1.0.0"));
   EXPECT_FALSE(FirmwareVersion::isNewerStable("pocket-v1.0.0.1", "1.0.0"));

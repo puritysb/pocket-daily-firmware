@@ -108,9 +108,31 @@ Host render tests do not sign off panel or radio behavior.
       `bootloader.bin`, `partitions.bin`, and license notices.
 - [ ] `/releases/latest` resolves and the on-device updater parses the release.
 
+## Development (0.x) releases
+
+Versions below 1.0 are published as normal releases (`pocket-v0.x.y`, marked
+latest) so the reader's updater and the companion's stable channel find them;
+see `docs/product-versioning.md`. They reach every lineage 2 reader, so the
+automated gates above apply in full and the exact release image gets at least
+this device pass on an X3 and an X4 before the tag (record commit, image
+SHA-256, tester/date under Candidate identity):
+
+- [ ] Installs through the SD updater and boots to Pocket Daily; About shows
+      the version.
+- [ ] Opens a Korean and an English EPUB, turns 20 pages, sleeps and wakes.
+- [ ] Home, Library, Settings and File Transfer open; labels are readable in
+      the configured language on the selected theme.
+- [ ] Sync with the companion: pairing or Same Wi-Fi, one upload, reading
+      position exchange.
+- [ ] Sync → Check for Updates on the released version reports no update and
+      no error.
+- [ ] No crash report; `/api/status` `freeHeap` above 50 KB on Home.
+
+The full X3/X4 sections remain the gate for `1.0.0`.
+
 ## Beta pre-releases (companion beta channel)
 
-Tag `pocket-v<version>-beta.<n>` (for example `pocket-v1.0.0-beta.1`, where `<version>` is
+Tag `pocket-v<version>-beta.<n>` (for example `pocket-v0.2.0-beta.1`, where `<version>` is
 `platformio.ini`'s) to publish a GitHub **pre-release**. The release workflow
 builds `gh_release_beta`, checks that `firmware.bin` reports exactly
 `<version>-beta.<n>`, and publishes with `--prerelease --latest=false`, so
