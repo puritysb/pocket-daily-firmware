@@ -44,7 +44,7 @@ improving reading is out of scope.
   | `refactor-for-review` | refactoring, cleaning up, or preparing a change for PR |
   | `debug-crashes` | chasing a panic, reboot, hang, or watchdog timeout |
   | `firmware-deploy` | getting a build onto the device |
-  | `fork-sync` | pulling upstream, opening an upstream PR |
+  | `fork-sync` | pulling upstream, opening or answering an upstream PR |
   | `generated-content` | changing i18n YAML, HTML pages, or fonts |
 
 - `docs/PROJECT_MEMORY.md` is the shared cross-session, cross-agent memory.
@@ -84,6 +84,12 @@ improving reading is out of scope.
   a stack/static alternative was rejected.
 - After a fix, tell the user how to verify it (heap over serial, a specific
   cache file, a hardware step).
+- A test that guards new logic must fail when a fault is injected into that
+  logic; a fixture with uniform values cannot guard indexing.
+- Anything that reaches another repository (opening an upstream PR, pushing to
+  its branch, commenting, editing its description) needs the owner's approval
+  of the exact content. Read `fork-sync` first; state what was not verified on
+  hardware and never write "verified by me" for the owner.
 
 ## Repository identity and boundaries
 

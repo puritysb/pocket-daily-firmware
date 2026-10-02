@@ -46,6 +46,24 @@ Bare `new` / `new[]` is never correct here: under `-fno-exceptions` it calls
   setup). Banned on hot/render paths. Build text with a stack `char[]` +
   `snprintf`; if a `std::string` is unavoidable, `reserve` it first.
 
+## Transient allocations still cost
+
+A buffer freed in the same function is not free of consequences. Whatever is
+allocated while it is alive (a result vector, the pages built next) lands
+after it, so a larger transient footprint moves long-lived blocks deeper into
+the free region and splits the largest block. Total free heap does not show
+this; `ESP.getMaxAllocHeap()` does. A 4-byte-per-word temporary in the
+line-break search cost 13 KB of contiguous heap on an X3 with free heap
+unchanged (crosspoint-reader#3814).
+
+- Prove a new temporary harmless with an allocation trace equal to the
+  baseline (count, sizes, order) or a device largest-block measurement
+  (`scripts/heap_log_summary.py`), not with lifetime reasoning.
+- Moving it to the stack is a trade, not a free fix: measure the frame of the
+  function and of every helper it adds with `PLATFORMIO_BUILD_FLAGS=-fstack-usage`
+  (the `.su` file beside the object) and keep the whole frame under 256 B. A
+  lambda called from two places is its own frame; one call site inlines.
+
 ## Justify every allocation
 
 Per AGENTS.md's evidence rule: when you add a heap allocation, state in one line
