@@ -338,6 +338,10 @@ void ActivityManager::goToBrowser() {
 }
 
 void ActivityManager::goToReader(std::string path, const bool allowFastInitialRefresh) {
+  // Opening a book returns Home unless the caller says otherwise
+  // (goToReaderFrom, resumeReader): an origin left over from an earlier book
+  // must not send a book opened from the file browser back to Pocket Daily.
+  readerReturn = ReaderReturn::Home;
   if (path.empty()) {
     goToFileBrowser("/");
     return;
@@ -363,6 +367,12 @@ void ActivityManager::goToReaderFrom(const ReaderReturn origin, std::string path
   goToReader(std::move(path), allowFastInitialRefresh);
   // Only a queued book records the origin; a failed open leaves no stale return.
   if (pendingActivity && pendingActivity->isReaderActivity()) readerReturn = origin;
+}
+
+void ActivityManager::resumeReader(std::string path) {
+  const ReaderReturn origin = readerReturn;
+  goToReader(std::move(path));
+  readerReturn = origin;
 }
 
 void ActivityManager::leaveReader() {

@@ -49,6 +49,18 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertEqual(reader.count("activityManager.leaveReader()"), 3)
         go_home = manager[manager.index("void ActivityManager::goHome("):]
         self.assertIn("readerReturn = ReaderReturn::Home;", go_home[:go_home.index("\n}")])
+        # A plain open (Home, Library, file browser) resets the origin, so a book
+        # opened there after leaving a Pocket book by Back-to-files returns Home.
+        # Only the reader's own re-opens keep it.
+        open_book = manager[manager.index("void ActivityManager::goToReader("):]
+        open_book = open_book[:open_book.index("\n}")]
+        self.assertLess(open_book.index("readerReturn = ReaderReturn::Home;"), open_book.index("if (path.empty())"))
+        self.assertIn("activityManager.resumeReader(openPath)", reader)
+        sync = (root / "src/activities/reader/KOReaderSyncActivity.cpp").read_text()
+        self.assertIn("activityManager.resumeReader(epubPath)", sync)
+        callers = [p for p in (root / "src").rglob("*.cpp") if "resumeReader(" in p.read_text()]
+        self.assertEqual(sorted(p.name for p in callers),
+                         ["ActivityManager.cpp", "KOReaderSyncActivity.cpp", "ReaderActivity.cpp"])
         # The first front button leads to CrossPoint Home and says so.
         self.assertIn("mapLabels(tr(STR_POCKET_HOME)", pocket)
         self.assertNotIn("STR_POCKET_LIBRARY", pocket)
