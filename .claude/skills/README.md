@@ -25,7 +25,7 @@ rules. These skills load on demand.
 | `refactor-for-review` | refactoring, cleaning up, or preparing a change for PR |
 | `debug-crashes` | chasing a panic, reboot, hang, or watchdog timeout |
 | `firmware-deploy` | getting a build onto the device, over USB or SD card |
-| `fork-sync` | pulling upstream, opening an upstream PR |
+| `fork-sync` | pulling upstream, opening or answering an upstream PR |
 | `generated-content` | changing i18n YAML, HTML pages, or fonts — anything a build script emits |
 
 The first five are **decision procedures**: judgment `AGENTS.md` cannot afford
