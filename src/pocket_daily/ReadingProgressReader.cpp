@@ -181,18 +181,24 @@ bool takeFurtherOffer(const Epub& epub, const float currentPercentage, std::stri
                       float& percentage) {
   struct OfferWork {
     Offer offer;
+    Record record;  // Reuses the operation allocation; too large for the reader task stack.
     Scratch scratch;
     char question[MAX_DEVICE_BYTES + 96];
   };
+  // Bounded offer, current record and codec scratch share one cold-path allocation; too large for the task stack.
   auto work = makeUniqueNoThrow<OfferWork>();
-  if (!work) return false;  // Keep the offer; the next open asks again.
+  if (!work) {
+    LOG_ERR("RPS", "Could not allocate %u bytes for reading offer", static_cast<unsigned>(sizeof(OfferWork)));
+    return false;  // Keep the offer; the next open asks again.
+  }
   const char* cachePath = epub.getCachePath().c_str();
   if (!loadOffer(cachePath, work->offer, work->scratch)) {
     removeOffer(cachePath);  // Unreadable or damaged: never ask about it.
     return false;
   }
   const Offer& offer = work->offer;
-  if (!isFurther(offer.percentage, currentPercentage)) {
+  const uint32_t seq = loadRecord(cachePath, work->record, work->scratch) ? work->record.seq : 0;
+  if (!shouldSuggest(offer, seq, currentPercentage)) {
     LOG_DBG("RPS", "Discarding offer %.4f from %s: current %.4f", static_cast<double>(offer.percentage), offer.device,
             static_cast<double>(currentPercentage));
     removeOffer(cachePath);

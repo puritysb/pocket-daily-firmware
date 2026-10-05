@@ -33,7 +33,8 @@ String buildStatusJson(const StatusInputs& in) {
   char deviceId[9];
   snprintf(deviceId, sizeof(deviceId), "%08lX", static_cast<unsigned long>(ESP.getEfuseMac() & 0xFFFFFFFFUL));
   doc["deviceID"] = deviceId;
-  doc["sessionEnd"] = in.profile == Profile::POCKET_SYNC && in.apMode;
+  doc["sessionEnd"] = isSyncProfile(in.profile);
+  doc["publicationReceipt"] = 1;
   doc["contentPresentation"] = in.contentPresentation;
   // Home / Daily Brief in Sync (docs/pocket-screen-present-v1.md); older
   // firmware omits the key and the companion must not call the routes.

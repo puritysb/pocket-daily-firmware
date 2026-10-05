@@ -405,3 +405,21 @@ TEST(ReadingSyncService, CountsConnectionsIncludingStartupWithoutCountingDisconn
   EXPECT_EQ(service.connectionGeneration(), 3u);
   service.end();
 }
+
+TEST(ReadingSyncSession, CausalOfferRejectsChangedReaderAndStoresMatchingObservation) {
+  seedLibrary();
+  Link link;
+  auto body = appOfferBody(DIGEST_A, "Phone", READER_ID, "0.1");
+  body.pop_back();
+  body += ",\"readerSeq\":2}";
+  EXPECT_EQ(offer(link, "00000090", body, 29, crcOf(body)), std::vector<std::string>{"ERR 00000090 STALE_POSITION"});
+  EXPECT_FALSE(Reading::hasOffer(cacheOf(BOOK_A).c_str()));
+  body.replace(body.rfind(":2}"), 3, ":3}");
+  EXPECT_EQ(offer(link, "00000091", body, 31, crcOf(body)), std::vector<std::string>{"OK 00000091"});
+  Reading::Offer saved;
+  Reading::Scratch scratch;
+  ASSERT_TRUE(Reading::loadOffer(cacheOf(BOOK_A).c_str(), saved, scratch));
+  EXPECT_EQ(saved.readerSeq, 3u);
+  EXPECT_TRUE(Reading::shouldSuggest(saved, 3, 0.25f));
+  EXPECT_FALSE(Reading::shouldSuggest(saved, 4, 0.25f));
+}

@@ -5,12 +5,17 @@ Automatic, account-free exchange of reading places between a Pocket Daily reader
 the bonded Nearby Sync service (`nearby-sync-v1.md`) as its transport and the
 reading-progress v1 records (`reading-progress-v1.md`) as its payload.
 
-Status (2026-09-30): integrated review candidate on `codex/ble-sync-review`,
-based on product main `ee188fe7` (CrossPoint 1.6.5 / FreeInk SDK `111fdcc7`).
-The paired app candidate is also `codex/ble-sync-review`, based on app `c22df41`.
-The held `feat/ble-reading-sync` history is included in the integration.
-Publication state is recorded in GitHub PRs/releases; X3/X4 hardware acceptance
-is still pending. See `ble-sync-review-2026-09-30.md` for findings and acceptance steps.
+Current source (2026-10-05): the HTTP and BLE paths share `ReadingExchange`.
+Lists advertise `offerVersion:2`; offers may bind to a positive `readerSeq`.
+A changed reader position returns `STALE_POSITION`; legacy peers remain
+forward-only. See `reading-progress-v1.md` for the common payload/storage rules.
+The app distinguishes pairing, supported `READ1`, waiting, exchanging, errors,
+and the last completed BLE exchange. Pairing alone is not sync support or proof
+that a window opened. `/api/status.readSync` explains the reader's latest
+memory/battery/bond gate only when HTTP status belongs to that paired reader.
+The existing memory thresholds and radio ownership remain unchanged.
+X3/X4 BLE availability, background delivery and handoff still need hardware
+acceptance. The historical integration review is `ble-sync-review-2026-09-30.md`.
 
 ## Experience
 

@@ -117,6 +117,29 @@ See [reader-files.md](reader-files.md) for the contract.
 - [ ] Record throughput and pre/min/post heap, largest block and watchdog/crash
       results. Host reassembly tests do not establish these device results.
 
+## Companion connection changes — 2026-10-05
+
+Pending separately on **X3 and X4**, against the exact app revision and firmware
+artifact hash. No host/simulator result signs these off.
+
+- [ ] Same Wi-Fi and Direct: publish an EPUB; drop the commit response, reconnect
+      and explicitly resume. Match the durable receipt without another upload;
+      restart reader and app and repeat. Verify exact file bytes on SD.
+- [ ] Lose power before receipt persistence or replace/remove the receipt: the app
+      must report unknown and preserve its queue, not resend or claim success.
+- [ ] Download official firmware before Direct connection, then Send update.
+      Verify SD staging, successful session/end on both profiles, on-reader
+      installation/cancel confirmation and installed version on a later reconnect.
+- [ ] BLE: pair without READ1, pair with READ1, close a book, background the app,
+      sleep/wake, force a memory/battery gate and use HTTP diagnostics. Check the
+      app distinguishes waiting, unavailable, failure and completed exchange.
+- [ ] Reading: observe the reader, reread an earlier position in the app, exchange,
+      accept/cancel on the reader. Cancel must not repeat the same suggestion.
+      Change reader position before delivery/opening: reject the stale offer.
+- [ ] Interrupt BLE with Same Wi-Fi or Direct setup; cancel and retry. Record heap,
+      largest block, watchdog/crash and radio teardown; exercise X3/X4 controls
+      and all four orientations. No new claim that BLE is always available.
+
 ## Publication
 
 - [ ] Nearby Sync v1 is frozen and compatible with the app repository.

@@ -58,7 +58,7 @@ class ListStream {
   size_t index = 0;
 };
 
-enum class OfferStoreResult : uint8_t { STORED, UNKNOWN_DOCUMENT, FAILED };
+enum class OfferStoreResult : uint8_t { STORED, UNKNOWN_DOCUMENT, STALE_POSITION, FAILED };
 
 // Stores a validated offer as the pending place of the recent book whose
 // `document` or `filenameDocument` matches. The current position is never

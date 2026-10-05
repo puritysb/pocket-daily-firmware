@@ -368,3 +368,43 @@ Brief, covers, custom/transparent screens and Quick Resume. It does not change
 how the power button works. The cue remains anchored in physical portrait at
 X3's top switch or X4's upper-right switch regardless of reading orientation.
 No new endpoint or automatic firmware installation is involved.
+
+## Durable publication receipt and session completion — 2026-10-05
+
+Both Sync profiles (`COMPANION` on the same Wi-Fi and private `POCKET_SYNC`)
+advertise `publicationReceipt:1` and `sessionEnd:true`. Publication receipts
+also accompany the existing commit route in File Transfer; `sessionEnd:true`
+is limited to Sync profiles. `POST /api/pocket/v1/session/end` now works
+in either Sync profile and rejects an active receiving stream, while allowing
+the completed/replied stream to leave Sync. Ending a firmware transfer still
+only leads to the reader's install confirmation; it never authorizes flashing.
+
+`POST /api/pocket/v1/publication` is a read-only outcome lookup using the same
+JSON as `/commit`: `staging`, `target`, `size`, and eight-digit hexadecimal
+`crc32`. Both routes reject active writers, accept at most 1536 body bytes
+and paths shorter than 512 bytes, and retain the existing commit path policy.
+The app re-probes device identity before recovery; these local HTTP routes
+do not provide cryptographic LAN authentication. Matching the
+latest durable receipt returns the ordinary `{size,crc32}` receipt; an absent,
+corrupt or different receipt returns 404 `{"state":"unknown"}`. A duplicate
+commit matching that receipt returns success without republishing the file.
+
+After publishing, firmware writes `/.crosspoint/pocket-publication.bin` via a
+temporary file and verifies its bytes. `PDC1` stores little-endian size and CRC,
+then NUL-terminated staging and target paths. Exact request comparison uses a
+64-byte stack buffer; no persistent RAM receipt cache is added. Only the most
+recent publication is remembered, bounding SD use. This is historical evidence
+of that publication, not proof that the target has remained unchanged.
+
+The app durably marks publication pending before commit. On a lost reply or
+later explicit resume it re-probes the same device identity, verifies the
+capability and queries the receipt; it never resends payload or commit to
+resolve an uncertain outcome. A power loss between target publication and
+receipt persistence still yields unknown. Receipt absence never proves the
+previous target survived or makes blind retry safe; manual inspection/local
+queue removal remains available. This is not a general SD power-loss transaction.
+
+For an internet-free Direct connection, the app can download and validate an
+official image first, keep it in the prepared queue, then explicitly send it
+after connecting. After firmware publication the app ends capable LAN and AP
+sessions so the reader can present its existing installation confirmation.

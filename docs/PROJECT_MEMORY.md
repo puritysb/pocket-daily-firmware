@@ -3,6 +3,34 @@
 This is concise, repository-owned context for future sessions. It is not a chat
 transcript. Current source and release records override dated observations.
 
+## Companion connectivity revision — 2026-10-05 (local, not released)
+
+- Owner authorized app + firmware improvements before the first formal release.
+  Sync session/end now covers LAN COMPANION as well as private AP; completed
+  stream replies no longer block ending. Installation still needs reader consent.
+- `publicationReceipt:1`: bounded latest-only SD receipt, read-only outcome query,
+  idempotent matching commit; app re-probes identity and resolves pending queue
+  records without payload/commit replay. A missing receipt remains unknown,
+  including a power loss before receipt persistence. Not general SD atomicity.
+- Reading lists advertise `offerVersion:2`. Optional readerSeq binds a suggestion
+  to the observed reader record, checked at storage and book open. PDRO writes v2
+  and reads v1/v2; PDRP and section caches are unchanged. App observations and
+  delivered markers support intentional rereading and suppress repeated offers.
+- App distinguishes remembered pairing from READ1 support and completed exchange,
+  exposes existing window-gate diagnostics, centralizes task ownership, and can
+  prepare official firmware before an internet-free Direct connection. Existing
+  BLE heap thresholds, window policy and radio exclusivity remain unchanged.
+- Local evidence: 865/865 host tests; strict CI-pinned cppcheck 2.11 has no defects;
+  default build has zero compiler warnings/errors. Evidence logs are ignored
+  `build/connectivity-review/`. Bundled newer cppcheck reports pre-existing
+  HttpDownloader copy-member warnings; the repository CI wrapper passes.
+- Paired app evidence: 487/487 iOS tests, both platform builds, 430/430 Mac
+  XPointer cross-checks and isolated 19-image screenshot regeneration passed.
+- No push, installation or X3/X4 claim. The working tree also contains
+  a separate session's reader preference/UI changes, preserved as found. Device
+  gates are in `docs/release-checklist.md` under Companion connection changes;
+  the final artifact identity must come from `firmware/LATEST_BUILD.txt`.
+
 ## Firmware work status — 2026-10-05
 
 - Status reconciled against `main` `a96170e1`: PR #13 reader-file pieces,
