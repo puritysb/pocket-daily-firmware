@@ -11,7 +11,8 @@ are retained. Hidden/system folders and firmware cannot be deleted here.
 
 ## Contract (app and sibling firmware)
 
-Sync `/api/status` advertises `readerFiles: 1` and optional `totalHeap` bytes.
+Sync `/api/status` advertises `readerFiles: 2` and optional `totalHeap` bytes.
+Version 1 provides list/delete/storage; version 2 also provides bounded download.
 Older firmware remains supported: free RAM only, no invented SD usage.
 All endpoints below require the current `deviceID` query and refuse work while
 uploads/presentation are busy or the reader has insufficient working memory.
@@ -80,8 +81,9 @@ recent books, so the listing stays a cheap directory walk.
   staging buffer with one bounded socket write (the crash-report pattern). The
   app advances `offset` by the bytes received and must not assume a fixed size.
   No `Range` header and no whole-file stream: on the X3, a single long HTTP
-  readback stopped after 8192 of 16384 bytes (`docs/TRANSFER_BENCHMARK.md`),
-  while bounded pieces are the proven path; an interrupted download resumes
+  readback stopped after 8192 of 16384 bytes (`docs/TRANSFER_BENCHMARK.md`).
+  Bounded pieces follow the existing bounded-response pattern, but this route
+  still needs device acceptance; an interrupted download resumes
   from the last offset by design.
 - Only `.epub`, `.txt`, `.md` (case-insensitive) outside hidden, dot and
   reserved system paths, the same rules as the listing. XTC, firmware and
@@ -100,9 +102,10 @@ recent books, so the listing stays a cheap directory walk.
   20 MB files, both bearers) is the acceptance test for this route.
 - One download at a time; each piece counts as client activity for the session
   timeout. No firmware size limit beyond the SD file system; the app should
-  confirm unusually large files. Throughput is unmeasured: one request per
-  piece, X3 request turnaround observed 0.03–0.7 s, so a 1 MB EPUB is a minute
-  or more. Show progress and allow cancel.
-- Verification when implemented: host tests for path/type/offset/size/identity
-  rules and piece bounds; on X3/X4 Same Wi-Fi and Direct, a 1 MB EPUB and a
-  20 MB EPUB downloaded byte-identical (SHA-256), with heap and watchdog logs.
+  confirm unusually large files. Throughput for this route is unmeasured. Historical X3 request turnaround
+  (0.03–0.7 s) is not a download benchmark or a reliable completion estimate.
+  Measure each bearer with the final image; show progress and allow cancel.
+- Host policy/reassembly tests and route source guards are implemented; they
+  do not verify HTTP transport. Remaining device acceptance is tracked in
+  [release-checklist.md](release-checklist.md#reader-file-download-both-x3-and-x4):
+  both bearers, byte identity, HTTP errors, cancellation, heap and watchdog logs.

@@ -16,6 +16,66 @@ git diff --name-only --diff-filter=M upstream/master..HEAD -- src lib | grep -v 
 git diff --numstat upstream/master..HEAD -- src lib | grep -v pocket_daily
 ```
 
+## Current status and next work — 2026-10-05
+
+Checked against product `main` at `a96170e1` and live GitHub PR/CI status.
+The latest main build workflow succeeded; the separate PR-links workflow was
+skipped. No product PR is open. These are existing CI results, not a new local
+build or device test. The 2026-10-01 inventory and measurements below remain
+historical evidence; candidate status does not mean ready for submission.
+
+### Completed in the product
+
+- Shell labels/routing, stock theme restoration and UI-pack/frame-capture
+  removal: PRs #8–#9. Hardware acceptance remains open.
+- Bounded reader-file download (`readerFiles: 2`): PR #13, `433b3e7d`.
+  Policy/reassembly tests exist; HTTP transport and device throughput remain
+  unverified. See [reader-files.md](reader-files.md).
+- 32-entry line-break gap window and nonuniform reference test: PR #16,
+  `0ed52bf7`. The 64-entry device result does not validate this final revision.
+- Stale book-origin fix: PR #18, `67828475`; stock opens reset the origin,
+  reader-internal reopens preserve it.
+- Version 0.1.0 / lineage 2 preparation: PR #19, `a96170e1`. Publication is
+  separate from the completed merge.
+
+### Software triage queue (proposed order)
+
+This is a work queue, not a claim that the candidates have been re-ported,
+benchmarked, or cleared of duplicates on today's upstream. For every U item,
+first inspect current `develop` and search open/closed issues and PRs. Drop an
+already-fixed or equivalent change; keep a fork-only dependency in H/P. Prepare
+only an independently useful stock fix with a failing-before test. Record the
+base SHA, fixture, command, output and fault-injection result beside each item.
+
+| Order | Items | Next concrete proof / decision | Completion gate |
+|---|---|---|---|
+| 1 | U-ZIP-1, U-HAL-2, U-NET-2 | Reproduce unaligned reads under UBSan; inject HalFile allocation failure; assert USER_EXISTS text on stock. These are correctness claims, not speed claims. | Old code fails, new code and adjacent success/error cases pass; no product dependency or equivalent upstream fix. |
+| 2 | U-EPUB-2, U-EPUB-3 | Fail page allocation without publishing a partial cache; suspend a partial chapter and turn forward without skipping its remaining pages. Check stock background-build semantics before extracting. | Deterministic failure/partial-cache tests and byte/layout regression comparison; reject fork-only behavior. |
+| 3 | D duplicates, Q automatic font/network | Recheck each D entry against current source before deleting; compare explicit font selection, OPDS limits, transfer profiles and TLS/power-save behavior with stock. | Per-item keep/remove rationale plus tests for the affected behavior; restore stock only where no required device/product behavior is lost. |
+| 4 | U-FONT-1, U-HAL-1, U-GFX-1 | Re-port independently; measure calls/bytes, allocation history and stack; compare section bytes/pixels. Existing fork figures are not new stock benchmarks. | Host equivalence and Latin/CJK regressions first; device time/heap/four-orientation proof before claiming device gains. |
+| 5 | U-EPUB-4/5, U-FONT-2, U-NET-1/3, U-SYS-1/2/3, U-UI-1 | Follow each row's missing-proof checklist. In particular, reproduce WebDAV's inferred defect and separate Unicode support from bundled product fonts. | Stock benefit and focused tests established before PR preparation; keep hardware-dependent assertions pending. |
+| Deferred design | U-NET-4, layout prebuild, XPointer, deferred progress save | Compare upstream equivalents and discuss design before porting broad changes; TIME_WAIT uses private lwIP APIs. | RFC-quality evidence; no direct extraction of product files. |
+
+R-8 (indexing/inflate) and Q stack sizes remain device-measurement work, not
+confirmed fixes to implement blindly. Do not shrink stacks or remove network
+limits based only on a host test. Existing R fixes still need the device cases
+listed below; “Fixed” means the code change landed, not hardware acceptance.
+
+### Submitted upstream and deferred acceptance
+
+- [#3813](https://github.com/crosspoint-reader/crosspoint-reader/pull/3813):
+  OPEN; monitor review of href zeroing. No additional implementation is
+  implied by its open status.
+- [#3814](https://github.com/crosspoint-reader/crosspoint-reader/pull/3814):
+  OPEN, Draft; final 32-entry revision `236cde79` awaits device evidence.
+  Earlier 64-entry X3 measurements remain revision-specific.
+- X3/X4 navigation, radio, download SHA-256, heap, sleep/recovery and release
+  acceptance are deferred by the owner. Record exact commit/image hash in
+  [release-checklist.md](release-checklist.md); no release is signed off here.
+- App implementation and UI-host re-import belong to the app session. This
+  audit does not assert their current completion. Cross-repository protocol
+  acceptance remains a separate gate.
+
 ## Buckets
 
 | Bucket | Meaning | Where it lives | On an upstream merge |
@@ -86,12 +146,12 @@ cited commit or document and have not been re-measured in this audit.
 |---|---|---|---|---|---|
 | U-HAL-1 | `HalFile` write-behind buffer (`HalFile::setWriteBuffer`, `lib/hal/HalStorage.h:139`; used by `Section.cpp:395`) — fd4a58df | candidate | ~59,000 → 83 `write` calls per 100 KB of chapter (fd4a58df, `docs/reader-perf.md`) | `test/hal_storage` `WriteBufferBatchesSmallWritesWithoutChangingBytes` | Device chapter-build time before/after; section `.bin` byte identity on a corpus; peak heap +2 KB. Split from the `ParsedText` half of fd4a58df |
 | U-HAL-2 | OOM-safe `HalFile` (`makeUniqueNoThrow<Impl>`, no `assert(impl)`) — 391e12fd, b818e819 | candidate | — (correctness) | `test/hal_storage` StorageAllocation cases | Allocation-failure host test on upstream baseline |
-| U-EPUB-1 | Measure each line-break gap once in `ParsedText::computeLineBreaks` — fd4a58df, re-ported 2026-10-01 onto upstream's gap rule | **pr-open (draft), second revision prepared** [#3814](https://github.com/crosspoint-reader/crosspoint-reader/pull/3814): heap vector → 64-entry stack window (2e53b6f4; reviewer re-measured on X3: heap penalty gone, layout gain kept, but frame 176 → 304 B plus an 80 B helper) → 32-entry window with one measuring site (frame 240 B, no helper; fork PR #16, upstream commit 236cde79 pushed 2026-10-02 with a reply and corrected description; still a draft until that revision runs on a device); overlaps closed #1528 | Host allocation trace, 3,328-word paragraph: baseline 1,549 allocations / peak 49,664 B; gap vector 1,550 / 62,976 B (+13,312 B, the reviewer's delta); stack window 1,549 / 49,664 B with the same size sequence. Lookups (400 words, 480 px): 5,847 → 1,137. Reviewer's X3 timing with the vector version: initial layout −10.8 % (English), −4.1 % (Korean); page rendering unchanged. Fork golden digest unchanged `0x6b8020d1993c5848`, host layout 157–165 ms (baseline 181–204 ms). Frames (RISC-V `-fstack-usage`): develop 176 B; 64-entry 304 B + 80 B helper; 32-entry 240 B. Lookups with 32 entries: 13 words/line 5,847 → 1,137; 24/line 51,532 → 5,831; 40/line 83,080 → 21,607; 66/line 135,662 → 74,189. Reviewer's X3 re-test of 2e53b6f4: initial layout −11.1 % English, −3.8 % Korean; largest block equal to baseline (17,396 B median) | `LineBreakCost.MeasuresEachWordGapOnceInTheBreakSearch`, `LineBreakCost.CachedGapsMatchDirectMeasurement` (pair-dependent gaps vs an independent reference, 200 paragraphs, mutation-checked; fork and upstream branch); off-tree differential run of 4,000 random paragraphs identical on develop and all three revisions, also under ASan/UBSan; fork `ReadingPositionLayout.SectionFilesMatchTheLayoutGolden`; upstream suite 419/419 on develop | Device largest-free-block re-measurement of the stack-window version (reviewer's rig or our X3) |
+| U-EPUB-1 | Measure each line-break gap once in `ParsedText::computeLineBreaks` — fd4a58df, re-ported 2026-10-01 onto upstream's gap rule | **pr-open (draft), second revision posted** [#3814](https://github.com/crosspoint-reader/crosspoint-reader/pull/3814): heap vector → 64-entry stack window (2e53b6f4; reviewer re-measured on X3: heap penalty gone, layout gain kept, but frame 176 → 304 B plus an 80 B helper) → 32-entry window with one measuring site (frame 240 B, no helper; fork PR #16, upstream commit 236cde79 pushed 2026-10-02 with a reply and corrected description; still a draft until that revision runs on a device); overlaps closed #1528 | Host allocation trace, 3,328-word paragraph: baseline 1,549 allocations / peak 49,664 B; gap vector 1,550 / 62,976 B (+13,312 B, the reviewer's delta); stack window 1,549 / 49,664 B with the same size sequence. Lookups (400 words, 480 px): 5,847 → 1,137. Reviewer's X3 timing with the vector version: initial layout −10.8 % (English), −4.1 % (Korean); page rendering unchanged. Fork golden digest unchanged `0x6b8020d1993c5848`, host layout 157–165 ms (baseline 181–204 ms). Frames (RISC-V `-fstack-usage`): develop 176 B; 64-entry 304 B + 80 B helper; 32-entry 240 B. Lookups with 32 entries: 13 words/line 5,847 → 1,137; 24/line 51,532 → 5,831; 40/line 83,080 → 21,607; 66/line 135,662 → 74,189. Reviewer's X3 re-test of 2e53b6f4: initial layout −11.1 % English, −3.8 % Korean; largest block equal to baseline (17,396 B median) | `LineBreakCost.MeasuresEachWordGapOnceInTheBreakSearch`, `LineBreakCost.CachedGapsMatchDirectMeasurement` (pair-dependent gaps vs an independent reference, 200 paragraphs, mutation-checked; fork and upstream branch); off-tree differential run of 4,000 random paragraphs identical on develop and all three revisions, also under ASan/UBSan; fork `ReadingPositionLayout.SectionFilesMatchTheLayoutGolden`; upstream suite 419/419 on develop | Device timing, largest-free-block and stack headroom for final 32-entry revision `236cde79`; prior 64-entry device evidence is not this revision |
 | U-EPUB-2 | nothrow `Page` allocation plus `outOfMemory_` in `ChapterHtmlSlimParser` — 5f1806a3 | candidate | Field abort at 12,276 B largest block (51191628) | none | Allocation-failure host test proving a clean build failure and no committed partial; hand-split from text-offset hunks |
 | U-EPUB-3 | `Section::mayHaveMorePages()` / `isCatchingUp()` so a suspended partial does not skip the rest of the chapter — 5f1806a3 | candidate | — | `test/reader_layout` uses it, no dedicated case | Host test: paused partial, forward turn, assert same spine |
 | U-EPUB-4 | Replace U+FFFD titles with the filename, clear U+FFFD authors (`Epub.cpp:17-45`) — 5bdacea0, 819ecd3d | candidate | — | none | Unit test on metadata sanitizing; exclude the `recent.bin` migration |
 | U-EPUB-5 | Grapheme-safe hyphenation and CJK breaks (`Hyphenator.cpp:173-195`, `ParsedText.cpp:170-172`) — cd0f98c4 | needs-port | — | `test/hyphenation_eval/HyphenatorClusterTest.cpp`, `test/utf8_compose/Utf8ClusterTest.cpp` | Depends on fork `Utf8.h` helpers; send together with U-FONT-2 |
-| U-EPUB-6 | Zero the whole `PageLink::href` buffer (`lib/Epub/Epub/PageLink.h`) | **pr-open** [#3813](https://github.com/crosspoint-reader/crosspoint-reader/pull/3813) (branch `upstream-pr/pagelink-zero-href` on `upstream/develop`); description corrected 2026-10-01 (256-byte buffer, host-only verification) | Upstream writes all 256 bytes of `href` (`FOOTNOTE_HREF_LEN`; the PR text first said 128, corrected after review) (`Page.cpp` serialize) after copying only the string, so section files carry uninitialized heap bytes: the same book produced different section bytes in Release vs ASan (`0xBE` fill) builds until fixed | Upstream branch: `PageLinkTest.ConstructionZeroesTheWholeHrefBuffer` (fails at byte 1 on the old constructor); upstream suite 418/418 on develop | None; PR text drafted |
+| U-EPUB-6 | Zero the whole `PageLink::href` buffer (`lib/Epub/Epub/PageLink.h`) | **pr-open** [#3813](https://github.com/crosspoint-reader/crosspoint-reader/pull/3813) (branch `upstream-pr/pagelink-zero-href` on `upstream/develop`); description corrected 2026-10-01 (256-byte buffer, host-only verification) | Upstream writes all 256 bytes of `href` (`FOOTNOTE_HREF_LEN`; the PR text first said 128, corrected after review) (`Page.cpp` serialize) after copying only the string, so section files carry uninitialized heap bytes: the same book produced different section bytes in Release vs ASan (`0xBE` fill) builds until fixed | Upstream branch: `PageLinkTest.ConstructionZeroesTheWholeHrefBuffer` (fails at byte 1 on the old constructor); upstream suite 418/418 on develop | Await upstream review; host-only verification disclosed |
 | U-ZIP-1 | `ZipFile` reads the EOCD signature and fields through `reinterpret_cast<uint32_t*>` at byte offsets (`ZipFile.cpp:253,270`) | candidate (upstream code, unchanged by the fork) | UBSan: misaligned 4-byte loads on every EPUB open (host) | none | `memcpy` reads; UBSan-clean host run. Works on the C3 today, so this is portability/UB, not a device crash |
 | U-FONT-1 | Bounded LRU advance cache with batched reads — 347c6ec8 | needs-port | 1,596 distinct syllables: 10,217 → 3 opens, 21,548 → 2 seeks, 21,616 → 419 reads, byte-identical sections (347c6ec8, `PROJECT_MEMORY.md`) | `test/sd_font/SdCardFontAdvanceTest.cpp` | Re-port onto upstream `SdCardFont` without BoundedUI; stock EPUB with >768 distinct CJK codepoints; Latin no-regression |
 | U-FONT-2 | Zero-width Default_Ignorable codepoints, emoji clusters drawn once (`lib/Utf8/Utf8.h:121,133`) — 77cec6ab, part of cd0f98c4 | needs-port | — (correctness) | `test/utf8_compose`, `test/gfx_host/GlyphFallbackTest.cpp` | Golden frames for ZWJ/VS16 strings; separate from the PocketSymbols fallback font |
@@ -100,7 +160,7 @@ cited commit or document and have not been re-measured in this audit.
 | U-NET-2 | `KOReaderSyncClient::errorString` handles `USER_EXISTS` | candidate | — | none | One host assertion |
 | U-NET-3 | `HttpDownloader::lastFailure()` stage/code/TLS/heap diagnostics and `OtaFailure` classifier — 1ed19672, c70cc220 | candidate | Verified on X3 2026-09-26 (`PROJECT_MEMORY.md`) | `test/ota_failure` | Strip companion-app wording; stock OTA screen before/after |
 | U-SYS-1 | Power-button interrupt latch (`HalGPIO::attachPowerButtonLatch`, `consumePowerHold`) — 6c065027 | candidate | — | none | Host test with fake GPIO/clock (bounce, held press, screenshot combo, X4Pro click window, 10 ms short-press threshold); device loop blocked 2 s still sleeps. Review debounce bypass and ISR IRAM safety first |
-| U-SYS-2 | Crash reports for brownout/eFuse/glitch/watchdog, 4 rotated reports, RTC breadcrumb — 4ba46658 | candidate after R-6 | Field task-watchdog report with breadcrumb (`PROJECT_MEMORY.md`) | none | Fix R-6 first; host tests for `isRebootFromCrash`, rotation, begin/clear order |
+| U-SYS-2 | Crash reports for brownout/eFuse/glitch/watchdog, 4 rotated reports, RTC breadcrumb — 4ba46658 | candidate (R-6 fixed in fork) | Field task-watchdog report with breadcrumb (`PROJECT_MEMORY.md`) | none | R-6 is fixed in the fork; extract with host tests for `isRebootFromCrash`, rotation, begin/clear order |
 | U-SYS-3 | `getBaseSettingsList()` built once at boot | candidate | — | none | Heap and largest block during an upload plus settings GET |
 | U-UI-1 | Home menu rect height `pageHeight - menuTop - hints` and fixed arrays instead of per-paint vectors (`HomeActivity.cpp:533`) — b3f28f98 | candidate | — | none | Split from the Pocket entry; frame diff |
 | U-NET-4 | Release TIME_WAIT PCBs on the server (`src/pocket_daily/web/ServerTimeWait.*`) — 77953e61 | concept only | Eight status reads: 19,016 → 17,468 B without, 19,136–19,176 B with (`PROJECT_MEMORY.md`) | `ServerTimeWaitTest` | Uses lwIP private headers; stock File Transfer polling heap trace |
@@ -114,7 +174,7 @@ direct PR:
   `PocketDaily::ReaderPerf`, the AA yield and landing-cancel atomics, and
   overlaps upstream's background build and `idlePrewarm`.
 - **Deferred progress save (1.5 s idle)** (0dcab16d, 41aea867). Save measured up
-  to 419 ms per turn (`docs/reader-perf.md`). Currently inactive, see R-1.
+  to 419 ms per turn (`docs/reader-perf.md`). Restored by R-1 in the fork; device persistence/timing and stock extraction remain unverified.
 - **XPointer numbering** (`text()[N]` counts non-whitespace runs only, as
   crengine does; 0bdea6f8, 07814f78). 430 golden positions resolve in the app.
   The reference is the app's reimplementation, so a PR needs a golden produced
@@ -222,7 +282,7 @@ Documented by their own contracts; the seam mechanics are in `docs/SEAM.md`.
 
 - A change to an inherited file lands with a row here in the same commit.
 - A U change is its own commit with no product hunks, so it can be
-  cherry-picked onto `upstream/master` for a PR.
+  re-ported onto current `upstream/develop` for a PR (`master` is the stable integration line).
 - When upstream accepts a U change, the next sync takes upstream's version and
   the row moves to "merged upstream" with the PR number.
 - Each upstream sync re-runs the reproduction commands at the top and updates

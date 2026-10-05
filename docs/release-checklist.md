@@ -99,6 +99,24 @@ Host render tests do not sign off panel or radio behavior.
       do not reduce gates to hide missing headroom. Mark skipped-only scenarios
       as unavailable, not successful reading sync.
 
+## Reader file download (both X3 and X4)
+
+Implemented in PR #13; hardware acceptance is still pending. Record app build,
+firmware commit and image SHA-256. Run on Same Wi-Fi and Direct separately.
+See [reader-files.md](reader-files.md) for the contract.
+
+- [ ] Download 1 MB and 20 MB EPUBs and representative TXT/MD files; compare
+      whole-file SHA-256 with the SD originals, not only received length.
+- [ ] Confirm `readerFiles: 2`, exact Content-Length, no-store and piece caps
+      (4096 / 1024 bytes), including the final short piece.
+- [ ] Exercise malformed query, forbidden path/type, missing file, wrong
+      device ID, changed size, EOF offset, busy and low-heap responses;
+      verify retry/backoff, restart and cancellation with the app.
+- [ ] Interrupt and resume; confirm no duplicate/missing bytes and that cancel
+      leaves the reader responsive for reading and another sync session.
+- [ ] Record throughput and pre/min/post heap, largest block and watchdog/crash
+      results. Host reassembly tests do not establish these device results.
+
 ## Publication
 
 - [ ] Nearby Sync v1 is frozen and compatible with the app repository.

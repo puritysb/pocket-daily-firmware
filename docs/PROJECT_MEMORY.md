@@ -3,6 +3,23 @@
 This is concise, repository-owned context for future sessions. It is not a chat
 transcript. Current source and release records override dated observations.
 
+## Firmware work status — 2026-10-05
+
+- Status reconciled against `main` `a96170e1`: PR #13 reader-file pieces,
+  #16 final 32-entry gap window, #18 stale reader origin, and #19 version
+  0.1.0 / lineage 2 are merged. Latest main build CI succeeded; no product PR
+  is open. No new build or hardware test was run for this documentation pass.
+- Upstream #3813 is open; #3814 is open/Draft with final revision `236cde79`.
+  The reviewer's X3 measurement covered the prior 64-entry implementation,
+  not the final 32-entry implementation.
+- `docs/fork-delta-register.md` now separates merged work, proposed software
+  triage (stock repro, duplicate check, fault-injection and regression proof),
+  and deferred hardware/release gates. Candidates are not submission-ready
+  merely because code or a benchmark exists in this fork.
+- Hardware acceptance remains deferred; app work belongs to its own session.
+  Reader-file HTTP/device acceptance is centralized in the release checklist.
+  This update changes documentation only; it publishes no PR or release.
+
 ## Fork delta audit — 2026-10-01
 
 - `docs/fork-delta-register.md` classifies the 120 inherited `src/`/`lib/`
@@ -32,7 +49,7 @@ transcript. Current source and release records override dated observations.
   Host 848/848, default build clean (static RAM 69,912 → 69,496 B, flash
   6,396,307 → 6,369,675 B). Not yet on X3/X4.
 
-## Version series reset to 0.x — 2026-10-03 (prepared, not released)
+## Version series reset to 0.x — 2026-10-03 (merged, not released)
 
 - Owner decision relayed by the app session: development releases are 0.x,
   published as normal (latest) GitHub releases; first is `pocket-v0.1.0`;
@@ -44,8 +61,8 @@ transcript. Current source and release records override dated observations.
   comparison tests for 0.x, `docs/product-versioning.md` rewritten, a
   development-release device pass added to `docs/release-checklist.md`. The
   release workflow already publishes `pocket-v<version>` as latest.
-- Not done: merge, tag, publish. They wait for the owner's direct
-  confirmation in this session and the device pass on the exact image.
+- Merged via PR #19 at `a96170e1`. Tag and publication remain pending the
+  owner's direct confirmation and device acceptance of the exact image.
 
 ## Post-merge self-review — 2026-10-02
 
@@ -98,12 +115,13 @@ transcript. Current source and release records override dated observations.
   gaps); it was replaced by `CachedGapsMatchDirectMeasurement` (pair-dependent
   gaps against an independent reference), and the reply says so. The reviewer's run covers the largest-block
   measurement we had promised; `measure.sh` remains for our own checks.
-- Pending device A/B on the owner's X3 with upstream dev images (develop
-  099e89bc, vector 1d749dee as the control that must reproduce the drop,
-  window 2e53b6f4): `build/upstream-3814-measure/measure.sh <variant>` flashes
-  over USB and captures serial; `scripts/heap_log_summary.py --skip 6 a.log
-  b.log` reports the largest-block medians. Delete the book cache before each
-  run (cold layout), hyphenation off. `measure.sh restore` flashes Pocket back.
+- Device acceptance still needed for final 32-entry revision `236cde79`.
+  The earlier A/B recipe under `build/upstream-3814-measure/` targeted
+  64-entry `2e53b6f4`; do not use that image as proof of the final revision.
+  Before any later run, rebuild/identify the current upstream baseline and
+  final candidate, record image hashes and validate the transport with the
+  owner. Hardware work is deferred; the local historical helper is not a
+  tracked or verified deployment procedure for the current candidate.
 
 ## Delta alignment merged — 2026-10-01
 
