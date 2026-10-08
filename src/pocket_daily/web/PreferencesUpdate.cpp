@@ -74,6 +74,19 @@ bool parsePreferences(const char* json, const size_t length, const PreferenceLim
     error = "Invalid frontButtonFollowOrientation";
     return false;
   }
+  if (!readRange(doc["orientation"], 0, limits.orientationCount - 1, parsed.hasOrientation, parsed.orientation)) {
+    error = "Invalid orientation";
+    return false;
+  }
+  if (!readRange(doc["lineSpacing"], 0, limits.lineSpacingCount - 1, parsed.hasLineSpacing, parsed.lineSpacing)) {
+    error = "Invalid lineSpacing";
+    return false;
+  }
+  if (!readRange(doc["screenMargin"], limits.minScreenMargin, limits.maxScreenMargin, parsed.hasScreenMargin,
+                 parsed.screenMargin)) {
+    error = "Invalid screenMargin";
+    return false;
+  }
   out = parsed;
   return true;
 }

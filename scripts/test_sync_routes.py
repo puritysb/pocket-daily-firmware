@@ -201,7 +201,7 @@ class SyncRoutesTest(unittest.TestCase):
         endpoints = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
         body = endpoints[endpoints.index("void configurePocketRoutes("):endpoints.index("void registerPocketRoutes(")]
         # Registered on the Sync profiles, in the same block as the profile.
-        sync = body[body.index("if (isSyncProfile(d.profile)) {"):]
+        sync = body[body.rindex("if (isSyncProfile(d.profile)) {"):]
         sync = sync[:sync.index("\n  }\n")]
         self.assertIn('routes.on("/api/pocket/v1/profile", HTTP_POST', sync)
         self.assertIn('routes.on("/api/pocket/v1/glance", HTTP_POST', sync)
@@ -260,7 +260,7 @@ class SyncRoutesTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         source = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
         body = source[source.index("void configurePocketRoutes("):source.index("void registerPocketRoutes(")]
-        sync = body[body.index("if (isSyncProfile(d.profile)) {"):]
+        sync = body[body.rindex("if (isSyncProfile(d.profile)) {"):]
         self.assertIn('routes.on("/api/pocket/v1/files/content", HTTP_GET', sync)
         handler = source[source.index("void handleReaderFileContent("):source.index("enum class ReaderFileAction")]
         self.assertIn("admitContentOperation", handler)
@@ -334,7 +334,7 @@ class SyncRoutesTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         source = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
         body = source[source.index("void configurePocketRoutes("):source.index("void registerPocketRoutes(")]
-        sync = body[body.index("if (isSyncProfile(d.profile)) {"):]
+        sync = body[body.rindex("if (isSyncProfile(d.profile)) {"):]
         sync = sync[:sync.index("\n  }\n")]
         self.assertIn('routes.on("/api/pocket/v1/reading", HTTP_GET', sync)
         self.assertIn('routes.on("/api/pocket/v1/reading", HTTP_POST', sync)

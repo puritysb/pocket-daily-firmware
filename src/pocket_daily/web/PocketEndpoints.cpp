@@ -26,6 +26,7 @@
 #include "pocket_daily/ContentSealStore.h"
 #include "pocket_daily/PocketGlanceStore.h"
 #include "pocket_daily/PocketProfileStore.h"
+#include "pocket_daily/PublicationReceipt.h"
 #include "pocket_daily/ReadingExchange.h"
 #include "pocket_daily/ReadingProgress.h"
 #include "pocket_daily/StagedFirmwareStore.h"
@@ -91,7 +92,7 @@ bool renameStorageFile(const String& from, const String& to) {
 }
 
 void handleSessionEnd(WebServer& server, const RouteDeps& d) {
-  if ((d.host.httpUploadBusy && d.host.httpUploadBusy(d.host.self)) || (d.stream && d.stream->transferActive())) {
+  if ((d.host.httpUploadBusy && d.host.httpUploadBusy(d.host.self)) || (d.stream && d.stream->receiving())) {
     server.send(409, "application/json", "{\"error\":\"transfer active\"}");
     return;
   }
@@ -814,6 +815,9 @@ void handleReadingOffer(WebServer& server, const RouteDeps& d) {
       server.sendHeader("Cache-Control", "no-store");
       server.send(200, "application/json", "{\"ok\":true,\"state\":\"pending\"}");
       return;
+    case Reading::OfferStoreResult::STALE_POSITION:
+      server.send(409, "text/plain", "Reader position changed; exchange again");
+      return;
     case Reading::OfferStoreResult::FAILED:
       server.send(500, "text/plain", "Reading position could not be stored; retry");
       return;
@@ -871,14 +875,14 @@ void handleTransferControl(WebServer& server, const RouteDeps& d) {
 // Pocket clients upload to a unique hidden .part file, then ask the reader
 // to verify size + CRC and atomically publish it. A dropped phone or Wi-Fi
 // link therefore never turns a valid book or update.bin into a partial file.
-void handleCommitUpload(WebServer& server, const RouteDeps& d) {
+void handleCommitUpload(WebServer& server, const RouteDeps& d, const bool queryOnly = false) {
   if ((d.host.httpUploadBusy && d.host.httpUploadBusy(d.host.self)) || (d.stream && d.stream->receiving())) {
-    if (d.stream) d.stream->noteCommitFailed();
+    if (d.stream && !queryOnly) d.stream->noteCommitFailed();
     server.send(409, "text/plain", "Another file transfer is active");
     return;
   }
-  if (!server.hasArg("plain")) {
-    if (d.stream) d.stream->noteCommitFailed();
+  if (!server.hasArg("plain") || server.arg("plain").length() > 1536) {
+    if (d.stream && !queryOnly) d.stream->noteCommitFailed();
     server.send(400, "text/plain", "Missing JSON body");
     return;
   }
@@ -887,7 +891,7 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
   const DeserializationError error = deserializeJson(doc, server.arg("plain"));
   if (error || !doc["staging"].is<const char*>() || !doc["target"].is<const char*>() || !doc["size"].is<size_t>() ||
       !doc["crc32"].is<const char*>()) {
-    if (d.stream) d.stream->noteCommitFailed();
+    if (d.stream && !queryOnly) d.stream->noteCommitFailed();
     server.send(400, "text/plain", "Invalid commit request");
     return;
   }
@@ -896,13 +900,13 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
   const String target = norm(d, doc["target"].as<const char*>());
   if (!Content::genericContentWriteAllowed({staging.c_str(), staging.length()}) ||
       !Content::genericContentWriteAllowed({target.c_str(), target.length()})) {
-    if (d.stream) d.stream->noteCommitFailed();
+    if (d.stream && !queryOnly) d.stream->noteCommitFailed();
     server.send(403, "text/plain", "Protected or unsafe content path");
     return;
   }
   const size_t expectedSize = doc["size"].as<size_t>();
   if (!Content::contentWriteWithinBudget({target.c_str(), target.length()}, 0, expectedSize)) {
-    if (d.stream) d.stream->noteCommitFailed();
+    if (d.stream && !queryOnly) d.stream->noteCommitFailed();
     server.send(413, "text/plain", "Content staging file exceeds 256 KiB");
     return;
   }
@@ -919,17 +923,40 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
   if (!stagingName.startsWith(".pocket-") || !stagingName.endsWith(".part") || stagingParent != targetParent ||
       targetName.isEmpty() || protectedName(d, targetName) || !crcEnd || *crcEnd != '\0' ||
       expectedCrcText.length() != 8) {
-    if (d.stream) d.stream->noteCommitFailed();
+    if (d.stream && !queryOnly) d.stream->noteCommitFailed();
     server.send(400, "text/plain", "Unsafe commit path or checksum");
     return;
   }
 
+  const Publication::Request publication{staging.c_str(), target.c_str(), static_cast<uint32_t>(expectedSize),
+                                         expectedCrc};
+  if (!Publication::valid(publication)) {
+    if (d.stream && !queryOnly) d.stream->noteCommitFailed();
+    server.send(400, "text/plain", "Publication path exceeds receipt limit");
+    return;
+  }
+  const bool published = Publication::matches(publication);
+  if (queryOnly || published) {
+    if (!published) {
+      server.send(404, "application/json", "{\"state\":\"unknown\"}");
+      return;
+    }
+    char response[80];
+    snprintf(response, sizeof(response), "{\"size\":%u,\"crc32\":\"%08lX\"}", static_cast<unsigned>(expectedSize),
+             static_cast<unsigned long>(expectedCrc));
+    server.send(200, "application/json", response);
+    return;
+  }
+  if (!d.stream) {
+    server.send(409, "text/plain", "Upload stream unavailable");
+    return;
+  }
   const StagedUpload& staged = d.stream->staged();
   String uploadedPath = norm(d, staged.path + "/" + staged.fileName);
   const uint32_t uploadedCrc = staged.crc32 ^ 0xFFFFFFFFU;
   if (!staged.success || uploadedPath != staging || staged.size != expectedSize || uploadedCrc != expectedCrc ||
       !Storage.exists(staging.c_str())) {
-    if (d.stream) d.stream->noteCommitFailed();
+    if (d.stream && !queryOnly) d.stream->noteCommitFailed();
     server.send(409, "text/plain", "Staged upload verification failed");
     return;
   }
@@ -938,7 +965,7 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
   const bool stagedSizeMatches = stagedFile && !stagedFile.isDirectory() && stagedFile.size() == expectedSize;
   if (stagedFile) stagedFile.close();
   if (!stagedSizeMatches) {
-    if (d.stream) d.stream->noteCommitFailed();
+    if (d.stream && !queryOnly) d.stream->noteCommitFailed();
     server.send(409, "text/plain", "Staged file size mismatch");
     return;
   }
@@ -947,13 +974,13 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
   Storage.remove(backup.c_str());
   const bool hadTarget = Storage.exists(target.c_str());
   if (hadTarget && !renameStorageFile(target, backup)) {
-    if (d.stream) d.stream->noteCommitFailed();
+    if (d.stream && !queryOnly) d.stream->noteCommitFailed();
     server.send(500, "text/plain", "Could not preserve existing target");
     return;
   }
   if (!renameStorageFile(staging, target)) {
     if (hadTarget) renameStorageFile(backup, target);
-    if (d.stream) d.stream->noteCommitFailed();
+    if (d.stream && !queryOnly) d.stream->noteCommitFailed();
     server.send(500, "text/plain", "Could not publish staged upload");
     return;
   }
@@ -970,6 +997,11 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d) {
     if (Storage.exists(marker.c_str()) && !Storage.remove(marker.c_str())) {
       LOG_ERR("ARTICLE", "Could not reset read marker after replacement");
     }
+  }
+  // A lost receipt write leaves an explicitly unknown outcome; it never causes republication.
+  if (!Publication::save(publication)) {
+    server.send(500, "text/plain", "File published but receipt could not be saved");
+    return;
   }
   char response[80];
   snprintf(response, sizeof(response), "{\"size\":%u,\"crc32\":\"%08lX\"}", static_cast<unsigned>(expectedSize),
@@ -1048,24 +1080,31 @@ void handleContentFile(WebServer& server, const RouteDeps& d) {
 // response can consume the last contiguous heap immediately after Wi-Fi
 // starts and strand the X3 on its retained Hotspot Mode frame. The button keys
 // (added 2026-09-26) tell the companion this reader accepts them on POST.
-// Including sleepWakeIndicator, every uint8_t at 255 fits in 192 bytes.
+// A bounded, temporary response; no full settings registry or retained buffer.
 void handleGetPreferences(WebServer& server) {
-  char json[192];
+  // 320 bytes exceeds the stack budget; temporary ownership avoids retained RAM.
+  auto json = makeUniqueNoThrow<char[]>(320);
+  if (!json) {
+    server.send(503, "text/plain", "Not enough memory for preferences; retry");
+    return;
+  }
   const int written = snprintf(
-      json, sizeof(json),
+      json.get(), 320,
       "{\"startupApp\":%u,\"pocketDailySleepCover\":%u,\"sleepTimeoutMinutes\":%u,\"fontSize\":%u,"
-      "\"sideButtonLayout\":%u,\"frontButtonFollowOrientation\":%u,\"sleepWakeIndicator\":%u}",
+      "\"sideButtonLayout\":%u,\"frontButtonFollowOrientation\":%u,\"sleepWakeIndicator\":%u,\"orientation\":%u,"
+      "\"lineSpacing\":%u,\"screenMargin\":%u}",
       static_cast<unsigned>(SETTINGS.startupApp), static_cast<unsigned>(SETTINGS.pocketDailySleepCover),
       static_cast<unsigned>(SETTINGS.sleepTimeoutMinutes),
       static_cast<unsigned>(LegacyFontSize::fromPoints(SETTINGS.fontPointSize)),
       static_cast<unsigned>(SETTINGS.sideButtonLayout), static_cast<unsigned>(SETTINGS.frontButtonFollowOrientation),
-      static_cast<unsigned>(SETTINGS.sleepWakeIndicator));
-  if (written <= 0 || static_cast<size_t>(written) >= sizeof(json)) {
+      static_cast<unsigned>(SETTINGS.sleepWakeIndicator), static_cast<unsigned>(SETTINGS.orientation),
+      static_cast<unsigned>(SETTINGS.lineSpacing), static_cast<unsigned>(SETTINGS.screenMargin));
+  if (written <= 0 || static_cast<size_t>(written) >= 320) {
     server.send(500, "text/plain", "Could not encode Pocket preferences");
     return;
   }
   server.sendHeader("Connection", "close");
-  server.send(200, "application/json", json);
+  server.send(200, "application/json", json.get());
 }
 
 void handlePostPreferences(WebServer& server, const RouteDeps& d) {
@@ -1076,30 +1115,46 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
   // Validate the whole body first; settings change only when every field is
   // valid, and a failed save restores the previous values (PreferencesUpdate.h).
   const String& body = server.arg("plain");
-  const PreferenceLimits limits{CrossPointSettings::STARTUP_APP_COUNT, CrossPointSettings::MIN_SLEEP_TIMEOUT_MINUTES,
-                                CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES, LegacyFontSize::COUNT,
-                                CrossPointSettings::SIDE_BUTTON_LAYOUT_COUNT};
+  const PreferenceLimits limits{
+      CrossPointSettings::STARTUP_APP_COUNT,         CrossPointSettings::MIN_SLEEP_TIMEOUT_MINUTES,
+      CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES, LegacyFontSize::COUNT,
+      CrossPointSettings::SIDE_BUTTON_LAYOUT_COUNT,  CrossPointSettings::ORIENTATION_COUNT,
+      CrossPointSettings::LINE_COMPRESSION_COUNT,    CrossPointSettings::SCREEN_MARGIN_MIN,
+      CrossPointSettings::SCREEN_MARGIN_MAX};
   PreferencesUpdate update;
   const char* error = nullptr;
   if (!parsePreferences(body.c_str(), body.length(), limits, update, error)) {
     server.send(400, "text/plain", error ? error : "Invalid preferences");
     return;
   }
-  const uint8_t previous[7] = {SETTINGS.startupApp,          SETTINGS.pocketDailySleepCover,
-                               SETTINGS.sleepTimeoutMinutes, SETTINGS.fontPointSize,
-                               SETTINGS.sideButtonLayout,    SETTINGS.frontButtonFollowOrientation,
-                               SETTINGS.sleepWakeIndicator};
+  const uint8_t previous[10] = {SETTINGS.startupApp,          SETTINGS.pocketDailySleepCover,
+                                SETTINGS.sleepTimeoutMinutes, SETTINGS.fontPointSize,
+                                SETTINGS.sideButtonLayout,    SETTINGS.frontButtonFollowOrientation,
+                                SETTINGS.sleepWakeIndicator,  SETTINGS.orientation,
+                                SETTINGS.lineSpacing,         SETTINGS.screenMargin};
   if (update.hasStartupApp) SETTINGS.startupApp = update.startupApp;
   if (update.hasSleepWakeIndicator) SETTINGS.sleepWakeIndicator = update.sleepWakeIndicator;
   if (update.hasSleepCover) SETTINGS.pocketDailySleepCover = update.sleepCover;
   if (update.hasSleepTimeout) SETTINGS.sleepTimeoutMinutes = update.sleepTimeoutMinutes;
-  if (update.hasFontSize) SETTINGS.fontPointSize = LegacyFontSize::toPoints(update.fontSize);
+  // An unchanged legacy bucket must not quantize a precise size selected on-device.
+  if (update.hasFontSize && update.fontSize != LegacyFontSize::fromPoints(SETTINGS.fontPointSize)) {
+    SETTINGS.fontPointSize = LegacyFontSize::toPoints(update.fontSize);
+  }
+  if (update.hasOrientation) SETTINGS.orientation = update.orientation;
+  if (update.hasLineSpacing) SETTINGS.lineSpacing = update.lineSpacing;
+  if (update.hasScreenMargin) SETTINGS.screenMargin = update.screenMargin;
   if (update.hasSideButtonLayout) SETTINGS.sideButtonLayout = update.sideButtonLayout;
   if (update.hasFrontButtonFollowOrientation) {
     SETTINGS.frontButtonFollowOrientation = update.frontButtonFollowOrientation;
   }
 
-  if (!SETTINGS.saveToFile()) {
+  const bool changed = previous[0] != SETTINGS.startupApp || previous[1] != SETTINGS.pocketDailySleepCover ||
+                       previous[2] != SETTINGS.sleepTimeoutMinutes || previous[3] != SETTINGS.fontPointSize ||
+                       previous[4] != SETTINGS.sideButtonLayout ||
+                       previous[5] != SETTINGS.frontButtonFollowOrientation ||
+                       previous[6] != SETTINGS.sleepWakeIndicator || previous[7] != SETTINGS.orientation ||
+                       previous[8] != SETTINGS.lineSpacing || previous[9] != SETTINGS.screenMargin;
+  if (changed && !SETTINGS.saveToFile()) {
     SETTINGS.startupApp = previous[0];
     SETTINGS.pocketDailySleepCover = previous[1];
     SETTINGS.sleepTimeoutMinutes = previous[2];
@@ -1107,12 +1162,15 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
     SETTINGS.sideButtonLayout = previous[4];
     SETTINGS.frontButtonFollowOrientation = previous[5];
     SETTINGS.sleepWakeIndicator = previous[6];
+    SETTINGS.orientation = previous[7];
+    SETTINGS.lineSpacing = previous[8];
+    SETTINGS.screenMargin = previous[9];
     server.send(500, "text/plain", "Could not save Pocket preferences");
     return;
   }
   server.sendHeader("Connection", "close");
   server.send(200, "application/json", "{\"saved\":true}");
-  d.liveStudio->notifyPrefsChanged();
+  if (changed) d.liveStudio->notifyPrefsChanged();
 }
 
 #ifdef ENABLE_DEV_REMOTE_FLASH
@@ -1218,7 +1276,7 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
       handleScreenPresentation(*server, *deps, false);
     });
   }
-  if (d.profile == Profile::POCKET_SYNC && d.apMode) {
+  if (isSyncProfile(d.profile)) {
     routes.on("/api/pocket/v1/session/end", HTTP_POST,
               [server = &server, deps = &d] { handleSessionEnd(*server, *deps); });
   }
@@ -1233,6 +1291,10 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
   routes.on("/api/pocket/v1/transfer", HTTP_POST, [server = &server, deps = &d] {
     note(*deps);
     handleTransferControl(*server, *deps);
+  });
+  routes.on("/api/pocket/v1/publication", HTTP_POST, [server = &server, deps = &d] {
+    note(*deps);
+    handleCommitUpload(*server, *deps, true);
   });
   routes.on("/api/pocket/v1/commit", HTTP_POST, [server = &server, deps = &d] {
     note(*deps);

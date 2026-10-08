@@ -12,9 +12,20 @@ struct PreferenceLimits {
   uint8_t maxSleepMinutes;
   uint8_t fontSizeCount;
   uint8_t sideButtonLayoutCount;
+  uint8_t orientationCount = 4;
+  uint8_t lineSpacingCount = 4;
+  uint8_t minScreenMargin = 5;
+  uint8_t maxScreenMargin = 40;
 };
 
 struct PreferencesUpdate {
+  bool hasOrientation = false;
+  uint8_t orientation = 0;
+  bool hasLineSpacing = false;
+  uint8_t lineSpacing = 0;
+  bool hasScreenMargin = false;
+  uint8_t screenMargin = 0;
+
   bool hasStartupApp = false;
   uint8_t startupApp = 0;
   bool hasSleepWakeIndicator = false;

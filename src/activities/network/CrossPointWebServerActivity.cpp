@@ -722,7 +722,7 @@ void CrossPointWebServerActivity::loop() {
         returnToLaunchOrigin();
         return;
     }
-    if (privateApMode && webServer && webServer->shouldEndSession()) {
+    if (webServer && webServer->shouldEndSession()) {
       returnToLaunchOrigin();
       return;
     }

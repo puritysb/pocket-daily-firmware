@@ -102,7 +102,7 @@ class Reader {
 // Checks size, trailing CRC, magic and version; leaves `reader` after the header. The byte
 // after the version is returned in `flags` (records) and ignored by offers.
 bool openRecord(const uint8_t* bytes, const size_t size, const char (&magic)[4], Reader& reader,
-                uint8_t* flags = nullptr) {
+                uint8_t* flags = nullptr, const uint8_t expectedVersion = VERSION) {
   if (!bytes || size < 4 + 2 + CRC_BYTES) return false;
   const uint8_t* crcBytes = bytes + size - CRC_BYTES;
   const uint32_t stored = static_cast<uint32_t>(crcBytes[0]) | (static_cast<uint32_t>(crcBytes[1]) << 8) |
@@ -112,7 +112,7 @@ bool openRecord(const uint8_t* bytes, const size_t size, const char (&magic)[4],
   uint8_t version = 0;
   uint8_t reserved = 0;
   const bool ok = reader.bytes(header, 4) && memcmp(header, magic, 4) == 0 && reader.u8(version) &&
-                  version == VERSION && reader.u8(reserved);
+                  version == expectedVersion && reader.u8(reserved);
   if (ok && flags) *flags = reserved;
   return ok;
 }
@@ -191,6 +191,11 @@ bool validPercentage(const float value) { return std::isfinite(value) && value >
 
 bool isFurther(const float offered, const float current) { return offered > current + FURTHER_MARGIN; }
 
+bool shouldSuggest(const Offer& offer, const uint32_t readerSeq, const float current) {
+  if (offer.readerSeq == 0) return isFurther(offer.percentage, current);
+  return offer.readerSeq == readerSeq && std::fabs(offer.percentage - current) > FURTHER_MARGIN;
+}
+
 size_t encodeRecord(const Record& record, uint8_t* out, const size_t capacity) {
   const size_t documentLength = strlen(record.document);
   const size_t xpointerLength = strlen(record.xpointer);
@@ -243,8 +248,9 @@ size_t encodeOffer(const Offer& offer, uint8_t* out, const size_t capacity) {
   }
   Writer w(out, capacity);
   w.bytes(OFFER_MAGIC, 4);
-  w.u8(VERSION);
+  w.u8(2);
   w.u8(0);
+  w.u32(offer.readerSeq);
   w.f32(offer.percentage);
   w.u16(static_cast<uint16_t>(xpointerLength));
   w.bytes(offer.xpointer, xpointerLength);
@@ -259,7 +265,9 @@ bool decodeOffer(const uint8_t* bytes, const size_t size, Offer& offer) {
   uint16_t xpointerLength = 0;
   uint8_t deviceLength = 0;
   Offer decoded;
-  const bool ok = openRecord(bytes, size, OFFER_MAGIC, r) && r.f32(decoded.percentage) && r.u16(xpointerLength) &&
+  const uint8_t version = bytes && size >= 6 ? bytes[4] : 0;
+  const bool ok = (version == 1 || version == 2) && openRecord(bytes, size, OFFER_MAGIC, r, nullptr, version) &&
+                  (version == 1 || r.u32(decoded.readerSeq)) && r.f32(decoded.percentage) && r.u16(xpointerLength) &&
                   r.text(decoded.xpointer, xpointerLength, sizeof(decoded.xpointer)) && r.u8(deviceLength) &&
                   r.text(decoded.device, deviceLength, sizeof(decoded.device)) && r.position() + CRC_BYTES == size &&
                   validPercentage(decoded.percentage) && validXPointer(decoded.xpointer, xpointerLength) &&
@@ -318,6 +326,13 @@ bool parseOfferJson(const char* json, const size_t length, OfferRequest& out, co
     return false;
   }
   request.offer.percentage = percentage.as<float>();
+  if (!doc["readerSeq"].isNull()) {
+    if (!doc["readerSeq"].is<uint32_t>() || doc["readerSeq"].as<uint32_t>() == 0) {
+      error = "Invalid reader sequence";
+      return false;
+    }
+    request.offer.readerSeq = doc["readerSeq"].as<uint32_t>();
+  }
   out = request;
   return true;
 }
@@ -326,8 +341,8 @@ size_t writeListHead(const char* deviceId, char* out, const size_t capacity) {
   if (!out || capacity == 0) return 0;
   out[0] = '\0';
   size_t used = 0;
-  if (!appendRaw("{\"v\":1,\"deviceID\":", out, capacity, used) || !appendJsonString(deviceId, out, capacity, used) ||
-      !appendRaw(",\"books\":[", out, capacity, used)) {
+  if (!appendRaw("{\"v\":1,\"offerVersion\":2,\"deviceID\":", out, capacity, used) ||
+      !appendJsonString(deviceId, out, capacity, used) || !appendRaw(",\"books\":[", out, capacity, used)) {
     return 0;
   }
   return used;

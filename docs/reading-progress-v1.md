@@ -1,6 +1,7 @@
 # Reading progress v1 — serverless positions between app and reader
 
-Implemented 2026-09-27; host-verified only. Not installed on X3/X4. The app-side
+Implemented 2026-09-27; causal-offer extension added 2026-10-05.
+The extension is locally tested; X3/X4 acceptance remains pending. The app-side
 contract is `docs/READING_PROGRESS.md` in the sibling `pocket-daily` repository
 ("리더 직접 교환"); this file is the firmware original and must stay in step.
 
@@ -19,7 +20,7 @@ firmware omits the key and the app must not call the routes.
 ## `GET /api/pocket/v1/reading?deviceID=<id>`
 
 ```json
-{"v":1,"deviceID":"<id>","books":[{"path":"/Books/a.epub",
+{"v":1,"offerVersion":2,"deviceID":"<id>","books":[{"path":"/Books/a.epub",
  "document":"<32 hex>","filenameDocument":"<32 hex>",
  "progress":"/body/DocFragment[3]/body/section[1]/p[12]/text()[1].96",
  "percentage":0.43000,"updated":1790000000,"seq":17}]}
@@ -42,8 +43,14 @@ firmware omits the key and the app must not call the routes.
   falls back to the whole-percent byte of `progress.bin`, else 0.
 - `updated`: epoch seconds when the record was written if the clock was set
   (≥ 2023-11-14, NTP or app glance), else 0. 0 whenever `progress` is null.
-- `seq`: reader-wide counter, advanced per new record. Informational: a lost or
-  damaged counter restarts at 1; do not order positions by it.
+- `seq`: reader-wide counter, advanced per new record; 0 when the record is not
+  current. It is an equality precondition for offers, never a cross-device clock.
+  A lost or damaged counter restarts at 1; do not order positions by it.
+- `offerVersion: 2`: accepts an optional positive uint32 `readerSeq` in offers.
+  The app remembers each reader/document sequence **and XPointer** (bounded to
+  400 observations) and when that unchanged position was first observed. A
+  later local reading position can be proposed even if it moves backward.
+  Without this capability the app sends only legacy forward suggestions.
 - Errors: 409 reader identity mismatch or transfer active (same admission as the
   other Pocket routes), 503 when free heap < 12 KiB or largest block < 4 KiB.
 
@@ -58,6 +65,11 @@ Body (≤ 1 KiB, JSON; `deviceID` is in the body, not the query):
   `device` non-empty strict UTF-8 without control characters, ≤ 64 bytes.
   Unknown keys are ignored. Malformed → 400 (503 if the parser ran out of heap).
 - Identity is checked after parsing: mismatch or active transfer → 409.
+- Optional `readerSeq` must be a positive uint32. A missing/current-record
+  mismatch or changed sequence returns 409 (`STALE_POSITION` over BLE), without
+  storing the offer. The same precondition is checked again when the book opens.
+  This protects normal concurrent reading; counter corruption/reset is not a
+  globally unique generation or a cryptographic freshness guarantee.
 - The book is found among Recent Books by `document` or `filenameDocument`.
   None → 404 (the app treats 404 as "nothing to do").
 - Stores a pending offer in the book's cache directory, replacing an earlier
@@ -66,13 +78,17 @@ Body (≤ 1 KiB, JSON; `deviceID` is in the body, not the query):
 
 ## On the reader
 
-When the book is next opened and its first page is laid out, a pending offer
-more than 0.004 (0.4 %) beyond the current page start opens a confirmation:
+When the book is next opened and its first page is laid out, an offer bound to
+the current sequence and more than 0.004 (0.4 %) away from the page start opens
+a confirmation. Legacy offers without a sequence must still be further ahead:
 `"<device>: <pct>% · Go there?"` (`STR_READING_OFFER_FORMAT`, English and
 Korean; other languages fall back to English). Confirm (Right) moves there
 through `ProgressMapper::toCrossPoint`; Cancel (Left) stays. The offer is
-deleted after either answer. An offer that is not further, or is damaged, is
-deleted silently. If the reader sleeps or exits during the question, the offer
+deleted after either answer. An offer with a stale sequence, too small a
+difference, an older legacy position, or damaged bytes is deleted silently.
+The app persists a delivered local-position marker only after all selected
+offers are acknowledged, so an unchanged dismissed offer is not sent again.
+Failed exchanges remain retryable. If the reader sleeps or exits during the question, the offer
 remains and is asked again on the next open.
 
 Confirming moves to the page that holds the offered XPointer's character, not an
@@ -161,8 +177,11 @@ any bad field. Moving or clearing a book's cache takes them along.
   page count u16, percentage f32, seq u32, updated u32, file size u32, digest
   length u8 (0 or 32) + digest, XPointer length u16 (≤ 512) + XPointer, CRC u32.
   Written to `.tmp` and renamed.
-- `pocket-reading-offer.bin` (`"PDRO"`, version 1): reserved u8, percentage f32,
-  XPointer length u16 + XPointer, device length u8 (≤ 64) + device, CRC u32.
+- `pocket-reading-offer.bin` (`"PDRO"`, version 2): reserved u8, readerSeq u32
+  (0 for legacy forward-only semantics), percentage f32, XPointer length u16 +
+  XPointer, device length u8 (≤ 64) + device, CRC u32. The decoder still reads
+  version 1, which has no readerSeq. Older firmware rejects v2 offers safely.
+  PDRP and section-cache layouts are unchanged.
 - `/.crosspoint/pocket-reading-seq.bin`: u32 value + u32 bitwise complement.
 
 ## Verification

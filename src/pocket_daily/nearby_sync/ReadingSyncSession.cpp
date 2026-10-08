@@ -216,6 +216,9 @@ void ReadingSyncSession::completeOffer() {
     case Reading::OfferStoreResult::UNKNOWN_DOCUMENT:
       queueError(id, "UNKNOWN_DOCUMENT");
       return;
+    case Reading::OfferStoreResult::STALE_POSITION:
+      queueError(id, "STALE_POSITION");
+      return;
     case Reading::OfferStoreResult::FAILED:
       queueError(id, "FAILED");
       return;

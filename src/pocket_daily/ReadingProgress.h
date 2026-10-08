@@ -16,8 +16,8 @@ inline constexpr size_t MAX_BOOKS = 10;
 // The app rejects a larger list (ReaderReadingList.maximumBytes).
 inline constexpr size_t MAX_LIST_BYTES = 8 * 1024;
 inline constexpr size_t MAX_OFFER_BODY_BYTES = 1024;
-// An offer at least this far ahead of the current page is asked about; the app
-// uses the same margin before it offers a position (ReadingSync.exchange).
+// Minimum distance from the current page for a suggestion. Legacy offers must
+// be ahead; causally bound offers can also suggest a rereading position.
 inline constexpr float FURTHER_MARGIN = 0.004f;
 
 // What the reader last recorded for one book (<cache>/pocket-reading.bin).
@@ -42,6 +42,7 @@ struct Record {
 
 // A position another device offered (<cache>/pocket-reading-offer.bin).
 struct Offer {
+  uint32_t readerSeq = 0;  // 0: legacy forward-only; otherwise the exact reader observation this offer follows
   float percentage = 0.0f;
   char xpointer[MAX_XPOINTER_BYTES + 1] = {};
   char device[MAX_DEVICE_BYTES + 1] = {};
@@ -61,12 +62,13 @@ bool validXPointer(const char* text, size_t length);
 bool validDevice(const char* text, size_t length);
 bool validPercentage(float value);
 bool isFurther(float offered, float current);
+bool shouldSuggest(const Offer& offer, uint32_t readerSeq, float current);
 
-// Little-endian fixed headers ("PDRP"/"PDRO", version 1) plus the strings and a
+// Little-endian headers ("PDRP" v1; "PDRO" v2, accepts v1) plus strings and
 // CRC32; independent of struct padding. Decoders validate every field.
 // Header 6 + fixed fields 22 + digest 1+32 + strings with length prefixes + CRC 4.
 inline constexpr size_t MAX_RECORD_BYTES = 6 + 22 + 1 + DIGEST_HEX + 2 + MAX_XPOINTER_BYTES + 4;
-inline constexpr size_t MAX_OFFER_BYTES = 6 + 4 + 2 + MAX_XPOINTER_BYTES + 1 + MAX_DEVICE_BYTES + 4;
+inline constexpr size_t MAX_OFFER_BYTES = 6 + 4 + 4 + 2 + MAX_XPOINTER_BYTES + 1 + MAX_DEVICE_BYTES + 4;
 size_t encodeRecord(const Record& record, uint8_t* out, size_t capacity);
 bool decodeRecord(const uint8_t* bytes, size_t size, Record& record);
 size_t encodeOffer(const Offer& offer, uint8_t* out, size_t capacity);

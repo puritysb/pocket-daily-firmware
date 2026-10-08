@@ -369,3 +369,49 @@ TEST(ReadingProgressStore, SequenceAdvancesAndRecoversFromDamage) {
   EXPECT_EQ(Reading::nextSequence(), 1u);
   EXPECT_EQ(Reading::nextSequence(), 2u);
 }
+
+TEST(ReadingProgressFormat, CausalOfferAllowsRereadingOnlyAtTheObservedSequence) {
+  auto offer = sampleOffer();
+  offer.percentage = 0.2f;
+  offer.readerSeq = 17;
+  EXPECT_TRUE(Reading::shouldSuggest(offer, 17, 0.8f));
+  EXPECT_FALSE(Reading::shouldSuggest(offer, 18, 0.8f));
+  EXPECT_FALSE(Reading::shouldSuggest(offer, 0, 0.8f));
+  EXPECT_FALSE(Reading::shouldSuggest(offer, 17, 0.201f));
+  uint8_t bytes[Reading::MAX_OFFER_BYTES];
+  const size_t size = Reading::encodeOffer(offer, bytes, sizeof(bytes));
+  ASSERT_GT(size, 0u);
+  EXPECT_EQ(bytes[4], 2);
+  Reading::Offer decoded;
+  ASSERT_TRUE(Reading::decodeOffer(bytes, size, decoded));
+  EXPECT_EQ(decoded.readerSeq, 17u);
+  EXPECT_TRUE(Reading::shouldSuggest(decoded, 17, 0.8f));
+  decoded.readerSeq = 0;
+  EXPECT_FALSE(Reading::shouldSuggest(decoded, 17, 0.8f));
+  EXPECT_TRUE(Reading::shouldSuggest(decoded, 17, 0.1f));
+}
+TEST(ReadingProgressFormat, CausalOfferSequenceMustBeAPositiveInteger) {
+  const std::string body =
+      "{\"deviceID\":\"ABCD1234\",\"document\":\"" + std::string(DIGEST) +
+      "\",\"progress\":\"/body/DocFragment[1]/body\",\"percentage\":0.2,\"device\":\"phone\",\"readerSeq\":";
+  Reading::OfferRequest request;
+  ASSERT_TRUE(parse(body + "17}", request));
+  EXPECT_EQ(request.offer.readerSeq, 17u);
+  for (const auto* invalid : {"0", "-1", "1.5", "4294967296", "\"17\"", "true"}) {
+    EXPECT_FALSE(parse(body + invalid + "}", request)) << invalid;
+  }
+}
+TEST(ReadingProgressFormat, LegacyOfferRemainsForwardOnly) {
+  // Independent v1 fixture: Python struct + zlib, not the current v2 encoder.
+  constexpr uint8_t bytes[] = {0x50, 0x44, 0x52, 0x4f, 0x01, 0x00, 0x00, 0x00, 0x00, 0x3f, 0x19, 0x00,
+                               0x2f, 0x62, 0x6f, 0x64, 0x79, 0x2f, 0x44, 0x6f, 0x63, 0x46, 0x72, 0x61,
+                               0x67, 0x6d, 0x65, 0x6e, 0x74, 0x5b, 0x31, 0x5d, 0x2f, 0x62, 0x6f, 0x64,
+                               0x79, 0x05, 0x70, 0x68, 0x6f, 0x6e, 0x65, 0x4d, 0xe1, 0x13, 0xbc};
+  Reading::Offer offer;
+  ASSERT_TRUE(Reading::decodeOffer(bytes, sizeof(bytes), offer));
+  EXPECT_EQ(offer.readerSeq, 0u);
+  EXPECT_FLOAT_EQ(offer.percentage, 0.5f);
+  EXPECT_STREQ(offer.device, "phone");
+  EXPECT_TRUE(Reading::shouldSuggest(offer, 1, 0.2f));
+  EXPECT_FALSE(Reading::shouldSuggest(offer, 1, 0.8f));
+}

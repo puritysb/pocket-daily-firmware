@@ -149,3 +149,31 @@ TEST(PreferencesUpdate, WakeIndicatorIsOptionalAndValidatedBeforeAnyChanges) {
   EXPECT_EQ(u.fontSize, 3);
   EXPECT_EQ(u.sleepWakeIndicator, 1);
 }
+
+TEST(PreferencesUpdate, ReadingLayoutBoundariesAndPartialUpdates) {
+  for (int orientation = 0; orientation < 4; ++orientation) {
+    PreferencesUpdate u;
+    ASSERT_TRUE(
+        parse("{\"orientation\":" + std::to_string(orientation) + ",\"lineSpacing\":3,\"screenMargin\":40}", u));
+    EXPECT_EQ(u.orientation, orientation);
+    EXPECT_TRUE(u.hasOrientation && u.hasLineSpacing && u.hasScreenMargin);
+    EXPECT_EQ(u.lineSpacing, 3);
+    EXPECT_EQ(u.screenMargin, 40);
+    EXPECT_FALSE(u.hasFontSize);
+  }
+  PreferencesUpdate u;
+  ASSERT_TRUE(parse(R"({"orientation":0,"lineSpacing":0,"screenMargin":5})", u));
+  EXPECT_EQ(u.screenMargin, 5);
+}
+
+TEST(PreferencesUpdate, InvalidReadingLayoutRejectsTheWholeDocument) {
+  for (const char* invalid :
+       {R"({"orientation":4})", R"({"orientation":-1})", R"({"orientation":"1"})", R"({"lineSpacing":4})",
+        R"({"screenMargin":4})", R"({"screenMargin":41})", R"({"fontSize":2,"screenMargin":true})"}) {
+    PreferencesUpdate u;
+    u.fontSize = 3;
+    EXPECT_FALSE(parse(invalid, u));
+    EXPECT_EQ(u.fontSize, 3);
+    EXPECT_FALSE(u.hasFontSize);
+  }
+}

@@ -323,16 +323,17 @@ large firmware staging, content batch, lock/background interruption and retry,
 explicit/end-of-batch shutdown, user Wi-Fi change, reader reboot and installation
 version verification. Measure free heap/largest block and watchdog behavior.
 
-## Companion preferences (updated 2026-09-30)
+## Companion preferences (updated 2026-10-05)
 
 `GET`/`POST /api/pocket/v1/preferences` is registered only in the POCKET_SYNC
 (private AP) and COMPANION (Pocket Sync → Join a Network) server profiles. GET
-returns one fixed, stack-encoded object; `SETTINGS` values are sent as
+returns one bounded object (320-byte fallible temporary encoding buffer); `SETTINGS` values are sent as
 integers:
 
 ```json
 {"startupApp":0,"pocketDailySleepCover":1,"sleepTimeoutMinutes":10,"fontSize":1,
- "sideButtonLayout":0,"frontButtonFollowOrientation":0,"sleepWakeIndicator":1}
+ "sideButtonLayout":0,"frontButtonFollowOrientation":0,"sleepWakeIndicator":1,
+ "orientation":0,"lineSpacing":1,"screenMargin":5}
 ```
 
 | Key | POST accepts | Meaning |
@@ -341,16 +342,24 @@ integers:
 | `pocketDailySleepCover` | boolean, or integer (non-zero = on) | Pocket Daily sleep cover |
 | `sleepWakeIndicator` | boolean, or integer (non-zero = on) | show WAKE at the physical power switch on sleep screens; default on |
 | `sleepTimeoutMinutes` | integer 1..31 | 31 means never |
-| `fontSize` | integer 0..3 | small, medium, large, extra large |
+| `fontSize` | integer 0..3 | legacy 12/14/16/18-point buckets; an unchanged bucket preserves a precise on-device size |
+| `orientation` | integer 0..3 | portrait, landscape clockwise, inverted portrait, landscape counter-clockwise |
+| `lineSpacing` | integer 0..3 | tight, normal, wide, extra wide |
+| `screenMargin` | integer 5..40 | reading margin in pixels |
 | `sideButtonLayout` | integer 0..2 | 0 side Up = previous page, Down = next; 1 swapped; 2 side buttons do not turn pages |
 | `frontButtonFollowOrientation` | boolean, or integer (non-zero = on) | when on, the front navigation axis flips while the screen renders inverted portrait or landscape counter-clockwise, so it matches the rotated hint labels |
 
 POST takes any subset of these keys. The whole body is validated before any
 setting changes: one invalid value (out of range, wrong JSON type, or a string)
 returns `400 text/plain` with a short reason such as `Invalid sideButtonLayout`
-and applies nothing. Unknown keys are ignored. Success saves `settings.json`
-and returns `200 {"saved":true}`, then emits the Live Studio `prefs` event; a
-failed save restores all seven previous values and returns 500.
+and applies nothing. Unknown keys are ignored. Success saves `settings.json` only when values change and returns
+`200 {"saved":true}`; changed values emit the Live Studio `prefs` event. A failed
+save restores all ten previous values and returns 500. Orientation, line spacing
+and margins were added on 2026-10-05; each key's GET presence is its capability.
+Companions omit absent keys, since older readers ignore unknown keys. These
+settings affect the next book render. Saving does not open a book or replace the
+Sync screen. The app's reading preview is illustrative; screen presentation
+continues to accept only `home` and `brief`.
 
 `sideButtonLayout` and `frontButtonFollowOrientation` were added on
 2026-09-26. Their presence in the GET response is the capability signal:
@@ -368,3 +377,43 @@ Brief, covers, custom/transparent screens and Quick Resume. It does not change
 how the power button works. The cue remains anchored in physical portrait at
 X3's top switch or X4's upper-right switch regardless of reading orientation.
 No new endpoint or automatic firmware installation is involved.
+
+## Durable publication receipt and session completion — 2026-10-05
+
+Both Sync profiles (`COMPANION` on the same Wi-Fi and private `POCKET_SYNC`)
+advertise `publicationReceipt:1` and `sessionEnd:true`. Publication receipts
+also accompany the existing commit route in File Transfer; `sessionEnd:true`
+is limited to Sync profiles. `POST /api/pocket/v1/session/end` now works
+in either Sync profile and rejects an active receiving stream, while allowing
+the completed/replied stream to leave Sync. Ending a firmware transfer still
+only leads to the reader's install confirmation; it never authorizes flashing.
+
+`POST /api/pocket/v1/publication` is a read-only outcome lookup using the same
+JSON as `/commit`: `staging`, `target`, `size`, and eight-digit hexadecimal
+`crc32`. Both routes reject active writers, accept at most 1536 body bytes
+and paths shorter than 512 bytes, and retain the existing commit path policy.
+The app re-probes device identity before recovery; these local HTTP routes
+do not provide cryptographic LAN authentication. Matching the
+latest durable receipt returns the ordinary `{size,crc32}` receipt; an absent,
+corrupt or different receipt returns 404 `{"state":"unknown"}`. A duplicate
+commit matching that receipt returns success without republishing the file.
+
+After publishing, firmware writes `/.crosspoint/pocket-publication.bin` via a
+temporary file and verifies its bytes. `PDC1` stores little-endian size and CRC,
+then NUL-terminated staging and target paths. Exact request comparison uses a
+64-byte stack buffer; no persistent RAM receipt cache is added. Only the most
+recent publication is remembered, bounding SD use. This is historical evidence
+of that publication, not proof that the target has remained unchanged.
+
+The app durably marks publication pending before commit. On a lost reply or
+later explicit resume it re-probes the same device identity, verifies the
+capability and queries the receipt; it never resends payload or commit to
+resolve an uncertain outcome. A power loss between target publication and
+receipt persistence still yields unknown. Receipt absence never proves the
+previous target survived or makes blind retry safe; manual inspection/local
+queue removal remains available. This is not a general SD power-loss transaction.
+
+For an internet-free Direct connection, the app can download and validate an
+official image first, keep it in the prepared queue, then explicitly send it
+after connecting. After firmware publication the app ends capable LAN and AP
+sessions so the reader can present its existing installation confirmation.

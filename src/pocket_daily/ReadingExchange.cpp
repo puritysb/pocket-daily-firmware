@@ -82,7 +82,7 @@ size_t ListStream::next(char* out, const size_t capacity) {
         entry.xpointer = book.current ? work.record.xpointer : "";
         entry.percentage = book.percentage;
         entry.updated = book.current ? work.record.updated : 0;
-        entry.seq = book.hasRecord ? work.record.seq : 0;
+        entry.seq = book.current ? work.record.seq : 0;
         const size_t length = composer.entry(entry, out, capacity);
         if (length) return length;
       }
@@ -102,6 +102,9 @@ OfferStoreResult storeOffer(const OfferRequest& request, ExchangeWork& work) {
     if (!loadExchangeBook(recent, work, book) ||
         (strcmp(book.document, request.document) != 0 && strcmp(book.filenameDocument, request.document) != 0)) {
       continue;
+    }
+    if (request.offer.readerSeq != 0 && (!book.current || request.offer.readerSeq != work.record.seq)) {
+      return OfferStoreResult::STALE_POSITION;
     }
     // Only a pending offer: the reader asks before moving when the book opens.
     if (!saveOffer(book.cachePath.c_str(), request.offer, work.scratch)) return OfferStoreResult::FAILED;
