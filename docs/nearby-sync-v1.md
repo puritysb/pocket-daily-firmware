@@ -323,16 +323,17 @@ large firmware staging, content batch, lock/background interruption and retry,
 explicit/end-of-batch shutdown, user Wi-Fi change, reader reboot and installation
 version verification. Measure free heap/largest block and watchdog behavior.
 
-## Companion preferences (updated 2026-09-30)
+## Companion preferences (updated 2026-10-05)
 
 `GET`/`POST /api/pocket/v1/preferences` is registered only in the POCKET_SYNC
 (private AP) and COMPANION (Pocket Sync → Join a Network) server profiles. GET
-returns one fixed, stack-encoded object; `SETTINGS` values are sent as
+returns one bounded object (320-byte fallible temporary encoding buffer); `SETTINGS` values are sent as
 integers:
 
 ```json
 {"startupApp":0,"pocketDailySleepCover":1,"sleepTimeoutMinutes":10,"fontSize":1,
- "sideButtonLayout":0,"frontButtonFollowOrientation":0,"sleepWakeIndicator":1}
+ "sideButtonLayout":0,"frontButtonFollowOrientation":0,"sleepWakeIndicator":1,
+ "orientation":0,"lineSpacing":1,"screenMargin":5}
 ```
 
 | Key | POST accepts | Meaning |
@@ -341,16 +342,24 @@ integers:
 | `pocketDailySleepCover` | boolean, or integer (non-zero = on) | Pocket Daily sleep cover |
 | `sleepWakeIndicator` | boolean, or integer (non-zero = on) | show WAKE at the physical power switch on sleep screens; default on |
 | `sleepTimeoutMinutes` | integer 1..31 | 31 means never |
-| `fontSize` | integer 0..3 | small, medium, large, extra large |
+| `fontSize` | integer 0..3 | legacy 12/14/16/18-point buckets; an unchanged bucket preserves a precise on-device size |
+| `orientation` | integer 0..3 | portrait, landscape clockwise, inverted portrait, landscape counter-clockwise |
+| `lineSpacing` | integer 0..3 | tight, normal, wide, extra wide |
+| `screenMargin` | integer 5..40 | reading margin in pixels |
 | `sideButtonLayout` | integer 0..2 | 0 side Up = previous page, Down = next; 1 swapped; 2 side buttons do not turn pages |
 | `frontButtonFollowOrientation` | boolean, or integer (non-zero = on) | when on, the front navigation axis flips while the screen renders inverted portrait or landscape counter-clockwise, so it matches the rotated hint labels |
 
 POST takes any subset of these keys. The whole body is validated before any
 setting changes: one invalid value (out of range, wrong JSON type, or a string)
 returns `400 text/plain` with a short reason such as `Invalid sideButtonLayout`
-and applies nothing. Unknown keys are ignored. Success saves `settings.json`
-and returns `200 {"saved":true}`, then emits the Live Studio `prefs` event; a
-failed save restores all seven previous values and returns 500.
+and applies nothing. Unknown keys are ignored. Success saves `settings.json` only when values change and returns
+`200 {"saved":true}`; changed values emit the Live Studio `prefs` event. A failed
+save restores all ten previous values and returns 500. Orientation, line spacing
+and margins were added on 2026-10-05; each key's GET presence is its capability.
+Companions omit absent keys, since older readers ignore unknown keys. These
+settings affect the next book render. Saving does not open a book or replace the
+Sync screen. The app's reading preview is illustrative; screen presentation
+continues to accept only `home` and `brief`.
 
 `sideButtonLayout` and `frontButtonFollowOrientation` were added on
 2026-09-26. Their presence in the GET response is the capability signal:

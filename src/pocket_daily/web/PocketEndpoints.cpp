@@ -1080,24 +1080,31 @@ void handleContentFile(WebServer& server, const RouteDeps& d) {
 // response can consume the last contiguous heap immediately after Wi-Fi
 // starts and strand the X3 on its retained Hotspot Mode frame. The button keys
 // (added 2026-09-26) tell the companion this reader accepts them on POST.
-// Including sleepWakeIndicator, every uint8_t at 255 fits in 192 bytes.
+// A bounded, temporary response; no full settings registry or retained buffer.
 void handleGetPreferences(WebServer& server) {
-  char json[192];
+  // 320 bytes exceeds the stack budget; temporary ownership avoids retained RAM.
+  auto json = makeUniqueNoThrow<char[]>(320);
+  if (!json) {
+    server.send(503, "text/plain", "Not enough memory for preferences; retry");
+    return;
+  }
   const int written = snprintf(
-      json, sizeof(json),
+      json.get(), 320,
       "{\"startupApp\":%u,\"pocketDailySleepCover\":%u,\"sleepTimeoutMinutes\":%u,\"fontSize\":%u,"
-      "\"sideButtonLayout\":%u,\"frontButtonFollowOrientation\":%u,\"sleepWakeIndicator\":%u}",
+      "\"sideButtonLayout\":%u,\"frontButtonFollowOrientation\":%u,\"sleepWakeIndicator\":%u,\"orientation\":%u,"
+      "\"lineSpacing\":%u,\"screenMargin\":%u}",
       static_cast<unsigned>(SETTINGS.startupApp), static_cast<unsigned>(SETTINGS.pocketDailySleepCover),
       static_cast<unsigned>(SETTINGS.sleepTimeoutMinutes),
       static_cast<unsigned>(LegacyFontSize::fromPoints(SETTINGS.fontPointSize)),
       static_cast<unsigned>(SETTINGS.sideButtonLayout), static_cast<unsigned>(SETTINGS.frontButtonFollowOrientation),
-      static_cast<unsigned>(SETTINGS.sleepWakeIndicator));
-  if (written <= 0 || static_cast<size_t>(written) >= sizeof(json)) {
+      static_cast<unsigned>(SETTINGS.sleepWakeIndicator), static_cast<unsigned>(SETTINGS.orientation),
+      static_cast<unsigned>(SETTINGS.lineSpacing), static_cast<unsigned>(SETTINGS.screenMargin));
+  if (written <= 0 || static_cast<size_t>(written) >= 320) {
     server.send(500, "text/plain", "Could not encode Pocket preferences");
     return;
   }
   server.sendHeader("Connection", "close");
-  server.send(200, "application/json", json);
+  server.send(200, "application/json", json.get());
 }
 
 void handlePostPreferences(WebServer& server, const RouteDeps& d) {
@@ -1108,30 +1115,46 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
   // Validate the whole body first; settings change only when every field is
   // valid, and a failed save restores the previous values (PreferencesUpdate.h).
   const String& body = server.arg("plain");
-  const PreferenceLimits limits{CrossPointSettings::STARTUP_APP_COUNT, CrossPointSettings::MIN_SLEEP_TIMEOUT_MINUTES,
-                                CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES, LegacyFontSize::COUNT,
-                                CrossPointSettings::SIDE_BUTTON_LAYOUT_COUNT};
+  const PreferenceLimits limits{
+      CrossPointSettings::STARTUP_APP_COUNT,         CrossPointSettings::MIN_SLEEP_TIMEOUT_MINUTES,
+      CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES, LegacyFontSize::COUNT,
+      CrossPointSettings::SIDE_BUTTON_LAYOUT_COUNT,  CrossPointSettings::ORIENTATION_COUNT,
+      CrossPointSettings::LINE_COMPRESSION_COUNT,    CrossPointSettings::SCREEN_MARGIN_MIN,
+      CrossPointSettings::SCREEN_MARGIN_MAX};
   PreferencesUpdate update;
   const char* error = nullptr;
   if (!parsePreferences(body.c_str(), body.length(), limits, update, error)) {
     server.send(400, "text/plain", error ? error : "Invalid preferences");
     return;
   }
-  const uint8_t previous[7] = {SETTINGS.startupApp,          SETTINGS.pocketDailySleepCover,
-                               SETTINGS.sleepTimeoutMinutes, SETTINGS.fontPointSize,
-                               SETTINGS.sideButtonLayout,    SETTINGS.frontButtonFollowOrientation,
-                               SETTINGS.sleepWakeIndicator};
+  const uint8_t previous[10] = {SETTINGS.startupApp,          SETTINGS.pocketDailySleepCover,
+                                SETTINGS.sleepTimeoutMinutes, SETTINGS.fontPointSize,
+                                SETTINGS.sideButtonLayout,    SETTINGS.frontButtonFollowOrientation,
+                                SETTINGS.sleepWakeIndicator,  SETTINGS.orientation,
+                                SETTINGS.lineSpacing,         SETTINGS.screenMargin};
   if (update.hasStartupApp) SETTINGS.startupApp = update.startupApp;
   if (update.hasSleepWakeIndicator) SETTINGS.sleepWakeIndicator = update.sleepWakeIndicator;
   if (update.hasSleepCover) SETTINGS.pocketDailySleepCover = update.sleepCover;
   if (update.hasSleepTimeout) SETTINGS.sleepTimeoutMinutes = update.sleepTimeoutMinutes;
-  if (update.hasFontSize) SETTINGS.fontPointSize = LegacyFontSize::toPoints(update.fontSize);
+  // An unchanged legacy bucket must not quantize a precise size selected on-device.
+  if (update.hasFontSize && update.fontSize != LegacyFontSize::fromPoints(SETTINGS.fontPointSize)) {
+    SETTINGS.fontPointSize = LegacyFontSize::toPoints(update.fontSize);
+  }
+  if (update.hasOrientation) SETTINGS.orientation = update.orientation;
+  if (update.hasLineSpacing) SETTINGS.lineSpacing = update.lineSpacing;
+  if (update.hasScreenMargin) SETTINGS.screenMargin = update.screenMargin;
   if (update.hasSideButtonLayout) SETTINGS.sideButtonLayout = update.sideButtonLayout;
   if (update.hasFrontButtonFollowOrientation) {
     SETTINGS.frontButtonFollowOrientation = update.frontButtonFollowOrientation;
   }
 
-  if (!SETTINGS.saveToFile()) {
+  const bool changed = previous[0] != SETTINGS.startupApp || previous[1] != SETTINGS.pocketDailySleepCover ||
+                       previous[2] != SETTINGS.sleepTimeoutMinutes || previous[3] != SETTINGS.fontPointSize ||
+                       previous[4] != SETTINGS.sideButtonLayout ||
+                       previous[5] != SETTINGS.frontButtonFollowOrientation ||
+                       previous[6] != SETTINGS.sleepWakeIndicator || previous[7] != SETTINGS.orientation ||
+                       previous[8] != SETTINGS.lineSpacing || previous[9] != SETTINGS.screenMargin;
+  if (changed && !SETTINGS.saveToFile()) {
     SETTINGS.startupApp = previous[0];
     SETTINGS.pocketDailySleepCover = previous[1];
     SETTINGS.sleepTimeoutMinutes = previous[2];
@@ -1139,12 +1162,15 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
     SETTINGS.sideButtonLayout = previous[4];
     SETTINGS.frontButtonFollowOrientation = previous[5];
     SETTINGS.sleepWakeIndicator = previous[6];
+    SETTINGS.orientation = previous[7];
+    SETTINGS.lineSpacing = previous[8];
+    SETTINGS.screenMargin = previous[9];
     server.send(500, "text/plain", "Could not save Pocket preferences");
     return;
   }
   server.sendHeader("Connection", "close");
   server.send(200, "application/json", "{\"saved\":true}");
-  d.liveStudio->notifyPrefsChanged();
+  if (changed) d.liveStudio->notifyPrefsChanged();
 }
 
 #ifdef ENABLE_DEV_REMOTE_FLASH

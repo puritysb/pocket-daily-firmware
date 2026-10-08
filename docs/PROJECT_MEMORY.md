@@ -3,7 +3,29 @@
 This is concise, repository-owned context for future sessions. It is not a chat
 transcript. Current source and release records override dated observations.
 
-## Companion connectivity revision — 2026-10-05 (local, not released)
+## Companion preferences integration — 2026-10-09
+
+- Integrated the pending reading-layout preferences with the companion
+  connectivity revision below. GET/POST now support orientation (0..3),
+  line spacing (0..3), and margins (5..40); absent keys remain compatible.
+  Unchanged POSTs skip persistence/events and preserve precise on-device font
+  sizes when the legacy font bucket is unchanged. Failed saves restore all ten
+  settings. The 320-byte GET buffer is fallible and temporary because it exceeds
+  the stack budget; no permanent buffer is reserved.
+- Cross-checked the wire fields and capability omission against app
+  `82865df`, `Sources/CrossPointClient.swift` and its preference tests.
+  App tests were not rerun in this firmware integration task.
+- Local validation: 865/865 host tests, 19 sync-route tests, strict cppcheck
+  2.11, formatting, and the default build (zero compiler warnings/errors) passed.
+  Isolated mutations of orientation assignment
+  and margin validation both failed the reading-layout regression tests.
+- X3/X4 HTTP, all four orientations, settings-save failure, heap/largest-block,
+  watchdog and radio behavior still require physical-device acceptance.
+  No installation or release is part of this integration. SDK storage changes
+  are reproduced by `scripts/storage_sdk.patch`; local `.agents/` copies are
+  excluded from the integration commit.
+
+## Companion connectivity revision — 2026-10-05 (not released)
 
 - Owner authorized app + firmware improvements before the first formal release.
   Sync session/end now covers LAN COMPANION as well as private AP; completed
