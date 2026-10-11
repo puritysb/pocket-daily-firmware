@@ -3,6 +3,21 @@
 This is concise, repository-owned context for future sessions. It is not a chat
 transcript. Current source and release records override dated observations.
 
+## Repeated X3 standby/wake acceptance — 2026-10-11
+
+- After pushing tools `5d512c56` and app `fb0629a`, `run --standby --cycles 3`
+  passed all three physical Mac/X3 cycles using the default enrollment.
+  Evidence: `build/dev-pipeline-runs/20261011T122403-b8cecb/report.json`.
+  Requested idle 90 s per cycle; measured standby 99.623/99.585/99.703 s,
+  light sleep 81.025/80.746/80.750 s, app reconnect 13.007/13.246/14.573 s.
+  Each recorded `app-wifi`, one BLE connection, zero READ_LISTs; inventories,
+  generated EPUB byte comparison/deletion and transfer-idle recovery all passed.
+- Charging confirmed, battery 25/25/26%. BLE minimum free heap
+  64,452/64,444/64,432 B; minimum largest block 55,284 B in every cycle.
+  Installed artifact unchanged; no new fix was required. Battery-only/overnight,
+  physical charging transitions and measured current remain unverified; three
+  cycles do not establish absence of a long-term leak.
+
 ## Automatic enrolled-reader rediscovery — 2026-10-11
 
 - The runner builds the Mac test host before reader preflight. A stale/reassigned
@@ -18,7 +33,7 @@ transcript. Current source and release records override dated observations.
 
 ## Current X3 acceptance baseline — 2026-10-11
 
-- Latest BLE idle/wake acceptance: `build/dev-pipeline-runs/20261011T105840-d292e9/report.json`.
+- Latest 30-minute BLE idle/wake acceptance: `build/dev-pipeline-runs/20261011T105840-d292e9/report.json`.
   A 1800-second app-traffic-free wait passed: measured standby 1807.465 s,
   light sleep 1472.430 s, one connection, zero READ_LISTs, `app-wifi` close,
   app reconnect 12.223 s, EPUB round trip/cleanup passed. Last checkpoint 19%
