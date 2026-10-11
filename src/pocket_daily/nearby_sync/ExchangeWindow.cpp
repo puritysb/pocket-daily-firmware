@@ -331,8 +331,19 @@ StandbyExit runStandby(const GfxRenderer& renderer, const uint32_t maxMs) {
     }
     if (gpio.wasUsbStateChanged() || millis() - batteryChecked >= 60000) {
       batteryChecked = millis();
-      if (!standbyEligible()) {
-        close(CloseReason::TIME_UP);
+      if (!SETTINGS.pocketReadingSync || !hasStoredBond()) {
+        close(CloseReason::RADIO_OWNER);
+        break;
+      }
+      const auto battery = powerManager.getBatteryPercentage();
+      const bool charging = gpio.isUsbConnected();
+      if (!batteryAllowed(battery, charging)) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        DevSleepCycle::checkpoint(DevSleepCycle::Checkpoint::StandbyAlive, battery, &stats, charging);
+#endif
+        LOG_INF("RSYNC", "standby closing: battery %u%%, charging %u", static_cast<unsigned>(battery),
+                static_cast<unsigned>(charging));
+        close(CloseReason::LOW_BATTERY);
         break;
       }
     }
@@ -341,7 +352,8 @@ StandbyExit runStandby(const GfxRenderer& renderer, const uint32_t maxMs) {
       evidenceAt = millis();
       DevSleepCycle::standbyEvidence(powerManager.bleStandbySleepCount(), powerManager.bleStandbySleepMillis(),
                                      millis() - began);
-      DevSleepCycle::checkpoint(DevSleepCycle::Checkpoint::StandbyAlive, powerManager.getBatteryPercentage(), &stats);
+      DevSleepCycle::checkpoint(DevSleepCycle::Checkpoint::StandbyAlive, powerManager.getBatteryPercentage(), &stats,
+                                gpio.isUsbConnected());
     }
 #endif
     // IDF's tickless idle and controller modem sleep own the wake schedule.

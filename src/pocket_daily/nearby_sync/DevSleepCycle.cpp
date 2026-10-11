@@ -12,7 +12,7 @@
 
 namespace Pocket::NearbySync::DevSleepCycle {
 namespace {
-constexpr uint32_t MAGIC = 0x424c4505;
+constexpr uint32_t MAGIC = 0x424c4506;
 // Fixed developer evidence only, under 208 B; avoids a heap allocation while
 // measuring reclamation. Production builds contain neither record nor routes.
 Record current;
@@ -60,17 +60,21 @@ bool read(Record& record) {
   HalFile file = Storage.open(RESULT_PATH);
   if (!file || file.size() != sizeof(record) || file.read(&record, sizeof(record)) != sizeof(record)) return false;
   return record.magic == MAGIC && record.run != 0 && record.check == checksum(record) &&
+         record.standbyLimitMs >= 180000 && record.standbyLimitMs <= 1890000 && record.charging <= 1 &&
          (record.returnMode == ReturnMode::Restart || record.returnMode == ReturnMode::TimedDeepSleep ||
           record.returnMode == ReturnMode::AppStandby) &&
          (record.state == State::Requested || record.state == State::Running || record.state == State::Completed ||
           record.state == State::Interrupted);
 }
 
-bool request(const uint32_t run, const ReturnMode mode) {
-  if (!run || running) return false;
+bool request(const uint32_t run, const ReturnMode mode, const uint32_t standbySeconds) {
+  if (!run || running || standbySeconds < 90 || standbySeconds > 1800 ||
+      (mode != ReturnMode::AppStandby && standbySeconds != 90))
+    return false;
   Record request;
   request.run = run;
   request.returnMode = mode;
+  request.standbyLimitMs = (standbySeconds + 90) * 1000;
   return save(request) && armBoot('B');
 }
 
@@ -85,6 +89,8 @@ bool begin() {
 }
 
 uint32_t runNumber() { return running ? current.run : 0; }
+
+uint32_t standbyLimitMs() { return running ? current.standbyLimitMs : 0; }
 
 bool active() { return running; }
 bool timerRequested() { return running && current.returnMode == ReturnMode::TimedDeepSleep; }
@@ -120,8 +126,10 @@ void frameReleased(const uint32_t beforeFree, const uint32_t beforeBlock, const 
   current.released = released;
 }
 
-bool checkpoint(const Checkpoint stage, const uint32_t batteryPercent, const Stats::Record* stats) {
+bool checkpoint(const Checkpoint stage, const uint32_t batteryPercent, const Stats::Record* stats,
+                const bool charging) {
   if (!running) return false;
+  current.charging = charging;
   current.checkpoint = stage;
   current.batteryPercent = batteryPercent;
   if (stats) current.result = *stats;

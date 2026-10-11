@@ -1325,7 +1325,14 @@ void handleDevBleCycle(WebServer& server, const RouteDeps& d) {
   const auto mode = sleep == "standby" ? ReturnMode::AppStandby
                     : sleep == "timer" ? ReturnMode::TimedDeepSleep
                                        : ReturnMode::Restart;
-  if (!Pocket::NearbySync::DevSleepCycle::request(run, mode)) {
+  uint32_t standbySeconds = 90;
+  const String seconds = server.arg("standbySeconds");
+  if ((!seconds.isEmpty() && !parseGeneration({seconds.c_str(), seconds.length()}, standbySeconds)) ||
+      standbySeconds < 90 || standbySeconds > 1800 || (sleep != "standby" && !seconds.isEmpty())) {
+    server.send(400, "text/plain", "standbySeconds requires standby and must be 90..1800");
+    return;
+  }
+  if (!Pocket::NearbySync::DevSleepCycle::request(run, mode, standbySeconds)) {
     server.send(503, "text/plain", "Could not verify the one-shot experiment request");
     return;
   }
@@ -1355,6 +1362,8 @@ void handleDevBleCycleResult(WebServer& server) {
   doc["timerArmed"] = record->timerArmed != 0;
   doc["checkpoint"] = static_cast<uint32_t>(record->checkpoint);
   doc["batteryPercent"] = record->batteryPercent;
+  doc["chargingAtCheckpoint"] = record->charging != 0;
+  doc["standbyLimitMs"] = record->standbyLimitMs;
   doc["timerWake"] = powerManager.devWokeFromTimer();
   doc["lightSleeps"] = record->lightSleeps;
   doc["lightSleepMs"] = record->lightSleepMs;

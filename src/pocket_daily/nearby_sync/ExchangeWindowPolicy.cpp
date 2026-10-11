@@ -90,6 +90,8 @@ const char* closeReasonName(const CloseReason reason) {
       return "low-memory";
     case CloseReason::SLEEP_FRAME:
       return "sleep-frame";
+    case CloseReason::LOW_BATTERY:
+      return "low-battery";
     case CloseReason::APP_WIFI:
       return "app-wifi";
   }

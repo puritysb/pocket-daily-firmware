@@ -24,11 +24,14 @@ struct Record {
   uint32_t fromWifi = 0;
   Checkpoint checkpoint = Checkpoint::None;
   uint32_t batteryPercent = 0;
+  uint32_t standbyLimitMs = 180000;
+  uint32_t charging = 0;
   uint32_t check = 0;
 };
 inline constexpr const char* RESULT_PATH = "/.crosspoint/dev-ble-cycle";
 bool read(Record& record);
-bool request(uint32_t run, ReturnMode mode = ReturnMode::Restart);
+bool request(uint32_t run, ReturnMode mode = ReturnMode::Restart, uint32_t standbySeconds = 90);
+uint32_t standbyLimitMs();
 // Arms the saved-network return BEFORE running the experiment. Failure never
 // starts a radio experiment; the caller returns to Same Wi-Fi instead.
 bool begin();
@@ -42,7 +45,7 @@ uint32_t runNumber();
 void standbyEvidence(uint32_t sleeps, uint32_t sleepMs, uint32_t elapsedMs);
 void frameReleased(uint32_t beforeFree, uint32_t beforeBlock, uint32_t afterFree, uint32_t afterBlock,
                    uint32_t frameBytes, bool released);
-bool checkpoint(Checkpoint stage, uint32_t batteryPercent, const Stats::Record* stats = nullptr);
+bool checkpoint(Checkpoint stage, uint32_t batteryPercent, const Stats::Record* stats = nullptr, bool charging = false);
 bool complete(const Stats::Record* stats);
 }  // namespace Pocket::NearbySync::DevSleepCycle
 #endif

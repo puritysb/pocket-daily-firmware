@@ -224,3 +224,28 @@ X3 deep sleep, separate from experimental BLE light sleep; BLE requires battery
 strictly above 10% (above 5% on X3 while charging is confirmed), and neither case measures battery life. No new shipping sleep mode or
 remote-control endpoint is enabled. These framebuffer captures cannot establish
 optical panel quality, grayscale overlays or physical button navigation.
+
+### Long standby diagnostics
+
+`--standby --standby-seconds 1800` requests a 30-minute uninterrupted app-side
+wait. Values are bounded to 90..1800 seconds; firmware recovery is the requested
+wait plus 90 seconds, persisted with the one-shot request. This needs matching
+firmware. The report checks the exact requested interval, measured standby time
+(at least wait minus 30 seconds for boot/teardown), and extended recovery limit.
+Shorter or stale results cannot certify a long run. The app harness suspends
+LAN monitoring and automatic BLE reading exchange during the wait, checks that
+exchange history stayed unchanged, and restores ownership before normal Connect.
+No test keepalive is sent during this wait. `chargingAtCheckpoint` describes the last recorded charging sample;
+`low-battery` closes are distinct from timer expiry. The record magic changed,
+so archive old cycle results before installing. A nonresponding reader may still
+need one physical wake to retrieve evidence; an e-paper standby image alone does
+not establish that BLE is powered.
+
+Physical Mac/X3 acceptance on 2026-10-11:
+`build/dev-pipeline-runs/20261011T105840-d292e9/report.json` passed a requested
+1800-second idle interval. Measured standby was 1,807,465 ms, automatic light sleep
+1,472,430 ms, one BLE connection, zero READ_LISTs, and `app-wifi` close. The app
+reconnected in 12.223 seconds and completed its generated EPUB round trip and
+cleanup. The last checkpoint was 19% with charging confirmed; minimum free heap
+64,504 B and minimum largest block 55,284 B. This is one 30-minute trial, not an
+overnight or current-consumption claim. Earlier interrupted runs are not passes.

@@ -382,7 +382,8 @@ void enterDeepSleep(bool fromTimeout = false) {
       if (powerManager.beginBleStandby()) {
         uint32_t deadline = 0;
 #ifdef ENABLE_DEV_REMOTE_FLASH
-        if (devCycleActive) deadline = 180000;  // recover remotely if the app never arrives
+        if (devCycleActive)
+          deadline = Pocket::NearbySync::DevSleepCycle::standbyLimitMs();  // recover remotely if the app never arrives
 #endif
         const uint32_t standbyStarted = millis();
         const auto outcome = Pocket::NearbySync::Window::runStandby(renderer, deadline);

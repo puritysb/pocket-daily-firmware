@@ -5,10 +5,24 @@ transcript. Current source and release records override dated observations.
 
 ## Current X3 acceptance baseline — 2026-10-11
 
+- Latest BLE idle/wake acceptance: `build/dev-pipeline-runs/20261011T105840-d292e9/report.json`.
+  A 1800-second app-traffic-free wait passed: measured standby 1807.465 s,
+  light sleep 1472.430 s, one connection, zero READ_LISTs, `app-wifi` close,
+  app reconnect 12.223 s, EPUB round trip/cleanup passed. Last checkpoint 19%
+  with charging confirmed; minimum heap 64,504 B / largest block 55,284 B.
+  Installed artifact `c2290a4a-ble-standby-w7d1b869f` (same source changes committed
+  with this entry); 915 host tests, runner/route/upload tests, cppcheck and both
+  firmware builds passed. This is one 30-minute trial, not overnight/current-draw evidence.
+- Battery-protection standby exits now report `low-battery`, distinct from timeout.
+  Developer trials persist charging and a bounded 90..1800-second wait plus
+  90-second recovery limit (record magic bumped). The app suspends its normal
+  periodic BLE/LAN exchanges during idle testing. Prior 10%-battery unplugged
+  failure is consistent with protection, but its historical exit reason is unavailable.
+
 - `build/dev-pipeline-runs/20261011T011839-f8c099/report.json` passed: 914 host
   tests, static analysis, default/standby builds, developer install, actual Mac
   BLE wake, ten interface cases and 13 native screen captures with offline OCR.
-  Installed candidate `8925b142-ble-standby-w3f7e719b`; prior entries below are
+  Earlier candidate `8925b142-ble-standby-w3f7e719b`; prior entries below are
   historical trials. Card A-B-A, real EPUB activity and timer deep sleep return
   preserve original cards/profile/reading list and remove owned fixture files.
 - X3 confirmed positive charging current allows BLE battery strictly above 5%;

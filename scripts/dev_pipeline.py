@@ -71,7 +71,7 @@ INTERFACE_CASES = {'identity-rejection', 'storage-usage', 'preferences-roundtrip
                    'folder-copy', 'inventory-preservation'}
 
 
-def hardware_evidence(log, run, version, standby, platform, interface=False, wifi_setup=False, screens=False):
+def hardware_evidence(log, run, version, standby, platform, interface=False, wifi_setup=False, screens=False, standby_seconds=90):
     records = []
     for line in log.splitlines():
         if MARKER in line:
@@ -124,7 +124,12 @@ def hardware_evidence(log, run, version, standby, platform, interface=False, wif
         if trial.get('run') != run:
             raise RuntimeError('stale firmware cycle evidence')
         cycle.check_result(trial, standby=True)
-        if record.get('standbyWaitSeconds', 0) < 90 or trial.get('standbyMs', 0) < 60000:
+        if standby_seconds > 90:
+            if trial.get('standbyLimitMs') != (standby_seconds + 90) * 1000:
+                raise RuntimeError('missing long-standby recovery deadline')
+            if record.get('idleAppTrafficSuspended') is not True:
+                raise RuntimeError('long standby requires suspended app traffic')
+        if record.get('standbyWaitSeconds', 0) != standby_seconds or trial.get('standbyMs', 0) < (standby_seconds - 30) * 1000:
             raise RuntimeError('standby trial did not span the first minute eligibility check')
     return record
 
@@ -314,6 +319,7 @@ def run(args, config, job):
             env = {key: value for key, value in os.environ.items() if not key.startswith('TEST_RUNNER_POCKET_HARDWARE_')}
             for key, value in {'ENABLED': '1', 'HOST': host, 'DEVICE_ID': identity, 'VERSION': version,
                                'RUN': str(run_id), 'STANDBY': '1' if args.standby else '0',
+                               'STANDBY_SECONDS': str(getattr(args, 'standby_seconds', 90)),
                                'SCREENS': '1' if getattr(args, 'screen_suite', False) and platform == 'macOS' else '0',
                                'WIFI_SETUP': '1' if getattr(args, 'wifi_setup', False) else '0',
                                'INTERFACE': '1' if getattr(args, 'interface_suite', False) else '0'}.items():
@@ -321,9 +327,9 @@ def run(args, config, job):
             label = f'{platform}-hardware-{index + 1}'
             log = job.command(label, command + ['test-without-building', '-parallel-testing-enabled', 'NO',
                 '-only-testing:' + target + '/ReaderHardwareTests/testDeveloperConnectionCycle',
-                '-resultBundlePath', str(job.output / (label + '.xcresult'))], cwd=app, env=env, timeout=1200 if getattr(args, 'interface_suite', False) else 480)
+                '-resultBundlePath', str(job.output / (label + '.xcresult'))], cwd=app, env=env, timeout=(1200 if getattr(args, 'interface_suite', False) else 480) + (getattr(args, 'standby_seconds', 90) if args.standby else 0))
             evidence = job.stage(label + '-evidence', lambda: hardware_evidence(
-                log.read_text(), run_id, version, args.standby, platform, getattr(args, 'interface_suite', False), getattr(args, 'wifi_setup', False), getattr(args, 'screen_suite', False) and platform == 'macOS'))
+                log.read_text(), run_id, version, args.standby, platform, getattr(args, 'interface_suite', False), getattr(args, 'wifi_setup', False), getattr(args, 'screen_suite', False) and platform == 'macOS', getattr(args, 'standby_seconds', 90)))
             if getattr(args, 'screen_suite', False) and platform == 'macOS':
                 destination = job.output / (label + '-screens')
                 job.command(label + '-export-screens', ['xcrun', 'xcresulttool', 'export', 'attachments',
@@ -363,6 +369,7 @@ def main():
     parser.add_argument('--checks', action='store_true', help='full firmware host/analysis/default-build gates')
     parser.add_argument('--cppcheck', default='build/cppcheck-source/cppcheck')
     parser.add_argument('--standby', action='store_true', help='actual app BLE wake scenario (experimental X3)')
+    parser.add_argument('--standby-seconds', type=int, default=90, help='uninterrupted standby wait, 90..1800 seconds')
     parser.add_argument('--cycles', type=int, default=1)
     parser.add_argument('--ios-simulator', help='simulator UDID for protocol regression/build validation')
     parser.add_argument('--ios-device', help='physical iPhone UDID; already paired/permissioned Debug app required')
@@ -371,6 +378,8 @@ def main():
         parser.error('--host is enrollment only; use configure to change the expected reader')
     if args.standby and args.build_firmware == 'default':
         parser.error('--standby requires --build-firmware ble_standby')
+    if not 90 <= args.standby_seconds <= 1800 or (not args.standby and args.standby_seconds != 90):
+        parser.error('--standby-seconds requires --standby and must be 90..1800')
     if not 1 <= args.cycles <= 20:
         parser.error('cycles must be 1..20')
     if args.firmware and args.build_firmware:

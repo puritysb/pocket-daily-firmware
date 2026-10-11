@@ -127,6 +127,29 @@ class PipelineTest(unittest.TestCase):
                 with self.assertRaises((RuntimeError, pipeline.pocket_put.ProtocolError)):
                     self.validate(record)
 
+    def test_long_standby_requires_matching_wait_and_elapsed_evidence(self):
+        record = self.evidence()
+        record['idleAppTrafficSuspended'] = True
+        record['standbyWaitSeconds'] = 1800
+        record['cycle']['standbyMs'] = 1780000
+        record['cycle']['standbyLimitMs'] = 1890000
+        log = pipeline.MARKER + json.dumps(record)
+        pipeline.hardware_evidence(log, int(record['run']), record['version'], True, 'macOS', standby_seconds=1800)
+        for field, value in [('standbyWaitSeconds', 90), ('idleAppTrafficSuspended', False)]:
+            invalid = {**record, field: value}
+            with self.assertRaises(RuntimeError):
+                pipeline.hardware_evidence(pipeline.MARKER + json.dumps(invalid), int(record['run']),
+                                          record['version'], True, 'macOS', standby_seconds=1800)
+        record['cycle']['standbyLimitMs'] = 180000
+        with self.assertRaises(RuntimeError):
+            pipeline.hardware_evidence(pipeline.MARKER + json.dumps(record), int(record['run']),
+                                      record['version'], True, 'macOS', standby_seconds=1800)
+        record['cycle']['standbyLimitMs'] = 1890000
+        record['cycle']['standbyMs'] = 90000
+        with self.assertRaises(RuntimeError):
+            pipeline.hardware_evidence(pipeline.MARKER + json.dumps(record), int(record['run']), record['version'], True,
+                                       'macOS', standby_seconds=1800)
+
     def test_short_or_missing_idle_interval_is_not_long_standby_evidence(self):
         for duration in [0, 59999]:
             record = self.evidence()

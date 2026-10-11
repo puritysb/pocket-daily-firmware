@@ -76,6 +76,7 @@ enum class CloseReason : uint8_t {
   LOW_MEMORY,
   SLEEP_FRAME,  // release radio memory before painting the retained sleep frame
   APP_WIFI,
+  LOW_BATTERY,
 };
 
 const char* triggerName(Trigger trigger);

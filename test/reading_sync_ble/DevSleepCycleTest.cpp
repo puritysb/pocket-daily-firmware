@@ -179,3 +179,23 @@ TEST(DevCaptureTicket, RejectsPartialCorruptAndZeroWhileAcceptingUnalignedBytes)
   EXPECT_EQ(decodeTicket(nullptr, sizeof(ticket)), 0U);
   EXPECT_EQ(PocketDaily::Boot::decodeDevBootMarker("R", 1), PocketDaily::Boot::DevBootReturn::ReaderCapture);
 }
+
+TEST_F(DevCycle, LongStandbyIsBoundedAndPersistsItsRecoveryDeadline) {
+  EXPECT_FALSE(DevSleepCycle::request(11, DevSleepCycle::ReturnMode::AppStandby, 89));
+  EXPECT_FALSE(DevSleepCycle::request(11, DevSleepCycle::ReturnMode::AppStandby, 1801));
+  EXPECT_FALSE(DevSleepCycle::request(11, DevSleepCycle::ReturnMode::TimedDeepSleep, 900));
+  EXPECT_FALSE(FakeSD::files.count(PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER));
+  ASSERT_TRUE(DevSleepCycle::request(11, DevSleepCycle::ReturnMode::AppStandby, 1800));
+  ASSERT_TRUE(DevSleepCycle::begin());
+  EXPECT_EQ(DevSleepCycle::standbyLimitMs(), 1890000U);
+  ASSERT_TRUE(DevSleepCycle::checkpoint(DevSleepCycle::Checkpoint::StandbyAlive, 9, &baseline, true));
+  DevSleepCycle::Record record;
+  ASSERT_TRUE(DevSleepCycle::read(record));
+  EXPECT_EQ(record.standbyLimitMs, 1890000U);
+  EXPECT_EQ(record.charging, 1U);
+  ASSERT_TRUE(DevSleepCycle::checkpoint(DevSleepCycle::Checkpoint::StandbyAlive, 9, &baseline, false));
+  ASSERT_TRUE(DevSleepCycle::read(record));
+  EXPECT_EQ(record.charging, 0U);
+  ASSERT_TRUE(DevSleepCycle::complete(&baseline));
+  EXPECT_EQ(DevSleepCycle::standbyLimitMs(), 0U);
+}
