@@ -307,4 +307,6 @@ bool isRebootFromCrash() {
   }
 }
 
+bool isSoftwareRestart() { return esp_reset_reason() == ESP_RST_SW; }
+
 }  // namespace HalSystem

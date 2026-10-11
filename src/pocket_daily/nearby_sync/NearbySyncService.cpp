@@ -75,6 +75,7 @@ class CommandCallbacks final : public NimBLECharacteristicCallbacks {
     if (windowMode() && !info.isBonded()) return;
     const std::string& value = characteristic->getValue();
     activeService->onCommandRecord(value.data(), value.size());
+    characteristic->setValue("");  // Do not retain Wi-Fi credentials in the GATT value.
   }
 };
 
@@ -82,7 +83,8 @@ ServerCallbacks serverCallbacks;
 CommandCallbacks commandCallbacks;
 }  // namespace
 
-bool Service::begin(const char* model, const char* firmware, const Mode requestedMode, const uint32_t advertiseMs) {
+bool Service::begin(const char* model, const char* firmware, const Mode requestedMode, const uint32_t advertiseMs,
+                    const bool appWake) {
   if (running_) return true;
 
   mode_ = requestedMode;
@@ -148,7 +150,8 @@ bool Service::begin(const char* model, const char* firmware, const Mode requeste
   }
 
   char statusRecord[MAX_RECORD_BYTES + 1];
-  const size_t statusLength = formatStatus(model, deviceId_, firmware, window, statusRecord, sizeof(statusRecord));
+  const size_t statusLength =
+      formatStatus(model, deviceId_, firmware, window, statusRecord, sizeof(statusRecord), appWake);
   if (statusLength == 0) {
     end();
     return false;
@@ -161,6 +164,12 @@ bool Service::begin(const char* model, const char* firmware, const Mode requeste
   advertising->setName(advertisedName_);
   advertising->addServiceUUID(SERVICE_UUID);
   advertising->enableScanResponse(true);
+  if (appWake) {
+    // Connectable once per second while the display is asleep. Controller
+    // modem sleep, not manual radio shutdown, preserves incoming connections.
+    advertising->setMinInterval(1600);
+    advertising->setMaxInterval(1600);
+  }
   if (!advertising->start(advertiseMs)) {
     end();
     return false;
@@ -196,6 +205,7 @@ void Service::end() {
     }
   }
   running_ = false;
+  memset(current_, 0, sizeof(current_));
   queue_.clear();  // NimBLE is gone: no producer left
   LOG_INF("NEARBY", "stopped heap=%lu block=%lu", static_cast<unsigned long>(ESP.getFreeHeap()),
           static_cast<unsigned long>(ESP.getMaxAllocHeap()));

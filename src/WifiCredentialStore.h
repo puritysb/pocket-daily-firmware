@@ -46,6 +46,9 @@ class WifiCredentialStore : public PersistableStore<WifiCredentialStore> {
   bool fromJson(JsonVariantConst doc);
 
   // Credential management
+  // Transactional app provisioning: persist a candidate before replacing RAM.
+  bool saveProvisionedCredential(const std::string& ssid, const std::string& password);
+  bool loadFromFile();
   bool addCredential(const std::string& ssid, const std::string& password);
   bool removeCredential(const std::string& ssid);
   std::optional<WifiCredential> findCredential(const std::string& ssid) const;

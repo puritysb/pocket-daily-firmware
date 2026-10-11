@@ -98,6 +98,18 @@ ParseResult parseCommand(const char* record, const size_t length, ParsedCommand&
   memcpy(out.requestId, id.text, REQUEST_ID_LENGTH);
   out.requestId[REQUEST_ID_LENGTH] = '\0';
 
+  if (fieldIs(verb, "WIFI_JOIN")) {
+    out.verb = Verb::WIFI_JOIN;
+    if (cursor >= end) return ParseResult::BAD_FIELDS;
+    out.chunk = cursor;
+    out.chunkLength = static_cast<size_t>(end - cursor);
+    return ParseResult::OK;
+  }
+  if (fieldIs(verb, "START_WIFI")) {
+    out.verb = Verb::START_WIFI;
+    return cursor == end ? ParseResult::OK : ParseResult::BAD_FIELDS;
+  }
+
   if (fieldIs(verb, "PING") || fieldIs(verb, "START_AP") || fieldIs(verb, "CANCEL") || fieldIs(verb, "READ_LIST")) {
     out.verb = fieldIs(verb, "PING")       ? Verb::PING
                : fieldIs(verb, "START_AP") ? Verb::START_AP
@@ -139,7 +151,9 @@ const char* badFieldsCode(const Verb verb) {
   }
 }
 
-bool allowedInWindow(const Verb verb) { return verb != Verb::START_AP && verb != Verb::NONE; }
+bool allowedInWindow(const Verb verb) {
+  return verb != Verb::START_AP && verb != Verb::START_WIFI && verb != Verb::WIFI_JOIN && verb != Verb::NONE;
+}
 
 size_t formatOk(const char* requestId, char* out, const size_t capacity) {
   if (!out || capacity == 0 || !usableId(requestId)) return finishRecord(0, out, capacity);
@@ -176,12 +190,15 @@ size_t formatEnd(const char* requestId, const uint32_t totalBytes, const uint32_
 }
 
 size_t formatStatus(const char* model, const char* deviceId, const char* firmware, const bool inWindow, char* out,
-                    const size_t capacity) {
+                    const size_t capacity, const bool appWake) {
   if (!out || capacity == 0) return 0;
-  return finishRecord(
-      snprintf(out, capacity, "V=1;MODEL=%s;ID=%s;FW=%s;CAP=AP,HTTP,SD,COMMIT1,READ1;WIN=%d", model ? model : "X4",
-               deviceId ? deviceId : "", firmware ? firmware : "unknown", inWindow ? 1 : 0),
-      out, capacity);
+  return finishRecord(snprintf(out, capacity, "V=1;MODEL=%s;ID=%s;FW=%s;CAP=AP,HTTP,SD,COMMIT1,READ1%s;WIN=%d",
+                               model ? model : "X4", deviceId ? deviceId : "", firmware ? firmware : "unknown",
+                               appWake    ? ",WAKE1,WIFI1"
+                               : inWindow ? ""
+                                          : ",WIFI1",
+                               inWindow ? 1 : 0),
+                      out, capacity);
 }
 
 uint32_t crcUpdate(const uint32_t crc, const void* data, const size_t length) {
@@ -298,6 +315,7 @@ bool RecordQueue::pop(char* out, const size_t capacity, size_t& length, const ui
     const bool current = generations[slot] == generation;
     memcpy(out, records[slot], size);
     out[size] = '\0';
+    memset(records[slot], 0, sizeof(records[slot]));
     tail.store(readAt + 1, std::memory_order_release);
     if (current) {
       length = size;
@@ -307,6 +325,7 @@ bool RecordQueue::pop(char* out, const size_t capacity, size_t& length, const ui
 }
 
 void RecordQueue::clear() {
+  memset(records, 0, sizeof(records));
   head.store(0, std::memory_order_release);
   tail.store(0, std::memory_order_release);
   overflow.store(false, std::memory_order_release);

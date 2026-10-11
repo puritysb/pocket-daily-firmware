@@ -78,6 +78,7 @@ struct Strings {
   const char* weatherHint = "";
   const char* nextEvent = "Next event";
   const char* today = "Today";
+  const char* noEvents = "No saved events";
   const char* home = "Home";
   const char* select = "Select";
   const char* articles = "Articles";

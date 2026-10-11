@@ -2947,6 +2947,7 @@ void EpubReaderActivity::updateBookmarkFlag() {
 ScreenshotInfo EpubReaderActivity::getScreenshotInfo() const {
   ScreenshotInfo info;
   info.readerType = ScreenshotInfo::ReaderType::Epub;
+  info.pageRendered = pageRendered.load(std::memory_order_acquire);
   if (epub) {
     snprintf(info.title, sizeof(info.title), "%s", epub->getTitle().c_str());
     info.spineIndex = currentSpineIndex;

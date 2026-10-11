@@ -41,7 +41,12 @@
 #include "platform/UsbSerialJtagHandoff.h"
 #include "pocket_daily/StagedFirmwareStore.h"
 #include "pocket_daily/boot/ProductBoot.h"
+#include "pocket_daily/boot/StandbyReturn.h"
+#include "pocket_daily/dev/ScreenCapture.h"
+#include "pocket_daily/nearby_sync/DevSleepCycle.h"
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
+#include "pocket_daily/nearby_sync/ExchangeWindowMemory.h"
+#include "pocket_daily/nearby_sync/WifiSetup.h"
 #include "pocket_daily/staged_firmware.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
@@ -72,6 +77,7 @@ SdCardFontSystem sdFontSystem;
 FontCacheManager fontCacheManager(renderer.getFontMap(), renderer.getSdCardFonts(), renderer.getTtfFonts());
 static unsigned long allowSleepAt = 0;
 static unsigned long lastX4ProPowerClickAt = 0;
+RTC_NOINIT_ATTR PocketDaily::Boot::StandbyTicket standbyTicket;
 
 namespace {
 constexpr unsigned long X4PRO_POWER_DOUBLE_CLICK_MS = 500;
@@ -281,6 +287,14 @@ static bool loadSleepFrameBuffer() {
 
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout = false) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  Pocket::NearbySync::DevSleepCycle::startedOnWifi(WiFi.status() == WL_CONNECTED);
+  Pocket::NearbySync::DevSleepCycle::checkpoint(Pocket::NearbySync::DevSleepCycle::Checkpoint::WifiEntry,
+                                                powerManager.getBatteryPercentage());
+#endif
+  // A wake/book-close window may still own the radio. Reclaim it before the
+  // sleep paint can load fonts; after releasing the frame, start a fresh window.
+  Pocket::NearbySync::Window::close(Pocket::NearbySync::Window::CloseReason::SLEEP_FRAME);
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
 
@@ -311,6 +325,13 @@ void enterDeepSleep(bool fromTimeout = false) {
     activityManager.goToSleep(fromTimeout);
   }
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (Pocket::NearbySync::DevSleepCycle::timerRequested()) {
+    RenderLock lock;
+    if (!PocketDaily::DevCapture::save(Pocket::NearbySync::DevSleepCycle::runNumber()))
+      LOG_ERR("VISUAL", "Sleep capture failed");
+  }
+#endif
   if (isQuickResumeSleep) {
     saveSleepFrameBuffer();
   } else if (Storage.exists(SLEEP_FRAME_FILE)) {
@@ -318,11 +339,83 @@ void enterDeepSleep(bool fromTimeout = false) {
     Storage.remove(SLEEP_FRAME_FILE);
   }
 
+#ifdef ENABLE_BLE_STANDBY
+  // The outgoing network activity has stopped its servers in onExit(). Return
+  // the Wi-Fi driver heap before admitting BLE, including sleep from Sync.
+  if (WiFi.getMode() != WIFI_MODE_NULL && Pocket::NearbySync::Window::standbyEligible()) {
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+  }
+#endif
+
   // Pocket Reading Sync: the sleep frame is on the panel; give a paired phone
   // 20 s to exchange places (docs/reading-sync-ble-v1.md), then sleep. Never
   // while Wi-Fi is up: BLE and Wi-Fi stay mutually exclusive.
   if (WiFi.getMode() == WIFI_MODE_NULL) {
-    Pocket::NearbySync::Window::runBeforeDeepSleep(activityManager.renderCount());
+    // The saved image is retained by the panel. Give its actual RAM back to
+    // NimBLE; this path never reallocates it before the terminal sleep/reset.
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    const uint32_t beforeFree = ESP.getFreeHeap(), beforeBlock = ESP.getMaxAllocHeap();
+#endif
+    const bool released = Pocket::NearbySync::Window::releaseSleepFrame(renderer);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    Pocket::NearbySync::DevSleepCycle::frameReleased(beforeFree, beforeBlock, ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
+                                                     renderer.getBufferSize(), released);
+    Pocket::NearbySync::DevSleepCycle::checkpoint(Pocket::NearbySync::DevSleepCycle::Checkpoint::FrameReleased,
+                                                  powerManager.getBatteryPercentage());
+#else
+    (void)released;
+#endif
+    bool allowStandby = true;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    const bool devCycleActive = Pocket::NearbySync::DevSleepCycle::active();
+    allowStandby = !devCycleActive || Pocket::NearbySync::DevSleepCycle::standbyRequested();
+#endif
+    if (released && allowStandby && Pocket::NearbySync::Window::standbyEligible()) {
+      halTiltSensor.deepSleep();
+      display.deepSleep();
+      powerLock.release();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+      Pocket::NearbySync::DevSleepCycle::checkpoint(Pocket::NearbySync::DevSleepCycle::Checkpoint::BeforeLightSleep,
+                                                    powerManager.getBatteryPercentage());
+#endif
+      if (powerManager.beginBleStandby()) {
+        uint32_t deadline = 0;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        if (devCycleActive) deadline = 180000;  // recover remotely if the app never arrives
+#endif
+        const uint32_t standbyStarted = millis();
+        const auto outcome = Pocket::NearbySync::Window::runStandby(renderer, deadline);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        if (devCycleActive) {
+          Pocket::NearbySync::DevSleepCycle::standbyEvidence(
+              powerManager.bleStandbySleepCount(), powerManager.bleStandbySleepMillis(), millis() - standbyStarted);
+          Pocket::NearbySync::DevSleepCycle::complete(Pocket::NearbySync::Window::statistics());
+        }
+#else
+        (void)standbyStarted;
+#endif
+        if (outcome != Pocket::NearbySync::Window::StandbyExit::DeepSleep) {
+          using PocketDaily::Boot::StandbyReturn;
+          PocketDaily::Boot::armStandbyReturn(
+              standbyTicket, outcome == Pocket::NearbySync::Window::StandbyExit::SameWifi ? StandbyReturn::SameWifi
+                                                                                          : StandbyReturn::Reader);
+          Storage.prepareForDeepSleep();
+          ESP.restart();
+          for (;;) delay(1000);
+        }
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        if (devCycleActive) {
+          Storage.prepareForDeepSleep();
+          ESP.restart();  // the pre-armed LAN route exposes the failed trial
+          for (;;) delay(1000);
+        }
+#endif
+        Storage.prepareForDeepSleep();
+        powerManager.startDeepSleep(gpio);
+      }
+    }
+    Pocket::NearbySync::Window::runBeforeDeepSleep(activityManager.renderCount(), renderer);
   } else {
     Pocket::NearbySync::Window::close(Pocket::NearbySync::Window::CloseReason::RADIO_OWNER);
   }
@@ -336,9 +429,26 @@ void enterDeepSleep(bool fromTimeout = false) {
 
   halTiltSensor.deepSleep();
   display.deepSleep();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  const bool devCycle = Pocket::NearbySync::DevSleepCycle::active();
+  const bool devTimer =
+      devCycle && Pocket::NearbySync::DevSleepCycle::timerRequested() && powerManager.armDevSleepTimer();
+  if (devCycle) {
+    Pocket::NearbySync::DevSleepCycle::timerArmed(devTimer);
+    Pocket::NearbySync::DevSleepCycle::complete(Pocket::NearbySync::Window::statistics());
+  }
+#endif
   Storage.prepareForDeepSleep();
   LOG_DBG("MAIN", "Entering deep sleep");
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  // Software return is the default experiment; an explicit X3 timer trial
+  // continues through real deep sleep and rejoins Wi-Fi after the timer wake.
+  if (devCycle && !devTimer) {
+    ESP.restart();
+    for (;;) delay(1000);
+  }
+#endif
   powerManager.startDeepSleep(gpio);
 }
 
@@ -417,6 +527,8 @@ void setup() {
 
   gpio.begin();
   powerManager.begin();
+  Pocket::NearbySync::WifiSetup::beginBoot(HalSystem::isSoftwareRestart());
+  const auto standbyReturn = PocketDaily::Boot::consumeStandbyReturn(standbyTicket, HalSystem::isSoftwareRestart());
 
   const auto wakeupReason = gpio.getWakeupReason();
   // Sample the wake hold now — a click wake is released within milliseconds of
@@ -462,7 +574,8 @@ void setup() {
 
   PocketDaily::Boot::beginNetHealth();
   APP_STATE.loadFromFile();
-  const bool isSleepWake = wakeupReason == HalGPIO::WakeupReason::PowerButton;
+  const bool isSleepWake =
+      wakeupReason == HalGPIO::WakeupReason::PowerButton || standbyReturn != PocketDaily::Boot::StandbyReturn::None;
   const bool isPersistedSleepWake = isSleepWake && !APP_STATE.showBootScreen;
 
   if (recoveryFirmwareMode) {
@@ -503,6 +616,8 @@ void setup() {
   const bool restoreLightOn =
       isSilentReboot ? silentRebootLightOn : (SETTINGS.frontlightOn != 0 && SETTINGS.frontlightRestoreOnWake != 0);
   Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, restoreLightOn);
+
+  if (standbyReturn == PocketDaily::Boot::StandbyReturn::Reader) wakePowerReleasePending = true;
 
   switch (wakeupReason) {
     case HalGPIO::WakeupReason::PowerButton:
@@ -587,6 +702,15 @@ void setup() {
   // Consume even on recovery/crash boots: those routes take precedence, but
   // must not leave a stale automatic radio request for a later normal boot.
   const auto devBootReturn = PocketDaily::Boot::consumeDevBootReturn();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  // A failed explicit experiment returns to its pre-armed LAN route so its
+  // crash report can be inspected remotely. Ordinary crash boots are unchanged.
+  const bool devCycleInterrupted =
+      devBootReturn == PocketDaily::Boot::DevBootReturn::SyncSta &&
+      (Pocket::NearbySync::DevSleepCycle::interruptIfRunning() || PocketDaily::DevCapture::recoverReader());
+#else
+  constexpr bool devCycleInterrupted = false;
+#endif
   // Pocket seam: true when this boot is a transfer session's teardown restart
   // landing on the Pocket Daily or Library shell (staged-firmware offer).
   bool landsOnShell = false;
@@ -594,15 +718,34 @@ void setup() {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
     activityManager.replaceActivity(
         std::make_unique<SdFirmwareUpdateActivity>(renderer, mappedInputManager, /*recoveryMode=*/true));
-  } else if (HalSystem::isRebootFromCrash()) {
+  } else if (HalSystem::isRebootFromCrash() && !devCycleInterrupted) {
     // Panic, watchdog and power-fault resets all leave an SD report. Surface it
     // immediately instead of silently resuming into the failing interaction.
     activityManager.goToCrashReport();
+  } else if (Pocket::NearbySync::WifiSetup::wantsJoin()) {
+    activityManager.goToPocketNearbySync(true);
+  } else if (Pocket::NearbySync::WifiSetup::wantsBluetooth()) {
+    activityManager.goToPocketNearbySync();
+  } else if (standbyReturn == PocketDaily::Boot::StandbyReturn::SameWifi) {
+    activityManager.goToPocketNearbySync(true);
   } else if (devBootReturn != PocketDaily::Boot::DevBootReturn::None) {
     // Dev loop only: consume the one-shot marker before reconnecting. Missing
     // credentials or association failure leaves the normal Wi-Fi chooser.
     using PocketDaily::Boot::DevBootReturn;
-    if (devBootReturn == DevBootReturn::SyncSta || devBootReturn == DevBootReturn::SyncMenu)
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    if (devBootReturn == DevBootReturn::ReaderCapture) {
+      if (!PocketDaily::DevCapture::beginReader()) activityManager.goToPocketNearbySync(true);
+    } else if (devBootReturn == DevBootReturn::BleSleepCycle) {
+      if (Pocket::NearbySync::DevSleepCycle::begin()) {
+        if (Pocket::NearbySync::DevSleepCycle::standbyRequested())
+          activityManager.goToPocketNearbySync(true);
+        else
+          activityManager.goToPocketDaily();
+      } else
+        activityManager.goToPocketNearbySync(true);
+    } else
+#endif
+        if (devBootReturn == DevBootReturn::SyncSta || devBootReturn == DevBootReturn::SyncMenu)
       activityManager.goToPocketNearbySync(devBootReturn == DevBootReturn::SyncSta);
     else
       activityManager.goToFileTransfer(devBootReturn == DevBootReturn::FileTransferSta);
@@ -701,6 +844,17 @@ void loop() {
 
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
   mappedInputManager.update();
+
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (Pocket::NearbySync::DevSleepCycle::active() && millis() >= allowSleepAt &&
+      (!Pocket::NearbySync::DevSleepCycle::standbyRequested() || WiFi.status() == WL_CONNECTED ||
+       millis() - allowSleepAt >= 30000)) {
+    activityManager.loop();
+    activityManager.requestUpdateAndWait();
+    enterDeepSleep();
+    return;
+  }
+#endif
 
   if (activityManager.requiresExclusiveStorageLoop()) {
     // USB Drive handed the raw SD card to the host. Do not run screenshots,
@@ -904,11 +1058,14 @@ void loop() {
 
   const unsigned long activityStartTime = millis();
   activityManager.loop();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  PocketDaily::DevCapture::readerLoop();
+#endif
   [[maybe_unused]] const unsigned long activityDuration = millis() - activityStartTime;
   // Pocket Reading Sync exchange windows: opened on the shell, served and
   // closed from this loop (docs/reading-sync-ble-v1.md).
   Pocket::NearbySync::Window::loop(activityManager.allowsExchangeWindow() && WiFi.getMode() == WIFI_MODE_NULL,
-                                   activityManager.renderCount());
+                                   activityManager.renderCount(), renderer);
 
   const unsigned long loopDuration = millis() - loopStartTime;
   if (loopDuration > maxLoopDuration) {

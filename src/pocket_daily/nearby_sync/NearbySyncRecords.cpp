@@ -28,6 +28,7 @@ void Service::onCommandRecord(const char* bytes, const size_t length) {
 }
 
 bool Service::takeCommand(ParsedCommand& command) {
+  memset(current_, 0, sizeof(current_));
   size_t length = 0;
   while (queue_.pop(current_, sizeof(current_), length, connectionGeneration())) {
     switch (parseCommand(current_, length, command)) {

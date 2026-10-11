@@ -30,13 +30,18 @@ class HalDisplay {
     return nullptr;
   }
   void returnFrameBufferStorage() {}
+  bool releaseFrameBufferForSleep() {
+    if (bytes_.empty()) return false;
+    std::vector<uint8_t>().swap(bytes_);
+    return true;
+  }
   static constexpr uint16_t DISPLAY_WIDTH = 800, DISPLAY_HEIGHT = 480, DISPLAY_WIDTH_BYTES = 100;
   static constexpr uint32_t BUFFER_SIZE = 48000;
   explicit HalDisplay(uint16_t width = DISPLAY_WIDTH, uint16_t height = DISPLAY_HEIGHT)
       : width_(width), height_(height), bytes_(checkedSize(width, height), 0xA5) {
     clearScreen();
   }
-  uint8_t* getFrameBuffer() const { return bytes_.data() + 16; }
+  uint8_t* getFrameBuffer() const { return bytes_.empty() ? nullptr : bytes_.data() + 16; }
   uint16_t getDisplayWidth() const { return width_; }
   uint16_t getDisplayHeight() const { return height_; }
   uint16_t getDisplayWidthBytes() const { return width_ / 8; }
@@ -44,6 +49,7 @@ class HalDisplay {
   void clearScreen(uint8_t color = 0xFF) const { std::fill_n(getFrameBuffer(), getBufferSize(), color); }
   void displayBuffer(RefreshMode = FAST_REFRESH, bool = false) { ++presentations; }
   bool guardsIntact() const {
+    if (bytes_.empty()) return true;
     return std::all_of(bytes_.begin(), bytes_.begin() + 16, [](auto b) { return b == 0xA5; }) &&
            std::all_of(bytes_.end() - 16, bytes_.end(), [](auto b) { return b == 0xA5; });
   }

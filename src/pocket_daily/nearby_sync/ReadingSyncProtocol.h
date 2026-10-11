@@ -18,7 +18,7 @@ inline constexpr size_t MAX_DATA_CHUNK = 180;
 inline constexpr size_t MAX_OFFER_TOTAL = 1024;
 inline constexpr size_t REQUEST_ID_LENGTH = 8;
 
-enum class Verb : uint8_t { NONE, PING, START_AP, CANCEL, READ_LIST, OFFER, WRITE };
+enum class Verb : uint8_t { NONE, PING, START_AP, CANCEL, READ_LIST, OFFER, WRITE, START_WIFI, WIFI_JOIN };
 
 enum class ParseResult : uint8_t {
   OK,
@@ -60,7 +60,7 @@ size_t formatData(const char* requestId, uint32_t seq, const char* chunk, size_t
 size_t formatEnd(const char* requestId, uint32_t totalBytes, uint32_t crc, char* out, size_t capacity);
 // Status characteristic value: v1 status plus READ1 and WIN=1|0.
 size_t formatStatus(const char* model, const char* deviceId, const char* firmware, bool inWindow, char* out,
-                    size_t capacity);
+                    size_t capacity, bool appWake = false);
 
 // CRC-32 (IEEE 802.3, reflected 0xEDB88320; zlib crc32 and Swift's matching
 // implementation). Start with CRC_START, finish with crcFinish.

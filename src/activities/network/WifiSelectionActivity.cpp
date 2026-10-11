@@ -11,10 +11,12 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "SilentRestart.h"
 #include "WifiCredentialStore.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "pocket_daily/nearby_sync/WifiSetup.h"
 
 namespace fui = freeink::ui;
 
@@ -140,6 +142,16 @@ void WifiSelectionActivity::onEnter() {
   // Trigger first update to show scanning message
   requestUpdate();
 
+  if (Pocket::NearbySync::WifiSetup::wantsJoin()) {
+    const auto& candidate = Pocket::NearbySync::WifiSetup::current();
+    selectedSSID = candidate.ssid;
+    enteredPassword = candidate.password;
+    selectedRequiresPassword = !enteredPassword.empty();
+    appWifiSetup = true;
+    attemptConnection();
+    return;
+  }
+
   // Attempt to auto-connect to known networks. Try the last successful
   // network first for speed, then scan and try any visible saved networks by
   // signal strength. The user can interrupt this and show the scan result.
@@ -162,6 +174,9 @@ void WifiSelectionActivity::onEnter() {
 
 void WifiSelectionActivity::onExit() {
   Activity::onExit();
+  if (appWifiSetup) Pocket::NearbySync::WifiSetup::complete(Pocket::NearbySync::WifiSetup::Result::Failed);
+  std::fill(enteredPassword.begin(), enteredPassword.end(), '\0');
+  enteredPassword.clear();
 
   LOG_DBG("WIFI", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
 
@@ -422,6 +437,11 @@ bool WifiSelectionActivity::tryNextSavedNetworkFromScan() {
 }
 
 void WifiSelectionActivity::handleAutoConnectFailure() {
+  if (Pocket::NearbySync::WifiSetup::current().result == Pocket::NearbySync::WifiSetup::Result::Failed) {
+    Pocket::NearbySync::WifiSetup::prepareBluetooth();
+    silentRestartToPocketNearbySync();
+    return;
+  }
   LOG_DBG("WIFI", "Saved network failed: %s", selectedSSID.c_str());
   WiFi.disconnect();
 
@@ -517,6 +537,21 @@ void WifiSelectionActivity::checkConnectionStatus() {
             WiFi.RSSI());
 #endif
 
+    if (appWifiSetup) {
+      bool saved = false;
+      {
+        RenderLock lock(*this);
+        saved = WIFI_STORE.saveProvisionedCredential(selectedSSID, enteredPassword);
+      }
+      Pocket::NearbySync::WifiSetup::complete(saved ? Pocket::NearbySync::WifiSetup::Result::Saved
+                                                    : Pocket::NearbySync::WifiSetup::Result::SaveFailed);
+      appWifiSetup = false;
+      std::fill(enteredPassword.begin(), enteredPassword.end(), '\0');
+      enteredPassword.clear();
+      onComplete(true);
+      return;
+    }
+
     // Sync RTC from NTP on the first successful WiFi connection only. The DS3231
     // drifts ~2 ppm so one sync is enough; users can force a re-sync from
     // Settings > System > Clock > Sync clock now.
@@ -551,6 +586,10 @@ void WifiSelectionActivity::checkConnectionStatus() {
   }
 
   if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) {
+    if (appWifiSetup) {
+      failAppWifiSetup();
+      return;
+    }
     connectionError = tr(STR_ERROR_GENERAL_FAILURE);
     if (status == WL_NO_SSID_AVAIL) {
       connectionError = tr(STR_ERROR_NETWORK_NOT_FOUND);
@@ -567,6 +606,10 @@ void WifiSelectionActivity::checkConnectionStatus() {
   // Check for timeout
   const unsigned long timeoutMs = autoConnecting ? AUTO_CONNECTION_TIMEOUT_MS : CONNECTION_TIMEOUT_MS;
   if (millis() - connectionStartTime > timeoutMs) {
+    if (appWifiSetup) {
+      failAppWifiSetup();
+      return;
+    }
     WiFi.disconnect();
     connectionError = tr(STR_ERROR_CONNECTION_TIMEOUT);
     if (autoConnecting) {
@@ -577,6 +620,19 @@ void WifiSelectionActivity::checkConnectionStatus() {
     requestUpdate();
     return;
   }
+}
+
+void WifiSelectionActivity::failAppWifiSetup() {
+  Pocket::NearbySync::WifiSetup::complete(Pocket::NearbySync::WifiSetup::Result::Failed);
+  appWifiSetup = false;
+  std::fill(enteredPassword.begin(), enteredPassword.end(), '\0');
+  enteredPassword.clear();
+  // Restore the last working network without changing its saved credentials.
+  const auto previous = WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid());
+  if (previous && tryAutoConnectCredential(*previous)) return;
+  // No old network: return to secure Bluetooth so the app can retry.
+  Pocket::NearbySync::WifiSetup::prepareBluetooth();
+  silentRestartToPocketNearbySync();
 }
 
 void WifiSelectionActivity::loop() {

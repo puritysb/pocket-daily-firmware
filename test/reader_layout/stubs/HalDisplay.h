@@ -35,6 +35,11 @@ class HalDisplay {
     return nullptr;
   }
   void returnFrameBufferStorage() {}
+  bool releaseFrameBufferForSleep() {
+    if (fb_.empty()) return false;
+    std::vector<uint8_t>().swap(fb_);
+    return true;
+  }
   static constexpr uint16_t DISPLAY_WIDTH = 792, DISPLAY_HEIGHT = 528, DISPLAY_WIDTH_BYTES = 99;
   static constexpr uint32_t BUFFER_SIZE = 99u * 528u;
   explicit HalDisplay(uint16_t = DISPLAY_WIDTH, uint16_t = DISPLAY_HEIGHT)

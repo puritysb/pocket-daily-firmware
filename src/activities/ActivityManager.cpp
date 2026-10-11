@@ -73,7 +73,9 @@ void ActivityManager::renderTaskLoop() {
     // Acquire the lock before reading currentActivity to avoid a TOCTOU race
     // where the main task deletes the activity between the null-check and render().
     RenderLock lock;
-    if (currentActivity) {
+    // A terminal sleep transition can return the framebuffer to the radio.
+    // Test under the same lock as its release, including queued notifications.
+    if (currentActivity && renderer.hasFrameBuffer()) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
       DEV_TRACE(PocketDaily::DevTrace::RENDER_START);
       // Night mode is a global output polarity applied to every activity.

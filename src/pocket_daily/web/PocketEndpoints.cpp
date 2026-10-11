@@ -35,6 +35,7 @@
 #include "pocket_daily/live_studio/HeapMap.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/live_studio/StackReport.h"
+#include "pocket_daily/nearby_sync/WifiSetup.h"
 #include "pocket_daily/staged_firmware.h"
 #include "pocket_daily/web/DisplayState.h"
 #include "pocket_daily/web/ExactRouteDispatch.h"
@@ -46,7 +47,15 @@
 #include "pocket_daily/web/TcpCensus.h"
 #include "util/BookCacheUtils.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
+#include <HalDisplay.h>
+#include <HalPowerManager.h>
+
+#include "activities/RenderLock.h"
+#include "pocket_daily/dev/ScreenCapture.h"
+#include "pocket_daily/nearby_sync/DevSleepCycle.h"
+#include "pocket_daily/nearby_sync/ExchangeWindowPolicy.h"
 #include "pocket_daily/product_identity.h"
+#include "util/ScreenshotUtil.h"
 #endif
 
 namespace PocketDaily::Web {
@@ -590,6 +599,103 @@ void handleCrashReport(WebServer& server) {
   LOG_DBG("WEB", "Crash report chunk offset=%u bytes=%u total=%u", static_cast<unsigned>(offset),
           static_cast<unsigned>(count), static_cast<unsigned>(reportSize));
 }
+
+#ifdef ENABLE_DEV_REMOTE_FLASH
+// One developer-owned SD image, never a second framebuffer. Only a completed
+// Home/Brief presentation can be captured, under the same lock as the painter.
+// Bounded download pieces reuse the existing firmware staging buffer.
+constexpr const char* kScreenCapturePath = DevCapture::PATH;
+
+// Keep the 88-byte card receipt out of the HTTP/chunk handler's stack frame.
+__attribute__((noinline)) bool matchesCapture(WebServer& server, const RouteDeps& d, uint32_t generation) {
+  if (server.arg("surface") == "card" && d.presentation.state) {
+    const auto receipt = d.presentation.state(d.presentation.self);
+    return receipt.phase == Content::PresentationPhase::Rendered && receipt.generation == generation &&
+           server.arg("revision") == receipt.revision;
+  }
+  const auto receipt = d.screen.state(d.screen.self);
+  return receipt.phase == Content::PresentationPhase::Rendered && receipt.generation == generation &&
+         DailyProfile::generation() == generation && server.arg("surface") == surfaceName(receipt.surface);
+}
+
+void handleDevScreenCapture(WebServer& server, const RouteDeps& d) {
+  char deviceId[9];
+  if (!admitContentOperation(server, d, deviceId)) return;
+  uint32_t run = 0;
+  const String runArg = server.arg("run");
+  if (!parseGeneration({runArg.c_str(), runArg.length()}, run) || !run) {
+    server.send(400, "text/plain", "Invalid capture run");
+    return;
+  }
+  if (server.method() == HTTP_POST) {
+    uint32_t generation = 0;
+    const String generationArg = server.arg("generation");
+    if (!parseGeneration({generationArg.c_str(), generationArg.length()}, generation) || !d.screen.state) {
+      server.send(400, "text/plain", "Invalid capture generation");
+      return;
+    }
+    RenderLock lock(RenderLock::Mode::Try);
+    if (!lock.ownsLock()) {
+      server.send(409, "text/plain", "Reader is drawing");
+      return;
+    }
+    if (!matchesCapture(server, d, generation) || display.isInverted()) {
+      lock.unlock();
+      server.send(409, "text/plain", "No matching completed normal-polarity screen");
+      return;
+    }
+    const bool saved = DevCapture::save(run);
+    lock.unlock();
+    if (!saved) {
+      server.send(500, "text/plain", "Screen capture could not be saved");
+      return;
+    }
+    server.send(204, "text/plain", "");
+    return;
+  }
+  if (DevCapture::savedRun() != run) {
+    server.send(409, "text/plain", "Capture run mismatch");
+    return;
+  }
+  if (server.method() == HTTP_DELETE) {
+    if (!DevCapture::remove(run)) {
+      server.send(500, "text/plain", "Capture cleanup failed");
+      return;
+    }
+    server.send(204, "text/plain", "");
+    return;
+  }
+  uint32_t offset = 0;
+  const String offsetArg = server.arg("offset");
+  if (!parseGeneration({offsetArg.c_str(), offsetArg.length()}, offset)) {
+    server.send(400, "text/plain", "Invalid capture offset");
+    return;
+  }
+  HalFile file = Storage.open(kScreenCapturePath);
+  if (!file || offset >= file.size() || !file.seek(offset)) {
+    server.send(416, "text/plain", "Capture offset unavailable");
+    return;
+  }
+  const size_t total = file.size();
+  const size_t count = std::min(total - static_cast<size_t>(offset), CRASH_REPORT_CHUNK_BYTES);
+  uint8_t* body = firmware_flash::sharedStagingBuffer();
+  const int read = file.read(body, count);
+  file.close();
+  if (read != static_cast<int>(count)) {
+    server.send(500, "text/plain", "Capture read failed");
+    return;
+  }
+  server.client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
+  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("X-Capture-Run", String(run));
+  server.sendHeader("X-Capture-Size", String(static_cast<unsigned>(total)));
+  server.setContentLength(count);
+  feedLoopWDT();
+  server.send(200, "application/octet-stream", "");
+  server.sendContent(reinterpret_cast<const char*>(body), count);
+  feedLoopWDT();
+}
+#endif
 
 // docs/reader-files.md "Reader file download": one bounded piece per request.
 static_assert(kDownloadPieceSameWifi <= firmware_flash::STAGING_BUFFER_BYTES, "piece must fit the staging buffer");
@@ -1174,6 +1280,114 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
 }
 
 #ifdef ENABLE_DEV_REMOTE_FLASH
+void handleDevReaderCapture(WebServer& server, const RouteDeps& d) {
+  char identity[9];
+  if (!admitContentOperation(server, d, identity)) return;
+  uint32_t run = 0;
+  const String arg = server.arg("run");
+  if (d.apMode || !parseGeneration({arg.c_str(), arg.length()}, run) || !run) {
+    server.send(400, "text/plain", "Requires Same Wi-Fi and a nonzero run");
+    return;
+  }
+  if (!DevCapture::requestReader(run)) {
+    server.send(409, "text/plain", "Missing reader fixture or request could not be saved");
+    return;
+  }
+  server.sendHeader("Connection", "close");
+  server.send(202, "text/plain", "Reader capture scheduled; automatic Same Wi-Fi return");
+  delay(750);
+  ESP.restart();
+}
+
+void handleDevBleCycle(WebServer& server, const RouteDeps& d) {
+  if (d.apMode || (d.host.httpUploadBusy && d.host.httpUploadBusy(d.host.self)) ||
+      (d.stream && d.stream->receiving())) {
+    server.send(409, "text/plain", "Requires idle Same Wi-Fi");
+    return;
+  }
+  const String argument = server.arg("run");
+  uint32_t run = 0;
+  if (!parseGeneration(std::string_view(argument.c_str(), argument.length()), run) || !run) {
+    server.send(400, "text/plain", "run must be a nonzero uint32");
+    return;
+  }
+  using Pocket::NearbySync::DevSleepCycle::ReturnMode;
+  const String sleep = server.arg("sleep");
+  bool standbySupported = false;
+#ifdef ENABLE_BLE_STANDBY
+  standbySupported = gpio.deviceIsX3();
+#endif
+  if ((sleep != "" && sleep != "timer" && sleep != "standby") || (sleep == "timer" && !gpio.deviceIsX3()) ||
+      (sleep == "standby" && !standbySupported)) {
+    server.send(400, "text/plain", "timer sleep is supported only for X3 trials");
+    return;
+  }
+  const auto mode = sleep == "standby" ? ReturnMode::AppStandby
+                    : sleep == "timer" ? ReturnMode::TimedDeepSleep
+                                       : ReturnMode::Restart;
+  if (!Pocket::NearbySync::DevSleepCycle::request(run, mode)) {
+    server.send(503, "text/plain", "Could not verify the one-shot experiment request");
+    return;
+  }
+  server.sendHeader("Connection", "close");
+  server.send(202, "text/plain", "BLE sleep-path test scheduled; automatic Same Wi-Fi return");
+  delay(750);
+  ESP.restart();
+}
+
+void handleDevBleCycleResult(WebServer& server) {
+  using namespace Pocket::NearbySync;
+  // At most 208 B, request-local: alongside JSON encoding it would exceed the
+  // stack-frame budget. No allocation is retained during BLE measurement.
+  auto record = makeUniqueNoThrow<DevSleepCycle::Record>();
+  if (!record) {
+    server.send(503, "text/plain", "No result memory");
+    return;
+  }
+  if (!DevSleepCycle::read(*record)) {
+    server.send(404, "text/plain", "No verified cycle record");
+    return;
+  }
+  JsonDocument doc;
+  doc["run"] = record->run;
+  doc["state"] = static_cast<uint32_t>(record->state);
+  doc["returnMode"] = static_cast<uint32_t>(record->returnMode);
+  doc["timerArmed"] = record->timerArmed != 0;
+  doc["checkpoint"] = static_cast<uint32_t>(record->checkpoint);
+  doc["batteryPercent"] = record->batteryPercent;
+  doc["timerWake"] = powerManager.devWokeFromTimer();
+  doc["lightSleeps"] = record->lightSleeps;
+  doc["lightSleepMs"] = record->lightSleepMs;
+  doc["standbyMs"] = record->standbyMs;
+  doc["fromWifi"] = record->fromWifi != 0;
+  doc["frameReleased"] = record->released != 0;
+  doc["frameBytes"] = record->frameBytes;
+  doc["beforeFree"] = record->beforeFree;
+  doc["beforeBlock"] = record->beforeBlock;
+  doc["afterFree"] = record->afterFree;
+  doc["afterBlock"] = record->afterBlock;
+  doc["statsValid"] = Stats::valid(record->result);
+  const auto& result = record->result;
+  doc["opened"] = result.opened - record->baseline.opened;
+  doc["connections"] = result.connections - record->baseline.connections;
+  doc["lists"] = result.lists - record->baseline.lists;
+  doc["offers"] = result.offers - record->baseline.offers;
+  doc["gate"] = Window::gateName(static_cast<Window::Gate>(result.lastGate));
+  doc["close"] = Window::closeReasonName(static_cast<Window::CloseReason>(result.lastClose));
+  doc["startFree"] = result.startFree;
+  doc["startBlock"] = result.startBlock;
+  doc["openFree"] = result.openFree;
+  doc["openBlock"] = result.openBlock;
+  doc["minFree"] = result.minFree;
+  doc["minBlock"] = result.minBlock;
+  doc["closedFree"] = result.closedFree;
+  doc["closedBlock"] = result.closedBlock;
+  String response;
+  serializeJson(doc, response);
+  server.sendHeader("Connection", "close");
+  server.send(200, "application/json", response);
+}
+
 // Developer builds only. Validates and flashes the staged /update.bin, then
 // reboots; a one-shot marker makes the next boot rejoin the saved STA network.
 // Missing credentials fall back to the normal Wi-Fi chooser. The response is sent before
@@ -1277,6 +1491,18 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     });
   }
   if (isSyncProfile(d.profile)) {
+    routes.on("/api/pocket/v1/wifi/setup", HTTP_POST, [server = &server, deps = &d] {
+      char deviceId[9];
+      const String claimed = server->arg("deviceID");
+      if (!admitOperationFor(*server, *deps, deviceId, claimed.c_str())) return;
+      if (server->hasArg("plain") && server->arg("plain").length()) {
+        server->send(400, "text/plain", "No credentials accepted over HTTP");
+        return;
+      }
+      Pocket::NearbySync::WifiSetup::prepareBluetooth();
+      server->sendHeader("Cache-Control", "no-store");
+      server->send(200, "application/json", "{\"bluetooth\":true}");
+    });
     routes.on("/api/pocket/v1/session/end", HTTP_POST,
               [server = &server, deps = &d] { handleSessionEnd(*server, *deps); });
   }
@@ -1409,6 +1635,22 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     note(*deps);
     handleDevFlash(*server, *deps);
   });
+  routes.on("/api/pocket/v1/dev/reader-capture", HTTP_POST,
+            [server = &server, deps = &d] { handleDevReaderCapture(*server, *deps); });
+  routes.on("/api/pocket/v1/dev/ble-cycle", HTTP_POST, [server = &server, deps = &d] {
+    note(*deps);
+    handleDevBleCycle(*server, *deps);
+  });
+  routes.on("/api/pocket/v1/dev/ble-cycle", HTTP_GET, [server = &server, deps = &d] {
+    note(*deps);
+    handleDevBleCycleResult(*server);
+  });
+  for (const auto method : {HTTP_POST, HTTP_GET, HTTP_DELETE}) {
+    routes.on("/api/pocket/v1/dev/screen-capture", method, [server = &server, deps = &d] {
+      note(*deps);
+      handleDevScreenCapture(*server, *deps);
+    });
+  }
   // Developer builds only: force one repaint (live-frame debugging).
   routes.on("/api/pocket/v1/dev/render", HTTP_POST, [server = &server, deps = &d] {
     note(*deps);

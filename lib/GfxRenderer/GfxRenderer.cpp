@@ -398,6 +398,15 @@ void GfxRenderer::releaseFrameBufferForBuild() {
   }
 }
 
+bool GfxRenderer::releaseFrameBufferForSleep() {
+  if (!frameBuffer || _stripActive ||
+      std::any_of(bwBufferChunks.begin(), bwBufferChunks.end(), [](const uint8_t* chunk) { return chunk != nullptr; }))
+    return false;
+  if (!display.releaseFrameBufferForSleep()) return false;
+  frameBuffer = nullptr;
+  return true;
+}
+
 bool GfxRenderer::restoreFrameBufferAfterBuild() {
   buildscratch::reclaim();
   display.returnFrameBufferStorage();  // cannot fail: the allocation was never freed

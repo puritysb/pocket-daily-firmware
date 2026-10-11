@@ -15,9 +15,12 @@
 #include <memory>
 
 #include "CrossPointSettings.h"
+#include "DevSleepCycle.h"
+#include "ExchangeWindowMemory.h"
 #include "NearbySyncService.h"
 #include "ReadSyncStats.h"
 #include "ReadingSyncSession.h"
+#include "pocket_daily/nearby_sync/WifiSetup.h"
 
 namespace Pocket::NearbySync::Window {
 namespace {
@@ -35,6 +38,8 @@ struct Runtime {
   ReadingSyncSession session{service};
   const char* model = "X4";
   UnbondedGrace grace;
+  bool appWake = false;
+  bool wifiRequested = false;
 };
 
 // Survives the restart into a Wi-Fi mode, so /api/status can report it.
@@ -64,7 +69,7 @@ void startTask(void* context) {
   auto* work = static_cast<Runtime*>(context);
   // Advertise until the window closes it: a sleep trigger can move the
   // deadline, and stopRadio() always ends advertising with NimBLE itself.
-  const bool started = work->service.begin(work->model, CROSSPOINT_VERSION, Mode::WINDOW, 0);
+  const bool started = work->service.begin(work->model, CROSSPOINT_VERSION, Mode::WINDOW, 0, work->appWake);
   startState.store(started ? StartState::SUCCEEDED : StartState::FAILED, std::memory_order_release);
   vTaskDelete(nullptr);
 }
@@ -110,15 +115,16 @@ void stopRadio() {
   HalSystem::setCrashBreadcrumb("readsync:window-closed");
 }
 
-void start() {
+void start(const GfxRenderer& renderer) {
   powerManager.setPowerSaving(false);  // the controller needs the normal CPU clock
   GateInput input;
   input.enabled = SETTINGS.pocketReadingSync != 0;
   input.bonded = input.enabled && hasStoredBond();
   input.batteryPercent = powerManager.getBatteryPercentage();
+  input.charging = gpio.deviceIsX3() && gpio.isUsbConnected();
   input.freeHeap = ESP.getFreeHeap();
   input.largestBlock = ESP.getMaxAllocHeap();
-  const Gate gate = evaluate(input);
+  const Gate gate = prepareWindowMemory(input, renderer);
   Stats::startAttempt(stats, static_cast<uint8_t>(controller.trigger()), static_cast<uint8_t>(gate), input.freeHeap,
                       input.largestBlock, gate == Gate::OPEN);
   if (gate != Gate::OPEN) {
@@ -138,6 +144,7 @@ void start() {
     return;
   }
   runtime->model = gpio.deviceIsX3() ? "X3" : "X4";
+  runtime->appWake = controller.trigger() == Trigger::STANDBY;
   HalSystem::setCrashBreadcrumb("readsync:window-start");
   LOG_INF("RSYNC", "window %s starting (heap %lu, block %lu, battery %u%%)", triggerName(controller.trigger()),
           static_cast<unsigned long>(input.freeHeap), static_cast<unsigned long>(input.largestBlock),
@@ -165,6 +172,10 @@ void finishStart() {
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t largestBlock = ESP.getMaxAllocHeap();
   Stats::ready(stats, freeHeap, largestBlock, readyAllowed(freeHeap, largestBlock));
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (readyAllowed(freeHeap, largestBlock))
+    DevSleepCycle::checkpoint(DevSleepCycle::Checkpoint::RadioReady, powerManager.getBatteryPercentage(), &stats);
+#endif
   if (!readyAllowed(freeHeap, largestBlock)) {
     controller.started(true, millis());
     controller.close(CloseReason::LOW_MEMORY);
@@ -199,6 +210,26 @@ void serve() {
   ParsedCommand command;
   while (service.takeCommand(command)) {
     switch (command.verb) {
+      case Verb::WIFI_JOIN:
+        if (!acceptsWifiWake(runtime->appWake, service.isAuthenticated())) {
+          service.notifyError(command.requestId, NOT_IN_SYNC);
+        } else if (!WifiSetup::receive(command)) {
+          service.notifyError(command.requestId, "BAD_WIFI");
+        } else if (service.notifyOk(command.requestId)) {
+          runtime->wifiRequested = true;
+        } else {
+          WifiSetup::cancel();
+        }
+        break;
+      case Verb::START_WIFI:
+        // Only a bonded, encrypted, authenticated foreground app request can
+        // change radio ownership. Merely connecting for READ_LIST never wakes Wi-Fi.
+        if (!acceptsWifiWake(runtime->appWake, service.isAuthenticated())) {
+          service.notifyError(command.requestId, NOT_IN_SYNC);
+        } else if (service.notifyOk(command.requestId)) {
+          runtime->wifiRequested = true;
+        }
+        break;
       case Verb::PING:
       case Verb::CANCEL:
         service.notifyOk(command.requestId);
@@ -225,10 +256,10 @@ void arm(const Trigger trigger, const uint32_t renderCount) {
   }
 }
 
-void loop(const bool shellActive, const uint32_t renderCount) {
+void loop(const bool shellActive, const uint32_t renderCount, const GfxRenderer& renderer) {
   switch (controller.tick(millis(), renderCount, shellActive)) {
     case Controller::Action::START:
-      start();
+      start(renderer);
       return;
     case Controller::Action::STOP:
       stopRadio();
@@ -251,7 +282,7 @@ bool active() { return controller.radioUp(); }
 
 const Stats::Record* statistics() { return Stats::valid(stats) ? &stats : nullptr; }
 
-void runBeforeDeepSleep(const uint32_t renderCount) {
+void runBeforeDeepSleep(const uint32_t renderCount, const GfxRenderer& renderer) {
   arm(Trigger::SLEEP, renderCount);
   while (controller.state() != Controller::State::IDLE) {
     gpio.update();
@@ -260,9 +291,65 @@ void runBeforeDeepSleep(const uint32_t renderCount) {
       close(CloseReason::BUTTON);
       break;
     }
-    loop(true, renderCount);
+    loop(true, renderCount, renderer);
     delay(10);
   }
+}
+
+bool standbyEligible() {
+#ifdef ENABLE_BLE_STANDBY
+  return gpio.deviceIsX3() && SETTINGS.pocketReadingSync && hasStoredBond() &&
+         batteryAllowed(powerManager.getBatteryPercentage(), gpio.isUsbConnected());
+#else
+  return false;
+#endif
+}
+
+StandbyExit runStandby(const GfxRenderer& renderer, const uint32_t maxMs) {
+  const uint32_t began = millis();
+  uint32_t batteryChecked = began;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  uint32_t evidenceAt = began;
+#endif
+  arm(Trigger::STANDBY, 0);
+  while (controller.state() != Controller::State::IDLE) {
+    HalSystem::feedWatchdogIfRegistered();
+    gpio.update();
+    if (gpio.wasAnyPressed()) {
+      close(CloseReason::BUTTON);
+      return StandbyExit::Reader;
+    }
+    loop(true, 0, renderer);
+    if (runtime && runtime->wifiRequested) {
+      delay(300);  // let the accepted notification leave before stopping BLE
+      close(CloseReason::APP_WIFI);
+      return StandbyExit::SameWifi;
+    }
+    if (maxMs && millis() - began >= maxMs) {
+      close(CloseReason::TIME_UP);
+      break;
+    }
+    if (gpio.wasUsbStateChanged() || millis() - batteryChecked >= 60000) {
+      batteryChecked = millis();
+      if (!standbyEligible()) {
+        close(CloseReason::TIME_UP);
+        break;
+      }
+    }
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    if (DevSleepCycle::active() && millis() - evidenceAt >= 30000) {
+      evidenceAt = millis();
+      DevSleepCycle::standbyEvidence(powerManager.bleStandbySleepCount(), powerManager.bleStandbySleepMillis(),
+                                     millis() - began);
+      DevSleepCycle::checkpoint(DevSleepCycle::Checkpoint::StandbyAlive, powerManager.getBatteryPercentage(), &stats);
+    }
+#endif
+    // IDF's tickless idle and controller modem sleep own the wake schedule.
+    // Never call esp_light_sleep_start while the BLE controller is active.
+    powerManager.setPowerSaving(true);
+    delay(25);
+  }
+  return StandbyExit::DeepSleep;
 }
 
 }  // namespace Pocket::NearbySync::Window

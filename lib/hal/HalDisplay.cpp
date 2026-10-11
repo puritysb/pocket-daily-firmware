@@ -107,6 +107,13 @@ uint8_t* HalDisplay::lendFrameBufferStorage(uint32_t* sizeOut) { return einkDisp
 
 void HalDisplay::returnFrameBufferStorage() { einkDisplay.returnBuildStorage(); }
 
+bool HalDisplay::releaseFrameBufferForSleep() {
+  if (!einkDisplay.framebufferReady()) return false;  // never free storage loaned to a build
+  einkDisplay.waitRefreshComplete();
+  einkDisplay.releaseBuffers();
+  return !einkDisplay.framebufferReady();
+}
+
 bool HalDisplay::displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback, bool turnOffScreen) {
   if (gpio.deviceIsX3() && fallback == HALF_REFRESH) einkDisplay.requestResync();
   return einkDisplay.displayGrayscaleBase(mode, static_cast<EInkDisplay::RefreshMode>(fallback), turnOffScreen);

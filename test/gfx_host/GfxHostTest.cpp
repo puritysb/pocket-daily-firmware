@@ -38,6 +38,35 @@ TEST(GfxHost, HardwareOnlyOperationsFailExplicitly) {
   EXPECT_THROW(panel.preconditionGrayscale(), std::logic_error);
 }
 
+TEST(GfxHost, TerminalSleepReleasesPanelAndRendererPointersWithoutRepainting) {
+  for (const auto [width, height] : {std::pair{800, 480}, {792, 528}}) {
+    HalDisplay panel(width, height);
+    GfxRenderer renderer(panel);
+    renderer.begin();
+    renderer.drawPixel(3, 7);
+    renderer.displayBuffer();
+    ASSERT_TRUE(renderer.hasFrameBuffer());
+    ASSERT_TRUE(renderer.releaseFrameBufferForSleep());
+    EXPECT_FALSE(renderer.hasFrameBuffer());
+    EXPECT_EQ(renderer.getFrameBuffer(), nullptr);
+    EXPECT_EQ(panel.getFrameBuffer(), nullptr);
+    EXPECT_EQ(panel.presentations, 1U);
+    EXPECT_FALSE(renderer.releaseFrameBufferForSleep());
+  }
+}
+
+TEST(GfxHost, TerminalSleepDoesNotFreeAnActiveGrayscaleTarget) {
+  HalDisplay panel;
+  GfxRenderer renderer(panel);
+  renderer.begin();
+  std::vector<uint8_t> strip(panel.getDisplayWidthBytes(), 0xff);
+  renderer.beginStripTarget(strip.data(), 0, 1);
+  EXPECT_FALSE(renderer.releaseFrameBufferForSleep());
+  EXPECT_TRUE(renderer.hasFrameBuffer());
+  renderer.endStripTarget();
+  EXPECT_TRUE(renderer.releaseFrameBufferForSleep());
+}
+
 TEST(GfxHost, RejectsUnboundedOrNonByteAlignedPanelsBeforeAllocating) {
   EXPECT_THROW((HalDisplay(0, 480)), std::invalid_argument);
   EXPECT_THROW((HalDisplay(799, 480)), std::invalid_argument);

@@ -14,6 +14,8 @@ uint32_t durationMs(const Trigger trigger) {
       return WAKE_MS;
     case Trigger::SLEEP:
       return SLEEP_MS;
+    case Trigger::STANDBY:
+      return SLEEP_MS;  // bound startup; OPEN remains available until explicitly closed
   }
   return SLEEP_MS;
 }
@@ -27,7 +29,7 @@ bool UnbondedGrace::expired(const uint32_t generation, const uint32_t connectedA
 Gate evaluate(const GateInput& input) {
   if (!input.enabled) return Gate::SETTING_OFF;
   if (!input.bonded) return Gate::NO_BOND;
-  if (input.batteryPercent <= MIN_BATTERY_PERCENT) return Gate::LOW_BATTERY;
+  if (!batteryAllowed(input.batteryPercent, input.charging)) return Gate::LOW_BATTERY;
   if (input.freeHeap < BLE_WINDOW_MIN_FREE || input.largestBlock < BLE_WINDOW_MIN_BLOCK) return Gate::LOW_MEMORY;
   return Gate::OPEN;
 }
@@ -48,6 +50,8 @@ const char* triggerName(const Trigger trigger) {
       return "wake";
     case Trigger::SLEEP:
       return "sleep";
+    case Trigger::STANDBY:
+      return "standby";
   }
   return "?";
 }
@@ -84,6 +88,10 @@ const char* closeReasonName(const CloseReason reason) {
       return "start-failed";
     case CloseReason::LOW_MEMORY:
       return "low-memory";
+    case CloseReason::SLEEP_FRAME:
+      return "sleep-frame";
+    case CloseReason::APP_WIFI:
+      return "app-wifi";
   }
   return "?";
 }
@@ -112,7 +120,8 @@ Controller::Action Controller::tick(const uint32_t nowMs, const uint32_t renderC
         return Action::NONE;
       }
       const bool frameDone = renderCount != armedRender;
-      if (armedTrigger != Trigger::SLEEP && !frameDone && !reached(nowMs, armedAt + RENDER_WAIT_MS)) {
+      if (armedTrigger != Trigger::SLEEP && armedTrigger != Trigger::STANDBY && !frameDone &&
+          !reached(nowMs, armedAt + RENDER_WAIT_MS)) {
         return Action::NONE;
       }
       current = State::STARTING;
@@ -122,7 +131,8 @@ Controller::Action Controller::tick(const uint32_t nowMs, const uint32_t renderC
     case State::STARTING:
     case State::OPEN:
       if (!shellActive) return close(CloseReason::LEFT_SHELL);
-      if (reached(nowMs, deadline)) return close(CloseReason::TIME_UP);
+      if (!(current == State::OPEN && armedTrigger == Trigger::STANDBY) && reached(nowMs, deadline))
+        return close(CloseReason::TIME_UP);
       return Action::NONE;
   }
   return Action::NONE;

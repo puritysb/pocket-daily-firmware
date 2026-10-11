@@ -27,7 +27,8 @@ enum class Mode : uint8_t { SCREEN, WINDOW };
 class Service final {
  public:
   // `advertiseMs` 0 advertises until end().
-  bool begin(const char* model, const char* firmware, Mode requestedMode = Mode::SCREEN, uint32_t advertiseMs = 120000);
+  bool begin(const char* model, const char* firmware, Mode requestedMode = Mode::SCREEN, uint32_t advertiseMs = 120000,
+             bool appWake = false);
   void end();
 
   bool isRunning() const { return running_; }

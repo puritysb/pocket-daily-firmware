@@ -78,6 +78,10 @@ class HalDisplay {
   // Access to frame buffer
   uint8_t* getFrameBuffer() const;
 
+  // Terminal sleep only: the panel retains its image, but no more drawing is
+  // legal until the next boot. Caller must exclude every renderer first.
+  bool releaseFrameBufferForSleep();
+
   // Lend the framebuffer's ~48 KB STORAGE to a memory-hungry phase (chapter
   // builds) without freeing it: the allocation never moves, so repeated loans
   // cannot fragment the heap (free+realloc measurably did). No display calls

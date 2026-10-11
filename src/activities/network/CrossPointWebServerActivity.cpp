@@ -24,6 +24,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "pocket_daily/live_studio/NetHealth.h"
+#include "pocket_daily/nearby_sync/WifiSetup.h"
 #include "util/QrUtils.h"
 #include "util/TaskWatchdog.h"
 #include "util/UiCjkFont.h"
@@ -106,6 +107,11 @@ void CrossPointWebServerActivity::onEnter() {
   connectedSSID.clear();
   lastHandleClientTime = 0;
   requestUpdate();
+
+  if (Pocket::NearbySync::WifiSetup::wantsBluetooth()) {
+    startNearbySync();
+    return;
+  }
 
   // Consume once before either profile's chooser. Failed saved association
   // falls back to the existing Wi-Fi UI, never another reboot/auto-retry loop.
@@ -203,7 +209,11 @@ void CrossPointWebServerActivity::onExit() {
   if (launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC && !updateCheckHandoff) {
     HalSystem::setCrashBreadcrumb("nearby:exit-restart");
     silentRestartToPocketDaily();
+#ifndef ENABLE_BLE_STANDBY
     return;  // ESP.restart() does not return.
+#endif
+    // The call returns only when sleep supersedes the restart. Standby needs
+    // the normal server/BLE/DNS teardown before switching from Wi-Fi to BLE.
   }
 
   // Stop accepting work before tearing down either radio.  Wi-Fi activities
@@ -476,6 +486,18 @@ void CrossPointWebServerActivity::handleNearbySync() {
     case Pocket::NearbySync::Verb::CANCEL:
       nearbySync.notifyOk(command.requestId);
       break;
+    case Pocket::NearbySync::Verb::WIFI_JOIN:
+      if (!nearbySync.isAuthenticated()) {
+        nearbySync.notifyError(command.requestId, "AUTH_REQUIRED");
+      } else if (!Pocket::NearbySync::WifiSetup::receive(command)) {
+        nearbySync.notifyError(command.requestId, "BAD_WIFI");
+      } else if (!nearbySync.notifyOk(command.requestId)) {
+        Pocket::NearbySync::WifiSetup::cancel();
+      }
+      break;
+    case Pocket::NearbySync::Verb::START_WIFI:
+      nearbySync.notifyError(command.requestId, "NOT_IN_SYNC");
+      break;
     case Pocket::NearbySync::Verb::START_AP: {
       PocketDaily::Web::generatePrivateApCredentials(nearbySync.deviceId(), privateApSsid, sizeof(privateApSsid),
                                                      privateApPassword, sizeof(privateApPassword));
@@ -674,6 +696,10 @@ void CrossPointWebServerActivity::startWebServer() {
 }
 
 void CrossPointWebServerActivity::loop() {
+  if (Pocket::NearbySync::WifiSetup::restartDue()) {
+    silentRestartToPocketNearbySync();
+    return;
+  }
   if (state == WebServerActivityState::NEARBY_STARTING) {
     handleNearbyStartup();
     return;

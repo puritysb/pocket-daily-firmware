@@ -3,6 +3,156 @@
 This is concise, repository-owned context for future sessions. It is not a chat
 transcript. Current source and release records override dated observations.
 
+## Current X3 acceptance baseline — 2026-10-11
+
+- `build/dev-pipeline-runs/20261011T011839-f8c099/report.json` passed: 914 host
+  tests, static analysis, default/standby builds, developer install, actual Mac
+  BLE wake, ten interface cases and 13 native screen captures with offline OCR.
+  Installed candidate `8925b142-ble-standby-w3f7e719b`; prior entries below are
+  historical trials. Card A-B-A, real EPUB activity and timer deep sleep return
+  preserve original cards/profile/reading list and remove owned fixture files.
+- X3 confirmed positive charging current allows BLE battery strictly above 5%;
+  otherwise above 10%. Standby checks power-state transitions and every minute.
+  Actual 9% trial crossed the 90-second wait and returned through app BLE wake in
+  12.876 s, with 65.897 s accumulated automatic light sleep. Physical unplug and
+  current draw remain unmeasured. The default shipping update path is unchanged;
+  remote install/capture/reader boot automation is developer-only.
+
+## Developer app–reader pipeline — 2026-10-09 (local)
+
+- `scripts/dev_pipeline.py` enrolls one Same-Wi-Fi developer reader in ignored
+  local config, runs firmware/app gates, freezes the candidate, optionally
+  installs via `--flash`, and executes shared opt-in XCTest hardware scenarios.
+  Stage logs, artifact/source identities, `.xcresult` and fresh cycle evidence
+  live in private ignored `build/dev-pipeline-runs/`. See
+  `docs/developer-pipeline.md` for commands and recovery boundaries.
+- The sibling Debug app exposes only a weak reference to its real PocketModel
+  for the test host. No shipping control listener, mocked transport or duplicate
+  BLE model. Ordinary tests skip hardware; opt-in simulator runs fail. Explicit
+  Connect, fresh inventory and complete root/Books pagination are exercised.
+- Full pipeline passed: 892 firmware host tests, strict cppcheck, warning-free
+  default/standby builds, Mac Debug build, 134 iOS protocol tests (the hardware
+  test intentionally skipped). Installed X3 `8925b142-ble-standby-w7763019d`,
+  SHA-256 `c396bd76c7bf56efb37f8e59a91c0a2ee307c92f6bd891c811d546595971b759`.
+  Two unattended post-install cycles passed: app reconnect 13.2/14.2 s, actual
+  light sleep 25.3/26.1 s, minimum BLE heap 61,416/61,408 B, root 19 and Books
+  3 entries through EOF. Evidence:
+  `build/dev-pipeline-runs/20261009T022930-607b7d/report.json` (ignored).
+  Ten runner regressions plus ten cycle tests pass. Existing normal companion
+  processes are rejected before reader I/O; real duplicate-app preflight failure
+  was exercised, and the normal app was closed before rerunning. Physical iPhone/X4 and
+  current measurement remain unverified; an offline initial reader still needs
+  Same Wi-Fi before starting this controlled pipeline.
+
+## Reader directory EOF repair — 2026-10-09 (X3 installed)
+
+- `HalFile::openNextEntry()` incorrectly checked `getError()` on the child after
+  SdFat `FsBaseFile::openNext()` cleared it at EOF. Closed children return
+  `0xFF`, so normal final pages became HTTP 503 and lost their accumulated rows.
+  Check the still-open directory's error state as in SdFat's OpenNext example;
+  reject invalid/misaligned/errored parents before iteration. No added heap,
+  on-card change, protocol change or app-source change.
+- The SDK fixture now reproduces closed-child `0xFF`; five regressions cover
+  empty/end, reuse, read failure, OOM and invalid cursor behavior. Restoring the
+  old check in an isolated binary fails both EOF tests. All 892 host tests,
+  strict cppcheck, formatting and warning-free default/ble_standby builds pass.
+- Installed X3 `8925b142-ble-standby-wde94a4e8`, SHA-256
+  `108326380ec0662e64f36a15a9e0f3dad03acd36f38fb7ab3ed1ac6c1c9245c1`.
+  Before: root page 2 and `/Books` returned 503. After: three identical complete
+  passes returned root 19 rows over two pages and Books 3 rows, ending at cursor
+  zero. Mac Refresh Inventory removed the error and displayed reading files.
+  Evidence is ignored `build/folder-eof/`; broader X4/Direct acceptance remains
+  separate. This resolves the folder-read error recorded in the standby notes.
+- Same final image also passed Wi-Fi → standby → actual Mac Connect → automatic
+  STA return: 33.7 s standby, 27.0 s measured SDK light sleep, 61,488 B minimum
+  BLE free heap. The app automatically refreshed and displayed the inventory
+  without errors after reconnect. No new physical button/menu action was needed.
+
+## App Connect wakes sleeping X3 — 2026-10-09 (local experimental)
+
+- `scripts/pio_ble_standby.sh` builds `ble_standby` with an isolated PM/tickless/
+  BLE-modem-sleep SDK. The main crystal stays available for controller sleep;
+  this is SDK automatic light sleep, not BLE wake from deep sleep. Default and
+  release builds retain bounded windows; X4 standby is gated off.
+- After the sleep frame is saved/released, bonded X3 standby advertises `WAKE1`
+  and accepts authenticated `START_WIFI <id>`. It acknowledges, shuts BLE down,
+  then uses a checked one-shot software-restart route to join saved Wi-Fi.
+  Buttons route to reading. Battery <=10%, disabled sync, no bond or failed
+  memory admission retain deep-sleep fallback. No automatic AP is introduced.
+- The companion's explicit Connect checks LAN, requests bonded BLE wake when
+  needed, and validates reader identity on LAN. Opening an explicit Connect
+  sheet for a remembered reader starts this automatically; background reading
+  exchange does not start Wi-Fi. Signed Mac app installed with pairing intact.
+- Initial candidate `8925b142-ble-standby-w9ef85a63` completed three actual
+  Mac/X3 app-wake trials, including 68.8 s and 57.7 s standby, then automatic
+  STA return. All recorded positive SDK light-sleep duration and >64 KB sampled
+  BLE free heap. These first trials entered standby from the reading shell.
+- Follow-up covers sleep directly from Same Wi-Fi: complete the network
+  activity teardown and stop the Wi-Fi driver before BLE admission. Developer
+  `--standby` now starts from connected Wi-Fi and requires `fromWifi=true` in
+  durable evidence. The developer deadline is 180 s; ordinary standby has no
+  window deadline. See `docs/ble-standby-review.md` for exact final evidence.
+- Final installed image `8925b142-ble-standby-wd4168ca4` passed two Wi-Fi-entry
+  app-wake trials, including 80.8 s standby / 64.8 s actual light sleep and
+  60,936 B minimum BLE free heap. Final Mac app restart + one Connect click
+  completed LAN return. 887 host tests, 49 Python tests, strict cppcheck and
+  warning-free default/experimental builds passed. Exact hash is in the review.
+- No current meter, physical iPhone or X4 acceptance. Root file listing and
+  preferences worked after wake, but `/Books` listing returned a separate
+  folder-read error; content-transfer success is not inferred from connectivity.
+
+## BLE window cache admission — 2026-10-09 (local, X3 installed)
+
+- X3 version `0.1.0` reported retained wake-window refusal: 80,100 B free,
+  61,428 B largest block, below the 96 KiB total-heap startup floor. RTC data
+  survives restart; exact attempt age and installed commit are unknown.
+- Automatic BLE admission now releases only rebuildable font caches under the
+  render lock when memory is the failed gate, re-samples, and applies unchanged
+  thresholds. Families remain loaded; there are no new heap allocations.
+- Validation: 871/871 host tests, 19 route checks, strict cppcheck 2.11,
+  formatting and warning-free default build passed. Three injected defects
+  (release, locking, floor bypass) were detected. Hardware gains remain unverified.
+- X3 installation of candidate `8925b142-w84ab574e` was confirmed by exact
+  reported version after owner installation. Retained wake sample: 85,824 B
+  free / 61,428 B largest block, still refused. The 5,724 B difference from
+  the earlier sample is not a controlled cache delta; BLE success is unverified.
+- No current meter or X4 is available. Always-available BLE needs SDK modem
+  sleep/tickless/PM integration, clock validation, and a hardware energy study;
+  it is not enabled by this fix. See `docs/ble-standby-review.md` for evidence
+  and the Same-Wi-Fi-preserving acceptance procedure.
+- Structural follow-up implemented: stop an earlier window before the sleep
+  paint; save the retained frame, release the actual framebuffer through HAL
+  under RenderLock, and skip queued paints under the same lock. No reallocation
+  occurs before terminal sleep. X3 candidate `8925b142-wf7a0c1de` completed four
+  automatic software-return cycles: 80,592 -> 133,844 B free, one actual Mac
+  READ_LIST each, sampled minimum >=67,776 B, automatic Same Wi-Fi reconnect.
+  OFFER/current and reversible same-boot standby remain unverified.
+- Developer-only `dev/ble-cycle` and `scripts/dev_ble_cycle.py` provide verified
+  run identity, durable pre/post memory and counter evidence, bounded automatic
+  LAN return, and explicit X3 timer-sleep trials. Failed/ambiguous commands are
+  not replayed. `--build` runs checks/build before installation and cycles.
+  Existing owner authorization explicitly includes automatic developer flashing.
+- Final installed X3 candidate `8925b142-w1aa7db7b` (6,394,416 B; SHA-256
+  `dbf60622bda2c178ada4ea9bc183ec5df5f2a1a51e9b877974057ac75c8b4f90`)
+  passed the complete build/install/test pipeline: 882 host tests, 48 Python
+  tests, strict cppcheck 2.11, warning-free default build, then three real
+  deep-sleep/timer-wake cycles with one Mac READ_LIST each and automatic LAN
+  return. Each reclaimed 52,272 B; BLE sampled minimum was 67,956 B free.
+  Final status was STA / deep-sleep wake. Earlier candidates add four software
+  return and two timer-wake successes; do not attribute those to the final image.
+  Developer paths were preprocessed out with the flag absent. This is timer
+  wake, not BLE wake from deep sleep; current, OFFER, screen appearance, X4
+  and reversible same-boot standby remain unverified. Detailed evidence and
+  the artifact boundary are in `docs/ble-standby-review.md`.
+- Reversible standby still needs a proved restoration/fragmentation strategy
+  and SDK PM integration; always-available BLE is not enabled. The existing
+  in-place build loan does not free heap for NimBLE. Target ABI accounting found 9,372 B of
+  always-resident base-setting elements; immutable flash descriptors are a
+  separate baseline improvement. X3 GPIO13 is SD power in BoardConfig, while
+  X4 uses it as a battery latch; do not generalize the HAL's conflicting comment
+  into evidence that the X3 CPU loses battery power. Details and validation
+  gates are in `docs/ble-standby-review.md`.
+
 ## Companion preferences integration — 2026-10-09
 
 - Integrated the pending reading-layout preferences with the companion

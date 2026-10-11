@@ -9,6 +9,9 @@
 #include <cassert>
 
 #include "HalGPIO.h"
+#ifdef ENABLE_BLE_STANDBY
+#include <esp_pm.h>
+#endif
 
 class HalPowerManager;
 extern HalPowerManager powerManager;  // Singleton
@@ -23,6 +26,10 @@ class HalPowerManager {
   enum LockMode { None, NormalSpeed };
   LockMode currentLockMode = None;
   SemaphoreHandle_t modeMutex = nullptr;  // Protect access to currentLockMode
+#ifdef ENABLE_BLE_STANDBY
+  esp_pm_lock_handle_t frequencyLock = nullptr;
+  bool frequencyLocked = false;
+#endif
 
  public:
 #if BOARD_HAS_PSRAM
@@ -41,6 +48,17 @@ class HalPowerManager {
   // Setup wake up GPIO and enter deep sleep
   // Should be called inside main loop() to handle the currentLockMode
   void startDeepSleep(HalGPIO& gpio) const;
+  // Enables driver-managed light sleep only while the display is quiescent.
+  // False on ordinary builds, unsupported boards or PM initialization failure.
+  bool beginBleStandby();
+  uint32_t bleStandbySleepCount() const;
+  uint32_t bleStandbySleepMillis() const;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  // X3-only experiment: retain the normal deep-sleep path, add a timer so
+  // the reader can rejoin saved Wi-Fi without a physical button press.
+  bool armDevSleepTimer() const;
+  bool devWokeFromTimer() const;
+#endif
 
   // Get battery percentage (range 0-100)
   uint16_t getBatteryPercentage() const;
@@ -55,6 +73,7 @@ class HalPowerManager {
    public:
     explicit Lock();
     ~Lock();
+    void release();
 
     // Non-copyable and non-movable
     Lock(const Lock&) = delete;

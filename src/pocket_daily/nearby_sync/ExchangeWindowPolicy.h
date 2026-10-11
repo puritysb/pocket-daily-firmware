@@ -9,7 +9,7 @@
 // tests drive the same decisions; ExchangeWindow applies them to NimBLE.
 namespace Pocket::NearbySync::Window {
 
-enum class Trigger : uint8_t { BOOK_CLOSED, WAKE, SLEEP };
+enum class Trigger : uint8_t { BOOK_CLOSED, WAKE, SLEEP, STANDBY };
 
 inline constexpr uint32_t BOOK_CLOSED_MS = 45000;
 inline constexpr uint32_t WAKE_MS = 45000;
@@ -45,6 +45,11 @@ inline constexpr uint32_t BLE_WINDOW_RUNNING_MIN_FREE = 20U * 1024U;
 inline constexpr uint32_t BLE_WINDOW_RUNNING_MIN_BLOCK = 4U * 1024U;
 // The window needs battery strictly above this.
 inline constexpr uint16_t MIN_BATTERY_PERCENT = 10;
+inline constexpr uint16_t CHARGING_MIN_BATTERY_PERCENT = 5;
+// Only confirmed X3 charging permits the lower floor; unknown power is false.
+inline bool batteryAllowed(uint16_t percent, bool charging) {
+  return percent > (charging ? CHARGING_MIN_BATTERY_PERCENT : MIN_BATTERY_PERCENT);
+}
 
 enum class Gate : uint8_t { OPEN, NO_BOND, SETTING_OFF, LOW_BATTERY, LOW_MEMORY };
 
@@ -54,6 +59,7 @@ struct GateInput {
   uint16_t batteryPercent = 0;
   uint32_t freeHeap = 0;
   uint32_t largestBlock = 0;
+  bool charging = false;
 };
 
 Gate evaluate(const GateInput& input);
@@ -68,11 +74,15 @@ enum class CloseReason : uint8_t {
   BUTTON,       // a press during the sleep window
   START_FAILED,
   LOW_MEMORY,
+  SLEEP_FRAME,  // release radio memory before painting the retained sleep frame
+  APP_WIFI,
 };
 
 const char* triggerName(Trigger trigger);
 const char* gateName(Gate gate);
 const char* closeReasonName(CloseReason reason);
+
+inline bool acceptsWifiWake(bool standby, bool authenticated) { return standby && authenticated; }
 
 // The window lifecycle. IDLE → ARMED (trigger seen) → STARTING (radio coming
 // up in a worker) → OPEN (advertising / connected) → IDLE. The owner performs

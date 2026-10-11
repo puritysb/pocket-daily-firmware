@@ -13,6 +13,33 @@ struct TransferFeedback {
   TransferKind kind = TransferKind::Content;
   uint32_t received = 0;
   uint32_t total = 0;
+  uint32_t completedAt = 0;
+  static constexpr uint32_t RESULT_DISPLAY_MS = 5000;
+  bool shouldDismiss(uint32_t now) const {
+    return kind == TransferKind::Content && (phase == TransferPhase::Saved || phase == TransferPhase::Removed) &&
+           static_cast<uint32_t>(now - completedAt) >= RESULT_DISPLAY_MS;
+  }
+  const char* phaseName() const {
+    switch (phase) {
+      case TransferPhase::Idle:
+        return "idle";
+      case TransferPhase::Ready:
+        return "ready";
+      case TransferPhase::Receiving:
+        return "receiving";
+      case TransferPhase::Verifying:
+        return "verifying";
+      case TransferPhase::Saved:
+        return "saved";
+      case TransferPhase::Paused:
+        return "paused";
+      case TransferPhase::Removed:
+        return "removed";
+      case TransferPhase::Failed:
+        return "failed";
+    }
+    return "unknown";
+  }
   unsigned percent() const {
     if (total == 0) return 0;
     const auto value = static_cast<uint64_t>(received) * 100 / total;

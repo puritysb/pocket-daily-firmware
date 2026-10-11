@@ -11,6 +11,7 @@
 #include "pocket_daily/FirmwareIdentity.h"
 #include "pocket_daily/ReaderPerf.h"
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
+#include "pocket_daily/nearby_sync/WifiSetup.h"
 #include "pocket_daily/web/UploadStreamServer.h"
 
 namespace PocketDaily::Web {
@@ -34,12 +35,26 @@ String buildStatusJson(const StatusInputs& in) {
   snprintf(deviceId, sizeof(deviceId), "%08lX", static_cast<unsigned long>(ESP.getEfuseMac() & 0xFFFFFFFFUL));
   doc["deviceID"] = deviceId;
   doc["sessionEnd"] = isSyncProfile(in.profile);
+  doc["wifiSetup"] = isSyncProfile(in.profile) ? 1 : 0;
+  if (Pocket::NearbySync::WifiSetup::current().requestId[0]) {
+    JsonObject setup = doc["wifiSetupResult"].to<JsonObject>();
+    setup["requestID"] = Pocket::NearbySync::WifiSetup::current().requestId;
+    setup["state"] = Pocket::NearbySync::WifiSetup::resultName();
+  }
   doc["publicationReceipt"] = 1;
   doc["contentPresentation"] = in.contentPresentation;
   // Home / Daily Brief in Sync (docs/pocket-screen-present-v1.md); older
   // firmware omits the key and the companion must not call the routes.
   doc["articleLibrary"] = 1;
   doc["transferControl"] = 1;
+  if (isSyncProfile(in.profile) && in.stream) {
+    const auto& feedback = in.stream->feedback();
+    JsonObject transfer = doc["transferState"].to<JsonObject>();
+    transfer["version"] = 1;
+    transfer["phase"] = feedback.phaseName();
+    transfer["kind"] = feedback.kind == TransferKind::Firmware ? "firmware" : "content";
+    transfer["percent"] = feedback.percent();
+  }
   if (in.screenPresentation) doc["screenPresentation"] = 1;
   // Pocket Daily profile endpoints (docs/pocket-profile-v1.md) exist on Sync.
   if (isSyncProfile(in.profile)) doc["pocketProfile"] = 1;

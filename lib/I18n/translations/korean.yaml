@@ -120,3 +120,5 @@ STR_TRANSFER_APP_CONTROLS: "앱에서 일시정지 · 재시도 · 정리"
 STR_READING_OFFER_FORMAT: "%s: %d%% · 이동할까요?"
 
 STR_SLEEP_WAKE_INDICATOR: "절전 화면 WAKE 표시"
+
+STR_POCKET_NO_EVENTS: "저장된 일정이 없습니다"

@@ -465,3 +465,47 @@ TEST(SleepWakeCue, BriefSectionsStartBelowTheWakeTab) {
     EXPECT_TRUE(panel.guardsIntact());
   }
 }
+
+TEST_P(HomePreview, EmptyTodayOnlyBriefExplainsItsEmptyState) {
+  auto today = defaults();
+  today.sleep_count = 1;
+  today.sleep_sections[0] = 4;
+  auto reading = today;
+  reading.sleep_sections[0] = 1;
+  const auto absent = brief(reading, 0);
+  const auto schedule = brief(today, 0);
+  EXPECT_GT(ink(schedule), ink(absent) + 100u);
+}
+
+TEST(BriefHeader, ResolvedFontLineBoxSeparatesHeaderAndBody) {
+  EpdFontData data{};
+  data.advanceY = 42;
+  data.ascender = 30;
+  data.descender = -12;
+  EpdFont font(&data);
+  HalDisplay panel(792, 528);
+  GfxRenderer renderer(panel);
+  renderer.begin();
+  renderer.insertFont(1234, EpdFontFamily(&font));
+  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  PocketDaily::Glance glance{};
+  PocketDaily::Card card{};
+  PocketDaily::Home::BriefView view{};
+  view.glance = &glance;
+  view.pocketCard = &card;
+  view.reading = {true, "", "", 20};
+  view.profile.sleepCount = 1;
+  view.profile.sleepSections[0] = PocketDaily::DailyProfile::SleepSection::Reading;
+  int coverY = -1;
+  PocketDaily::Home::Env env{};
+  env.metrics = {8, 48, 12, 16, 20};
+  env.context = &coverY;
+  env.text.pick = [](void*, const char*, int, EpdFontFamily::Style) { return 1234; };
+  env.drawCover = [](void* context, GfxRenderer&, int, int y, int, int) {
+    *static_cast<int*>(context) = y;
+    return true;
+  };
+  PocketDaily::Home::renderBrief(renderer, view, env);
+  EXPECT_GE(coverY, 8 + 48 + 12 + 42 + 6);
+  EXPECT_TRUE(panel.guardsIntact());
+}

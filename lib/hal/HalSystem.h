@@ -35,4 +35,5 @@ bool isRebootFromPanic();
 // Covers panic/lockup plus watchdog, brownout and power-glitch resets so
 // failures that bypass panic_abort still produce a retained report.
 bool isRebootFromCrash();
+bool isSoftwareRestart();
 }  // namespace HalSystem

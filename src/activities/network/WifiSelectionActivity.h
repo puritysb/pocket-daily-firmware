@@ -81,6 +81,8 @@ class WifiSelectionActivity final : public Activity, private UiAppHost {
 
   // Whether network was connected using a saved password (skip save prompt)
   bool usedSavedPassword = false;
+  bool appWifiSetup = false;
+  void failAppWifiSetup();
 
   // Whether to attempt auto-connect on entry
   const bool allowAutoConnect;

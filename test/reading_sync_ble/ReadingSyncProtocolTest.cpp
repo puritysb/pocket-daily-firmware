@@ -115,7 +115,7 @@ TEST(ReadingSyncProtocol, FormatsEventRecordsWithinTheLimit) {
   ASSERT_GT(formatStatus("X3", "89ABCDEF", "1.7.1", true, out, sizeof(out)), 0u);
   EXPECT_STREQ(out, "V=1;MODEL=X3;ID=89ABCDEF;FW=1.7.1;CAP=AP,HTTP,SD,COMMIT1,READ1;WIN=1");
   ASSERT_GT(formatStatus("X4", "89ABCDEF", "1.7.0-main-932d73fa", false, out, sizeof(out)), 0u);
-  EXPECT_NE(strstr(out, "READ1;WIN=0"), nullptr);
+  EXPECT_NE(strstr(out, "READ1,WIFI1;WIN=0"), nullptr);
   const std::string longFirmware(200, 'f');
   EXPECT_EQ(formatStatus("X4", "89ABCDEF", longFirmware.c_str(), false, out, sizeof(out)), 0u);
 }
@@ -224,4 +224,18 @@ TEST(ReadingSyncProtocol, RecordQueueIsBoundedAndPerConnection) {
   EXPECT_FALSE(queue.pop(out, RECORD_LIMIT, length, 2));  // caller buffer too small
   queue.clear();
   EXPECT_FALSE(queue.pop(out, sizeof(out), length, 2));
+}
+
+TEST(ReadingSyncProtocol, AppWakeRequiresAnExplicitCapabilityAndBoundedCommand) {
+  ParsedCommand command;
+  EXPECT_EQ(parse("START_WIFI 01ABCDEF", command), ParseResult::OK);
+  EXPECT_EQ(command.verb, Verb::START_WIFI);
+  EXPECT_EQ(parse("START_WIFI 01ABCDEF extra", command), ParseResult::BAD_FIELDS);
+  EXPECT_EQ(parse("START_WIFI 01ABCDEf", command), ParseResult::MALFORMED);
+  EXPECT_FALSE(allowedInWindow(Verb::START_WIFI));
+  char record[RECORD_LIMIT + 1];
+  ASSERT_GT(formatStatus("X3", "AABBCCDD", "dev", true, record, sizeof(record), true), 0u);
+  EXPECT_NE(std::string(record).find(",WAKE1"), std::string::npos);
+  ASSERT_GT(formatStatus("X3", "AABBCCDD", "dev", true, record, sizeof(record)), 0u);
+  EXPECT_EQ(std::string(record).find("WAKE1"), std::string::npos);
 }

@@ -19,6 +19,7 @@
 #include "activities/util/BmpViewerActivity.h"
 #include "activities/util/FullScreenMessageActivity.h"
 #include "components/UITheme.h"
+#include "pocket_daily/dev/ScreenCapture.h"
 
 ReaderActivity::ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
                                std::string bookPath, const bool allowFastInitialRefresh)
@@ -65,7 +66,7 @@ void ReaderActivity::onEnter() {
   }
 
   // Clear remembered book after opening it
-  if (!APP_STATE.openEpubPath.empty()) {
+  if (!PocketDaily::DevCapture::readerActive() && !APP_STATE.openEpubPath.empty()) {
     APP_STATE.openEpubPath.clear();
     APP_STATE.saveToFile();
   }
@@ -82,6 +83,7 @@ void ReaderActivity::onEnter() {
 }
 
 void ReaderActivity::rememberBookOnceRendered() {
+  if (PocketDaily::DevCapture::readerActive()) return;
   if (bookRemembered || !pageRendered.load(std::memory_order_acquire)) return;
   bookRemembered = true;
   APP_STATE.openEpubPath = bookPath;

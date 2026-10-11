@@ -177,7 +177,11 @@ class HalStorage {
     if (FakeSD::extraAfterRename) FakeSD::files[std::string(target) + "/unexpected.part"] = {};
     return !FakeSD::failAfterRename;
   }
-  HalFile open(const char* path, int flags) {
+  bool openFileForWrite(const char*, const char* path, HalFile& file) {
+    file = open(path, O_WRITE | O_CREAT | O_TRUNC);
+    return static_cast<bool>(file);
+  }
+  HalFile open(const char* path, int flags = O_RDONLY) {
     if (!ready()) return {};
     if (flags & O_WRITE) {
       if (FakeSD::failWriteOpen) return {};

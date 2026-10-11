@@ -7,7 +7,7 @@
 
 namespace Pocket::NearbySync {
 
-bool Service::begin(const char*, const char*, const Mode requestedMode, uint32_t) {
+bool Service::begin(const char*, const char*, const Mode requestedMode, uint32_t, bool) {
   mode_ = requestedMode;
   snprintf(deviceId_, sizeof(deviceId_), "%s", "89ABCDEF");
   snprintf(advertisedName_, sizeof(advertisedName_), "Pocket-%.4s", deviceId_ + 4);

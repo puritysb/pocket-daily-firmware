@@ -142,6 +142,22 @@ TEST(ExchangeWindowPolicy, EarlyCloses) {
   EXPECT_EQ(armed.tick(100000, 9, true), Action::NONE);
 }
 
+TEST(ExchangeWindowPolicy, SleepPaintReleasesAnOpenOrStartingRadioBeforeAFreshWindow) {
+  for (const bool started : {false, true}) {
+    Controller window;
+    window.arm(Trigger::WAKE, 0, 1);
+    ASSERT_EQ(window.tick(10, 2, true), Action::START);
+    if (started) window.started(true, 20);
+    EXPECT_EQ(window.close(CloseReason::SLEEP_FRAME), Action::STOP);
+    window.stopped();
+    EXPECT_FALSE(window.radioUp());
+    window.arm(Trigger::SLEEP, 3000, 2);
+    EXPECT_EQ(window.tick(3000, 2, true), Action::START);
+    window.started(true, 3100);
+    EXPECT_EQ(window.remainingMs(3100), SLEEP_MS - 100);
+  }
+}
+
 TEST(ExchangeWindowPolicy, FailedStartsReturnToIdle) {
   Controller window;
   window.arm(Trigger::WAKE, 0, 0);
@@ -197,4 +213,63 @@ TEST(ExchangeWindowPolicy, UnbondedGraceHandlesMillisWrap) {
   const uint32_t connected = UINT32_MAX - 1000;
   EXPECT_FALSE(grace.expired(1, connected, connected + 4999));
   EXPECT_TRUE(grace.expired(1, connected, connected + 5000));
+}
+
+TEST(ExchangeWindowPolicy, StandbySurvivesOrdinaryWindowDeadlineButBoundsStartup) {
+  Controller c;
+  c.arm(Trigger::STANDBY, 100, 0);
+  EXPECT_EQ(c.tick(100, 0, true), Controller::Action::START);
+  c.started(true, 120);
+  EXPECT_EQ(c.tick(200000, 0, true), Controller::Action::NONE);
+  EXPECT_EQ(c.close(CloseReason::APP_WIFI), Controller::Action::STOP);
+  EXPECT_EQ(c.lastCloseReason(), CloseReason::APP_WIFI);
+  c.stopped();
+  c.arm(Trigger::STANDBY, 300000, 0);
+  EXPECT_EQ(c.tick(300000, 0, true), Controller::Action::START);
+  EXPECT_EQ(c.tick(330000, 0, true), Controller::Action::STOP);
+}
+
+TEST(ExchangeWindowPolicy, OnlyAuthenticatedStandbyCanWakeWifi) {
+  EXPECT_TRUE(acceptsWifiWake(true, true));
+  EXPECT_FALSE(acceptsWifiWake(false, true));
+  EXPECT_FALSE(acceptsWifiWake(true, false));
+  EXPECT_FALSE(acceptsWifiWake(false, false));
+}
+
+#include "pocket_daily/boot/StandbyReturn.h"
+TEST(ExchangeWindowPolicy, WakeRouteIsOneShotAndNeverReplayedAfterCrashOrCorruption) {
+  using namespace PocketDaily::Boot;
+  StandbyTicket ticket;
+  EXPECT_EQ(consumeStandbyReturn(ticket, true), StandbyReturn::None);
+  armStandbyReturn(ticket, StandbyReturn::SameWifi);
+  EXPECT_EQ(consumeStandbyReturn(ticket, true), StandbyReturn::SameWifi);
+  EXPECT_EQ(consumeStandbyReturn(ticket, true), StandbyReturn::None);
+  armStandbyReturn(ticket, StandbyReturn::SameWifi);
+  EXPECT_EQ(consumeStandbyReturn(ticket, false), StandbyReturn::None);
+  armStandbyReturn(ticket, StandbyReturn::Reader);
+  ticket.check ^= 1;
+  EXPECT_EQ(consumeStandbyReturn(ticket, true), StandbyReturn::None);
+  armStandbyReturn(ticket, StandbyReturn::Reader);
+  EXPECT_EQ(consumeStandbyReturn(ticket, true), StandbyReturn::Reader);
+}
+
+TEST(ExchangeWindowPolicy, ChargingFloorAndPowerLossAreFailClosed) {
+  auto input = openGates();
+  for (uint16_t percent = 0; percent <= 11; ++percent) {
+    input.batteryPercent = percent;
+    input.charging = true;
+    EXPECT_EQ(evaluate(input), percent > 5 ? Gate::OPEN : Gate::LOW_BATTERY);
+    input.charging = false;  // unplugged, discharging, or unavailable telemetry
+    EXPECT_EQ(evaluate(input), percent > 10 ? Gate::OPEN : Gate::LOW_BATTERY);
+  }
+  input.batteryPercent = 7;
+  input.charging = true;
+  input.enabled = false;
+  EXPECT_EQ(evaluate(input), Gate::SETTING_OFF);
+  input.enabled = true;
+  input.bonded = false;
+  EXPECT_EQ(evaluate(input), Gate::NO_BOND);
+  input.bonded = true;
+  input.freeHeap = BLE_WINDOW_MIN_FREE - 1;
+  EXPECT_EQ(evaluate(input), Gate::LOW_MEMORY);
 }

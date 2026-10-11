@@ -121,3 +121,5 @@ foreach(target reader_layout_test reading_position_layout_test)
     ${REPO_ROOT}/lib/miniz/src/miniz_impl.c)
   target_include_directories(${target} PRIVATE ${REPO_ROOT}/lib/miniz/src ${REPO_ROOT}/lib/miniz/third_party)
 endforeach()
+
+add_subdirectory(wifi_setup)

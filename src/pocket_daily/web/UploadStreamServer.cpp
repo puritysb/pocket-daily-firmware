@@ -66,13 +66,14 @@ bool UploadStreamServer::discardStaging(const String& path, const TransferKind k
   if (path == resume_.path) resume_.clear();
   if (path == stagedPath) staged_.success = false;
   // A reconnect after reboot has no in-memory ledger; show that cleanup receipt too.
-  feedback_ = {TransferPhase::Removed, kind, 0, 0};
+  feedback_ = {TransferPhase::Removed, kind, 0, 0, millis()};
   return true;
 }
 
 void UploadStreamServer::noteCommitted(const bool firmware) {
   feedback_.kind = firmware ? TransferKind::Firmware : TransferKind::Content;
   feedback_.phase = TransferPhase::Saved;
+  feedback_.completedAt = millis();
   feedback_.received = staged_.size;
   feedback_.total = staged_.size;
   // Publication consumed the hidden file; never retain a stale resume ledger.
@@ -468,6 +469,7 @@ void UploadStreamServer::finish() {
 }
 
 void UploadStreamServer::service() {
+  if (feedback_.shouldDismiss(millis())) hideFeedback();
   if (!server_) return;
 #ifdef ENABLE_DEV_REMOTE_FLASH
   metrics_.service(millis());

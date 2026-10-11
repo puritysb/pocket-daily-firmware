@@ -507,6 +507,9 @@ class GfxRenderer {
   void releaseFrameBufferForBuild();
   bool restoreFrameBufferAfterBuild();
   bool hasFrameBuffer() const { return frameBuffer != nullptr; }
+  // One-way ownership transfer before sleep. Call under RenderLock, after
+  // saving the retained frame; drawing stays disabled until the next boot.
+  bool releaseFrameBufferForSleep();
 
   // RAII form of the loan above, for blocking build regions with early-return
   // error paths: restores on scope exit (or explicitly via end()). Display the

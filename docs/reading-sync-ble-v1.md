@@ -30,6 +30,34 @@ acceptance. The historical integration review is `ble-sync-review-2026-09-30.md`
 
 ## Reader: exchange windows
 
+### Experimental app-requested wake (2026-10-09)
+
+The opt-in `ble_standby` build replaces the X3 pre-deep-sleep window with
+retained-screen BLE standby when the existing bond, setting, battery and memory
+gates pass. Build it with `scripts/pio_ble_standby.sh`, which isolates the
+PM/tickless/controller-modem-sleep SDK from normal builds. Default and release
+images retain the bounded windows described below; X4 standby is not enabled.
+
+In this standby only, status advertises capability `WAKE1`. An already bonded,
+encrypted peer may send `START_WIFI <id>` (exactly eight uppercase hexadecimal
+digits). `OK <id>` accepts a Same-Wi-Fi handoff; ordinary exchange windows reject
+it with `NOT_IN_SYNC`. `START_AP` remains unavailable. Merely connecting or
+reading positions never starts Wi-Fi.
+
+After acknowledging, the reader shuts down BLE and performs a deliberate
+software restart to rebuild rendering state and join a saved network. The RTC
+route is checked, consumed once, and ignored after a crash/cold boot. A button
+instead returns to reading. The panel retains its sleep image during standby;
+SDK automatic light sleep keeps BLE available. This is not BLE wake from deep
+sleep. Low battery or failed admission can still end in unreachable deep sleep.
+
+The Apple app's explicit Connect operation first checks LAN, then uses its
+remembered bonded peripheral to request wake, then validates the same reader
+identity over LAN. Quiet background position exchange does not request Wi-Fi.
+No phone/Mac network change or hotspot handoff is automatic. Initial pairing,
+Bluetooth permission and a saved reachable Wi-Fi network are prerequisites.
+Physical acceptance and energy limits are recorded in `ble-standby-review.md`.
+
 The reader advertises the existing Nearby Sync service for a bounded **exchange
 window** at natural moments, while Wi-Fi is off and no book is open:
 
@@ -42,13 +70,18 @@ window** at natural moments, while Wi-Fi is off and no book is open:
 Rules:
 
 - A window opens only when at least one bond exists, the setting "Sync places with
-  your phone" is on (default on once a bond exists), battery is above 10 %, and the
+  your phone" is on (default on once a bond exists), battery is above 10 % (above 5 % on X3 with confirmed charging), and the
   free heap is at least 96 KiB and largest block is at least 40 KiB. These are
   provisional safety gates, not proof of availability on every X3/X4 shell.
   Otherwise it is skipped silently.
 - The window closes at once when a book is opened, any Wi-Fi mode or the Nearby Sync
   screen starts (which owns BLE), a button needs the heap, or the time is up. A
   sleep window then enters deep sleep. Radios are never on while a book is open.
+- X3 charging means a successful BQ27220 positive-current sample, not merely a
+  physically attached cable. Zero/negative current and failed reads use the 10%
+  floor. Standby rechecks eligibility on USB-state changes and every 60 seconds;
+  loss of charging at 10% or below closes BLE and proceeds to deep sleep. The 5%
+  boundary remains excluded, just like the existing 10% boundary.
 - BLE and Wi-Fi remain mutually exclusive.
 - Advertising uses the same service UUID and local name as Nearby Sync. Connections
   from a peer that is not already bonded are disconnected before pairing
@@ -66,15 +99,27 @@ Reader implementation notes (2026-09-30):
   (`pocketReadingSync` in `settings.json`, default on). "At least one bond" is
   read from NimBLE's NVS store (`nimble_bond`, `peer_sec_<n>`) without starting
   the controller.
-- Gates, in order: setting on, a bond stored, battery > 10 %, Wi-Fi off, free
+- Gates, in order: setting on, a bond stored, battery > 10 % (X3 charging: > 5 %), Wi-Fi off, free
   heap ≥ 96 KiB and largest block ≥ 40 KiB before NimBLE starts, then free heap
   ≥ 24 KiB and largest block ≥ 8 KiB once it is up. Running windows close below
   20 KiB free or 4 KiB largest block. List/offer admission and final offer parsing
   each require 24 KiB free / 8 KiB block; an offer returns `NO_MEMORY` otherwise.
+- If only the startup memory gate fails, release rebuildable font caches under
+  the render lock and sample again; font families remain loaded. The same
+  free/block thresholds still apply. RTC startFree/startBlock report this final
+  admission sample. Cache-only recovery was insufficient on the tested X3.
+- Before painting the sleep frame, stop any earlier BLE window (`sleep-frame`
+  close reason). Save the frame, then release its RAM through HAL/GfxRenderer
+  under `RenderLock`. The render task checks framebuffer availability under the
+  same lock, so queued renders cannot access freed storage. The e-ink image
+  remains visible and no buffer reallocation occurs before sleep. Start a fresh
+  20-second window using unchanged gates. X3 developer tests now demonstrate
+  memory recovery and actual Mac reading-list exchanges; see `ble-standby-review.md`.
 - Book-closed and wake windows start after the shell's next frame has been
   drawn (render counter; at most 5 s wait). The wake trigger is a power-button
   wake onto the shell (not a silent restart, crash, recovery or developer boot).
-  A sleep trigger during an open window keeps it open for exactly 20 s more.
+  The policy can extend an open window for 20 s, but the production sleep
+  transition now closes it before painting and starts a fresh window afterward.
 - The window closes before any screen other than Pocket Daily or the sleep
   screen is entered (a book, stock CrossPoint Home/Library/file browser,
   Settings, a dialog, a Wi-Fi mode, the Nearby Sync restart). Stock screens
@@ -262,3 +307,39 @@ bond change; each trigger (book closed, wake, sleep) and each early close;
 opening a book right after closing one (window start in flight); that sleep
 still happens and wake works after a sleep window; battery cost of windows; and
 the app's background reconnect.
+
+## App-entered Wi-Fi provisioning (`WIFI1`)
+
+`WIFI1` is advertised in the explicit Nearby Sync screen and X3 standby, never
+ordinary short reading-position windows. The authenticated command is
+`WIFI_JOIN <id> <SSID uppercase hex> <password uppercase hex or ->`, within
+220 bytes. SSID is 1–32 bytes without control characters; password is 8–63
+printable ASCII bytes, a 64-hex-digit PSK, or explicit open-network `-`.
+Names, spaces and case are exact. The app validates UTF-8 before encoding.
+
+Only encrypted, MITM-authenticated peers can submit it; standby also requires a
+bond. `OK <id>` means accepted for one attempt, not saved. Rejected input returns
+`BAD_WIFI`, unsupported windows `NOT_IN_SYNC`. No automatic command replay.
+A 124-byte RTC ticket transfers credentials across the BLE-to-Wi-Fi restart;
+only deliberate software restart consumes it. Other resets discard it, and
+terminal outcomes erase the SSID/password. Queue/GATT buffers are cleared.
+
+The Wi-Fi selection activity attempts the candidate without changing saved
+networks. Successful association saves a candidate JSON through temporary and
+backup renames; boot recovers an interrupted replacement. Failed association
+tries the previous network without overwriting its credentials, then returns
+to Bluetooth setup if that network is unavailable. `GET /api/status` returns
+`wifiSetup:1` and `wifiSetupResult:{requestID,state}`. Terminal states are
+`saved`, `failed`, `save_failed`; `pending` is not success. There are no password
+fields in responses or new logs. Existing on-card obfuscation is not encryption.
+
+An idle Sync client can request `POST /api/pocket/v1/wifi/setup?deviceID=<id>`
+to open Bluetooth setup after a clean restart. This route is identity-checked,
+not cryptographically LAN-authenticated, accepts no credential body, rejects
+active uploads, and only opens the existing passkey-protected BLE service.
+It neither bypasses pairing nor sends credentials over HTTP.
+
+App UI, privacy and shared fixtures are documented in the sibling
+[READER_WIFI_SETUP.md](../../pocket-daily/docs/READER_WIFI_SETUP.md).
+The developer pipeline `--wifi-setup` verifies a nonexistent network attempt
+and recovery using the actual app; it is not positive new-network acceptance.

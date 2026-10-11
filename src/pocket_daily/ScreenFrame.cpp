@@ -229,7 +229,8 @@ bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* conte
         Home::briefWeatherLabel(label, sizeof(label), g.weather, s.weather, frame.glanceStale);
         if (!visitStrings(context, visit, {label})) return false;
       }
-      if (profile.sleeps(SleepSection::Today) && g.eventCount > 0) {
+      if (profile.sleeps(SleepSection::Today) && (g.eventCount > 0 || profile.sleepCount == 1)) {
+        if (g.eventCount == 0 && !visitStrings(context, visit, {s.noEvents})) return false;
         if (!visitStrings(context, visit, {s.today})) return false;
         for (uint8_t i = 0; i < g.eventCount; ++i)
           if (GlanceFormat::formatEventLine(line, sizeof(line), g.events[i]) > 0 &&

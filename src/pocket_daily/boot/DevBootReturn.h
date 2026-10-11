@@ -6,7 +6,15 @@
 #include "pocket_daily/web/Profile.h"
 
 namespace PocketDaily::Boot {
-enum class DevBootReturn : uint8_t { None, FileTransferSta, SyncSta, FileTransferMenu, SyncMenu };
+enum class DevBootReturn : uint8_t {
+  None,
+  FileTransferSta,
+  SyncSta,
+  FileTransferMenu,
+  SyncMenu,
+  BleSleepCycle,
+  ReaderCapture
+};
 
 inline constexpr char devBootMarker(Web::Profile profile, bool apMode) {
   // A private AP lease is deliberately not persisted across firmware reboot.
@@ -25,6 +33,10 @@ inline constexpr DevBootReturn decodeDevBootMarker(const char* bytes, size_t siz
       return DevBootReturn::FileTransferMenu;
     case 'N':
       return DevBootReturn::SyncMenu;
+    case 'R':
+      return DevBootReturn::ReaderCapture;
+    case 'B':
+      return DevBootReturn::BleSleepCycle;
     default:
       return DevBootReturn::None;
   }

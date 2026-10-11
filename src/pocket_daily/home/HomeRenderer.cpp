@@ -367,9 +367,10 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
     const int f = fontForText(SMALL_FONT_ID, label);
     renderer.drawText(f, x, y, label, true, EpdFontFamily::BOLD);
     const int lw = renderer.getTextWidth(f, label, EpdFontFamily::BOLD);
-    const int ly = y + lineS / 2 + 2;
+    const int labelHeight = renderer.getLineHeight(f);
+    const int ly = y + labelHeight / 2 + 2;
     if (lw + 10 < cw) renderer.drawLine(x + lw + 10, ly, x + cw, ly);
-    return y + lineS + 6;
+    return y + labelHeight + 6;
   };
 
   // ── READING (local plane: the open book). Device-owned data — valid with
@@ -527,8 +528,16 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   auto drawToday = [&](int x, int y, int cw, int maxY) -> int {
     // No room for the header plus one event: skip rather than overlap the
     // status line (sections above may have used the space).
-    if (g.eventCount == 0 || y + lineS + 6 + line10 >= maxY) return y;
+    const bool onlyToday = view.profile.sleepCount == 1 && view.profile.sleeps(DailyProfile::SleepSection::Today);
+    if ((g.eventCount == 0 && !onlyToday) || y + lineS + 6 + line10 >= maxY) return y;
     y = sectionHeader(x, y, cw, s.today);
+    if (g.eventCount == 0) {
+      const int f = fontForText(UI_10_FONT_ID, s.noEvents);
+      const int height = renderer.getLineHeight(f);
+      if (y + height >= maxY) return y;
+      renderer.drawText(f, x, y, renderer.truncatedText(f, s.noEvents, cw).c_str(), true);
+      return y + height + 12;
+    }
     for (uint8_t i = 0; i < g.eventCount; i++) {
       if (y + line10 >= maxY) break;
       if (GlanceFormat::formatEventLine(buf, sizeof(buf), g.events[i]) <= 0) continue;

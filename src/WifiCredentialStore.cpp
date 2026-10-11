@@ -1,6 +1,7 @@
 #include "WifiCredentialStore.h"
 
 #include <CredentialIntegrity.h>
+#include <HalStorage.h>
 #include <Logging.h>
 #include <ObfuscationUtils.h>
 
@@ -107,6 +108,66 @@ bool WifiCredentialStore::fromJson(JsonVariantConst doc) {
   }
 
   return true;
+}
+
+bool WifiCredentialStore::loadFromFile() {
+  // Recover a power loss between renaming the old file and publishing the new
+  // one. Keep the old copy until the new file has parsed successfully.
+  static constexpr const char* backup = "/.crosspoint/wifi.setup-old";
+  if (PersistableStore<WifiCredentialStore>::loadFromFile()) {
+    Storage.remove(backup);
+    return true;
+  }
+  if (!Storage.exists(backup)) return false;
+  Storage.remove(getFilePath());
+  if (!Storage.rename(backup, getFilePath())) return false;
+  return PersistableStore<WifiCredentialStore>::loadFromFile();
+}
+
+bool WifiCredentialStore::saveProvisionedCredential(const std::string& ssid, const std::string& password) {
+  std::lock_guard<std::mutex> lock(storeMutex);
+  // Cold, one-shot JSON snapshot bounded to the existing eight networks. Reuse
+  // the store serializer instead of another persistent credentials container.
+  JsonDocument doc;
+  toJson(doc);
+  JsonArray entries = doc["credentials"].as<JsonArray>();
+  JsonObject target;
+  for (JsonObject entry : entries) {
+    if (ssid == (entry["ssid"] | "")) {
+      target = entry;
+      break;
+    }
+  }
+  if (target.isNull()) {
+    if (entries.size() >= MAX_NETWORKS) return false;
+    target = entries.add<JsonObject>();
+  }
+  target["ssid"] = ssid;
+  target["password_obf"] = obfuscation::obfuscateToBase64(password);
+  target["password_len"] = password.size();
+  target["password_crc32"] = credential_integrity::crc32(password);
+  doc["lastConnectedSsid"] = ssid;
+  if (doc.overflowed()) return false;
+  static constexpr const char* pending = "/.crosspoint/wifi.setup-new";
+  static constexpr const char* backup = "/.crosspoint/wifi.setup-old";
+  if (!writeDocToFile(pending, doc)) {
+    Storage.remove(pending);
+    return false;
+  }
+  Storage.remove(backup);
+  const bool hadPrevious = Storage.exists(getFilePath());
+  if (hadPrevious && !Storage.rename(getFilePath(), backup)) {
+    Storage.remove(pending);
+    return false;
+  }
+  if (!Storage.rename(pending, getFilePath())) {
+    if (hadPrevious && !Storage.rename(backup, getFilePath())) LOG_ERR("WCS", "Wi-Fi backup recovery deferred to boot");
+    Storage.remove(pending);
+    return false;
+  }
+  const bool loaded = fromJson(doc.as<JsonVariantConst>());
+  if (loaded) Storage.remove(backup);
+  return loaded;
 }
 
 bool WifiCredentialStore::addCredential(const std::string& ssid, const std::string& password) {

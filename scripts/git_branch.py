@@ -124,7 +124,7 @@ def get_base_version(project_dir):
 def inject_version(env):
     # Only applies to developer environments; release envs set the
     # version via build_flags in platformio.ini and are unaffected.
-    if env['PIOENV'] not in ('default', 'network_diagnostics', 'sta_recovery'):
+    if env['PIOENV'] not in ('default', 'network_diagnostics', 'sta_recovery', 'ble_standby'):
         return
 
     project_dir = env['PROJECT_DIR']
