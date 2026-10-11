@@ -107,6 +107,7 @@ add_subdirectory(fs_helpers)
 add_subdirectory(absolute_grayscale)
 
 add_subdirectory(sd_card_font)
+add_subdirectory(sd_allocation)
 add_subdirectory(glyph_bitmap)
 
 target_include_directories(crosspoint_test_common INTERFACE

@@ -23,3 +23,9 @@ def apply_storage_patch(project: Path) -> str:
 if "Import" in globals():
     Import("env")  # noqa: F821 - PlatformIO/SCons
     print("Storage SDK patch: " + apply_storage_patch(Path(env["PROJECT_DIR"])))  # noqa: F821
+
+elif __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--project", type=Path, default=Path(__file__).resolve().parents[1])
+    print(apply_storage_patch(parser.parse_args().project))

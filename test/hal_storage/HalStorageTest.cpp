@@ -65,6 +65,63 @@ TEST_F(StorageAllocation, DirectoryAllocationFailureDoesNotAdvanceCursor) {
   EXPECT_EQ(FakeSDK::nexts, 1u);
 }
 
+TEST_F(StorageAllocation, EntryIteratorEndsNormallyWithAnUnopenedChild) {
+  auto directory = Storage.open("/Books");
+  HalFile entry;
+  FakeSDK::nextAtEnd = true;
+  EXPECT_EQ(directory.openNextEntry(entry), HalFile::DirectoryRead::End);
+  EXPECT_FALSE(entry);
+  EXPECT_EQ(FakeSDK::nexts, 1u);
+}
+
+TEST_F(StorageAllocation, EntryIteratorReusesItsHandleAndClosesLastFileAtEnd) {
+  auto directory = Storage.open("/Books");
+  HalFile entry;
+  ASSERT_EQ(directory.openNextEntry(entry), HalFile::DirectoryRead::Record);
+  EXPECT_TRUE(entry);
+  FakeMemory::fail = true;  // Reuse the already allocated child handle.
+  ASSERT_EQ(directory.openNextEntry(entry), HalFile::DirectoryRead::Record);
+  EXPECT_EQ(FakeSDK::closes, 1u);
+  FakeSDK::nextAtEnd = true;
+  EXPECT_EQ(directory.openNextEntry(entry), HalFile::DirectoryRead::End);
+  EXPECT_FALSE(entry);
+  EXPECT_EQ(FakeSDK::closes, 2u);
+  EXPECT_EQ(FakeSDK::nexts, 3u);
+}
+
+TEST_F(StorageAllocation, EntryIteratorPreservesReadFailureInsteadOfReportingEnd) {
+  auto directory = Storage.open("/Books");
+  HalFile entry;
+  FakeSDK::nextReadError = true;
+  EXPECT_EQ(directory.openNextEntry(entry), HalFile::DirectoryRead::Error);
+  EXPECT_FALSE(entry);
+  EXPECT_EQ(FakeSDK::nexts, 1u);
+}
+
+TEST_F(StorageAllocation, EntryIteratorAllocationFailureDoesNotAdvanceDirectory) {
+  auto directory = Storage.open("/Books");
+  HalFile entry;
+  FakeMemory::fail = true;
+  EXPECT_EQ(directory.openNextEntry(entry), HalFile::DirectoryRead::Error);
+  EXPECT_EQ(FakeSDK::nexts, 0u);
+}
+
+TEST_F(StorageAllocation, EntryIteratorRejectsInvalidDirectoryBeforeTouchingChild) {
+  HalFile empty, entry;
+  EXPECT_EQ(empty.openNextEntry(entry), HalFile::DirectoryRead::Error);
+  auto directory = Storage.open("/Books");
+  EXPECT_EQ(directory.openNextEntry(directory), HalFile::DirectoryRead::Error);
+  FakeSDK::directory = false;
+  EXPECT_EQ(directory.openNextEntry(entry), HalFile::DirectoryRead::Error);
+  FakeSDK::directory = true;
+  ASSERT_TRUE(directory.seekSet(1));
+  EXPECT_EQ(directory.openNextEntry(entry), HalFile::DirectoryRead::Error);
+  ASSERT_TRUE(directory.seekSet(0));
+  FakeSDK::readError = 1;
+  EXPECT_EQ(directory.openNextEntry(entry), HalFile::DirectoryRead::Error);
+  EXPECT_EQ(FakeSDK::nexts, 0u);
+}
+
 TEST_F(StorageAllocation, RawDirectoryRecordsBoundWorkWithoutAllocating) {
   auto directory = Storage.open("/");
   uint8_t record[32] = {};

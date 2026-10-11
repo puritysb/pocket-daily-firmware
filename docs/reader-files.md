@@ -11,6 +11,51 @@ are retained. Hidden/system folders and firmware cannot be deleted here.
 
 ## Contract (app and sibling firmware)
 
+### SPI allocation reads — 2026-10-09
+
+The storage SDK patch must read allocation sectors from the mounted SPI card
+even when `USE_BLOCK_DEVICE_INTERFACE=0`. `rawBlockDevice()` is a USB-oriented
+optional interface and returns null on the X3 build; using it made every usage
+request fail with 503 despite successful book I/O. The reviewed
+`scripts/storage_sdk.patch` now uses the SPI card directly inside the SDK,
+under the existing HalStorage lock. `test/sd_allocation` compiles the actual SDK
+header with a USB-disabled SPI stub and covers missing/unmounted cards and read
+errors. CMake applies the reviewed patch to an isolated header copy, so a clean
+SDK checkout is tested without modifying it. The app's `--interface-suite`
+requires a real chunked usage result.
+
+### Directory end handling — 2026-10-09
+
+`HalFile::openNextEntry` checks the open directory's error state after SdFat's
+iterator returns false. `FsBaseFile::openNext` clears the child handle both at
+end-of-directory and on failure; `getError()` on that closed child returns
+`0xFF`. Checking that child incorrectly turned every last listing page into
+HTTP 503, discarding its rows. The directory error still produces HTTP 503;
+an invalid/non-directory/misaligned cursor or allocation failure remains an
+error. No new allocation, on-card change or HTTP payload change is introduced.
+
+The HAL fixture now models closed-child `0xFF`, normal empty/end iteration and
+directory read failure. Five regressions cover those outcomes, handle reuse,
+allocation refusal and invalid cursors. Restoring the old child-error check in
+an isolated build fails the two end-of-directory regressions. The app already
+consumes `nextCursor=0`; its parser/iteration contract needs no change.
+
+X3 Same-Wi-Fi verification: installed `8925b142-ble-standby-wde94a4e8`
+(6,406,864 B; SHA-256
+`108326380ec0662e64f36a15a9e0f3dad03acd36f38fb7ab3ed1ac6c1c9245c1`).
+Before repair, root cursor 1824 and Books cursor 0 returned 503. After repair,
+three complete passes returned root pages of 12 + 7 rows and Books 3 rows,
+with no duplicates, identical order and final `nextCursor=0`. Actual Mac
+Refresh Inventory displayed reading files without the former error. This is
+listing acceptance on X3 Same Wi-Fi, not download/delete/Direct/X4 acceptance.
+Validation: 892 host tests, strict cppcheck and warning-free default and
+experimental standby builds. Evidence: ignored `build/folder-eof/`.
+The same image passed a subsequent Wi-Fi-entry standby trial: the restarted
+Mac app's Connect action woke the reader after 33.7 s, rejoined saved Wi-Fi and
+automatically displayed the inventory without the error. The device recorded
+actual light sleep and minimum BLE free heap of 61,488 B. No physical reader
+interaction was needed; battery-current and X4 claims are not implied.
+
 Sync `/api/status` advertises `readerFiles: 2` and optional `totalHeap` bytes.
 Version 1 provides list/delete/storage; version 2 also provides bounded download.
 Older firmware remains supported: free RAM only, no invented SD usage.

@@ -1,6 +1,6 @@
 --- a/libs/hardware/SDCardManager/include/SDCardManager.h
 +++ b/libs/hardware/SDCardManager/include/SDCardManager.h
-@@ -32,6 +32,14 @@
+@@ -32,6 +32,22 @@
    SDCardManager();
    bool begin();
    bool ready() const;
@@ -10,7 +10,15 @@
 +  uint32_t clusterBytes() { return initialized ? vol().bytesPerCluster() : 0; }
 +  uint32_t fatStart() { return initialized ? vol().fatStartSector() : 0; }
 +  bool readAllocationSector(uint32_t sector, uint8_t* data) {
-+    return initialized && rawBlockDevice() && rawBlockDevice()->readSector(sector, data);
++    if (!initialized) return false;
++#if FREEINK_SD_SDMMC
++    auto* device = rawBlockDevice();
++#else
++    // SPI cards can read sectors even when the optional USB block-device
++    // interface is disabled (the ESP32-C3 configuration).
++    auto* device = sd.card();
++#endif
++    return device && device->readSector(sector, data);
 +  }
    // Returns the total card capacity in bytes. Cached at begin(); 0 if not mounted.
    uint64_t sdTotalBytes() const;

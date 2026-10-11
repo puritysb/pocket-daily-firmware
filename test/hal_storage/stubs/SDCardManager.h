@@ -11,6 +11,7 @@
 namespace FakeSDK {
 inline unsigned opens = 0, closes = 0, nexts = 0, writes = 0, unlocked = 0;
 inline bool failOpen = false;
+inline bool nextAtEnd = false, nextReadError = false;
 inline bool directory = true;
 inline uint8_t filesystemType = 32;
 inline bool errorAfterRead = false;
@@ -27,6 +28,7 @@ inline void checkLock() {
 inline void reset() {
   opens = closes = nexts = writes = unlocked = 0;
   failOpen = false;
+  nextAtEnd = nextReadError = false;
   directory = true;
   filesystemType = 32;
   errorAfterRead = false;
@@ -72,7 +74,8 @@ class FsFile {
   bool isDirectory() const { return opened && FakeSDK::directory; }
   uint8_t getError() const {
     FakeSDK::checkLock();
-    return FakeSDK::readError;
+    // FsBaseFile has neither its FAT nor exFAT child after openNext fails.
+    return opened ? FakeSDK::readError : 0xff;
   }
   size_t size() const { return opened ? 7 : 0; }
   size_t fileSize() const { return size(); }
@@ -137,7 +140,8 @@ class FsFile {
   void rewindDirectory() { FakeSDK::checkLock(); }
   bool openNext(FsFile* directory) {
     FakeSDK::checkLock();
-    opened = directory->opened;
+    if (FakeSDK::nextReadError) FakeSDK::readError = 1;
+    opened = directory->opened && !FakeSDK::nextAtEnd && !FakeSDK::nextReadError;
     ++FakeSDK::nexts;
     return opened;
   }

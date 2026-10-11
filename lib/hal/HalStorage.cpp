@@ -429,12 +429,16 @@ bool HalFile::close() {
 }
 HalFile::DirectoryRead HalFile::openNextEntry(HalFile& entry) {
   HalStorage::StorageLock lock;
-  if (!impl || &entry == this) return DirectoryRead::Error;
+  if (!impl || &entry == this || !impl->file.isDirectory() || impl->file.getError() || (impl->file.position() & 31u))
+    return DirectoryRead::Error;
   if (!entry.impl) entry.impl = allocateImpl();
   if (!entry.impl) return DirectoryRead::Error;
   entry.impl->file.close();
   if (entry.impl->file.openNext(&impl->file)) return DirectoryRead::Record;
-  return impl->file.getError() || entry.impl->file.getError() ? DirectoryRead::Error : DirectoryRead::End;
+  // FsBaseFile::openNext clears the child handle on EOF as well as failure.
+  // Its getError() then returns 0xFF, not a read-error indication. SdFat's
+  // OpenNext example checks the still-open directory to distinguish I/O failure.
+  return impl->file.getError() ? DirectoryRead::Error : DirectoryRead::End;
 }
 uint32_t HalFile::modificationTime() {
   HalStorage::StorageLock lock;

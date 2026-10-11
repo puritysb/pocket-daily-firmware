@@ -1,0 +1,3 @@
+#pragma once
+#define FREEINK_SD_SDMMC 0
+#define USE_BLOCK_DEVICE_INTERFACE 0

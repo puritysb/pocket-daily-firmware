@@ -1,4 +1,6 @@
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,7 +17,6 @@ class StorageSDKPatchTests(unittest.TestCase):
         relative = Path("freeink-sdk/libs/hardware/SDCardManager/include/SDCardManager.h")
         self.header = self.project / relative
         self.header.parent.mkdir(parents=True)
-        import subprocess
         self.original = subprocess.check_output(
             ["git", "-C", str(root / "freeink-sdk"), "show", "HEAD:libs/hardware/SDCardManager/include/SDCardManager.h"], text=True)
         self.header.write_text(self.original)
@@ -30,6 +31,13 @@ class StorageSDKPatchTests(unittest.TestCase):
         self.assertTrue(result.endswith(b"// unrelated local work\n"))
         self.assertEqual(apply_storage_patch(self.project), "already applied")
         self.assertEqual(self.header.read_bytes(), result)
+
+    def test_cli_prepares_an_isolated_clean_sdk_for_host_tests(self):
+        script = Path(__file__).resolve().parent / "patch_storage_sdk.py"
+        result = subprocess.run([sys.executable, str(script), "--project", str(self.project)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("auto* device = sd.card();", self.header.read_text())
 
     def test_conflicting_sdk_is_not_modified(self):
         self.header.write_text(self.original.replace("bool ready() const;", "bool ready(int);"))
