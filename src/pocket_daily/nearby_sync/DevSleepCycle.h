@@ -26,12 +26,16 @@ struct Record {
   uint32_t batteryPercent = 0;
   uint32_t standbyLimitMs = 180000;
   uint32_t charging = 0;
+  uint32_t advertisingDelayMs = 0, advertisingStartedMs = 0;
   uint32_t check = 0;
 };
 inline constexpr const char* RESULT_PATH = "/.crosspoint/dev-ble-cycle";
 bool read(Record& record);
-bool request(uint32_t run, ReturnMode mode = ReturnMode::Restart, uint32_t standbySeconds = 90);
+bool request(uint32_t run, ReturnMode mode = ReturnMode::Restart, uint32_t standbySeconds = 90,
+             uint32_t advertisingDelayMs = 0);
 uint32_t standbyLimitMs();
+uint32_t advertisingDelayMs();
+void advertisingStarted(uint32_t elapsedMs);
 // Arms the saved-network return BEFORE running the experiment. Failure never
 // starts a radio experiment; the caller returns to Same Wi-Fi instead.
 bool begin();

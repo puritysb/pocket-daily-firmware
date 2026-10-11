@@ -71,7 +71,7 @@ INTERFACE_CASES = {'identity-rejection', 'storage-usage', 'preferences-roundtrip
                    'folder-copy', 'inventory-preservation'}
 
 
-def hardware_evidence(log, run, version, standby, platform, interface=False, wifi_setup=False, screens=False, standby_seconds=90):
+def hardware_evidence(log, run, version, standby, platform, interface=False, wifi_setup=False, screens=False, standby_seconds=90, battery_only=False, delayed_advertising=False, wake_control=False):
     records = []
     for line in log.splitlines():
         if MARKER in line:
@@ -124,6 +124,8 @@ def hardware_evidence(log, run, version, standby, platform, interface=False, wif
         if trial.get('run') != run:
             raise RuntimeError('stale firmware cycle evidence')
         cycle.check_result(trial, standby=True)
+        if not delayed_advertising and trial.get("advertisingDelayMs", 0) != 0:
+            raise RuntimeError("advertising fault leaked into ordinary standby")
         if standby_seconds > 90:
             if trial.get('standbyLimitMs') != (standby_seconds + 90) * 1000:
                 raise RuntimeError('missing long-standby recovery deadline')
@@ -131,6 +133,45 @@ def hardware_evidence(log, run, version, standby, platform, interface=False, wif
                 raise RuntimeError('long standby requires suspended app traffic')
         if record.get('standbyWaitSeconds', 0) != standby_seconds or trial.get('standbyMs', 0) < (standby_seconds - 30) * 1000:
             raise RuntimeError('standby trial did not span the first minute eligibility check')
+    if delayed_advertising:
+        trial = record.get('cycle', {})
+        delay_ms = (standby_seconds + 16) * 1000
+        if (not standby or trial.get('advertisingDelayMs') != delay_ms
+                or trial.get('advertisingStartedMs', 0) < delay_ms):
+            raise RuntimeError('missing reader advertising delay')
+    if wake_control:
+        if (not delayed_advertising or record.get('wakeControl') is not True
+                or [item.get('event') for item in record.get('wakeObservations', [])]
+                    != ['connecting', 'connected', 'authenticated', 'commandSent', 'accepted']):
+            raise RuntimeError('invalid no-rediscovery control evidence')
+    if delayed_advertising and not wake_control:
+        trial = record.get('cycle', {})
+        delay_ms = (standby_seconds + 16) * 1000
+        observations = record.get('wakeObservations', [])
+        names = [item.get('event') for item in observations]
+        times = {item.get('event'): item.get('seconds') for item in observations}
+        scan, connected = times.get('discoveryStarted'), times.get('connected')
+        ordered = [item.get('seconds') for item in observations]
+        if (not standby or trial.get('advertisingDelayMs') != delay_ms
+                or trial.get('advertisingStartedMs', 0) < delay_ms
+                or record.get('wakeControl') is True
+                or names != ['connecting', 'connectionReset', 'pendingConnectionCancelled', 'discoveryStarted',
+                             'knownAdvertisement', 'reconnectRequested', 'connected', 'authenticated',
+                             'commandSent', 'accepted']
+                or not isinstance(scan, (int, float)) or not isinstance(connected, (int, float))
+                or not 7.5 <= scan < connected < 20
+                or not all(isinstance(value, (int, float)) for value in ordered)
+                or not 0 <= ordered[0] <= ordered[-1] < 20
+                or not all(left <= right for left, right in zip(ordered, ordered[1:]))
+                or names.index('authenticated') < names.index('connected')
+                or names.index('accepted') < names.index('commandSent')):
+            raise RuntimeError('missing actual delayed-advertising recovery evidence')
+    if battery_only:
+        trial = record.get('cycle', {})
+        if (not standby or record.get('batteryOnlyRequested') is not True
+                or trial.get('chargingAtCheckpoint') is not False
+                or not isinstance(trial.get('batteryPercent'), int) or trial['batteryPercent'] <= 10):
+            raise RuntimeError('missing eligible battery-only standby evidence')
     return record
 
 
@@ -321,9 +362,7 @@ def run(args, config, job):
             ('host-configure', ['cmake', '-S', 'test', '-B', 'build/host-tests', '-DCMAKE_BUILD_TYPE=Release']),
             ('host-build', ['cmake', '--build', 'build/host-tests', '-j8']),
             ('host-tests', ['ctest', '--test-dir', 'build/host-tests', '--output-on-failure', '-j8']),
-            ('pipeline-tests', [sys.executable, '-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_dev_*.py']),
-            ('upload-tests', [sys.executable, '-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_pocket_put.py']),
-            ('route-tests', [sys.executable, '-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_sync_routes.py']),
+            ('pipeline-tests', [sys.executable, '-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'test_*.py']),
             ('cppcheck', [sys.executable, 'scripts/check_firmware.py', '--cppcheck', args.cppcheck]),
             ('default-build', ['./scripts/pio.sh', 'run', '-e', 'default']),
         ]
@@ -380,6 +419,9 @@ def run(args, config, job):
             for key, value in {'ENABLED': '1', 'HOST': host, 'DEVICE_ID': identity, 'VERSION': version,
                                'RUN': str(run_id), 'STANDBY': '1' if args.standby else '0',
                                'STANDBY_SECONDS': str(getattr(args, 'standby_seconds', 90)),
+                               'WAKE_CONTROL': '1' if getattr(args, 'wake_control', False) else '0',
+                               'DELAYED_ADVERTISING': '1' if getattr(args, 'delayed_advertising', False) else '0',
+                               'BATTERY_ONLY': '1' if getattr(args, 'battery_only', False) else '0',
                                'SCREENS': '1' if getattr(args, 'screen_suite', False) and platform == 'macOS' else '0',
                                'WIFI_SETUP': '1' if getattr(args, 'wifi_setup', False) else '0',
                                'INTERFACE': '1' if getattr(args, 'interface_suite', False) else '0'}.items():
@@ -389,7 +431,7 @@ def run(args, config, job):
                 '-only-testing:' + target + '/ReaderHardwareTests/testDeveloperConnectionCycle',
                 '-resultBundlePath', str(job.output / (label + '.xcresult'))], cwd=app, env=env, timeout=(1200 if getattr(args, 'interface_suite', False) else 480) + (getattr(args, 'standby_seconds', 90) if args.standby else 0))
             evidence = job.stage(label + '-evidence', lambda: hardware_evidence(
-                log.read_text(), run_id, version, args.standby, platform, getattr(args, 'interface_suite', False), getattr(args, 'wifi_setup', False), getattr(args, 'screen_suite', False) and platform == 'macOS', getattr(args, 'standby_seconds', 90)))
+                log.read_text(), run_id, version, args.standby, platform, getattr(args, 'interface_suite', False), getattr(args, 'wifi_setup', False), getattr(args, 'screen_suite', False) and platform == 'macOS', getattr(args, 'standby_seconds', 90), getattr(args, 'battery_only', False), getattr(args, 'delayed_advertising', False), getattr(args, 'wake_control', False)))
             if getattr(args, 'screen_suite', False) and platform == 'macOS':
                 destination = job.output / (label + '-screens')
                 job.command(label + '-export-screens', ['xcrun', 'xcresulttool', 'export', 'attachments',
@@ -429,6 +471,9 @@ def main():
     parser.add_argument('--checks', action='store_true', help='full firmware host/analysis/default-build gates')
     parser.add_argument('--cppcheck', default='build/cppcheck-source/cppcheck')
     parser.add_argument('--standby', action='store_true', help='actual app BLE wake scenario (experimental X3)')
+    parser.add_argument('--wake-control', action='store_true', help='negative control: suppress only app rediscovery; never count as recovery verification')
+    parser.add_argument('--delayed-advertising', action='store_true', help='inject a real reader advertising outage and require foreground rediscovery evidence')
+    parser.add_argument('--battery-only', action='store_true', help='require noncharging standby checkpoint above 10 percent; emits unplug-ready marker')
     parser.add_argument('--standby-seconds', type=int, default=90, help='uninterrupted standby wait, 90..1800 seconds')
     parser.add_argument('--cycles', type=int, default=1)
     parser.add_argument('--ios-simulator', help='simulator UDID for protocol regression/build validation')
@@ -436,6 +481,12 @@ def main():
     args = parser.parse_args()
     if args.action == 'run' and args.host:
         parser.error('--host is enrollment only; use configure to change the expected reader')
+    if args.wake_control and not args.delayed_advertising:
+        parser.error('--wake-control requires --delayed-advertising')
+    if args.delayed_advertising and not args.standby:
+        parser.error('--delayed-advertising requires --standby')
+    if args.battery_only and not args.standby:
+        parser.error('--battery-only requires --standby')
     if args.standby and args.build_firmware == 'default':
         parser.error('--standby requires --build-firmware ble_standby')
     if not 90 <= args.standby_seconds <= 1800 or (not args.standby and args.standby_seconds != 90):

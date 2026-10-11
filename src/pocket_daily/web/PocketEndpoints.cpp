@@ -55,7 +55,6 @@
 #include "pocket_daily/nearby_sync/DevSleepCycle.h"
 #include "pocket_daily/nearby_sync/ExchangeWindowPolicy.h"
 #include "pocket_daily/product_identity.h"
-#include "util/ScreenshotUtil.h"
 #endif
 
 namespace PocketDaily::Web {
@@ -1332,7 +1331,13 @@ void handleDevBleCycle(WebServer& server, const RouteDeps& d) {
     server.send(400, "text/plain", "standbySeconds requires standby and must be 90..1800");
     return;
   }
-  if (!Pocket::NearbySync::DevSleepCycle::request(run, mode, standbySeconds)) {
+  const String delayed = server.arg("delayAdvertising");
+  if (!delayed.isEmpty() && (delayed != "1" || sleep != "standby")) {
+    server.send(400, "text/plain", "delayAdvertising requires standby and value 1");
+    return;
+  }
+  const uint32_t advertisingDelayMs = delayed == "1" ? (standbySeconds + 16) * 1000 : 0;
+  if (!Pocket::NearbySync::DevSleepCycle::request(run, mode, standbySeconds, advertisingDelayMs)) {
     server.send(503, "text/plain", "Could not verify the one-shot experiment request");
     return;
   }
@@ -1344,7 +1349,7 @@ void handleDevBleCycle(WebServer& server, const RouteDeps& d) {
 
 void handleDevBleCycleResult(WebServer& server) {
   using namespace Pocket::NearbySync;
-  // At most 208 B, request-local: alongside JSON encoding it would exceed the
+  // At most 224 B, request-local: alongside JSON encoding it would exceed the
   // stack-frame budget. No allocation is retained during BLE measurement.
   auto record = makeUniqueNoThrow<DevSleepCycle::Record>();
   if (!record) {
@@ -1364,6 +1369,8 @@ void handleDevBleCycleResult(WebServer& server) {
   doc["batteryPercent"] = record->batteryPercent;
   doc["chargingAtCheckpoint"] = record->charging != 0;
   doc["standbyLimitMs"] = record->standbyLimitMs;
+  doc["advertisingDelayMs"] = record->advertisingDelayMs;
+  doc["advertisingStartedMs"] = record->advertisingStartedMs;
   doc["timerWake"] = powerManager.devWokeFromTimer();
   doc["lightSleeps"] = record->lightSleeps;
   doc["lightSleepMs"] = record->lightSleepMs;

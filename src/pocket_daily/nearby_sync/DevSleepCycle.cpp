@@ -12,12 +12,12 @@
 
 namespace Pocket::NearbySync::DevSleepCycle {
 namespace {
-constexpr uint32_t MAGIC = 0x424c4506;
-// Fixed developer evidence only, under 208 B; avoids a heap allocation while
+constexpr uint32_t MAGIC = 0x424c4507;
+// Fixed developer evidence only, under 224 B; avoids a heap allocation while
 // measuring reclamation. Production builds contain neither record nor routes.
 Record current;
 bool running = false;
-static_assert(sizeof(Record) <= 208);
+static_assert(sizeof(Record) <= 224);
 
 uint32_t checksum(const Record& record) {
   const auto* bytes = reinterpret_cast<const uint8_t*>(&record);
@@ -61,18 +61,23 @@ bool read(Record& record) {
   if (!file || file.size() != sizeof(record) || file.read(&record, sizeof(record)) != sizeof(record)) return false;
   return record.magic == MAGIC && record.run != 0 && record.check == checksum(record) &&
          record.standbyLimitMs >= 180000 && record.standbyLimitMs <= 1890000 && record.charging <= 1 &&
+         record.advertisingDelayMs < record.standbyLimitMs &&
+         (record.advertisingDelayMs == 0 || record.returnMode == ReturnMode::AppStandby) &&
          (record.returnMode == ReturnMode::Restart || record.returnMode == ReturnMode::TimedDeepSleep ||
           record.returnMode == ReturnMode::AppStandby) &&
          (record.state == State::Requested || record.state == State::Running || record.state == State::Completed ||
           record.state == State::Interrupted);
 }
 
-bool request(const uint32_t run, const ReturnMode mode, const uint32_t standbySeconds) {
+bool request(const uint32_t run, const ReturnMode mode, const uint32_t standbySeconds,
+             const uint32_t advertisingDelayMs) {
   if (!run || running || standbySeconds < 90 || standbySeconds > 1800 ||
-      (mode != ReturnMode::AppStandby && standbySeconds != 90))
+      (mode != ReturnMode::AppStandby && (standbySeconds != 90 || advertisingDelayMs != 0)) ||
+      (advertisingDelayMs != 0 && advertisingDelayMs != (standbySeconds + 16) * 1000))
     return false;
   Record request;
   request.run = run;
+  request.advertisingDelayMs = advertisingDelayMs;
   request.returnMode = mode;
   request.standbyLimitMs = (standbySeconds + 90) * 1000;
   return save(request) && armBoot('B');
@@ -91,6 +96,11 @@ bool begin() {
 uint32_t runNumber() { return running ? current.run : 0; }
 
 uint32_t standbyLimitMs() { return running ? current.standbyLimitMs : 0; }
+
+uint32_t advertisingDelayMs() { return running ? current.advertisingDelayMs : 0; }
+void advertisingStarted(const uint32_t elapsedMs) {
+  if (running && !current.advertisingStartedMs) current.advertisingStartedMs = elapsedMs;
+}
 
 bool active() { return running; }
 bool timerRequested() { return running && current.returnMode == ReturnMode::TimedDeepSleep; }

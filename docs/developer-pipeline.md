@@ -32,6 +32,10 @@ The host needs Xcode with a signing identity, XcodeGen, CMake, the repository's
 native PlatformIO wrapper, and cppcheck 2.11 for full firmware gates. Use
 `--cppcheck <path>` if the pinned analyzer is installed elsewhere.
 
+`--checks` runs the complete host suite, every `scripts/test_*.py` test
+(including ownership-boundary checks), strict analysis and the default build.
+Restricting Python discovery to transport tests misses repository-wide gates.
+
 From the firmware checkout:
 
 ```sh
@@ -66,6 +70,27 @@ unreachable subnet can still prevent discovery. This does not bootstrap release
 firmware. An initial enrollment still requires the reader's address once.
 
 ## Iterate
+
+For a real delayed-advertising recovery experiment, use `--standby
+--delayed-advertising`. The developer `ble-cycle` request accepts
+`delayAdvertising=1` only with standby. It defers BLE startup until
+`(standbySeconds + 16) * 1000` milliseconds into standby while retaining battery,
+button and automatic return handling. The versioned/checksummed developer record
+reports `advertisingDelayMs` and `advertisingStartedMs`; the record gains eight
+bytes, no additional heap buffer, and its magic changes to reject old layouts.
+The fault has no persistent setting and is compiled out without
+`ENABLE_DEV_REMOTE_FLASH`.
+
+The app-owned harness requires pending connection cancellation and confirmation,
+actual service scan, enrolled advertisement, one reconnect, authentication and
+exactly one acknowledged wake, in that order and
+inside the original 20-second app deadline. `--wake-control` suppresses only the
+app's eight-second recovery action via a test-only scheduler. It preserves the
+real radio and can succeed without rediscovery; that result is a control, never
+recovery evidence. Both paths still check inventory, EPUB bytes, cleanup and idle
+return. An old image that ignores the new query fails evidence validation.
+Use the sibling app's `docs/CURRENT_HANDOFF.md` for measured results and limits;
+injected outages do not establish an unobserved historical RF cause.
 
 Fast app iteration against the installed reader:
 
@@ -268,3 +293,21 @@ reconnected in 12.223 seconds and completed its generated EPUB round trip and
 cleanup. The last checkpoint was 19% with charging confirmed; minimum free heap
 64,504 B and minimum largest block 55,284 B. This is one 30-minute trial, not an
 overnight or current-consumption claim. Earlier interrupted runs are not passes.
+
+### Physical cable removal and battery-only trials
+
+Use `run --standby --standby-seconds 300 --cycles 2 --battery-only` with the
+reader initially connected to power. The real app emits
+`POCKET_STANDBY_READY <run> waitSeconds=300` after requesting standby once and
+observing that the reader no longer answers its LAN probe. Ask the user to remove
+the charging cable at the first marker and leave it removed through both cycles;
+record that confirmation separately in the private run directory. The marker is
+a coordination point, not standalone evidence that BLE/light sleep succeeded.
+The usual firmware run/idle/heap/app-wake evidence remains mandatory.
+
+Both app and runner additionally require `batteryOnlyRequested: true`,
+`chargingAtCheckpoint: false` and `batteryPercent > 10`. The last checkpoint
+cannot independently establish physical removal or uninterrupted battery-only
+power; combine it with the user's confirmation. This neither measures current
+nor changes the protective thresholds. A late/no unplug or absent power record
+fails this specific acceptance even if normal Wi-Fi reconnection succeeds.

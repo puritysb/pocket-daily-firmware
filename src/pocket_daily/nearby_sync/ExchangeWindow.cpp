@@ -319,7 +319,17 @@ StandbyExit runStandby(const GfxRenderer& renderer, const uint32_t maxMs) {
       close(CloseReason::BUTTON);
       return StandbyExit::Reader;
     }
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    // One-shot developer radio fault: withhold the actual advertiser, not an
+    // app callback. Normal standby has zero delay; battery/button/recovery
+    // handling below remains active throughout the injected outage.
+    if (millis() - began >= DevSleepCycle::advertisingDelayMs()) {
+      loop(true, 0, renderer);
+      if (controller.state() == Controller::State::OPEN) DevSleepCycle::advertisingStarted(millis() - began);
+    }
+#else
     loop(true, 0, renderer);
+#endif
     if (runtime && runtime->wifiRequested) {
       delay(300);  // let the accepted notification leave before stopping BLE
       close(CloseReason::APP_WIFI);

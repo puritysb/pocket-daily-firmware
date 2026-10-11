@@ -199,3 +199,21 @@ TEST_F(DevCycle, LongStandbyIsBoundedAndPersistsItsRecoveryDeadline) {
   ASSERT_TRUE(DevSleepCycle::complete(&baseline));
   EXPECT_EQ(DevSleepCycle::standbyLimitMs(), 0U);
 }
+
+TEST_F(DevCycle, DelayedAdvertisingIsBoundedStandbyOnlyAndPersistsActualStart) {
+  using DevSleepCycle::ReturnMode;
+  EXPECT_FALSE(DevSleepCycle::request(42, ReturnMode::Restart, 90, 106000));
+  EXPECT_FALSE(DevSleepCycle::request(42, ReturnMode::AppStandby, 90, 105999));
+  EXPECT_FALSE(DevSleepCycle::request(42, ReturnMode::AppStandby, 90, 180000));
+  ASSERT_TRUE(DevSleepCycle::request(42, ReturnMode::AppStandby, 90, 106000));
+  ASSERT_TRUE(DevSleepCycle::begin());
+  EXPECT_EQ(DevSleepCycle::advertisingDelayMs(), 106000u);
+  DevSleepCycle::advertisingStarted(106251);
+  DevSleepCycle::advertisingStarted(106999);
+  ASSERT_TRUE(DevSleepCycle::complete(nullptr));
+  DevSleepCycle::Record record;
+  ASSERT_TRUE(DevSleepCycle::read(record));
+  EXPECT_EQ(record.advertisingStartedMs, 106251u);
+  EXPECT_EQ(record.advertisingDelayMs, 106000u);
+  EXPECT_EQ(DevSleepCycle::advertisingDelayMs(), 0u);
+}

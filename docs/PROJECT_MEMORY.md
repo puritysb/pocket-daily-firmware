@@ -3,6 +3,24 @@
 This is concise, repository-owned context for future sessions. It is not a chat
 transcript. Current source and release records override dated observations.
 
+## Actual advertising-delay recovery and regression — 2026-10-12
+
+- Developer-only `delayAdvertising=1` withholds the real standby advertiser
+  until `(standbySeconds + 16) * 1000`; ordinary standby is unchanged. Versioned
+  cycle evidence records requested delay and actual start. Battery/button and
+  automatic return remain active; no new heap allocation or persistent option.
+- Runner options validate battery-only checkpoints and actual foreground
+  cancel/acknowledge/scan/bonded-advertisement/reconnect/one-command order.
+  `--wake-control` suppresses app rediscovery only and cannot count as recovery.
+  Delayed recovery passed 3/3 in `20261011T152735-7c55e9`; historical RF cause
+  remains unconfirmed. Installed test build was `5610af50-ble-standby-w244dc28a`.
+- Full host 916, all Python 130, strict cppcheck and default build passed.
+  `--checks` now includes every Python test; the seam gate registers the required
+  developer RenderLock edge and an unused screenshot include was removed.
+  Final `20261011T163609-3fc6ac` passed all 10 app interface cases and 13 X3
+  captures/OCR, timer deep sleep and restoration. App's first download timeout
+  did not recur and remains unexplained. No new physical iPhone/X4/current tests.
+
 ## Repeated X3 standby/wake acceptance — 2026-10-11
 
 - After pushing tools `5d512c56` and app `fb0629a`, `run --standby --cycles 3`

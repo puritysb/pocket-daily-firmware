@@ -25,6 +25,54 @@ class PipelineTest(unittest.TestCase):
         return pipeline.hardware_evidence(pipeline.MARKER + json.dumps(evidence),
                                           123, 'x-dev-y', True, 'macOS')
 
+    def test_delayed_advertising_requires_real_scan_before_connection(self):
+        record = self.evidence()
+        record['cycle'].update(advertisingDelayMs=106000, advertisingStartedMs=106250)
+        record['wakeObservations'] = [
+            {'event': name, 'seconds': seconds} for name, seconds in [
+                ('connecting', 0.05), ('connectionReset', 8), ('pendingConnectionCancelled', 8.005),
+                ('discoveryStarted', 8.01), ('knownAdvertisement', 12.4), ('reconnectRequested', 12.41),
+                ('connected', 12.6),
+                ('authenticated', 13.1), ('commandSent', 13.2), ('accepted', 13.4)]]
+        def validate(value):
+            return pipeline.hardware_evidence(pipeline.MARKER + json.dumps(value),
+                123, 'x-dev-y', True, 'macOS', delayed_advertising=True)
+        self.assertTrue(validate(record)['passed'])
+        for missing in ['connecting', 'connectionReset', 'pendingConnectionCancelled', 'discoveryStarted',
+                        'knownAdvertisement', 'reconnectRequested', 'connected', 'authenticated', 'commandSent', 'accepted']:
+            broken = json.loads(json.dumps(record))
+            broken['wakeObservations'] = [v for v in broken['wakeObservations'] if v['event'] != missing]
+            with self.assertRaises(RuntimeError): validate(broken)
+        for field, value in [('advertisingDelayMs', 0), ('advertisingStartedMs', 1)]:
+            broken = json.loads(json.dumps(record)); broken['cycle'][field] = value
+            with self.assertRaises(RuntimeError): validate(broken)
+        for event, seconds in [('discoveryStarted', 0.1), ('connected', 21), ('connected', 7), ('knownAdvertisement', 4), ('accepted', 21)]:
+            broken = json.loads(json.dumps(record))
+            next(v for v in broken['wakeObservations'] if v['event'] == event)['seconds'] = seconds
+            with self.assertRaises(RuntimeError): validate(broken)
+
+    def test_control_cannot_be_counted_as_rediscovery_recovery(self):
+        record = self.evidence()
+        record['wakeControl'] = True
+        record['cycle'].update(advertisingDelayMs=106000, advertisingStartedMs=106250)
+        record['wakeObservations'] = [{'event': name, 'seconds': seconds} for name, seconds in [
+            ('connecting', 0.1), ('connected', 15), ('authenticated', 15.2),
+            ('commandSent', 15.3), ('accepted', 15.4)]]
+        def validate(control):
+            return pipeline.hardware_evidence(pipeline.MARKER + json.dumps(record),
+                123, 'x-dev-y', True, 'macOS', delayed_advertising=True, wake_control=control)
+        self.assertTrue(validate(True)['passed'])
+        with self.assertRaises(RuntimeError): validate(False)
+        record['wakeObservations'].append({'event': 'discoveryStarted', 'seconds': 8})
+        with self.assertRaises(RuntimeError): validate(True)
+
+    def test_ordinary_standby_rejects_leaked_advertising_fault(self):
+        record = self.evidence()
+        record['cycle']['advertisingDelayMs'] = 106000
+        with self.assertRaises(RuntimeError): self.validate(record)
+        record['cycle']['advertisingDelayMs'] = 0
+        self.assertTrue(self.validate(record)['passed'])
+
     def test_wifi_setup_requires_verified_rollback(self):
         record = self.evidence()
         def validate():
@@ -149,6 +197,23 @@ class PipelineTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             pipeline.hardware_evidence(pipeline.MARKER + json.dumps(record), int(record['run']), record['version'], True,
                                        'macOS', standby_seconds=1800)
+
+    def test_battery_only_rejects_charging_missing_and_protected_battery(self):
+        record = self.evidence()
+        record['batteryOnlyRequested'] = True
+        record['cycle'].update(chargingAtCheckpoint=False, batteryPercent=26)
+        def validate():
+            return pipeline.hardware_evidence(pipeline.MARKER + json.dumps(record),
+                                              123, 'x-dev-y', True, 'macOS', battery_only=True)
+        self.assertTrue(validate()['passed'])
+        for field, value in [('chargingAtCheckpoint', True), ('chargingAtCheckpoint', None),
+                             ('batteryPercent', 10), ('batteryPercent', 0), ('batteryPercent', None)]:
+            before = record['cycle'][field]
+            record['cycle'][field] = value
+            with self.assertRaisesRegex(RuntimeError, 'battery-only'): validate()
+            record['cycle'][field] = before
+        del record['batteryOnlyRequested']
+        with self.assertRaisesRegex(RuntimeError, 'battery-only'): validate()
 
     def test_short_or_missing_idle_interval_is_not_long_standby_evidence(self):
         for duration in [0, 59999]:
