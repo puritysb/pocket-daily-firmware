@@ -3,6 +3,22 @@
 This is concise, repository-owned context for future sessions. It is not a chat
 transcript. Current source and release records override dated observations.
 
+## Actual Wi-Fi transfer-loss acceptance — 2026-10-12
+
+- Developer-only `dev/network-fault` arms a size/run-bound one-shot real Wi-Fi
+  disconnect during upload or after durable publication, before its reply.
+  Unused arms expire after 60 s; reconnect starts after 5 s and restores the
+  previous auto-reconnect setting. Runtime hooks are absent from production.
+- `20261011T173129-98ca79` installed `89d8310c-ble-standby-w079b67ca` and passed
+  both faults: offline 8979/9020 ms, receiving resumed at 65536 B, one publication
+  each. Both app jobs completed without another Send; downloaded 853319 B
+  matched exactly. All 10 interface cases and original inventory survived.
+- Host 920, all Python 131, strict cppcheck and default/standby builds passed.
+  Default static RAM 69760 B (+40 B), flash 6396851 B; standby RAM 69976 B,
+  flash 6408039 B. Trial state adds no persistent heap allocation.
+  App download completion diagnostics/fixes accompany this contract. Historical
+  timeout cause remains unconfirmed; router reboot/DHCP and iPhone/X4 are separate.
+
 ## Actual advertising-delay recovery and regression — 2026-10-12
 
 - Developer-only `delayAdvertising=1` withholds the real standby advertiser

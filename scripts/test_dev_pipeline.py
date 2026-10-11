@@ -25,6 +25,22 @@ class PipelineTest(unittest.TestCase):
         return pipeline.hardware_evidence(pipeline.MARKER + json.dumps(evidence),
                                           123, 'x-dev-y', True, 'macOS')
 
+    def test_network_fault_requires_real_outage_resume_and_single_publication(self):
+        record = self.evidence()
+        record['networkFaults'] = [dict(run=123, state=4, point=point, sawOffline=True,
+            outageMs=5200, publications=1, passed=True, resumed=65536) for point in ['receiving', 'published']]
+        def validate(value):
+            return pipeline.hardware_evidence(pipeline.MARKER + json.dumps(value),
+                123, 'x-dev-y', True, 'macOS', network_faults=True)
+        self.assertTrue(validate(record)['passed'])
+        for key, value in [('run', 124), ('state', 2), ('sawOffline', False),
+                           ('outageMs', 4999), ('publications', 2), ('passed', False), ('resumed', 0)]:
+            broken = json.loads(json.dumps(record))
+            broken['networkFaults'][0][key] = value
+            with self.assertRaises(RuntimeError): validate(broken)
+        record['networkFaults'].pop()
+        with self.assertRaises(RuntimeError): validate(record)
+
     def test_delayed_advertising_requires_real_scan_before_connection(self):
         record = self.evidence()
         record['cycle'].update(advertisingDelayMs=106000, advertisingStartedMs=106250)

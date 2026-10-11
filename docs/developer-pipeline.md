@@ -311,3 +311,29 @@ cannot independently establish physical removal or uninterrupted battery-only
 power; combine it with the user's confirmation. This neither measures current
 nor changes the protective thresholds. A late/no unplug or absent power record
 fails this specific acceptance even if normal Wi-Fi reconnection succeeds.
+
+## One-shot real Wi-Fi transfer faults
+
+`run --interface-suite --network-faults --app <checkout>` requires matching
+developer firmware and the app harness. `POST /api/pocket/v1/dev/network-fault`
+is Same-Wi-Fi only, requires the enrolled `deviceID`, nonzero `run`, exact fixture
+`size` (128 KiB..2 MiB), and `point=receiving|published`. It rejects active uploads
+and existing armed/offline/recovering trials. An unused arm expires after 60 s.
+No new persistent setting, credential handling or heap allocation is needed by
+the fixed trial record; the endpoint uses existing request-local JSON encoding.
+
+Receiving triggers after a verified 64 KiB prefix, drops real Wi-Fi association
+and preserves the partial stream for the normal resume path. Published triggers
+only after atomic publication and durable receipt, dropping the HTTP reply.
+Both disable automatic reconnect temporarily and restore its prior setting
+before requesting saved-network reconnection after five seconds. Stopping the
+server restores the prior reconnect setting too. All runtime hooks/routes compile
+out without `ENABLE_DEV_REMOTE_FLASH`.
+
+GET returns run/point/state/size/bytes, actual `sawOffline`, outage duration,
+publication count and the latest stream's resumed offset. State values are
+0 idle, 1 armed, 2 offline, 3 recovering, 4 complete, 5 expired. The runner requires
+both cases, real offline observation, >=5 s outage, one publication each, resumed
+prefix >=64 KiB for receiving, completed app jobs and exact downloaded bytes.
+This tests association loss on X3, not a router reboot or address reassignment.
+The device installation remains a separate explicit developer `--flash` action.

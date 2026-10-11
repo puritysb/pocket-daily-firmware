@@ -8,6 +8,7 @@
 
 #include <algorithm>
 
+#include "DevNetworkFault.h"
 #include "network/FirmwareFlasher.h"
 #include "pocket_daily/ContentPathPolicy.h"
 #include "pocket_daily/web/SocketReceive.h"
@@ -81,6 +82,9 @@ void UploadStreamServer::noteCommitted(const bool firmware) {
 }
 
 void UploadStreamServer::stop() {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  DevNetworkFault::cancel();
+#endif
   reset(true);
   discardResume();
   if (server_) {
@@ -473,6 +477,12 @@ void UploadStreamServer::service() {
   if (!server_) return;
 #ifdef ENABLE_DEV_REMOTE_FLASH
   metrics_.service(millis());
+  DevNetworkFault::service();
+  if (phase_ == Phase::DATA && DevNetworkFault::trigger(DevNetworkFault::Point::Receiving, expected_, received_)) {
+    client_.stop();
+    suspend("Upload disconnected");
+    return;
+  }
 #endif
 
   if (phase_ == Phase::IDLE) {

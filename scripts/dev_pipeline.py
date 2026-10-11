@@ -71,7 +71,7 @@ INTERFACE_CASES = {'identity-rejection', 'storage-usage', 'preferences-roundtrip
                    'folder-copy', 'inventory-preservation'}
 
 
-def hardware_evidence(log, run, version, standby, platform, interface=False, wifi_setup=False, screens=False, standby_seconds=90, battery_only=False, delayed_advertising=False, wake_control=False):
+def hardware_evidence(log, run, version, standby, platform, interface=False, wifi_setup=False, screens=False, standby_seconds=90, battery_only=False, delayed_advertising=False, wake_control=False, network_faults=False):
     records = []
     for line in log.splitlines():
         if MARKER in line:
@@ -172,6 +172,17 @@ def hardware_evidence(log, run, version, standby, platform, interface=False, wif
                 or trial.get('chargingAtCheckpoint') is not False
                 or not isinstance(trial.get('batteryPercent'), int) or trial['batteryPercent'] <= 10):
             raise RuntimeError('missing eligible battery-only standby evidence')
+    if network_faults:
+        faults = record.get('networkFaults', [])
+        if len(faults) != 2 or [f.get('point') for f in faults] != ['receiving', 'published']:
+            raise RuntimeError('missing network fault cases')
+        for fault in faults:
+            if (fault.get('run') != run or fault.get('state') != 4 or fault.get('sawOffline') is not True
+                    or fault.get('outageMs', 0) < 5000 or fault.get('publications') != 1
+                    or fault.get('passed') is not True):
+                raise RuntimeError('missing actual network outage/recovery/publication evidence')
+        if faults[0].get('resumed', 0) < 65536:
+            raise RuntimeError('missing upload prefix resume')
     return record
 
 
@@ -423,6 +434,7 @@ def run(args, config, job):
                                'DELAYED_ADVERTISING': '1' if getattr(args, 'delayed_advertising', False) else '0',
                                'BATTERY_ONLY': '1' if getattr(args, 'battery_only', False) else '0',
                                'SCREENS': '1' if getattr(args, 'screen_suite', False) and platform == 'macOS' else '0',
+                               'NETWORK_FAULTS': '1' if getattr(args, 'network_faults', False) else '0',
                                'WIFI_SETUP': '1' if getattr(args, 'wifi_setup', False) else '0',
                                'INTERFACE': '1' if getattr(args, 'interface_suite', False) else '0'}.items():
                 env['TEST_RUNNER_POCKET_HARDWARE_' + key] = value
@@ -431,7 +443,7 @@ def run(args, config, job):
                 '-only-testing:' + target + '/ReaderHardwareTests/testDeveloperConnectionCycle',
                 '-resultBundlePath', str(job.output / (label + '.xcresult'))], cwd=app, env=env, timeout=(1200 if getattr(args, 'interface_suite', False) else 480) + (getattr(args, 'standby_seconds', 90) if args.standby else 0))
             evidence = job.stage(label + '-evidence', lambda: hardware_evidence(
-                log.read_text(), run_id, version, args.standby, platform, getattr(args, 'interface_suite', False), getattr(args, 'wifi_setup', False), getattr(args, 'screen_suite', False) and platform == 'macOS', getattr(args, 'standby_seconds', 90), getattr(args, 'battery_only', False), getattr(args, 'delayed_advertising', False), getattr(args, 'wake_control', False)))
+                log.read_text(), run_id, version, args.standby, platform, getattr(args, 'interface_suite', False), getattr(args, 'wifi_setup', False), getattr(args, 'screen_suite', False) and platform == 'macOS', getattr(args, 'standby_seconds', 90), getattr(args, 'battery_only', False), getattr(args, 'delayed_advertising', False), getattr(args, 'wake_control', False), getattr(args, 'network_faults', False)))
             if getattr(args, 'screen_suite', False) and platform == 'macOS':
                 destination = job.output / (label + '-screens')
                 job.command(label + '-export-screens', ['xcrun', 'xcresulttool', 'export', 'attachments',
@@ -468,6 +480,7 @@ def main():
     parser.add_argument('--wifi-setup', action='store_true', help='BLE Wi-Fi setup with nonexistent network and verified rollback')
     parser.add_argument('--screen-suite', action='store_true', help='physical X3 Home/Brief/cards/EPUB captures and actual deep-sleep validation')
     parser.add_argument('--interface-suite', action='store_true', help='full app interface scenarios with owned fixtures and restoration')
+    parser.add_argument('--network-faults', action='store_true', help='actual X3 Wi-Fi outage during upload and after publication; requires --interface-suite')
     parser.add_argument('--checks', action='store_true', help='full firmware host/analysis/default-build gates')
     parser.add_argument('--cppcheck', default='build/cppcheck-source/cppcheck')
     parser.add_argument('--standby', action='store_true', help='actual app BLE wake scenario (experimental X3)')
@@ -481,6 +494,8 @@ def main():
     args = parser.parse_args()
     if args.action == 'run' and args.host:
         parser.error('--host is enrollment only; use configure to change the expected reader')
+    if args.network_faults and not args.interface_suite:
+        parser.error('--network-faults requires --interface-suite')
     if args.wake_control and not args.delayed_advertising:
         parser.error('--wake-control requires --delayed-advertising')
     if args.delayed_advertising and not args.standby:

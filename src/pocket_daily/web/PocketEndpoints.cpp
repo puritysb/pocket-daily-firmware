@@ -16,6 +16,7 @@
 #include <ctime>
 
 #include "CrossPointSettings.h"
+#include "DevNetworkFault.h"
 #include "RecentBooksStore.h"
 #include "articles/ArticleStorage.h"
 #include "components/UITheme.h"
@@ -1108,6 +1109,12 @@ void handleCommitUpload(WebServer& server, const RouteDeps& d, const bool queryO
     server.send(500, "text/plain", "File published but receipt could not be saved");
     return;
   }
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (DevNetworkFault::trigger(DevNetworkFault::Point::Published, expectedSize, expectedSize)) {
+    server.client().stop();
+    return;
+  }
+#endif
   char response[80];
   snprintf(response, sizeof(response), "{\"size\":%u,\"crc32\":\"%08lX\"}", static_cast<unsigned>(expectedSize),
            static_cast<unsigned long>(uploadedCrc));
@@ -1653,6 +1660,47 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
   });
   routes.on("/api/pocket/v1/dev/reader-capture", HTTP_POST,
             [server = &server, deps = &d] { handleDevReaderCapture(*server, *deps); });
+  for (const auto method : {HTTP_POST, HTTP_GET}) {
+    routes.on("/api/pocket/v1/dev/network-fault", method, [server = &server, deps = &d] {
+      char deviceId[9];
+      if (!admitContentOperation(*server, *deps, deviceId)) return;
+      if (deps->apMode) {
+        server->send(409, "text/plain", "Same Wi-Fi required");
+        return;
+      }
+      if (server->method() == HTTP_POST) {
+        uint32_t run = 0, size = 0;
+        const String runArg = server->arg("run"), sizeArg = server->arg("size"), point = server->arg("point");
+        if (!parseGeneration({runArg.c_str(), runArg.length()}, run) ||
+            !parseGeneration({sizeArg.c_str(), sizeArg.length()}, size) ||
+            (point != "receiving" && point != "published")) {
+          server->send(400, "text/plain", "Invalid network fault trial");
+          return;
+        }
+        if (!deps->stream || deps->stream->transferActive() ||
+            !DevNetworkFault::arm(
+                run, size,
+                point == "receiving" ? DevNetworkFault::Point::Receiving : DevNetworkFault::Point::Published)) {
+          server->send(409, "text/plain", "Trial cannot be armed");
+          return;
+        }
+      }
+      const auto& trial = DevNetworkFault::evidence();
+      JsonDocument doc;
+      doc["run"] = trial.run;
+      doc["state"] = static_cast<unsigned>(trial.state);
+      doc["point"] = trial.point == DevNetworkFault::Point::Receiving ? "receiving" : "published";
+      doc["size"] = trial.size;
+      doc["bytes"] = trial.bytes;
+      doc["sawOffline"] = trial.sawOffline;
+      doc["publications"] = trial.publications;
+      doc["resumed"] = deps->stream ? deps->stream->metrics().resumed : 0;
+      doc["outageMs"] = trial.restoredAt ? trial.restoredAt - trial.droppedAt : 0;
+      String response;
+      serializeJson(doc, response);
+      server->send(200, "application/json", response);
+    });
+  }
   routes.on("/api/pocket/v1/dev/ble-cycle", HTTP_POST, [server = &server, deps = &d] {
     note(*deps);
     handleDevBleCycle(*server, *deps);

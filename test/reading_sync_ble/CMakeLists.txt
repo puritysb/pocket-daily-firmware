@@ -9,6 +9,7 @@ set(READING_SYNC_PURE_SOURCES
 add_executable(reading_sync_ble_protocol_test
   ReadingSyncProtocolTest.cpp
   WifiSetupTest.cpp
+  DevNetworkFaultTest.cpp
   ExchangeWindowPolicyTest.cpp
   ReadSyncStatsTest.cpp
   ${READING_SYNC_PURE_SOURCES})
