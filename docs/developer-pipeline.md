@@ -41,11 +41,29 @@ python3 scripts/dev_pipeline.py run
 
 Enrollment stores only the LAN address and expected reader identity in ignored
 `build/dev-pipeline.json`, mode 0600. Runs reuse it; a different reader is rejected.
-Re-enroll deliberately if DHCP changes the address. The runner never switches
-the Mac/iPhone to the reader's private hotspot. An offline reader at preflight is
-a failure; the current pipeline starts in Same Wi-Fi and tests sleep inside its
-controlled scenario. It does not bootstrap release firmware or recover a reader
-that cannot boot/join Wi-Fi.
+When the saved address times out, returns malformed status or belongs to another
+reader, the runner starts `ReaderHardwareTests/testDiscoverEnrolledReader` in the
+real Debug Mac app. It uses the normal Connect flow, including bonded BLE wake,
+Bonjour and bounded current-LAN discovery. Its admission gate requires the
+already enrolled identity, Same Wi-Fi, developer firmware and HTTP port 80 before
+accepting a session. A fresh run-tagged receipt is required; missing, duplicate,
+stale, skipped or failed discovery is not success. The runner then independently
+rechecks HTTP identity/version before atomically updating only the saved host.
+The rest of the requested inventory/transfer/standby suites proceeds normally.
+
+No IP input or re-enrollment is needed for a network/DHCP address change. Reports
+record `discovery.method` (`saved-address` or `app-discovery`) and whether the
+address changed; the discovery log and `.xcresult` stay in the private run folder.
+The discovery scenario deliberately seeds the app with the runner's old address,
+and restores its previous address hint on failure. Enrollment remains unchanged
+if discovery, receipt validation or the independent HTTP check fails.
+
+The runner never switches the Mac/iPhone to the reader's private hotspot or
+copies Wi-Fi credentials. The reader must already know/join the current network;
+use the app's Wi-Fi provisioning when credentials change. A powered-off reader,
+deep sleep, low-battery BLE cutoff, denied OS permissions, network isolation or an
+unreachable subnet can still prevent discovery. This does not bootstrap release
+firmware. An initial enrollment still requires the reader's address once.
 
 ## Iterate
 
@@ -77,7 +95,8 @@ python3 scripts/dev_pipeline.py run --firmware firmware/update.bin --flash --sta
 ```
 
 `--flash` is explicit developer installation, separate from normal app update
-confirmation. The image is frozen under the run directory before app builds.
+confirmation. The image is frozen under the run directory before installation.
+The Mac app is built before preflight so it can discover an unreachable saved IP.
 All requested firmware/app build and test gates precede installation. An exact
 version already installed skips flashing. Otherwise upload uses the existing
 port-82 acknowledgement/commit protocol, sends the developer flash request once,

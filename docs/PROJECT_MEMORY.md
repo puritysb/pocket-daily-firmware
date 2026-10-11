@@ -3,6 +3,19 @@
 This is concise, repository-owned context for future sessions. It is not a chat
 transcript. Current source and release records override dated observations.
 
+## Automatic enrolled-reader rediscovery — 2026-10-11
+
+- The runner builds the Mac test host before reader preflight. A stale/reassigned
+  address invokes the real app's normal discovery with an enrolled-identity gate;
+  fresh run evidence and an independent HTTP identity/version check precede atomic
+  host replacement. Initial enrollment remains required; Wi-Fi credentials and
+  Apple network association are unchanged. See `docs/developer-pipeline.md`.
+- Physical stale-hint recovery passed twice, including inventory/EPUB cleanup and
+  a subsequent 90-second standby/wake (`20261011T121809-dab6d8`, app reconnect
+  18.975 s). Developer Python tests: 31 passed. App Mac and iOS device-SDK test
+  builds passed; no simulator or physical iPhone execution. This change only
+  touches host automation/docs; installed firmware and renderer bytes are unchanged.
+
 ## Current X3 acceptance baseline — 2026-10-11
 
 - Latest BLE idle/wake acceptance: `build/dev-pipeline-runs/20261011T105840-d292e9/report.json`.

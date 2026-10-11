@@ -239,13 +239,80 @@ def reader_status(host, identity, version=None):
     return status
 
 
+DISCOVERY_MARKER = 'POCKET_DISCOVERY_RESULT '
+
+
+def discovery_evidence(log, run):
+    records = [json.loads(line.split(DISCOVERY_MARKER, 1)[1]) for line in log.splitlines()
+               if DISCOVERY_MARKER in line]
+    if len(records) != 1:
+        raise RuntimeError('missing or duplicate app discovery evidence')
+    record = records[0]
+    if (record.get('passed') is not True or record.get('run') != str(run)
+            or record.get('platform') != 'macOS' or record.get('identityVerified') is not True
+            or record.get('staleHintUsed') is not True or record.get('port') != 80
+            or not isinstance(record.get('version'), str) or '-dev-' not in record['version']):
+        raise RuntimeError('invalid or stale app discovery evidence')
+    private_host(record.get('host', ''))
+    return record
+
+
+def resolve_reader(config, config_path, discover):
+    """Treat an IP as a hint, never as enrollment. Persist only after a fresh ID check."""
+    host, identity = private_host(config['host']), config['deviceID']
+    if not isinstance(identity, str) or not identity:
+        raise ValueError('missing enrolled reader identity; enroll once before running')
+    try:
+        status = reader_status(host, identity)
+        return host, status, {'method': 'saved-address', 'identityVerified': True}
+    except (OSError, ValueError, pocket_put.ProtocolError):
+        # A stale address may now belong to an unrelated reader. The real app
+        # filters candidates by the enrolled identity before accepting a session.
+        pass
+    evidence = discover()
+    new_host = private_host(evidence['host'])
+    status = reader_status(new_host, identity, evidence['version'])
+    updated = {**config, 'host': new_host}
+    if new_host != host:
+        save(config_path, updated)
+        config.update(updated)
+    return new_host, status, {'method': 'app-discovery', 'addressChanged': new_host != host,
+                              'identityVerified': True, 'app': evidence}
+
+
+def discover_with_app(job, base, app, config):
+    run_id = secrets.randbelow(0xffffffff) + 1
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(('TEST_RUNNER_POCKET_HARDWARE_', 'POCKET_HARDWARE_'))}
+    for key, value in {'ENABLED': '1', 'DISCOVERY': '1', 'HOST': config['host'],
+                       'DEVICE_ID': config['deviceID'], 'RUN': str(run_id)}.items():
+        env['TEST_RUNNER_POCKET_HARDWARE_' + key] = value
+    log = job.command('app-reader-discovery', base + ['test-without-building',
+        '-parallel-testing-enabled', 'NO',
+        '-only-testing:PocketMacTests/ReaderHardwareTests/testDiscoverEnrolledReader',
+        '-resultBundlePath', str(job.output / 'app-reader-discovery.xcresult')],
+        cwd=app, env=env, timeout=360)
+    record = discovery_evidence(log.read_text(), run_id)
+    require_companion_stopped()
+    return record
+
+
 def run(args, config, job):
     job.stage('exclusive-app-preflight', require_companion_stopped)
     host, identity = private_host(config['host']), config['deviceID']
     app = args.app.resolve()
     job.report['sources'] = {'firmware': source_state(ROOT), 'app': source_state(app),
                              'sdk': source_state(ROOT / 'freeink-sdk')}
-    status = job.stage('reader-preflight', lambda: reader_status(host, identity))
+    job.command('app-project', ['xcodegen', 'generate'], cwd=app)
+    derived = app / '.build/dev-pipeline-mac'
+    base = ['xcodebuild', '-project', 'Pocket.xcodeproj', '-scheme', 'PocketMac', '-configuration', 'Debug',
+            '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', str(derived), 'CODE_SIGNING_ALLOWED=YES']
+    job.command('mac-build', base + ['build-for-testing'], cwd=app)
+    app_binary = derived / 'Build/Products/Debug/Pocket.app/Contents/MacOS/Pocket'
+    job.report['macApp'] = {'path': str(app_binary), 'sha256': hashlib.sha256(app_binary.read_bytes()).hexdigest()}
+    host, status, discovery = job.stage('reader-preflight', lambda: resolve_reader(
+        config, args.config, lambda: discover_with_app(job, base, app, config)))
+    job.report['discovery'] = discovery
     version = status['version']
     if args.standby and status.get('device') != 'X3':
         raise RuntimeError('experimental standby hardware scenario is X3 only')
@@ -277,13 +344,6 @@ def run(args, config, job):
     if args.standby and 'ble-standby' not in version:
         raise RuntimeError('standby scenario requires the experimental ble_standby artifact')
     job.report['version'] = version
-    job.command('app-project', ['xcodegen', 'generate'], cwd=app)
-    derived = app / '.build/dev-pipeline-mac'
-    base = ['xcodebuild', '-project', 'Pocket.xcodeproj', '-scheme', 'PocketMac', '-configuration', 'Debug',
-            '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', str(derived), 'CODE_SIGNING_ALLOWED=YES']
-    job.command('mac-build', base + ['build-for-testing'], cwd=app)
-    app_binary = derived / 'Build/Products/Debug/Pocket.app/Contents/MacOS/Pocket'
-    job.report['macApp'] = {'path': str(app_binary), 'sha256': hashlib.sha256(app_binary.read_bytes()).hexdigest()}
     if args.ios_simulator:
         job.command('ios-simulator', ['xcodebuild', 'test', '-project', 'Pocket.xcodeproj', '-scheme', 'Pocket',
             '-configuration', 'Debug', '-destination', f'platform=iOS Simulator,id={args.ios_simulator}',

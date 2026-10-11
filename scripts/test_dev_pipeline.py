@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import dev_pipeline as pipeline
 
@@ -222,6 +222,115 @@ class PipelineTest(unittest.TestCase):
             with patch.object(pipeline.cycle, 'get_json', return_value={**good, key: value}):
                 with self.assertRaises((RuntimeError, pipeline.pocket_put.ProtocolError)):
                     pipeline.reader_status('192.168.1.2', 'expected')
+
+    def test_discovery_evidence_rejects_untrusted_or_stale_results(self):
+        good = {'passed': True, 'run': '42', 'platform': 'macOS', 'identityVerified': True,
+                'staleHintUsed': True, 'host': '192.168.2.3', 'port': 80, 'version': 'v-dev-test'}
+        def validate(record):
+            return pipeline.discovery_evidence(pipeline.DISCOVERY_MARKER + json.dumps(record), 42)
+        self.assertEqual(validate(good), good)
+        for key, value in [('passed', False), ('run', '41'), ('platform', 'simulator'),
+                           ('identityVerified', False), ('staleHintUsed', False), ('port', 8080),
+                           ('host', '8.8.8.8'), ('host', '127.0.0.1'), ('version', '1.0')]:
+            with self.subTest(key=key, value=value), self.assertRaises((RuntimeError, ValueError)):
+                validate({**good, key: value})
+        log = pipeline.DISCOVERY_MARKER + json.dumps(good)
+        for invalid in ['', log + '\n' + log, pipeline.DISCOVERY_MARKER + 'invalid']:
+            with self.assertRaises((RuntimeError, ValueError)):
+                pipeline.discovery_evidence(invalid, 42)
+
+    def test_stale_or_reassigned_address_recovers_only_the_enrolled_reader(self):
+        good = {'deviceID': 'expected', 'mode': 'STA', 'version': 'v-dev-test'}
+        for initial in [OSError('offline'), {**good, 'deviceID': 'different'}, {}]:
+            with self.subTest(initial=initial), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / 'reader.json'
+                config = {'host': '192.168.1.2', 'deviceID': 'expected', 'extra': 'preserved'}
+                pipeline.save(path, config)
+                discovered = {'host': '192.168.2.3', 'version': good['version']}
+                discover = Mock(return_value=discovered)
+                with patch.object(pipeline.cycle, 'get_json', side_effect=[initial, good]) as probe:
+                    host, status, evidence = pipeline.resolve_reader(config, path, discover)
+                self.assertEqual(host, discovered['host'])
+                self.assertEqual(status, good)
+                self.assertTrue(evidence['addressChanged'])
+                self.assertEqual(probe.call_args_list[-1].args[0], host)
+                self.assertEqual(config, json.loads(path.read_text()))
+                self.assertEqual(config['deviceID'], 'expected')
+                self.assertEqual(config['extra'], 'preserved')
+                discover.assert_called_once_with()
+
+    def test_failed_discovery_never_reenrolls_or_rewrites_config(self):
+        good = {'deviceID': 'expected', 'mode': 'STA', 'version': 'v-dev-test'}
+        failures = [OSError('offline'), {**good, 'deviceID': 'different'}, {},
+                    {**good, 'version': 'v-dev-other'}, {**good, 'mode': 'AP'}]
+        for response in failures:
+            with self.subTest(response=response), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / 'reader.json'
+                original = {'host': '192.168.1.2', 'deviceID': 'expected'}
+                config = dict(original)
+                pipeline.save(path, original)
+                before = path.read_bytes()
+                discover = Mock(return_value={'host': '192.168.2.3', 'version': good['version']})
+                with patch.object(pipeline.cycle, 'get_json', side_effect=[OSError(), response]):
+                    with self.assertRaises((OSError, RuntimeError, pipeline.pocket_put.ProtocolError)):
+                        pipeline.resolve_reader(config, path, discover)
+                self.assertEqual(path.read_bytes(), before)
+                self.assertEqual(config, original)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'reader.json'
+            pipeline.save(path, original)
+            for error in [RuntimeError('missing or duplicate evidence'), TimeoutError('app timeout')]:
+                with patch.object(pipeline.cycle, 'get_json', side_effect=OSError()):
+                    with self.assertRaises((RuntimeError, TimeoutError)):
+                        pipeline.resolve_reader(dict(original), path, Mock(side_effect=error))
+                self.assertEqual(json.loads(path.read_text()), original)
+
+    def test_pipeline_continues_hardware_suite_at_verified_new_address(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = {'host': '192.168.1.2', 'deviceID': 'expected'}
+            config_path = root / 'reader.json'
+            pipeline.save(config_path, config)
+            args = SimpleNamespace(app=root, config=config_path, standby=False, checks=False,
+                                   build_firmware=None, firmware=None, ios_simulator=None,
+                                   ios_device=None, cycles=1)
+            binary = root / '.build/dev-pipeline-mac/Build/Products/Debug/Pocket.app/Contents/MacOS/Pocket'
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b'test app')
+            job = pipeline.Pipeline(root / 'run')
+            hardware_hosts = []
+            def command(name, argv, **kwargs):
+                log = job.output / (name + '.log')
+                if name == 'macOS-hardware-1':
+                    env = kwargs['env']
+                    hardware_hosts.append(env['TEST_RUNNER_POCKET_HARDWARE_HOST'])
+                    record = {'passed': True, 'initialConnection': True, 'platform': 'macOS',
+                              'run': env['TEST_RUNNER_POCKET_HARDWARE_RUN'], 'version': 'v-dev-test'}
+                    log.write_text(pipeline.MARKER + json.dumps(record))
+                return log
+            good = {'deviceID': 'expected', 'mode': 'STA', 'version': 'v-dev-test'}
+            with patch.object(pipeline, 'source_state', return_value={}), \
+                 patch.object(pipeline, 'require_companion_stopped'), \
+                 patch.object(job, 'command', side_effect=command), \
+                 patch.object(pipeline, 'discover_with_app', return_value={
+                     'host': '192.168.2.3', 'version': 'v-dev-test'}), \
+                 patch.object(pipeline.cycle, 'get_json', side_effect=[OSError(), good]):
+                pipeline.run(args, config, job)
+            self.assertEqual(hardware_hosts, ['192.168.2.3'])
+            self.assertTrue(job.report['passed'])
+            self.assertEqual(job.report['discovery']['method'], 'app-discovery')
+            self.assertEqual(json.loads(config_path.read_text())['host'], hardware_hosts[0])
+
+    def test_reachable_saved_address_does_not_launch_discovery(self):
+        good = {'deviceID': 'expected', 'mode': 'STA', 'version': 'v-dev-test'}
+        discover = Mock(side_effect=AssertionError('must not discover'))
+        config = {'host': '192.168.1.2', 'deviceID': 'expected'}
+        with patch.object(pipeline.cycle, 'get_json', return_value=good):
+            host, _, evidence = pipeline.resolve_reader(config, None, discover)
+        self.assertEqual(host, config['host'])
+        self.assertEqual(evidence['method'], 'saved-address')
+        discover.assert_not_called()
 
     def test_host_rejects_public_loopback_and_non_address(self):
         for address in ['8.8.8.8', '127.0.0.1', '0.0.0.0', 'http://192.168.1.2/path']:
