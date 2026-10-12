@@ -330,6 +330,12 @@ class SyncRoutesTest(unittest.TestCase):
         status = (root / "src/pocket_daily/web/PocketStatus.cpp").read_text()
         self.assertIn('doc["contentRead"] = 1;', status)
 
+    def test_reader_capture_registers_exact_methods(self):
+        source = (Path(__file__).resolve().parents[1] / 'src/pocket_daily/web/PocketEndpoints.cpp').read_text()
+        route = source[source.index('for (const auto method : {HTTP_POST, HTTP_GET, HTTP_DELETE})'):]
+        self.assertIn('routes.on("/api/pocket/v1/dev/reader-capture", method,', route)
+        self.assertNotIn('routes.on("/api/pocket/v1/dev/reader-capture", HTTP_ANY', source)
+
     def test_reading_progress_routes_read_records_and_only_queue_offers(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
@@ -366,7 +372,7 @@ class SyncRoutesTest(unittest.TestCase):
         ble = session[session.index("void ReadingSyncSession::completeOffer("):]
         self.assertLess(ble.index("Reading::parseOfferJson("), ble.index("service.deviceId()"))
         self.assertLess(ble.index("service.deviceId()"), ble.index("Reading::storeOffer("))
-        store = exchange[exchange.index("OfferStoreResult storeOffer("):]
+        store = exchange[exchange.index("static OfferStoreResult storeBookOffer("): ]
         self.assertIn("saveOffer(", store)
         reader = (root / "src/activities/reader/EpubReaderActivity.cpp").read_text()
         exit_hook = reader[reader.index("EpubReaderActivity::~EpubReaderActivity()"):reader.index("void EpubReaderActivity::loop()")]

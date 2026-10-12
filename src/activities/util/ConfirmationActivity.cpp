@@ -35,6 +35,9 @@ void ConfirmationActivity::render(RenderLock&& lock) {
 }
 
 void ConfirmationActivity::loop() {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (developerAccept && confirmPopup.developerSelect(1)) return;
+#endif
   if (confirmPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
 
   // Popup dismissed without a selection (Back button or tap outside): cancel.

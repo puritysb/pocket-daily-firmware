@@ -11,6 +11,7 @@
 #include "Epub.h"
 #include "FsHelpers.h"
 #include "RecentBooksStore.h"
+#include "dev/ScreenCapture.h"
 
 namespace PocketDaily::ReadingProgress {
 namespace {
@@ -63,27 +64,43 @@ ListStream::ListStream(const char* id, const bool includePaths, ExchangeWork& wo
   snprintf(deviceId, sizeof(deviceId), "%s", id ? id : "");
 }
 
+size_t ListStream::append(const RecentBook& recent, char* out, const size_t capacity) {
+  HalSystem::feedWatchdogIfRegistered();
+  ExchangeBook book;
+  if (!loadExchangeBook(recent, work, book)) return 0;
+  ListEntry entry;
+  entry.path = includePaths ? recent.path.c_str() : nullptr;
+  entry.document = book.document;
+  entry.filenameDocument = book.filenameDocument;
+  entry.xpointer = book.current ? work.record.xpointer : "";
+  entry.percentage = book.percentage;
+  entry.updated = book.current ? work.record.updated : 0;
+  entry.seq = book.current ? work.record.seq : 0;
+  return composer.entry(entry, out, capacity);
+}
+
 size_t ListStream::next(char* out, const size_t capacity) {
   switch (phase) {
     case Phase::HEAD:
-      phase = Phase::BOOKS;
+      phase = Phase::FIXTURE;
       return composer.head(deviceId, out, capacity);
+    case Phase::FIXTURE: {
+      phase = Phase::BOOKS;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+      // Explicit run-bound synthetic book, never added to the user's recents.
+      RecentBook fixture;
+      fixture.path = DevCapture::exchangeFixture();
+      if (!fixture.path.empty()) {
+        const size_t length = append(fixture, out, capacity);
+        if (length) return length;
+      }
+#endif
+      [[fallthrough]];
+    }
     case Phase::BOOKS: {
       const auto& books = RECENT_BOOKS.getBooks();
       while (index < books.size() && !composer.full()) {
-        const RecentBook& recent = books[index++];
-        HalSystem::feedWatchdogIfRegistered();
-        ExchangeBook book;
-        if (!loadExchangeBook(recent, work, book)) continue;
-        ListEntry entry;
-        entry.path = includePaths ? recent.path.c_str() : nullptr;
-        entry.document = book.document;
-        entry.filenameDocument = book.filenameDocument;
-        entry.xpointer = book.current ? work.record.xpointer : "";
-        entry.percentage = book.percentage;
-        entry.updated = book.current ? work.record.updated : 0;
-        entry.seq = book.current ? work.record.seq : 0;
-        const size_t length = composer.entry(entry, out, capacity);
+        const size_t length = append(books[index++], out, capacity);
         if (length) return length;
       }
       phase = Phase::DONE;
@@ -95,22 +112,32 @@ size_t ListStream::next(char* out, const size_t capacity) {
   return 0;
 }
 
+static OfferStoreResult storeBookOffer(const RecentBook& recent, const OfferRequest& request, ExchangeWork& work) {
+  HalSystem::feedWatchdogIfRegistered();
+  ExchangeBook book;
+  if (!loadExchangeBook(recent, work, book) ||
+      (strcmp(book.document, request.document) != 0 && strcmp(book.filenameDocument, request.document) != 0)) {
+    return OfferStoreResult::UNKNOWN_DOCUMENT;
+  }
+  if (request.offer.readerSeq != 0 && (!book.current || request.offer.readerSeq != work.record.seq)) {
+    return OfferStoreResult::STALE_POSITION;
+  }
+  if (!saveOffer(book.cachePath.c_str(), request.offer, work.scratch)) return OfferStoreResult::FAILED;
+  return OfferStoreResult::STORED;
+}
+
 OfferStoreResult storeOffer(const OfferRequest& request, ExchangeWork& work) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  RecentBook fixture;
+  fixture.path = DevCapture::exchangeFixture();
+  if (!fixture.path.empty()) {
+    const auto result = storeBookOffer(fixture, request, work);
+    if (result != OfferStoreResult::UNKNOWN_DOCUMENT) return result;
+  }
+#endif
   for (const auto& recent : RECENT_BOOKS.getBooks()) {
-    HalSystem::feedWatchdogIfRegistered();
-    ExchangeBook book;
-    if (!loadExchangeBook(recent, work, book) ||
-        (strcmp(book.document, request.document) != 0 && strcmp(book.filenameDocument, request.document) != 0)) {
-      continue;
-    }
-    if (request.offer.readerSeq != 0 && (!book.current || request.offer.readerSeq != work.record.seq)) {
-      return OfferStoreResult::STALE_POSITION;
-    }
-    // Only a pending offer: the reader asks before moving when the book opens.
-    if (!saveOffer(book.cachePath.c_str(), request.offer, work.scratch)) return OfferStoreResult::FAILED;
-    LOG_DBG("RPS", "Reading offer %.4f from %s stored for %s", static_cast<double>(request.offer.percentage),
-            request.offer.device, recent.path.c_str());
-    return OfferStoreResult::STORED;
+    const auto result = storeBookOffer(recent, request, work);
+    if (result != OfferStoreResult::UNKNOWN_DOCUMENT) return result;
   }
   return OfferStoreResult::UNKNOWN_DOCUMENT;
 }

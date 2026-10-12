@@ -50,6 +50,7 @@
 #include "pocket_daily/BuildFailureLog.h"
 #include "pocket_daily/ReaderPerf.h"
 #include "pocket_daily/ReadingProgressReader.h"
+#include "pocket_daily/dev/ScreenCapture.h"
 #include "util/BookmarkUtil.h"
 #include "util/ButtonNavigator.h"
 #include "util/CjkScript.h"
@@ -610,6 +611,13 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (section && !RenderLock::peek() && PocketDaily::DevCapture::turnPage()) {
+    pageTurn(true);
+    requestUpdate();
+    return;
+  }
+#endif
   const unsigned long confirmHoldMs = confirmLongPressThreshold();
   // wasLongPressed() suppresses the release that follows it, so leave it unpolled while
   // the end-of-book menu owns Confirm -- otherwise the menu never sees that release.
@@ -1038,10 +1046,16 @@ void EpubReaderActivity::askReadingOffer() {
   }
   auto confirm = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, question, "");
   if (!confirm) return;  // The offer stays pending; the next open asks again.
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (PocketDaily::DevCapture::acceptOffer()) confirm->acceptAfterRenderForDeveloperTest();
+#endif
   startActivityForResult(
       std::move(confirm), [this, xpointer = std::move(xpointer), percentage](const ActivityResult& r) {
         PocketDaily::ReadingProgress::discardOffer(*epub);
         if (r.isCancelled) return;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        if (PocketDaily::DevCapture::acceptOffer()) PocketDaily::DevCapture::offerAccepted();
+#endif
         const int pages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
         const CrossPointPosition target =
             ProgressMapper::toCrossPoint(epub, {xpointer, percentage}, renderer, currentSpineIndex, pages);

@@ -3,6 +3,30 @@
 This is concise, repository-owned context for future sessions. It is not a chat
 transcript. Current source and release records override dated observations.
 
+
+## Real EPUB continuity and short X3 acceptance — 2026-10-13
+
+- Physical run `20261012T153747-86b9c6` passed all 10 interface cases,
+  two real Wi-Fi interruptions, two bidirectional Frankenstein reading rounds,
+  18 framebuffer captures and timer deep sleep/return. Imported, transferred,
+  downloaded and reimported EPUB bytes match; sleep body differs by zero pixels.
+- The original aggregate remains failed because its expected fixture hash used
+  the original publication metadata instead of the repackaged fixture. After
+  correcting that oracle and adding a fixture regression, all preserved device
+  results, capture hashes and exact OCR were audited without repeating hardware:
+  app `.build/x3-real-epub/final-audit/report.json` PASS.
+- Mac regression 115 passed plus the final chapter-boundary regression; firmware
+  host 922 and Python 134 passed, strict cppcheck/default/standby builds clean,
+  iOS physical SDK test build and package checks passed. No simulator was used.
+- Developer capture supports bounded 4 MiB EPUB files on SD without a file-sized
+  RAM buffer; run-bound real confirmation/page-turn capture preserves user data.
+  App continuation buttons adapt to narrow windows; download progress/recovery
+  and reader-book filtering were improved. See the app CURRENT_HANDOFF.md.
+- Scope remains Mac/X3 Same Wi-Fi. Long-duration battery, X4, expanded iPhone,
+  iCloud, BLE-only position acceptance, optical panel and image-rich EPUBs are
+  not established by this result. Installed artifact SHA-256:
+  `b78e3ff3d97336a96789605fb6c7e76a86b8433d91d4e17fe893d9e904d15480`.
+
 ## Actual Wi-Fi transfer-loss acceptance — 2026-10-12
 
 - Developer-only `dev/network-fault` arms a size/run-bound one-shot real Wi-Fi

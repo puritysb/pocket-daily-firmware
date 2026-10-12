@@ -49,7 +49,8 @@ class ListStream {
   size_t total() const { return composer.total(); }
 
  private:
-  enum class Phase : uint8_t { HEAD, BOOKS, DONE };
+  size_t append(const RecentBook& recent, char* out, size_t capacity);
+  enum class Phase : uint8_t { HEAD, FIXTURE, BOOKS, DONE };
   char deviceId[9] = {};
   bool includePaths;
   ExchangeWork& work;

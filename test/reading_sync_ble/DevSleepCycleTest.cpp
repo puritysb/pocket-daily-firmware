@@ -217,3 +217,24 @@ TEST_F(DevCycle, DelayedAdvertisingIsBoundedStandbyOnlyAndPersistsActualStart) {
   EXPECT_EQ(record.advertisingDelayMs, 106000u);
   EXPECT_EQ(DevSleepCycle::advertisingDelayMs(), 0u);
 }
+
+TEST(DevCaptureTicket, AcceptanceAndPageTurnMustActuallyCompleteBeforeCapture) {
+  using namespace PocketDaily::DevCapture;
+  EXPECT_TRUE(readyToCapture(ReaderAction::Seed, ReaderPhase::Reading));
+  EXPECT_FALSE(readyToCapture(ReaderAction::Accept, ReaderPhase::Reading));
+  EXPECT_FALSE(readyToCapture(ReaderAction::Accept, ReaderPhase::Turned));
+  EXPECT_TRUE(readyToCapture(ReaderAction::Accept, ReaderPhase::Accepted));
+  EXPECT_FALSE(readyToCapture(ReaderAction::Advance, ReaderPhase::Reading));
+  EXPECT_FALSE(readyToCapture(ReaderAction::Advance, ReaderPhase::Accepted));
+  EXPECT_TRUE(readyToCapture(ReaderAction::Advance, ReaderPhase::Turned));
+  EXPECT_FALSE(readyToCapture(ReaderAction::Seed, ReaderPhase::Closing));
+}
+
+TEST(DevCaptureTicket, RealBooksHaveABoundedSDSizeWithoutAFrameSizedLimit) {
+  using PocketDaily::DevCapture::validBookSize;
+  EXPECT_FALSE(validBookSize(0));
+  EXPECT_TRUE(validBookSize(1));
+  EXPECT_TRUE(validBookSize(226309));
+  EXPECT_TRUE(validBookSize(4 * 1024 * 1024));
+  EXPECT_FALSE(validBookSize(4 * 1024 * 1024 + 1));
+}

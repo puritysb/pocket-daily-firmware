@@ -1295,7 +1295,28 @@ void handleDevReaderCapture(WebServer& server, const RouteDeps& d) {
     server.send(400, "text/plain", "Requires Same Wi-Fi and a nonzero run");
     return;
   }
-  if (!DevCapture::requestReader(run)) {
+  if (server.method() == HTTP_DELETE) {
+    server.send(DevCapture::clearFixture(run) ? 204 : 409, "text/plain", "");
+    return;
+  }
+  if (server.method() == HTTP_GET) {
+    server.send(200, "application/json",
+                DevCapture::continuitySucceeded(run) ? "{\"completed\":true}" : "{\"completed\":false}");
+    return;
+  }
+  const String action = server.arg("action");
+  DevCapture::ReaderAction selected = DevCapture::ReaderAction::Capture;
+  if (action == "seed")
+    selected = DevCapture::ReaderAction::Seed;
+  else if (action == "accept")
+    selected = DevCapture::ReaderAction::Accept;
+  else if (action == "advance")
+    selected = DevCapture::ReaderAction::Advance;
+  else if (action.length()) {
+    server.send(400, "text/plain", "Unknown reading action");
+    return;
+  }
+  if (!DevCapture::requestReader(run, selected)) {
     server.send(409, "text/plain", "Missing reader fixture or request could not be saved");
     return;
   }
@@ -1658,8 +1679,10 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     note(*deps);
     handleDevFlash(*server, *deps);
   });
-  routes.on("/api/pocket/v1/dev/reader-capture", HTTP_POST,
-            [server = &server, deps = &d] { handleDevReaderCapture(*server, *deps); });
+  for (const auto method : {HTTP_POST, HTTP_GET, HTTP_DELETE}) {
+    routes.on("/api/pocket/v1/dev/reader-capture", method,
+              [server = &server, deps = &d] { handleDevReaderCapture(*server, *deps); });
+  }
   for (const auto method : {HTTP_POST, HTTP_GET}) {
     routes.on("/api/pocket/v1/dev/network-fault", method, [server = &server, deps = &d] {
       char deviceId[9];

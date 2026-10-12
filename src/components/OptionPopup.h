@@ -64,6 +64,16 @@ class OptionPopup {
     activate(currentIndex, std::move(onSelect));
   }
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  bool developerSelect(int index) {
+    if (!active || !uiReady || index < 0 || index >= static_cast<int>(ownedStrings.size())) return false;
+    selectedIndex = index;
+    active = false;
+    if (onSelectCallback) onSelectCallback(index);
+    return true;
+  }
+#endif
+
   bool handleInput(MappedInputManager& input, const std::function<void()>& requestUpdate) {
     if (!active) return false;
 

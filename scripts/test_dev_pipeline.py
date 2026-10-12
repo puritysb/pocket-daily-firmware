@@ -12,6 +12,11 @@ import dev_pipeline as pipeline
 
 
 class PipelineTest(unittest.TestCase):
+    def test_published_epub_manifest_matches_the_committed_test_file(self):
+        payload = (pipeline.ROOT / 'test/reading_progress/fixtures/frankenstein-se.epub').read_bytes()
+        self.assertEqual(len(payload), pipeline.REAL_EPUB_BYTES)
+        self.assertEqual(hashlib.sha256(payload).hexdigest(), pipeline.REAL_EPUB_SHA256)
+
     def evidence(self):
         return {'passed': True, 'initialConnection': True, 'run': '123', 'version': 'x-dev-y',
                 'platform': 'macOS', 'standbyWaitSeconds': 90, 'cycle': {
@@ -24,6 +29,46 @@ class PipelineTest(unittest.TestCase):
     def validate(self, evidence):
         return pipeline.hardware_evidence(pipeline.MARKER + json.dumps(evidence),
                                           123, 'x-dev-y', True, 'macOS')
+
+    def test_continuity_requires_both_acceptance_directions_and_restoration(self):
+        record = self.evidence()
+        record['continuityValidation'] = dict(passed=True, restored=True,
+            captures=[dict(name=name, run=143, sha256='a' * 64) for name in
+                ['continuity-seed', 'continuity-app-to-x3-0', 'continuity-x3-to-app-0',
+                 'continuity-app-to-x3-1', 'continuity-x3-to-app-1']],
+            cases=[dict(direction='bidirectional', passed=True, round=index,
+                        noMovementBeforeAcceptance=True, acceptedCharacterVisible=True, navigatedFromAnotherChapter=True, backwardOffer=backward)
+                   for index, backward in enumerate([False, True])])
+        def validate(value):
+            return pipeline.hardware_evidence(pipeline.MARKER + json.dumps(value),
+                123, 'x-dev-y', True, 'macOS', continuity=True)
+        self.assertTrue(validate(record)['passed'])
+        for key, value in [('passed', False), ('restored', False), ('captures', []), ('cases', [])]:
+            broken = json.loads(json.dumps(record))
+            broken['continuityValidation'][key] = value
+            with self.assertRaises(RuntimeError): validate(broken)
+        for key, value in [('passed', False), ('direction', 'one-way'), ('noMovementBeforeAcceptance', False), ('backwardOffer', True), ('acceptedCharacterVisible', False), ('navigatedFromAnotherChapter', False), ('round', 1)]:
+            broken = json.loads(json.dumps(record))
+            broken['continuityValidation']['cases'][0][key] = value
+            with self.assertRaises(RuntimeError): validate(broken)
+
+        record['continuityValidation']['epub'] = dict(kind='published-book',
+            sha256='d09a9d94bd1076edd07a9204989ed2917bef73ad28cbd855d758641fb2e5eeb0',
+            bytes=226309, roundTripBytesMatch=True, libraryReimportMatches=True)
+        def validate_real(value):
+            return pipeline.hardware_evidence(pipeline.MARKER + json.dumps(value),
+                123, 'x-dev-y', True, 'macOS', continuity=True, real_epub=True)
+        self.assertTrue(validate_real(record)['passed'])
+        for key, value in [('kind', 'generated'), ('sha256', 'a' * 64), ('bytes', 1),
+                           ('roundTripBytesMatch', False), ('libraryReimportMatches', False)]:
+            broken = json.loads(json.dumps(record))
+            broken['continuityValidation']['epub'][key] = value
+            with self.assertRaises(RuntimeError): validate_real(broken)
+
+        for key, value in [('name', 'old-capture'), ('run', 999), ('sha256', '')]:
+            broken = json.loads(json.dumps(record))
+            broken['continuityValidation']['captures'][0][key] = value
+            with self.assertRaises(RuntimeError): validate(broken)
 
     def test_network_fault_requires_real_outage_resume_and_single_publication(self):
         record = self.evidence()
@@ -121,7 +166,7 @@ class PipelineTest(unittest.TestCase):
                  '07-brief-today', '08-brief-weather-restored', '09-card-image-a',
                  '10-card-image-b', '11-card-image-restored', '12-reader-body', '13-actual-sleep']
         record['screenValidation'] = {'passed': True, 'restored': True, 'staleCaptureRejected': True,
-            'cardsRestored': True, 'readingPreserved': True, 'pixelDifferences': {'cardImage': 4000, 'cardRestored': 0},
+            'cardsRestored': True, 'readingPreserved': True, 'pixelDifferences': {'cardImage': 4000, 'cardRestored': 0, 'sleepContentRetained': 0},
             'sleepCycle': {'run': 136, 'state': 3, 'returnMode': 1, 'timerArmed': True, 'timerWake': True},
             'captures': [{'name': name, 'run': 124 + i, 'width': 528, 'height': 792,
                           'sha256': 'a' * 64} for i, name in enumerate(names)]}
@@ -140,7 +185,7 @@ class PipelineTest(unittest.TestCase):
             broken = json.loads(json.dumps(record))
             broken['screenValidation']['sleepCycle'][key] = value
             with self.assertRaises(RuntimeError): validate(broken)
-        for key, value in [('cardImage', 0), ('cardRestored', 42)]:
+        for key, value in [('cardImage', 0), ('cardRestored', 42), ('sleepContentRetained', 1), ('sleepContentRetained', None)]:
             broken = json.loads(json.dumps(record))
             broken['screenValidation']['pixelDifferences'][key] = value
             with self.assertRaises(RuntimeError): validate(broken)

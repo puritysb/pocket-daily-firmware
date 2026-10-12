@@ -337,3 +337,48 @@ both cases, real offline observation, >=5 s outage, one publication each, resume
 prefix >=64 KiB for receiving, completed app jobs and exact downloaded bytes.
 This tests association loss on X3, not a router reboot or address reassignment.
 The device installation remains a separate explicit developer `--flash` action.
+
+## Physical bidirectional reading acceptance
+
+`--continuity-suite` invokes the sibling app's `ReaderContinuity.swift` on macOS.
+It requires matching developer firmware and an enrolled X3. The runner validates
+two complete bidirectional rounds, including a backward app offer, pre-acceptance
+position preservation, captured page text and restoration. The Mac presses its rendered Go-to button
+through local window events; it does not directly invoke the navigation method. It exports the five
+run-bound X3 BMP/PNG captures from XCTest and verifies their hashes. This is HTTP
+exchange plus actual EPUB/confirmation behavior, not BLE-only or iCloud evidence.
+
+The developer-only `reader-capture` endpoint accepts `action=seed|accept|advance`
+for `/Pocket visual <run>.epub` (1 byte..4 MiB on SD). `seed` records the initial page;
+`accept` confirms only the reading-offer dialog after its popup is ready;
+`advance` turns one real page. Completion requires a rendered page, capture,
+and actual EPUB destruction/position recording before automatic Same Wi-Fi
+return. GET reports the matching completion ticket; DELETE ends the fixture's
+exchange visibility. Requests use the existing identity/storage admission gate.
+The fixture is temporarily prepended to the normal bounded reading list without
+mutating recent books. Production builds have no endpoint or automatic inputs.
+The app removes the trial marker and owned book and compares the original list.
+If the app is interrupted, the bounded reader timeout still returns to Wi-Fi;
+resume cleanup with the saved run and recovery artifacts before starting another
+trial. Removing the owned fixture also disables its exchange visibility.
+
+No second framebuffer is allocated. The phase/action bytes are static; the
+existing cold reading-list operation temporarily owns the synthetic path string
+(maximum 63 bytes), rather than reserving a permanent path buffer. Existing
+exchange scratch and actual reader allocations are reused.
+
+Add `--real-epub` to use `test/reading_progress/fixtures/frankenstein-se.epub`
+(226309 bytes, 38 sections). This published-book fixture retains Standard Ebooks'
+original XHTML but substitutes tiny images; see its fixture README for provenance.
+The runner requires its SHA-256, an unchanged app import/upload/download/reimport,
+then the same two bidirectional acceptance rounds. A matching existing reader
+history digest is refused; only the run-named trial is used. The 4 MiB admission
+bound changes an SD-size check, not parser allocation or production behavior.
+
+Native captures retain the user's reading orientation. The Mac runs offline OCR
+with explicit quarter-turn orientations and tests each independently against the
+exact source prefix; it does not concatenate candidates or accept approximate
+text. Sleep verification also requires zero body-pixel difference between the
+selected Brief and the actual deep-sleep frame (power/wake header/footer excluded).
+Omit `--standby` for a short run; `--screen-suite` still performs its bounded timer
+sleep and automatic network return.

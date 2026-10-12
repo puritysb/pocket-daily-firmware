@@ -28,6 +28,9 @@ import pocket_put
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / 'build/dev-pipeline.json'
 MARKER = 'POCKET_HARDWARE_RESULT '
+# Hash the checked-in, image-reduced fixture, not the original EPUB in the XPointer golden metadata.
+REAL_EPUB_SHA256 = 'd09a9d94bd1076edd07a9204989ed2917bef73ad28cbd855d758641fb2e5eeb0'
+REAL_EPUB_BYTES = 226309
 
 
 def save(path, value):
@@ -71,7 +74,7 @@ INTERFACE_CASES = {'identity-rejection', 'storage-usage', 'preferences-roundtrip
                    'folder-copy', 'inventory-preservation'}
 
 
-def hardware_evidence(log, run, version, standby, platform, interface=False, wifi_setup=False, screens=False, standby_seconds=90, battery_only=False, delayed_advertising=False, wake_control=False, network_faults=False):
+def hardware_evidence(log, run, version, standby, platform, interface=False, wifi_setup=False, screens=False, standby_seconds=90, battery_only=False, delayed_advertising=False, wake_control=False, network_faults=False, continuity=False, real_epub=False):
     records = []
     for line in log.splitlines():
         if MARKER in line:
@@ -83,6 +86,29 @@ def hardware_evidence(log, run, version, standby, platform, interface=False, wif
             or record.get('passed') is not True or record.get('initialConnection') is not True
             or record.get('platform') != platform):
         raise RuntimeError('hardware result failed or does not match this run/artifact/platform')
+    if continuity:
+        reading = record.get('continuityValidation', {})
+        cases = reading.get('cases', [])
+        captures = reading.get('captures', [])
+        names = ['continuity-seed', 'continuity-app-to-x3-0', 'continuity-x3-to-app-0',
+                 'continuity-app-to-x3-1', 'continuity-x3-to-app-1']
+        if (reading.get('passed') is not True or reading.get('restored') is not True
+                or len(cases) != 2 or [c.get('name') for c in captures] != names
+                or any(c.get('run') != (run + 20) % (2 ** 32) or len(c.get('sha256', '')) != 64 for c in captures)
+                or [c.get('round') for c in cases] != [0, 1]
+                or any(c.get('passed') is not True or c.get('direction') != 'bidirectional'
+                       or c.get('noMovementBeforeAcceptance') is not True
+                       or c.get('acceptedCharacterVisible') is not True
+                       or c.get('navigatedFromAnotherChapter') is not True for c in cases)
+                or [c.get('backwardOffer') for c in cases] != [False, True]):
+            raise RuntimeError('missing bidirectional reading acceptance evidence')
+    if real_epub:
+        epub = record.get('continuityValidation', {}).get('epub', {})
+        if (not continuity or epub.get('kind') != 'published-book'
+                or epub.get('sha256') != REAL_EPUB_SHA256
+                or epub.get('bytes') != REAL_EPUB_BYTES or epub.get('roundTripBytesMatch') is not True
+                or epub.get('libraryReimportMatches') is not True):
+            raise RuntimeError('missing unchanged published EPUB round-trip evidence')
     if wifi_setup and record.get("wifiSetupRollback") != "passed":
         raise RuntimeError("missing verified Wi-Fi setup rollback")
     if screens:
@@ -103,6 +129,8 @@ def hardware_evidence(log, run, version, standby, platform, interface=False, wif
                 or sleep.get('timerArmed') is not True or sleep.get('timerWake') is not True):
             raise RuntimeError('missing card restoration or actual sleep/wake evidence')
         differences = visual.get('pixelDifferences', {})
+        if differences.get('sleepContentRetained') != 0:
+            raise RuntimeError('actual sleep body differs from selected Brief')
         if differences.get('cardImage', 0) <= 1000 or differences.get('cardRestored') != 0:
             raise RuntimeError('missing card image pixel validation')
         for index, capture in enumerate(captures):
@@ -433,17 +461,33 @@ def run(args, config, job):
                                'WAKE_CONTROL': '1' if getattr(args, 'wake_control', False) else '0',
                                'DELAYED_ADVERTISING': '1' if getattr(args, 'delayed_advertising', False) else '0',
                                'BATTERY_ONLY': '1' if getattr(args, 'battery_only', False) else '0',
+                               'CONTINUITY': '1' if getattr(args, 'continuity_suite', False) and platform == 'macOS' else '0',
                                'SCREENS': '1' if getattr(args, 'screen_suite', False) and platform == 'macOS' else '0',
                                'NETWORK_FAULTS': '1' if getattr(args, 'network_faults', False) else '0',
                                'WIFI_SETUP': '1' if getattr(args, 'wifi_setup', False) else '0',
                                'INTERFACE': '1' if getattr(args, 'interface_suite', False) else '0'}.items():
                 env['TEST_RUNNER_POCKET_HARDWARE_' + key] = value
+            if getattr(args, 'real_epub', False) and platform == 'macOS':
+                env['TEST_RUNNER_POCKET_HARDWARE_CONTINUITY_EPUB'] = str(ROOT / 'test/reading_progress/fixtures/frankenstein-se.epub')
             label = f'{platform}-hardware-{index + 1}'
-            log = job.command(label, command + ['test-without-building', '-parallel-testing-enabled', 'NO',
-                '-only-testing:' + target + '/ReaderHardwareTests/testDeveloperConnectionCycle',
-                '-resultBundlePath', str(job.output / (label + '.xcresult'))], cwd=app, env=env, timeout=(1200 if getattr(args, 'interface_suite', False) else 480) + (getattr(args, 'standby_seconds', 90) if args.standby else 0))
+            try:
+                log = job.command(label, command + ['test-without-building', '-parallel-testing-enabled', 'NO',
+                    '-only-testing:' + target + '/ReaderHardwareTests/testDeveloperConnectionCycle',
+                    '-resultBundlePath', str(job.output / (label + '.xcresult'))], cwd=app, env=env, timeout=(1200 if getattr(args, 'interface_suite', False) or getattr(args, 'continuity_suite', False) else 480) + (getattr(args, 'standby_seconds', 90) if args.standby else 0))
+            except RuntimeError:
+                bundle = job.output / (label + '.xcresult')
+                if getattr(args, 'continuity_suite', False) and bundle.exists():
+                    destination = job.output / (label + '-continuity-failed')
+                    try:
+                        job.command(label + '-export-failed-continuity', ['xcrun', 'xcresulttool', 'export', 'attachments',
+                            '--path', str(bundle), '--output-path', str(destination)])
+                        job.report['continuityFailureArtifacts'] = str(destination)
+                    except RuntimeError as export_error:
+                        job.report['continuityExportError'] = str(export_error)
+                    job.flush()
+                raise
             evidence = job.stage(label + '-evidence', lambda: hardware_evidence(
-                log.read_text(), run_id, version, args.standby, platform, getattr(args, 'interface_suite', False), getattr(args, 'wifi_setup', False), getattr(args, 'screen_suite', False) and platform == 'macOS', getattr(args, 'standby_seconds', 90), getattr(args, 'battery_only', False), getattr(args, 'delayed_advertising', False), getattr(args, 'wake_control', False), getattr(args, 'network_faults', False)))
+                log.read_text(), run_id, version, args.standby, platform, getattr(args, 'interface_suite', False), getattr(args, 'wifi_setup', False), getattr(args, 'screen_suite', False) and platform == 'macOS', getattr(args, 'standby_seconds', 90), getattr(args, 'battery_only', False), getattr(args, 'delayed_advertising', False), getattr(args, 'wake_control', False), getattr(args, 'network_faults', False), getattr(args, 'continuity_suite', False) and platform == 'macOS', getattr(args, 'real_epub', False) and platform == 'macOS'))
             if getattr(args, 'screen_suite', False) and platform == 'macOS':
                 destination = job.output / (label + '-screens')
                 job.command(label + '-export-screens', ['xcrun', 'xcresulttool', 'export', 'attachments',
@@ -456,6 +500,12 @@ def run(args, config, job):
                     raise RuntimeError('Reader image semantics did not pass')
                 evidence['screenValidation']['semanticValidation'] = semantic
                 evidence['screenValidation']['exportedDirectory'] = str(destination)
+            if getattr(args, 'continuity_suite', False) and platform == 'macOS':
+                destination = job.output / (label + '-continuity')
+                job.command(label + '-export-continuity', ['xcrun', 'xcresulttool', 'export', 'attachments',
+                    '--path', str(job.output / (label + '.xcresult')), '--output-path', str(destination)])
+                collect_screen_artifacts(destination, evidence['continuityValidation']['captures'])
+                evidence['continuityValidation']['exportedDirectory'] = str(destination)
             job.report['hardware'].append(evidence)
             if platform == 'iOS-device':
                 job.report['iosPhysical'] = 'passed'
@@ -478,6 +528,8 @@ def main():
     parser.add_argument('--build-firmware', choices=['default', 'ble_standby'])
     parser.add_argument('--flash', action='store_true', help='explicitly install the chosen developer artifact')
     parser.add_argument('--wifi-setup', action='store_true', help='BLE Wi-Fi setup with nonexistent network and verified rollback')
+    parser.add_argument('--real-epub', action='store_true', help='use the published Frankenstein EPUB text fixture; requires --continuity-suite')
+    parser.add_argument('--continuity-suite', action='store_true', help='real bidirectional X3 reading offer acceptance and captured text verification')
     parser.add_argument('--screen-suite', action='store_true', help='physical X3 Home/Brief/cards/EPUB captures and actual deep-sleep validation')
     parser.add_argument('--interface-suite', action='store_true', help='full app interface scenarios with owned fixtures and restoration')
     parser.add_argument('--network-faults', action='store_true', help='actual X3 Wi-Fi outage during upload and after publication; requires --interface-suite')
@@ -492,6 +544,8 @@ def main():
     parser.add_argument('--ios-simulator', help='simulator UDID for protocol regression/build validation')
     parser.add_argument('--ios-device', help='physical iPhone UDID; already paired/permissioned Debug app required')
     args = parser.parse_args()
+    if args.real_epub and not args.continuity_suite:
+        parser.error('--real-epub requires --continuity-suite')
     if args.action == 'run' and args.host:
         parser.error('--host is enrollment only; use configure to change the expected reader')
     if args.network_faults and not args.interface_suite:

@@ -4,6 +4,22 @@
 #include <cstring>
 
 namespace PocketDaily::DevCapture {
+// On-SD admission bound; the EPUB parser streams bytes, never allocates this size.
+inline constexpr bool validBookSize(size_t size) { return size > 0 && size <= 4 * 1024 * 1024; }
+enum class ReaderAction : uint8_t { Capture, Seed, Accept, Advance };
+enum class ReaderPhase : uint8_t { Reading, Accepted, Turned, Closing };
+inline constexpr bool readyToCapture(ReaderAction action, ReaderPhase phase) {
+  switch (action) {
+    case ReaderAction::Capture:
+    case ReaderAction::Seed:
+      return phase == ReaderPhase::Reading;
+    case ReaderAction::Accept:
+      return phase == ReaderPhase::Accepted;
+    case ReaderAction::Advance:
+      return phase == ReaderPhase::Turned;
+  }
+  return false;
+}
 struct Ticket {
   uint32_t run, check;
 };
