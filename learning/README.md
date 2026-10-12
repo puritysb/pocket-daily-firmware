@@ -1,6 +1,9 @@
 # Pocket Daily learning packs
 
-Pocket Daily reads its Japanese course from an SD-backed `.pdl` pack. The
+The daily vocabulary course is optional and disabled on a fresh profile.
+Enable Daily word deliberately in the companion’s reader layout; the normal
+Home and sleep defaults show the current book or an empty Library slot.
+Pocket Daily reads the selected Japanese course from an SD-backed `.pdl` pack. The
 active Korean N3-oriented pack lives at:
 
 ```text
@@ -21,9 +24,8 @@ python scripts/import-openjlpt-learning.py --openjlpt /path/to/OpenJLPT
 python scripts/build-learning-pack.py
 ```
 
-The build also writes `jp-n3-ko.manifest.json`. A Surface provider can copy its
-`learningPack` object directly into `card_feed` and serve the adjacent `.pdl`
-file from the endpoint described below.
+The build also writes `jp-n3-ko.manifest.json` for reproducible packaging.
+The current companion has no learning-pack catalog or installer.
 
 Copy `learning/dist/jp-n3-ko.pdl` to the path above on the SD card. The device
 validates the fixed-format header, mandatory SPDX licence and attribution,
@@ -42,32 +44,10 @@ official practice questions or proprietary N3 lists into the pack. JLPT does
 not publish a current official level-by-level vocabulary/kanji specification;
 course-level tags therefore need to be described as N3-oriented curation.
 
-## Wireless update contract
+## Historical provider contract
 
-A compatible Surface provider may add this object to any full or unchanged
-`card_feed` response:
-
-```json
-{
-  "learningPack": {
-    "id": "jp-n3-ko",
-    "version": 2,
-    "format": 1,
-    "size": 123456,
-    "md5": "0123456789abcdef0123456789abcdef",
-    "licenseSpdx": "CC-BY-SA-4.0"
-  }
-}
-```
-
-On an explicit Pocket Daily Sync, the device downloads the advertised bytes
-from:
-
-```text
-GET /learning/pack?id=jp-n3-ko&version=3
-```
-
-Surface identity headers and the existing `token` query are included. The
-download lands in a temporary SD file, is checked against the advert and its
-internal pack metadata, then atomically replaces the active pack. Automatic
-wake pulls only learn about the advert; they do not download large study data.
+The former Surface/AgentDeck provider and its `/learning/pack` endpoint are
+retired. They are not prerequisites for offline learning and are not a current
+companion installation path. Install the validated `.pdl` on SD explicitly.
+A future app pack installer must preserve preview, license, version and an
+explicit user choice; it must not populate a fresh reader with assumed interests.

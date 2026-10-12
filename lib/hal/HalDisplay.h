@@ -58,6 +58,9 @@ class HalDisplay {
   void displayBufferAsync(RefreshMode mode = RefreshMode::FAST_REFRESH);
   // Block until a pending deferred refresh completes (no-op when none is).
   void waitRefreshComplete();
+  // Temporary, allocation-free observer during long panel BUSY waits. Return
+  // false to preserve the driver's normal wait/power behavior. Clear after use.
+  void setBusyWaitSliceHook(bool (*hook)(int8_t, uint8_t));
   // True when displayBufferAsync() genuinely overlaps (panel driver defers);
   // false where it falls back to a blocking refresh.
   bool supportsAsyncRefresh() const;

@@ -417,3 +417,17 @@ For an internet-free Direct connection, the app can download and validate an
 official image first, keep it in the prepared queue, then explicitly send it
 after connecting. After firmware publication the app ends capable LAN and AP
 sessions so the reader can present its existing installation confirmation.
+
+### First X3 installation
+
+When X3 has no settings file and no open book on an ordinary boot, it saves the
+initial settings and opens the existing authenticated BLE pairing surface.
+The companion's Set Up Reader flow discovers it and sends Wi-Fi credentials via
+the existing encrypted provisioning command. The reader needs no prior LAN IP
+or reader-side password entry. Read offline cancels; five minutes without an
+authenticated peer also returns to Pocket Daily. Subsequent boots, existing
+settings, sleep resumes and developer/recovery returns do not repeat this offer.
+This does not change pairing authentication, network validation, persistence or
+shipping firmware installation confirmation. Older firmware uses Sync → Direct
+connection explicitly. Physical first-install acceptance must include the OS
+pairing prompt; a previously paired LAN trial is not equivalent.

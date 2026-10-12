@@ -655,12 +655,17 @@ void handleDevScreenCapture(WebServer& server, const RouteDeps& d) {
     server.send(204, "text/plain", "");
     return;
   }
-  if (DevCapture::savedRun() != run) {
+  const bool wake = server.arg("frame") == "wake";
+  if (!server.arg("frame").isEmpty() && !wake) {
+    server.send(400, "text/plain", "Invalid capture frame");
+    return;
+  }
+  if ((wake ? DevCapture::wakeEvidence().run : DevCapture::savedRun()) != run) {
     server.send(409, "text/plain", "Capture run mismatch");
     return;
   }
   if (server.method() == HTTP_DELETE) {
-    if (!DevCapture::remove(run)) {
+    if (!(wake ? DevCapture::removeWake(run) : DevCapture::remove(run))) {
       server.send(500, "text/plain", "Capture cleanup failed");
       return;
     }
@@ -673,7 +678,7 @@ void handleDevScreenCapture(WebServer& server, const RouteDeps& d) {
     server.send(400, "text/plain", "Invalid capture offset");
     return;
   }
-  HalFile file = Storage.open(kScreenCapturePath);
+  HalFile file = Storage.open(wake ? DevCapture::WAKE_PATH : kScreenCapturePath);
   if (!file || offset >= file.size() || !file.seek(offset)) {
     server.send(416, "text/plain", "Capture offset unavailable");
     return;
@@ -1318,8 +1323,14 @@ void handleDevFreshStart(WebServer& server, const RouteDeps& d) {
     server.send(409, "text/plain", "Reader is drawing; settings unchanged");
     return;
   }
+  uint32_t archiveRun = 0;
+  const String archive = server.arg("archiveRun");
+  if (!archive.isEmpty() && (!parseGeneration({archive.c_str(), archive.length()}, archiveRun) || !archiveRun)) {
+    server.send(400, "text/plain", "archiveRun must be a nonzero uint32");
+    return;
+  }
   FreshStartOperations operations;
-  const auto result = FreshStart::run(operations);
+  const auto result = FreshStart::run(operations, archiveRun);
   if (result != FreshStart::Result::Completed) {
     LOG_ERR("RESET", "Fresh start failed at stage %u", static_cast<unsigned>(result));
     lock.unlock();
@@ -1448,6 +1459,10 @@ void handleDevBleCycleResult(WebServer& server) {
   doc["advertisingDelayMs"] = record->advertisingDelayMs;
   doc["advertisingStartedMs"] = record->advertisingStartedMs;
   doc["timerWake"] = powerManager.devWokeFromTimer();
+  const auto& wake = DevCapture::wakeEvidence();
+  doc["wakeCaptureRun"] = wake.run;
+  doc["wakeRefreshMs"] = wake.refreshMs;
+  doc["wakeSkipped"] = wake.skipped;
   doc["lightSleeps"] = record->lightSleeps;
   doc["lightSleepMs"] = record->lightSleepMs;
   doc["standbyMs"] = record->standbyMs;

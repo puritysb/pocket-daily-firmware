@@ -164,28 +164,28 @@ class PipelineTest(unittest.TestCase):
         names = ['01-home-reading', '02-home-word', '03-home-reading-restored',
                  '04-home-weather-bottom', '05-home-weather-top', '06-brief-weather',
                  '07-brief-today', '08-brief-weather-restored', '09-card-image-a',
-                 '10-card-image-b', '11-card-image-restored', '12-reader-body', '13-actual-sleep']
+                 '10-card-image-b', '11-card-image-restored', '12-reader-body', '13-actual-sleep', '14-wake-transition']
         record['screenValidation'] = {'passed': True, 'restored': True, 'staleCaptureRejected': True,
-            'cardsRestored': True, 'readingPreserved': True, 'pixelDifferences': {'cardImage': 4000, 'cardRestored': 0, 'sleepContentRetained': 0},
-            'sleepCycle': {'run': 136, 'state': 3, 'returnMode': 1, 'timerArmed': True, 'timerWake': True},
-            'captures': [{'name': name, 'run': 124 + i, 'width': 528, 'height': 792,
+            'cardsRestored': True, 'readingPreserved': True, 'preferencesRestored': True, 'pixelDifferences': {'cardImage': 4000, 'cardRestored': 0, 'sleepContentRetained': 0, 'wakeBodyRetained': 0, 'wakeTransition': 500},
+            'sleepCycle': {'run': 136, 'state': 3, 'returnMode': 1, 'timerArmed': True, 'timerWake': True, 'wakeCaptureRun': 136, 'wakeSkipped': False, 'wakeRefreshMs': 500},
+            'captures': [{'name': name, 'run': 123 + min(i + 1, 13), 'width': 528, 'height': 792,
                           'sha256': 'a' * 64} for i, name in enumerate(names)]}
         def validate(value):
             return pipeline.hardware_evidence(pipeline.MARKER + json.dumps(value),
                                               123, 'x-dev-y', False, 'macOS', screens=True)
         self.assertTrue(validate(record)['passed'])
-        for key in ['passed', 'restored', 'staleCaptureRejected', 'cardsRestored', 'readingPreserved']:
+        for key in ['passed', 'restored', 'staleCaptureRejected', 'cardsRestored', 'readingPreserved', 'preferencesRestored']:
             broken = json.loads(json.dumps(record))
             broken['screenValidation'][key] = False
             with self.assertRaises(RuntimeError): validate(broken)
         broken = json.loads(json.dumps(record))
         broken['screenValidation']['captures'][0]['run'] = 123
         with self.assertRaises(RuntimeError): validate(broken)
-        for key, value in [('run', 135), ('state', 4), ('returnMode', 0), ('timerArmed', False), ('timerWake', False)]:
+        for key, value in [('run', 135), ('state', 4), ('returnMode', 0), ('timerArmed', False), ('timerWake', False), ('wakeCaptureRun', 135), ('wakeSkipped', True), ('wakeRefreshMs', 0), ('wakeRefreshMs', 1501)]:
             broken = json.loads(json.dumps(record))
             broken['screenValidation']['sleepCycle'][key] = value
             with self.assertRaises(RuntimeError): validate(broken)
-        for key, value in [('cardImage', 0), ('cardRestored', 42), ('sleepContentRetained', 1), ('sleepContentRetained', None)]:
+        for key, value in [('cardImage', 0), ('cardRestored', 42), ('sleepContentRetained', 1), ('sleepContentRetained', None), ('wakeBodyRetained', 1), ('wakeTransition', 0)]:
             broken = json.loads(json.dumps(record))
             broken['screenValidation']['pixelDifferences'][key] = value
             with self.assertRaises(RuntimeError): validate(broken)

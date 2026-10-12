@@ -291,9 +291,9 @@ bool ActivityManager::goToPocketDaily() {
   return true;
 }
 
-void ActivityManager::goToPocketNearbySync(const bool autoJoinSavedNetwork) {
+void ActivityManager::goToPocketNearbySync(const bool autoJoinSavedNetwork, const bool firstSetup) {
   auto nearbySync = makeUniqueNoThrow<CrossPointWebServerActivity>(
-      renderer, mappedInput, WebServerLaunchMode::POCKET_NEARBY_SYNC, autoJoinSavedNetwork);
+      renderer, mappedInput, WebServerLaunchMode::POCKET_NEARBY_SYNC, autoJoinSavedNetwork, firstSetup);
   if (!nearbySync) {
     LOG_ERR("ACT", "OOM: Pocket Nearby Sync activity");
     return;

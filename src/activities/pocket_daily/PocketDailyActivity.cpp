@@ -117,7 +117,8 @@ void PocketDailyActivity::onEnter() {
     if (!PocketDaily::AppGlance::load(glanceSnapshot)) glanceSnapshot.clear();
   }
   localStudyOffset = 0;
-  buildLocalStudyCard();
+  const auto& profile = PocketDaily::DailyProfile::current();
+  if (profile.dailyWord || profile.shows(PocketDaily::DailyProfile::HomeItem::Word)) buildLocalStudyCard();
 
   AgentLog::line("POCKET", "Pocket reader onEnter (glance %s)", glanceSnapshot.savedEpoch ? "saved" : "none");
   // Paint Pocket immediately — local reading and carried cards need nothing.
@@ -186,7 +187,7 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
 
   // The local book, when one exists. This data lives entirely on SD.
   auto appendReading = [&]() {
-    if (APP_STATE.openEpubPath.empty() || n >= cap) return;
+    if (n >= cap) return;
     OverviewRow& o = out[n++];
     memset(&o, 0, sizeof(o));
     cp(o.sid, sizeof(o.sid), "local:reading");
@@ -341,7 +342,10 @@ void PocketDailyActivity::handleButtons() {
   }
   if (gpio.wasReleased(HalGPIO::BTN_CONFIRM) && n > 0) {
     if (rows[selected].reading) {
-      resumeReading();
+      if (APP_STATE.openEpubPath.empty())
+        activityManager.goToLibrary();
+      else
+        resumeReading();
     } else if (rows[selected].pocket) {
       strncpy(cardSid, rows[selected].sid, sizeof(cardSid) - 1);
       cardSid[sizeof(cardSid) - 1] = '\0';
@@ -350,8 +354,7 @@ void PocketDailyActivity::handleButtons() {
     }
     return;
   }
-  // Left opens the Articles library: the companion's articles on SD, listed
-  // and tidied on the reader (docs/articles-v1.md). Home stays stock CrossPoint.
+  // Saved articles remain available beside the reading carousel.
   if (gpio.wasReleased(HalGPIO::BTN_LEFT)) {
     activityManager.goToArticles();
     return;
@@ -418,7 +421,7 @@ void PocketDailyActivity::preparePersonalSnapshot() {
   memset(&renderPocketSnapshot, 0, sizeof(renderPocketSnapshot));
   if (const auto* appCards = appContent.cards(); appCards && appCards->count)
     renderPocketSnapshot = appCards->cards[0].card;
-  else if (localStudyCard.cardId[0])
+  else if (localStudyCard.cardId[0] && PocketDaily::DailyProfile::current().dailyWord)
     renderPocketSnapshot = localStudyCard;
 
   // Title, author and percent are shared with the Sync screen presenter
@@ -621,7 +624,7 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
   if (reason == GlanceReason::PoweredOff) {
     // The physical wake tab communicates the important state. Do not repeat
     // a stale date or the last Sync time beside the front-button area.
-    snprintf(status, sizeof(status), "%s", tr(STR_POCKET_POWERED_OFF));
+    snprintf(status, sizeof(status), "%s", tr(STR_POCKET_ASLEEP));
   } else if (syncedHm[0]) {
     snprintf(status, sizeof(status), "%s \xC2\xB7 %s", tr(STR_POCKET_OFFLINE), syncedHm);
   } else {

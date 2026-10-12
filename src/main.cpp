@@ -87,6 +87,13 @@ constexpr unsigned long X4PRO_POWER_CLICK_MAX_HOLD_MS = 300;
 // A wake hold must never become an in-app power-button action.  Boot may continue
 // while the button is held; swallow the one release that ends that wake gesture.
 static bool wakePowerReleasePending = false;
+// Boot-only latch: keep short input observed during the panel waveform until
+// routing runs. No task, allocation or second framebuffer is needed.
+static bool wakeCueInputObserved = false;
+static bool observeWakeCueInput(int8_t, uint8_t) {
+  wakeCueInputObserved = wakeCueInputObserved || gpio.rawInputActive();
+  return false;  // Retain the display driver's ordinary BUSY wait.
+}
 
 // Fonts
 EpdFont notoserif14RegularFont(&notoserif_14_regular);
@@ -575,8 +582,13 @@ void setup() {
 
   PocketDaily::Boot::beginNetHealth();
   APP_STATE.loadFromFile();
-  const bool isSleepWake =
-      wakeupReason == HalGPIO::WakeupReason::PowerButton || standbyReturn != PocketDaily::Boot::StandbyReturn::None;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  const bool devTimerWake = powerManager.devWokeFromTimer();
+#else
+  constexpr bool devTimerWake = false;
+#endif
+  const bool isSleepWake = devTimerWake || wakeupReason == HalGPIO::WakeupReason::PowerButton ||
+                           standbyReturn != PocketDaily::Boot::StandbyReturn::None;
   const bool isPersistedSleepWake = isSleepWake && !APP_STATE.showBootScreen;
 
   if (recoveryFirmwareMode) {
@@ -591,6 +603,8 @@ void setup() {
   if (gpio.hasTouch()) {
     SETTINGS.readerMenuStyle = CrossPointSettings::READER_MENU_TOOLBAR;
   }
+  const bool firstPocketSetup = gpio.deviceIsX3() && !isSilentReboot && !isSleepWake &&
+                                !Storage.exists(CrossPointSettings::getFilePath()) && APP_STATE.openEpubPath.empty();
   SETTINGS.loadFromFile();
   // Push the saved timezone's POSIX rule into the clock (migrating the legacy
   // UTC-offset setting on first boot after the update).
@@ -667,6 +681,7 @@ void setup() {
                                                    : BootResume::Splash;
   bool allowFastInitialReaderRefresh = false;
   bool needsWakeRefresh = false;
+  bool wakeSkipToReader = false;
 
   setupDisplayAndFonts(resume != BootResume::Splash);
 
@@ -688,8 +703,33 @@ void setup() {
           renderer.cleanupGrayscaleWithFrameBuffer();
           allowFastInitialReaderRefresh = true;
         }
-        PocketDaily::Boot::paintWakeCue(renderer);
-        renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+        // A retained closed-book tab opens once, then yields to the real
+        // page. Replace the existing wake refresh; never add an animation
+        // loop or a minimum dwell. A held button bypasses even this refresh.
+        uint32_t wakeRefreshMs = 0;
+        wakeSkipToReader = gpio.deviceIsX3() && gpio.rawInputActive();
+        if (!wakeSkipToReader && (!gpio.deviceIsX3() || SETTINGS.sleepWakeIndicator)) {
+          PocketDaily::Boot::paintWakeCue(renderer, gpio.deviceIsX3());
+          wakeSkipToReader = gpio.deviceIsX3() && gpio.rawInputActive();
+          if (!wakeSkipToReader) {
+            const auto started = millis();
+            wakeCueInputObserved = false;
+            if (gpio.deviceIsX3()) display.setBusyWaitSliceHook(observeWakeCueInput);
+            renderer.displayBuffer(gpio.deviceIsX3() ? HalDisplay::FAST_REFRESH : HalDisplay::HALF_REFRESH);
+            if (gpio.deviceIsX3()) display.setBusyWaitSliceHook(nullptr);
+            wakeRefreshMs = millis() - started;
+            LOG_INF("WAKE", "Cue refresh %lu ms", static_cast<unsigned long>(wakeRefreshMs));
+            // Panel waveforms cannot be cancelled. Sample immediately after
+            // the refresh and route to the book without another cue or hold.
+            wakeSkipToReader = gpio.deviceIsX3() && (wakeCueInputObserved || gpio.rawInputActive());
+          }
+        }
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        if (devTimerWake &&
+            !PocketDaily::DevCapture::saveWake(PocketDaily::DevCapture::savedRun(), wakeRefreshMs, wakeSkipToReader)) {
+          LOG_ERR("WAKE", "Could not save developer wake evidence");
+        }
+#endif
       } else {
         // Clean the retained sleep image as part of the first Home paint.
         needsWakeRefresh = true;
@@ -767,12 +807,19 @@ void setup() {
     // openEpubPath + lastSleepFromReader from a prior session.
     activityManager.goHome();
     landsOnShell = true;
+  } else if (firstPocketSetup && !mappedInputManager.isPressed(MappedInputManager::Button::Back)) {
+    // Persist before offering setup: skipping or timing out must not trap the
+    // next boot in pairing. Never erase bonds, books or saved networks here.
+    if (SETTINGS.saveToFile())
+      activityManager.goToPocketNearbySync(false, true);
+    else
+      activityManager.goToPocketDaily();
   } else if (mappedInputManager.isPressed(MappedInputManager::Button::Back)) {
     // CrossPoint Home is always one deliberate held button away, but is no
     // longer the product's default boot identity.
     activityManager.goHome(HomeMenuItem::NONE, needsWakeRefresh);
   } else if (!APP_STATE.openEpubPath.empty() && APP_STATE.readerActivityLoadCount == 0 &&
-             (mappedInputManager.isPressed(MappedInputManager::Button::Confirm) ||
+             (wakeSkipToReader || mappedInputManager.isPressed(MappedInputManager::Button::Confirm) ||
               (resume == BootResume::SplashlessWake && APP_STATE.lastSleepFromReader))) {
     // OK held, or waking from the book's Quick Resume page, which promises the
     // same page. Stock's boot-loop guard: a book that crashes the reader is not

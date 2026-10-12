@@ -117,24 +117,28 @@ def hardware_evidence(log, run, version, standby, platform, interface=False, wif
         expected_names = ['01-home-reading', '02-home-word', '03-home-reading-restored',
                           '04-home-weather-bottom', '05-home-weather-top', '06-brief-weather',
                           '07-brief-today', '08-brief-weather-restored', '09-card-image-a',
-                          '10-card-image-b', '11-card-image-restored', '12-reader-body', '13-actual-sleep']
+                          '10-card-image-b', '11-card-image-restored', '12-reader-body', '13-actual-sleep', '14-wake-transition']
         if (visual.get('passed') is not True or visual.get('restored') is not True
                 or visual.get('staleCaptureRejected') is not True
                 or [c.get('name') for c in captures] != expected_names):
             raise RuntimeError('missing or failed physical screen validation')
         sleep = visual.get('sleepCycle', {})
         if (visual.get('cardsRestored') is not True or visual.get('readingPreserved') is not True
+                or visual.get('preferencesRestored') is not True
                 or sleep.get('run') != run + 13
                 or sleep.get('state') != 3 or sleep.get('returnMode') != 1
-                or sleep.get('timerArmed') is not True or sleep.get('timerWake') is not True):
+                or sleep.get('timerArmed') is not True or sleep.get('timerWake') is not True
+                or sleep.get('wakeCaptureRun') != run + 13 or sleep.get('wakeSkipped') is not False
+                or not 0 < sleep.get('wakeRefreshMs', 0) <= 1500):
             raise RuntimeError('missing card restoration or actual sleep/wake evidence')
         differences = visual.get('pixelDifferences', {})
-        if differences.get('sleepContentRetained') != 0:
+        if (differences.get('sleepContentRetained') != 0 or differences.get('wakeBodyRetained') != 0
+                or differences.get('wakeTransition', 0) <= 100):
             raise RuntimeError('actual sleep body differs from selected Brief')
         if differences.get('cardImage', 0) <= 1000 or differences.get('cardRestored') != 0:
             raise RuntimeError('missing card image pixel validation')
         for index, capture in enumerate(captures):
-            if (capture.get('run') != run + index + 1 or capture.get('width') != 528
+            if (capture.get('run') != run + min(index + 1, 13) or capture.get('width') != 528
                     or capture.get('height') != 792 or len(capture.get('sha256', '')) != 64):
                 raise RuntimeError('stale or invalid reader capture evidence')
     if interface:

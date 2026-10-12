@@ -587,7 +587,7 @@ STR_POCKET_SYNC_UPDATED: "Updated"
 STR_POCKET_SYNC_UP_TO_DATE: "Up to date"
 STR_POCKET_SYNC_UNREACHABLE: "Companion unreachable"
 STR_POCKET_SYNC_RETRY: "Sync failed · press Sync to retry"
-STR_POCKET_WEATHER_HINT: "Press Sync to fetch a forecast"
+STR_POCKET_WEATHER_HINT: "Set up weather in the app, then sync"
 STR_POCKET_SLEEP_PREVIEW: "Sleep screen preview · Back returns to Sync"
 
 STR_ARTICLES: "Articles"
@@ -643,3 +643,12 @@ STR_NO_FOOTNOTES: "No footnotes"
 STR_SLEEP_WAKE_INDICATOR: "Sleep WAKE indicator"
 
 STR_POCKET_NO_EVENTS: "No saved events"
+
+STR_POCKET_READING_EMPTY: "Your next book starts here"
+STR_POCKET_READING_START: "Open Library to choose a book"
+
+STR_POCKET_ASLEEP: "Sleeping"
+
+STR_POCKET_SETUP: "Set up your reader"
+STR_POCKET_SETUP_APP: "In Pocket Daily, choose Set Up Reader"
+STR_POCKET_READ_OFFLINE: "Read offline"

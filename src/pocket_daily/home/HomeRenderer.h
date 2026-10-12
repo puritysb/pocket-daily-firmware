@@ -20,7 +20,7 @@ namespace PocketDaily::Home {
 // parse but resolve to no source.
 enum class RowSource : uint8_t { Reading, AppCards, DailyWord };
 
-// What content exists right now; a source without content adds no page.
+// Reading retains its empty-state page; optional sources need content.
 struct RowAvailability {
   bool book = false;      // an open book to continue
   bool appCards = false;  // at least one active app-authored card
@@ -67,20 +67,21 @@ struct Reading {
 struct Strings {
   const char* pocketDaily = "Pocket Daily";
   const char* continueReading = "Continue Reading";
-  const char* noOpenBook = "No open book";
-  const char* startReading = "Start reading";
+  const char* noOpenBook = "Your next book starts here";
+  const char* startReading = "Open Library to choose a book";
   const char* study = "Today's Study";
   const char* myCards = "My Cards";
   const char* word = "Daily Word";
   const char* empty = "";
   const char* weather = "Weather";
-  const char* noWeather = "";
-  const char* weatherHint = "";
+  const char* noWeather = "No saved weather";
+  const char* weatherHint = "Set up weather in the app, then sync";
   const char* nextEvent = "Next event";
   const char* today = "Today";
   const char* noEvents = "No saved events";
   const char* home = "Home";
   const char* select = "Select";
+  const char* library = "Library";
   const char* articles = "Articles";
   const char* sync = "Sync";
 };

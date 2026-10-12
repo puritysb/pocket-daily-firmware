@@ -46,6 +46,8 @@ enum class WebServerLaunchMode { FILE_TRANSFER, POCKET_NEARBY_SYNC };
 class CrossPointWebServerActivity final : public Activity {
   WebServerLaunchMode launchMode;
   bool autoJoinSavedNetwork;
+  bool firstSetup;
+  unsigned long firstSetupAt = 0;
   WebServerActivityState state = WebServerActivityState::MODE_SELECTION;
 
   // Network mode
@@ -110,11 +112,12 @@ class CrossPointWebServerActivity final : public Activity {
  public:
   explicit CrossPointWebServerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                        WebServerLaunchMode launchMode = WebServerLaunchMode::FILE_TRANSFER,
-                                       bool autoJoinSavedNetwork = false)
+                                       bool autoJoinSavedNetwork = false, bool firstSetup = false)
       : Activity(launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC ? "PocketNearbySync" : "CrossPointWebServer",
                  renderer, mappedInput),
         launchMode(launchMode),
-        autoJoinSavedNetwork(autoJoinSavedNetwork) {}
+        autoJoinSavedNetwork(autoJoinSavedNetwork),
+        firstSetup(firstSetup) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;

@@ -368,10 +368,10 @@ int32_t pdui_render_sleep_brief(pdui_context* context, const pdui_profile* profi
     // As on the reader: the first own card, else the sample, else the daily word.
     const PocketDaily::Card* first = context->cards.empty() ? nullptr : &context->cards.front().card;
     const PocketDaily::Card* sampleCard = sample.card.cardId[0] ? &sample.card : nullptr;
-    view.pocketCard = first ? first : sampleCard ? sampleCard : &sample.word;
+    view.pocketCard = first ? first : sampleCard ? sampleCard : parsed.dailyWord ? &sample.word : &sample.card;
     view.pinnedCard = first ? first : sampleCard;
     view.pinnedHasImage = first && !context->cards.front().image.empty();
-    view.status = "Powered off";
+    view.status = "Sleeping";
     view.profile = parsed;
     PocketDaily::Home::renderBrief(context->renderer, view, PocketUIHost::hostEnv(context->renderer, context->cards));
     if (options & PDUI_SLEEP_WAKE_INDICATOR) PowerWakeCue::draw(context->renderer, isX3Panel(context->panel), "WAKE");

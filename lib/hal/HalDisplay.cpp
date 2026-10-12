@@ -77,6 +77,8 @@ void HalDisplay::displayBufferAsync(HalDisplay::RefreshMode mode) {
 
 void HalDisplay::waitRefreshComplete() { einkDisplay.waitRefreshComplete(); }
 
+void HalDisplay::setBusyWaitSliceHook(bool (*hook)(int8_t, uint8_t)) { einkDisplay.setBusyWaitSliceHook(hook); }
+
 bool HalDisplay::supportsAsyncRefresh() const { return einkDisplay.supportsAsyncRefresh(); }
 
 HalDisplay::GrayscaleCapabilities HalDisplay::grayscaleCapabilities(GrayscaleMode mode) const {

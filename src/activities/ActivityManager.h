@@ -97,7 +97,7 @@ class ActivityManager {
   // goTo... functions are convenient wrapper for replaceActivity()
   void goToFileTransfer(bool autoJoinSavedNetwork = false);
   bool goToPocketDaily();
-  void goToPocketNearbySync(bool autoJoinSavedNetwork = false);
+  void goToPocketNearbySync(bool autoJoinSavedNetwork = false, bool firstSetup = false);
   void goToSettings();
   void goToFileBrowser(std::string path = {});
   bool goToArticles();

@@ -19,6 +19,7 @@ namespace PocketDaily::DevCapture {
 namespace {
 constexpr const char* META = "/.pocket/dev-screen.run";
 constexpr const char* REQUEST = "/.pocket/dev-reader.run";
+WakeEvidence wake;
 uint32_t activeRun = 0;
 uint32_t started = 0;
 constexpr const char* FIXTURE = "/.pocket/dev-reading.run";
@@ -53,6 +54,21 @@ void bookPath(char* output, size_t size, uint32_t run) {
   snprintf(output, size, "/Pocket visual %lu.epub", static_cast<unsigned long>(run));
 }
 }  // namespace
+const WakeEvidence& wakeEvidence() { return wake; }
+bool saveWake(uint32_t run, uint32_t refreshMs, bool skipped) {
+  wake = {};
+  if (!run || display.isInverted() ||
+      !ScreenshotUtil::saveFramebufferAsBmp(WAKE_PATH, display.getFrameBuffer(), display.getDisplayWidth(),
+                                            display.getDisplayHeight()))
+    return false;
+  wake = {run, refreshMs, skipped};
+  return true;
+}
+bool removeWake(uint32_t run) {
+  if (!run || wake.run != run || !Storage.remove(WAKE_PATH)) return false;
+  wake = {};
+  return true;
+}
 bool save(uint32_t run) {
   if (!run || display.isInverted()) return false;
   // Invalidate first: failed writes cannot expose an earlier successful frame.

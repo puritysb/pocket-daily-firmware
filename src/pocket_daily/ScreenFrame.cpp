@@ -163,7 +163,7 @@ LoadResult loadFrame(const Surface surface, const DailyProfile::Profile& profile
       wordDrawn = buildHomeRows(*frame);
       break;
     case Surface::Brief:
-      wordDrawn = !firstAppCard(*frame) && briefStudyShown(*frame);
+      wordDrawn = frame->profile.dailyWord && !firstAppCard(*frame) && briefStudyShown(*frame);
       break;
     case Surface::None:
       break;

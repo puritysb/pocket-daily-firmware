@@ -45,10 +45,7 @@ Profile defaults() {
   p.homeItems[1] = HomeItem::Study;
   p.homeCount = 2;
   p.sleepSections[0] = SleepSection::Reading;
-  p.sleepSections[1] = SleepSection::Study;
-  p.sleepSections[2] = SleepSection::Weather;
-  p.sleepSections[3] = SleepSection::Today;
-  p.sleepCount = 4;
+  p.sleepCount = 1;
   return p;
 }
 

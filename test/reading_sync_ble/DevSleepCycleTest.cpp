@@ -305,3 +305,23 @@ TEST(FreshStart, MissingMetadataIsAllowedButAnyExistingBackupPreventsMutation) {
   files.paths.clear();
   EXPECT_EQ(PocketDaily::FreshStart::run(files), PocketDaily::FreshStart::Result::Completed);
 }
+TEST(FreshStart, ExplicitRunPreservesPriorArchiveAndRejectsReuse) {
+  ResetFiles files;
+  files.paths.insert("/.first-install-pocket");
+  EXPECT_EQ(PocketDaily::FreshStart::run(files, UINT32_MAX), PocketDaily::FreshStart::Result::Completed);
+  EXPECT_TRUE(files.exists("/.first-install-pocket"));
+  EXPECT_TRUE(files.exists("/.first-install-pocket-4294967295"));
+  const auto saved = files.paths;
+  EXPECT_EQ(PocketDaily::FreshStart::run(files, UINT32_MAX), PocketDaily::FreshStart::Result::BackupExists);
+  EXPECT_EQ(files.paths, saved);
+}
+TEST(FreshStart, ExplicitRunRollsBackAllPartialArchiveFailures) {
+  for (int failure = 1; failure <= 3; ++failure) {
+    ResetFiles files;
+    const auto original = files.paths;
+    files.failMove = failure;
+    EXPECT_EQ(PocketDaily::FreshStart::run(files, 73), PocketDaily::FreshStart::Result::ArchiveFailed);
+    EXPECT_EQ(files.paths, original);
+    EXPECT_TRUE(files.bonds);
+  }
+}

@@ -406,3 +406,20 @@ loss of HTTP is expected. Do not reconnect it automatically after this action:
 that would consume the fresh pairing/setup state being rehearsed. A lost reply
 is ambiguous; inspect the reader before retrying. This is not a full flash erase
 or a claim of panel appearance based only on HTTP acknowledgement.
+
+The X3 screen suite also captures `14-wake-transition` after the actual timer
+sleep. Timer wakes enter the same splashless rendering path as a button wake;
+normal boot classification is unchanged in production. The developer capture
+GET/DELETE accepts `frame=wake`, with the same device/run admission and bounded
+chunks. The wake capture is separate from the retained sleep BMP and is admitted
+only for the current boot's recorded run. `/dev/ble-cycle` reports
+`wakeCaptureRun`, `wakeRefreshMs` and `wakeSkipped`. Acceptance requires unchanged
+body pixels, a changed cue, no skipped cue and 1..1500 ms for its one FAST refresh.
+These are framebuffer/timing observations, not optical or physical-button proof.
+
+For an explicitly requested repeat first-install rehearsal, an optional nonzero
+uint32 `archiveRun` appends `-<run>` to all three backup names. The same run cannot
+be reused if any destination exists. Earlier backups are never overwritten; an
+omitted run preserves the original fixed-name safety check. Identity, explicit
+acknowledgement, rollback and bond-reset rules are unchanged. This resets local
+reader settings/bonds, not root books/fonts, host OS bonds or hardware calibration.

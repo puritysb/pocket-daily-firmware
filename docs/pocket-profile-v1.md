@@ -73,20 +73,21 @@ theme is Lyra (spacing 16), so the "exact" canvas differed on default readers.
   "schema": 1,
   "home": {
     "items": ["reading", "study"],
-    "dailyWord": true,
-    "weather": "bottom",
-    "nextEvent": true
+    "dailyWord": false,
+    "weather": "off",
+    "nextEvent": false
   },
   "sleep": {
     "mode": "brief",
-    "sections": ["reading", "study", "weather", "today"]
+    "sections": ["reading"]
   }
 }
 ```
 
 - `home.items`: ordered, distinct subset of `reading`, `study`, `word` (and the
   retired `provider`, `monitor`, which are accepted but never shown); at least
-  one, at most four. An item with no data is skipped (no book, no cards).
+  one, at most four. Reading keeps an empty Library entry point without a
+  book; optional card sources without data are skipped.
 - `study` is the companion's own cards ("My cards", up to three pages, each
   drawn with its image on Home). Without a `word` item it falls back to the
   daily word when there are no cards and `dailyWord` is true (the v1
@@ -117,7 +118,11 @@ theme is Lyra (spacing 16), so the "exact" canvas differed on default readers.
   translation falls back to English on this path.
 - Home shows at most `maxHomeItems` (4, the existing `kOverviewCap`) items;
   when the ordered sources produce more, later ones are dropped.
-- A reader with no stored profile uses the defaults above.
+- A reader with no stored profile uses the reading-first defaults above
+  (2026-10-13). Existing profiles retain their choices. Sleep Study uses own
+  cards, then vocabulary only when `dailyWord` is enabled; a standalone Home
+  Word page does not silently enable that fallback. Selected weather without
+  saved data explains how to configure and sync it from the app.
 - Unknown keys, unknown IDs, duplicates, wrong types or an empty item list
   reject the whole document (400). Nothing is applied partially.
 

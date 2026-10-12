@@ -28,7 +28,7 @@ std::string replaced(std::string text, const std::string& from, const std::strin
 }
 }  // namespace
 
-TEST(PocketProfile, DefaultsShowReadingAndStudyWithoutRetiredItems) {
+TEST(PocketProfile, DefaultsKeepReadingFirstAndOptionalContentOff) {
   const auto p = defaults();
   ASSERT_TRUE(valid(p));
   ASSERT_EQ(p.homeCount, 2);
@@ -36,12 +36,12 @@ TEST(PocketProfile, DefaultsShowReadingAndStudyWithoutRetiredItems) {
   EXPECT_EQ(p.homeItems[1], HomeItem::Study);
   EXPECT_FALSE(p.shows(HomeItem::Provider));
   EXPECT_FALSE(p.shows(HomeItem::Monitor));
-  EXPECT_TRUE(p.dailyWord);
-  EXPECT_EQ(p.weather, WeatherPanel::Bottom);
-  EXPECT_TRUE(p.nextEvent);
+  EXPECT_FALSE(p.dailyWord);
+  EXPECT_EQ(p.weather, WeatherPanel::Off);
+  EXPECT_FALSE(p.nextEvent);
   EXPECT_EQ(p.sleepMode, SleepMode::Brief);
-  ASSERT_EQ(p.sleepCount, 4);
-  EXPECT_EQ(p.sleepSections[3], SleepSection::Today);
+  ASSERT_EQ(p.sleepCount, 1);
+  EXPECT_EQ(p.sleepSections[0], SleepSection::Reading);
 }
 
 TEST(PocketProfile, ParsesAFullDocumentInOrder) {

@@ -22,7 +22,8 @@ int homeRowSources(const DailyProfile::Profile& profile, const RowAvailability& 
   for (uint8_t k = 0; k < profile.homeCount && k < DailyProfile::HOME_ITEM_CAP; ++k) {
     switch (profile.homeItems[k]) {
       case HomeItem::Reading:
-        if (available.book) out[n++] = RowSource::Reading;
+        // An empty reading slot is still the first usable route to the library.
+        out[n++] = RowSource::Reading;
         break;
       case HomeItem::Study:
         // Without its own Word item, v1 keeps the daily word as the fallback.
@@ -320,7 +321,9 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   // Confirm selects the current carousel item. Left opens the Articles library;
   // Right opens Pocket's account-free nearby transport, where the companion
   // sends cards and the glance.
-  HomeDraw::drawPocketActionStrip(renderer, view.isX3, env.labels, s.home, s.select, s.articles, s.sync);
+  HomeDraw::drawPocketActionStrip(renderer, view.isX3, env.labels, s.home,
+                                  n > 0 && rows[selectedIndex].reading && !view.reading.valid ? s.library : s.select,
+                                  s.articles, s.sync);
 }
 
 void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
@@ -377,8 +380,19 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   // no daemon, no network, and no cached deck, which is what makes the glance
   // meaningful on a fully offline device. ──
   auto drawReading = [&](int x, int y, int cw, int maxY) -> int {
-    if (!renderReadingSnapshot.valid || y + line12 * 2 + 12 >= maxY) return y;
+    if (y + line12 * 2 + 12 >= maxY) return y;
     y = sectionHeader(x, y, cw, s.continueReading);
+    if (!renderReadingSnapshot.valid) {
+      const int titleFont = fontForText(UI_10_FONT_ID, s.noOpenBook);
+      y += drawWrappedFixed(renderer, titleFont, x, y + 12, s.noOpenBook, cw, 2, renderer.getLineHeight(titleFont) + 3,
+                            EpdFontFamily::BOLD) *
+               (renderer.getLineHeight(titleFont) + 3) +
+           24;
+      const int hintFont = fontForText(SMALL_FONT_ID, s.startReading);
+      y += drawWrappedFixed(renderer, hintFont, x, y, s.startReading, cw, 2, renderer.getLineHeight(hintFont) + 3) *
+           (renderer.getLineHeight(hintFont) + 3);
+      return y + 18;
+    }
 
     // The retained face gives the current book a real visual identity. The
     // setting is intentionally cover-only: turning it off keeps resume/title
@@ -506,7 +520,13 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   auto drawWeather = [&](int x, int y, int cw, int maxY) -> int {
     // A section that cannot fit its header and the temperature poster is
     // skipped rather than drawn over the status line.
-    if (!g.weather.valid || y + line12 + 58 >= maxY) return y;
+    if (y + line12 + 58 >= maxY) return y;
+    if (!g.weather.valid) {
+      y = sectionHeader(x, y, cw, s.weather);
+      const int height = std::min(160, maxY - y);
+      HomeDraw::drawWeatherPlaceholder(renderer, x, y, cw, height, s.noWeather, s.weatherHint, env.text);
+      return y + height;
+    }
     char weatherLabel[BRIEF_WEATHER_LABEL_BYTES] = {0};
     briefWeatherLabel(weatherLabel, sizeof(weatherLabel), g.weather, s.weather, view.snapshotStale);
     y = sectionHeader(x, y, cw, weatherLabel);

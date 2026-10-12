@@ -24,8 +24,8 @@ Strings deviceStrings() {
   Strings s;
   s.pocketDaily = tr(STR_POCKET_DAILY);
   s.continueReading = tr(STR_POCKET_CONTINUE_READING);
-  s.noOpenBook = tr(STR_NO_OPEN_BOOK);
-  s.startReading = tr(STR_START_READING);
+  s.noOpenBook = tr(STR_POCKET_READING_EMPTY);
+  s.startReading = tr(STR_POCKET_READING_START);
   s.study = tr(STR_POCKET_STUDY);
   s.myCards = tr(STR_POCKET_MY_CARDS);
   s.word = tr(STR_POCKET_DAILY_WORD);
@@ -38,6 +38,7 @@ Strings deviceStrings() {
   s.noEvents = tr(STR_POCKET_NO_EVENTS);
   s.home = tr(STR_POCKET_HOME);
   s.select = tr(STR_SELECT);
+  s.library = tr(STR_LIBRARY);
   s.articles = tr(STR_ARTICLES);
   s.sync = tr(STR_POCKET_SYNC);
   return s;

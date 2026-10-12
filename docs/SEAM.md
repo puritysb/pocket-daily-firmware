@@ -340,3 +340,7 @@ in the same commit:
    same merge.
 5. Hardware-sensitive claims (status bytes, route matrices, transfers) need a
    device session — simulator/host results do not verify them.
+
+The product boot cue also uses `util/PowerWakeCue.h` to open the same book tab
+that the inherited sleep activity retains. This is a shared, allocation-free
+rendering primitive; it does not give the base display layer a product dependency.

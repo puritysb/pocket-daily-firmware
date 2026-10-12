@@ -187,6 +187,18 @@ TEST_P(HomePreview, BriefSectionOrderIsHonoured) {
   EXPECT_NE(brief(weatherFirst), brief(defaults()));
 }
 
+TEST_P(HomePreview, EmptyStudyDoesNotInventVocabularyWithoutOptIn) {
+  auto profile = defaults();
+  profile.sleep_count = 1;
+  profile.sleep_sections[0] = 2;
+  profile.daily_word = 0;
+  const auto empty = brief(profile, 0);
+  profile.daily_word = 1;
+  EXPECT_NE(brief(profile, 0), empty);
+  profile.daily_word = 0;
+  EXPECT_EQ(brief(profile, 0), empty);
+}
+
 TEST_P(HomePreview, EmptySamplesStillDrawTheShell) {
   EXPECT_GT(ink(home(defaults(), 0)), 500u);
   EXPECT_GT(ink(brief(defaults(), 0)), 100u);
@@ -216,6 +228,35 @@ TEST_P(HomePreview, InvalidProfilesAreRejectedAndLeaveNoFrame) {
 
 // X3 (528x792 portrait) and X4 (480x800 portrait) physical landscape panels.
 // The order and fallback rules shared by the device overview and the preview.
+TEST(HomeRowSources, EmptyLibraryKeepsReadingFirstWithoutInventedContent) {
+  using PocketDaily::Home::RowSource;
+  const auto profile = PocketDaily::DailyProfile::defaults();
+  RowSource out[PocketDaily::DailyProfile::HOME_ITEM_CAP];
+  PocketDaily::Home::RowAvailability available;
+  ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, available, out), 1);
+  EXPECT_EQ(out[0], RowSource::Reading);
+  available.appCards = true;
+  ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, available, out), 2);
+  EXPECT_EQ(out[0], RowSource::Reading);
+  EXPECT_EQ(out[1], RowSource::AppCards);
+}
+
+TEST(SleepWakeCue, BookOpensOnlyInsideTheExistingX3Tab) {
+  HalDisplay panel(792, 528);
+  GfxRenderer renderer(panel);
+  renderer.begin();
+  renderer.clearScreen();
+  PowerWakeCue::draw(renderer, true, "");
+  const std::vector<uint8_t> resting(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize());
+  PowerWakeCue::draw(renderer, true, "", true);
+  const std::vector<uint8_t> opening(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize());
+  EXPECT_NE(resting, opening);
+  EXPECT_TRUE(panel.guardsIntact());
+  // The same tab is fully repainted, with no accumulating trails.
+  PowerWakeCue::draw(renderer, true, "");
+  EXPECT_EQ(std::vector<uint8_t>(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize()), resting);
+}
+
 TEST(HomeRowSources, FollowProfileOrderAndSkipItemsWithoutContent) {
   using PocketDaily::DailyProfile::HomeItem;
   using PocketDaily::Home::RowSource;
@@ -233,6 +274,7 @@ TEST(HomeRowSources, FollowProfileOrderAndSkipItemsWithoutContent) {
   profile.homeItems[2] = HomeItem::Provider;
   profile.homeCount = 3;
   PocketDaily::Home::RowAvailability none;
+  profile.dailyWord = true;
   // No cards: the daily word stands in while the profile keeps it...
   ASSERT_EQ(PocketDaily::Home::homeRowSources(profile, none, out), 1);
   EXPECT_EQ(out[0], RowSource::DailyWord);
@@ -466,6 +508,17 @@ TEST(SleepWakeCue, BriefSectionsStartBelowTheWakeTab) {
   }
 }
 
+TEST_P(HomePreview, EmptyWeatherBriefExplainsHowToAddWeather) {
+  auto profile = defaults();
+  profile.sleep_count = 1;
+  profile.sleep_sections[0] = 3;
+  const auto weather = brief(profile, 0);
+  // A header/footer alone must not pass as meaningful optional content.
+  EXPECT_GT(ink(weather), 3000u);
+  profile.sleep_sections[0] = 4;
+  EXPECT_NE(weather, brief(profile, 0));
+}
+
 TEST_P(HomePreview, EmptyTodayOnlyBriefExplainsItsEmptyState) {
   auto today = defaults();
   today.sleep_count = 1;
@@ -474,7 +527,9 @@ TEST_P(HomePreview, EmptyTodayOnlyBriefExplainsItsEmptyState) {
   reading.sleep_sections[0] = 1;
   const auto absent = brief(reading, 0);
   const auto schedule = brief(today, 0);
-  EXPECT_GT(ink(schedule), ink(absent) + 100u);
+  EXPECT_GT(ink(schedule), 1000u);
+  EXPECT_GT(ink(absent), 1000u);
+  EXPECT_NE(schedule, absent);
 }
 
 TEST(BriefHeader, ResolvedFontLineBoxSeparatesHeaderAndBody) {

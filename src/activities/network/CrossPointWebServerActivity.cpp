@@ -108,7 +108,8 @@ void CrossPointWebServerActivity::onEnter() {
   lastHandleClientTime = 0;
   requestUpdate();
 
-  if (Pocket::NearbySync::WifiSetup::wantsBluetooth()) {
+  if (firstSetup || Pocket::NearbySync::WifiSetup::wantsBluetooth()) {
+    firstSetupAt = millis();
     startNearbySync();
     return;
   }
@@ -696,6 +697,16 @@ void CrossPointWebServerActivity::startWebServer() {
 }
 
 void CrossPointWebServerActivity::loop() {
+  // Keep a full reconnect window after pairing: the companion deliberately
+  // drops this link before opening its authenticated credential writer.
+  if (firstSetup && nearbySync.isAuthenticated()) firstSetupAt = millis();
+  // First-install advertising is optional and bounded. Skipping it or leaving
+  // it idle returns to offline reading; it never becomes a boot requirement.
+  if (firstSetup && millis() - firstSetupAt >= 300000 && state == WebServerActivityState::NEARBY_READY &&
+      !nearbySync.isAuthenticated()) {
+    returnToLaunchOrigin();
+    return;
+  }
   if (Pocket::NearbySync::WifiSetup::restartDue()) {
     silentRestartToPocketNearbySync();
     return;
@@ -1081,8 +1092,8 @@ void CrossPointWebServerActivity::renderNearbySync() const {
   const int pageWidth = renderer.getScreenWidth();
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
 
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_POCKET_DIRECT),
-                 nullptr);
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
+                 firstSetup ? tr(STR_POCKET_SETUP) : tr(STR_POCKET_DIRECT), nullptr);
 
   int y = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing * 4;
   if (state == WebServerActivityState::NEARBY_STARTING) {
@@ -1093,7 +1104,8 @@ void CrossPointWebServerActivity::renderNearbySync() const {
   } else if (state == WebServerActivityState::NEARBY_HANDOFF) {
     renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_NEARBY_PREPARING), true, EpdFontFamily::BOLD);
   } else {
-    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_POCKET_DIRECT_ACTION), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, y, firstSetup ? tr(STR_POCKET_SETUP_APP) : tr(STR_POCKET_DIRECT_ACTION),
+                              true, EpdFontFamily::BOLD);
     y += lineHeight + metrics.verticalSpacing * 3;
     renderer.drawCenteredText(UI_10_FONT_ID, y, nearbySync.advertisedName(), true);
     y += lineHeight + metrics.verticalSpacing * 4;
@@ -1111,7 +1123,7 @@ void CrossPointWebServerActivity::renderNearbySync() const {
     }
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_EXIT), "", "", "");
+  const auto labels = mappedInput.mapLabels(firstSetup ? tr(STR_POCKET_READ_OFFLINE) : tr(STR_EXIT), "", "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 

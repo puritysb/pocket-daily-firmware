@@ -27,9 +27,9 @@ inline constexpr uint8_t SLEEP_SECTION_CAP = 4;
 struct Profile {
   HomeItem homeItems[HOME_ITEM_CAP]{};
   uint8_t homeCount = 0;
-  bool dailyWord = true;
-  WeatherPanel weather = WeatherPanel::Bottom;
-  bool nextEvent = true;
+  bool dailyWord = false;
+  WeatherPanel weather = WeatherPanel::Off;
+  bool nextEvent = false;
   SleepMode sleepMode = SleepMode::Brief;
   SleepSection sleepSections[SLEEP_SECTION_CAP]{};
   uint8_t sleepCount = 0;
@@ -38,9 +38,8 @@ struct Profile {
   bool sleeps(SleepSection section) const;
 };
 
-// Reading, study; weather below; next event on; Daily Brief with reading,
-// study, weather, today. (Before the daemon was retired the defaults also
-// listed provider, which now shows nothing.)
+// Reading first, then user-authored cards. Learning, weather and schedule are
+// opt-in; the retained sleep face reserves the current-book area.
 Profile defaults();
 bool operator==(const Profile& a, const Profile& b);
 inline bool operator!=(const Profile& a, const Profile& b) { return !(a == b); }

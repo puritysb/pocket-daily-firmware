@@ -14,6 +14,7 @@
 #include "pocket_daily/PocketProfileStore.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
+#include "util/PowerWakeCue.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include "pocket_daily/product_identity.h"
 #endif
@@ -50,7 +51,8 @@ void loadPersistedState() {
   PocketDaily::DailyProfile::loadAtBoot();
 }
 
-void paintWakeCue(const GfxRenderer& renderer) {
+void paintWakeCue(GfxRenderer& renderer, const bool isX3) {
+  if (isX3) PowerWakeCue::draw(renderer, true, tr(STR_POCKET_WAKE_READ), true);
   const int w = renderer.getScreenWidth();
   const int h = renderer.getScreenHeight();
   const int lineS = renderer.getLineHeight(SMALL_FONT_ID);
