@@ -238,3 +238,70 @@ TEST(DevCaptureTicket, RealBooksHaveABoundedSDSizeWithoutAFrameSizedLimit) {
   EXPECT_TRUE(validBookSize(4 * 1024 * 1024));
   EXPECT_FALSE(validBookSize(4 * 1024 * 1024 + 1));
 }
+
+#include <set>
+#include <string>
+
+#include "pocket_daily/dev/FreshStart.h"
+namespace {
+struct ResetFiles {
+  std::set<std::string> paths{"/.crosspoint", "/.pocket", "/pocket-daily", "/book.epub", "/fonts"};
+  int move = 0, failMove = -1;
+  bool bonds = true, bondFailure = false, rollbackFailure = false;
+  bool exists(const char* path) { return paths.count(path) != 0; }
+  bool rename(const char* from, const char* to) {
+    if (++move == failMove || (rollbackFailure && std::string(from).find("first-install") != std::string::npos))
+      return false;
+    if (!paths.erase(from) || paths.count(to)) return false;
+    paths.insert(to);
+    return true;
+  }
+  bool clearBonds() {
+    if (bondFailure) return false;
+    bonds = false;
+    return true;
+  }
+};
+}  // namespace
+TEST(FreshStart, ArchivesAllMetadataButPreservesBooksAndFonts) {
+  ResetFiles files;
+  EXPECT_EQ(PocketDaily::FreshStart::run(files), PocketDaily::FreshStart::Result::Completed);
+  EXPECT_FALSE(files.bonds);
+  for (const auto* path : PocketDaily::FreshStart::SOURCES) EXPECT_FALSE(files.exists(path));
+  for (const auto* path : PocketDaily::FreshStart::BACKUPS) EXPECT_TRUE(files.exists(path));
+  EXPECT_TRUE(files.exists("/book.epub"));
+  EXPECT_TRUE(files.exists("/fonts"));
+  EXPECT_EQ(PocketDaily::FreshStart::run(files), PocketDaily::FreshStart::Result::BackupExists);
+}
+TEST(FreshStart, EveryArchiveFailureRestoresAllOriginalPathsAndKeepsBonds) {
+  for (int fail = 1; fail <= 3; ++fail) {
+    ResetFiles files;
+    const auto original = files.paths;
+    files.failMove = fail;
+    EXPECT_EQ(PocketDaily::FreshStart::run(files), PocketDaily::FreshStart::Result::ArchiveFailed);
+    EXPECT_EQ(files.paths, original);
+    EXPECT_TRUE(files.bonds);
+  }
+}
+TEST(FreshStart, BondFailureRestoresFilesAndRollbackFailureIsExplicit) {
+  ResetFiles files;
+  const auto original = files.paths;
+  files.bondFailure = true;
+  EXPECT_EQ(PocketDaily::FreshStart::run(files), PocketDaily::FreshStart::Result::BondResetFailed);
+  EXPECT_EQ(files.paths, original);
+  files.rollbackFailure = true;
+  EXPECT_EQ(PocketDaily::FreshStart::run(files), PocketDaily::FreshStart::Result::RollbackFailed);
+}
+TEST(FreshStart, MissingMetadataIsAllowedButAnyExistingBackupPreventsMutation) {
+  for (const auto* backup : PocketDaily::FreshStart::BACKUPS) {
+    ResetFiles files;
+    files.paths.insert(backup);
+    const auto original = files.paths;
+    EXPECT_EQ(PocketDaily::FreshStart::run(files), PocketDaily::FreshStart::Result::BackupExists);
+    EXPECT_EQ(files.paths, original);
+    EXPECT_TRUE(files.bonds);
+  }
+  ResetFiles files;
+  files.paths.clear();
+  EXPECT_EQ(PocketDaily::FreshStart::run(files), PocketDaily::FreshStart::Result::Completed);
+}

@@ -382,3 +382,27 @@ text. Sleep verification also requires zero body-pixel difference between the
 selected Brief and the actual deep-sleep frame (power/wake header/footer excluded).
 Omit `--standby` for a short run; `--screen-suite` still performs its bounded timer
 sleep and automatic network return.
+
+## Explicit first-install rehearsal
+
+Developer builds expose `POST /api/pocket/v1/dev/fresh-start` only for an idle
+Same-Wi-Fi session. It requires the matching `deviceID` and the literal form
+acknowledgement `confirm=archive-settings-and-clear-pairing`. This is not a
+shipping reset UI and is never invoked by ordinary connection or test runs.
+
+The operation renames `/.crosspoint`, `/.pocket` and `/pocket-daily` to
+`/.first-install-crosspoint`, `/.first-install-pocket` and
+`/.first-install-content`, then clears only the `nimble_bond` NVS namespace and
+commits it. Calibration and unrelated NVS remain intact. Root books and font
+folders remain intact; history, Wi-Fi credentials, layout, cards and developer
+return markers are archived. The SD backups can contain private settings and
+must never be committed or shared. Existing backups reject the request before
+mutation. Rename failures roll back completed moves; rollback failures and bond
+errors are explicit failures, never a successful reset.
+
+A successful response is `{"archived":true,"bondsCleared":true,"rebooting":true}`.
+The reader restarts through ordinary boot with no saved-network return marker;
+loss of HTTP is expected. Do not reconnect it automatically after this action:
+that would consume the fresh pairing/setup state being rehearsed. A lost reply
+is ambiguous; inspect the reader before retrying. This is not a full flash erase
+or a claim of panel appearance based only on HTTP acknowledgement.

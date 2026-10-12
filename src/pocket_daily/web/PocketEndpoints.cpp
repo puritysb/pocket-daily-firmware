@@ -50,8 +50,10 @@
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include <HalDisplay.h>
 #include <HalPowerManager.h>
+#include <nvs.h>
 
 #include "activities/RenderLock.h"
+#include "pocket_daily/dev/FreshStart.h"
 #include "pocket_daily/dev/ScreenCapture.h"
 #include "pocket_daily/nearby_sync/DevSleepCycle.h"
 #include "pocket_daily/nearby_sync/ExchangeWindowPolicy.h"
@@ -1286,6 +1288,52 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
 }
 
 #ifdef ENABLE_DEV_REMOTE_FLASH
+struct FreshStartOperations {
+  bool exists(const char* path) { return Storage.exists(path); }
+  bool rename(const char* from, const char* to) { return Storage.rename(from, to); }
+  bool clearBonds() {
+    nvs_handle_t handle = 0;
+    const auto opened = nvs_open("nimble_bond", NVS_READWRITE, &handle);
+    if (opened == ESP_ERR_NVS_NOT_FOUND) return true;
+    if (opened != ESP_OK) return false;
+    const bool saved = nvs_erase_all(handle) == ESP_OK && nvs_commit(handle) == ESP_OK;
+    nvs_close(handle);
+    return saved;
+  }
+};
+
+void handleDevFreshStart(WebServer& server, const RouteDeps& d) {
+  char identity[9];
+  if (!admitContentOperation(server, d, identity)) return;
+  if (d.apMode || server.arg("confirm") != "archive-settings-and-clear-pairing") {
+    server.send(400, "text/plain", "Requires Same Wi-Fi and explicit reset acknowledgement");
+    return;
+  }
+  if (!Storage.ready()) {
+    server.send(503, "text/plain", "SD card is unavailable; settings unchanged");
+    return;
+  }
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock()) {
+    server.send(409, "text/plain", "Reader is drawing; settings unchanged");
+    return;
+  }
+  FreshStartOperations operations;
+  const auto result = FreshStart::run(operations);
+  if (result != FreshStart::Result::Completed) {
+    LOG_ERR("RESET", "Fresh start failed at stage %u", static_cast<unsigned>(result));
+    lock.unlock();
+    server.send(409, "text/plain", "Reset incomplete; inspect backup/state before retrying");
+    return;
+  }
+  // Keep the render lock until restart so no UI activity writes old state back.
+  // No saved-network return marker: the next boot is the ordinary first boot.
+  server.sendHeader("Connection", "close");
+  server.send(200, "application/json", "{\"archived\":true,\"bondsCleared\":true,\"rebooting\":true}");
+  delay(750);
+  ESP.restart();
+}
+
 void handleDevReaderCapture(WebServer& server, const RouteDeps& d) {
   char identity[9];
   if (!admitContentOperation(server, d, identity)) return;
@@ -1675,6 +1723,8 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
              static_cast<unsigned>(block), static_cast<unsigned>(purged), census);
     server->send(200, "text/plain", line);
   });
+  routes.on("/api/pocket/v1/dev/fresh-start", HTTP_POST,
+            [server = &server, deps = &d] { handleDevFreshStart(*server, *deps); });
   routes.on("/api/pocket/v1/dev/flash", HTTP_POST, [server = &server, deps = &d] {
     note(*deps);
     handleDevFlash(*server, *deps);
