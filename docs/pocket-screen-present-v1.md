@@ -5,7 +5,7 @@ tracing the device renderer (cover column, daily word, fonts). Contract between 
 companion app (`pocket-daily`). The app ships without it and detects it only
 through the status flag below. Nothing here changes existing routes.
 Local checks and remaining physical acceptance are recorded in
-[`SCREEN_PRESENTATION_HANDOFF.md`](SCREEN_PRESENTATION_HANDOFF.md).
+[`history/SCREEN_PRESENTATION_HANDOFF.md`](history/SCREEN_PRESENTATION_HANDOFF.md).
 
 ## Why
 

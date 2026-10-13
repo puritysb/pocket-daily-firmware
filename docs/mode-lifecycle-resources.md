@@ -4,7 +4,7 @@ Status: **design only**. No new implementation in this note. The next
 implementation increment waits on HN-2 heap-map evidence from a device session
 (see the evidence protocol). Related: `SEAM.md` (where the hooks live),
 `network-stability-analysis.md` (why heap pressure matters),
-`nearby-sync-v1.md` (the BLE memory gate), `PROJECT_MEMORY.md` (2026-09-20
+`nearby-sync-v1.md` (the BLE memory gate), `history/PROJECT_MEMORY-to-2026-10-13.md` (2026-09-20
 sprint entry).
 
 ## The problem

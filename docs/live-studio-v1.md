@@ -36,7 +36,7 @@ The firmware side went on branch `refactor/remove-ui-packs`:
 The companion decodes all removed status fields as optional. Home, Daily
 Brief and content previews come from the host renderer, not from device
 frames. Older design text for these features is in the git history of this
-file and in the dated entries of `docs/PROJECT_MEMORY.md`.
+file and in the dated entries of `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
 
 ## Non-goals
 

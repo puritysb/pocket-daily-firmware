@@ -51,7 +51,9 @@ improving reading is out of scope.
   Project facts, decisions, and hand-offs go there, never only into a
   tool-private memory (Claude auto memory, Codex or OpenCode state). A memory
   entry lands in the same change as the work it describes, so memory never
-  gets ahead of the tree.
+  gets ahead of the tree. It holds current state only and stays under about
+  300 lines: replace superseded entries and move history to `docs/history/`
+  instead of appending session logs.
 - Personal preferences belong in each tool's user-level file
   (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
   `~/.config/opencode/AGENTS.md`), not in the repository. Tool-local state
@@ -67,6 +69,8 @@ improving reading is out of scope.
 3. Only the task-relevant source and tests; `docs/embedded-reference.md` when
    you need the mechanism or example behind a rule.
 4. `docs/PROJECT_MEMORY.md` for repository boundaries and durable state.
+   `docs/history/` is a dated archive; read it only when tracing why something
+   changed, and prefer current code and docs when they disagree.
 5. `docs/release-checklist.md` before declaring a release complete.
 6. For live-studio or live sync work, `docs/live-studio-v1.md` and
    the companion design `docs/LIVE_STUDIO_DESIGN.md` in the sibling app

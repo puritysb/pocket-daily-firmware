@@ -6,7 +6,7 @@ The user installed wa4be8509; three Home presentations returned rendered.
 HTTP completion remains approximately 14.2 seconds. Further performance tuning
 is deferred as a separate task. Earlier pending-installation statements below
 are historical. The next priority is the existing EPUB sample reading acceptance.
-See [current shared handoff](../../pocket-daily/docs/CURRENT_HANDOFF.md).
+See [current shared handoff](../../../pocket-daily/docs/CURRENT_HANDOFF.md).
 
 This follow-up removes a redundant verification pass during
 `ContentViewState::load`. It is not installed on the reader that completed the
