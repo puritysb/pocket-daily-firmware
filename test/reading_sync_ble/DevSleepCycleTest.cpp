@@ -180,6 +180,53 @@ TEST(DevCaptureTicket, RejectsPartialCorruptAndZeroWhileAcceptingUnalignedBytes)
   EXPECT_EQ(PocketDaily::Boot::decodeDevBootMarker("R", 1), PocketDaily::Boot::DevBootReturn::ReaderCapture);
 }
 
+TEST(DevCaptureTicket, FirstTicketCreatesItsDirectoryAndStorageFailuresStayFailures) {
+  struct TicketStorage {
+    bool directory = false;
+    bool failMkdir = false;
+    int mkdirCalls = 0;
+    bool exists(const char* path) { return strcmp(path, "/.pocket") == 0 && directory; }
+    bool mkdir(const char* path) {
+      ++mkdirCalls;
+      if (failMkdir || strcmp(path, "/.pocket") != 0) return false;
+      directory = true;
+      return true;
+    }
+    bool openFileForWrite(const char* module, const char* path, HalFile& file) {
+      // Unlike the general FakeSD, model FAT's missing-parent rejection.
+      return directory && Storage.openFileForWrite(module, path, file);
+    }
+  } storage;
+  using namespace PocketDaily::DevCapture;
+  FakeSD::reset();
+  constexpr const char* path = "/.pocket/dev-reading.run";
+  {
+    HalFile file;
+    ASSERT_TRUE(writeTicketTo(storage, path, file, 123));
+  }
+  EXPECT_EQ(storage.mkdirCalls, 1);
+  const auto& bytes = FakeSD::files.at(path);
+  EXPECT_EQ(decodeTicket(bytes.data(), bytes.size()), 123U);
+  {
+    HalFile file;
+    ASSERT_TRUE(writeTicketTo(storage, path, file, 456));
+  }
+  EXPECT_EQ(storage.mkdirCalls, 1);
+  storage.directory = false;
+  storage.failMkdir = true;
+  HalFile file;
+  EXPECT_FALSE(writeTicketTo(storage, path, file, 789));
+  EXPECT_EQ(decodeTicket(bytes.data(), bytes.size()), 456U);
+  storage.directory = true;
+  FakeSD::failWriteOpen = true;
+  EXPECT_FALSE(writeTicketTo(storage, path, file, 789));
+  FakeSD::failWriteOpen = false;
+  FakeSD::writeBudget = 3;
+  EXPECT_FALSE(writeTicketTo(storage, path, file, 789));
+  EXPECT_EQ(decodeTicket(bytes.data(), bytes.size()), 0U);
+  FakeSD::reset();
+}
+
 TEST_F(DevCycle, LongStandbyIsBoundedAndPersistsItsRecoveryDeadline) {
   EXPECT_FALSE(DevSleepCycle::request(11, DevSleepCycle::ReturnMode::AppStandby, 89));
   EXPECT_FALSE(DevSleepCycle::request(11, DevSleepCycle::ReturnMode::AppStandby, 1801));

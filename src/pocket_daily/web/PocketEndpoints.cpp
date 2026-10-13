@@ -1359,8 +1359,14 @@ void handleDevReaderCapture(WebServer& server, const RouteDeps& d) {
     return;
   }
   if (server.method() == HTTP_GET) {
-    server.send(200, "application/json",
-                DevCapture::continuitySucceeded(run) ? "{\"completed\":true}" : "{\"completed\":false}");
+    const auto state = DevCapture::readerReadiness(run);
+    char body[176];
+    snprintf(body, sizeof(body),
+             "{\"completed\":%s,\"activeRun\":%lu,\"pendingRun\":%lu,\"fixtureRun\":%lu,\"bookReady\":%s}",
+             DevCapture::continuitySucceeded(run) ? "true" : "false", static_cast<unsigned long>(state.active),
+             static_cast<unsigned long>(state.pending), static_cast<unsigned long>(state.fixture),
+             state.bookReady ? "true" : "false");
+    server.send(200, "application/json", body);
     return;
   }
   const String action = server.arg("action");

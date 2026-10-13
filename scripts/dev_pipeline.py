@@ -398,6 +398,8 @@ def run(args, config, job):
         config, args.config, lambda: discover_with_app(job, base, app, config)))
     job.report['discovery'] = discovery
     version = status['version']
+    if getattr(args, 'x3_only', False) and status.get('device') != 'X3':
+        raise RuntimeError('X3-only acceptance rejected this reader before hardware mutations')
     if args.standby and status.get('device') != 'X3':
         raise RuntimeError('experimental standby hardware scenario is X3 only')
     if args.checks or args.build_firmware:
@@ -531,6 +533,7 @@ def main():
     parser.add_argument('--firmware', type=Path, help='snapshot and verify this developer artifact')
     parser.add_argument('--build-firmware', choices=['default', 'ble_standby'])
     parser.add_argument('--flash', action='store_true', help='explicitly install the chosen developer artifact')
+    parser.add_argument('--x3-only', action='store_true', help='reject non-X3 readers before any installation or hardware scenario')
     parser.add_argument('--wifi-setup', action='store_true', help='BLE Wi-Fi setup with nonexistent network and verified rollback')
     parser.add_argument('--real-epub', action='store_true', help='use the published Frankenstein EPUB text fixture; requires --continuity-suite')
     parser.add_argument('--continuity-suite', action='store_true', help='real bidirectional X3 reading offer acceptance and captured text verification')

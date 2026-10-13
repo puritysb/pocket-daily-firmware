@@ -21,6 +21,11 @@ bool save(uint32_t run);
 uint32_t savedRun();
 bool remove(uint32_t run);
 bool requestReader(uint32_t run, ReaderAction action = ReaderAction::Capture);
+struct ReaderReadiness {
+  uint32_t active, pending, fixture;
+  bool bookReady;
+};
+ReaderReadiness readerReadiness(uint32_t run);
 std::string exchangeFixture();
 bool clearFixture(uint32_t run);
 bool acceptOffer();

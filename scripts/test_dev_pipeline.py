@@ -411,6 +411,26 @@ class PipelineTest(unittest.TestCase):
                         pipeline.resolve_reader(dict(original), path, Mock(side_effect=error))
                 self.assertEqual(json.loads(path.read_text()), original)
 
+    def test_x3_only_rejects_other_models_before_hardware_operations(self):
+        from types import SimpleNamespace
+        for device in ['X4', None, 'unknown']:
+            with self.subTest(device=device), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                config = {'host': '192.168.1.2', 'deviceID': 'expected'}
+                args = SimpleNamespace(app=root, config=root / 'reader.json', x3_only=True)
+                binary = root / '.build/dev-pipeline-mac/Build/Products/Debug/Pocket.app/Contents/MacOS/Pocket'
+                binary.parent.mkdir(parents=True)
+                binary.write_bytes(b'test app')
+                job = pipeline.Pipeline(root / 'run')
+                status = {'device': device, 'version': 'v-dev-test'}
+                with patch.object(pipeline, 'source_state', return_value={}), \
+                     patch.object(pipeline, 'require_companion_stopped'), \
+                     patch.object(job, 'command') as command, \
+                     patch.object(pipeline, 'resolve_reader', return_value=(config['host'], status, {})):
+                    with self.assertRaisesRegex(RuntimeError, 'X3-only'):
+                        pipeline.run(args, config, job)
+                self.assertEqual([c.args[0] for c in command.call_args_list], ['app-project', 'mac-build'])
+
     def test_pipeline_continues_hardware_suite_at_verified_new_address(self):
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as tmp:

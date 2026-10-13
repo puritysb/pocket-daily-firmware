@@ -24,6 +24,15 @@ struct Ticket {
   uint32_t run, check;
 };
 inline constexpr Ticket ticketFor(uint32_t run) { return {run, run ^ 0x56495331u}; }
+// First-install resets archive /.pocket. Reader trials may precede the first
+// framebuffer capture, so ticket creation must not depend on that capture.
+template <typename StorageType, typename FileType>
+bool writeTicketTo(StorageType& storage, const char* path, FileType& file, uint32_t run) {
+  if (!storage.exists("/.pocket") && !storage.mkdir("/.pocket")) return false;
+  const Ticket ticket = ticketFor(run);
+  return storage.openFileForWrite("VISUAL", path, file) &&
+         file.write(reinterpret_cast<const uint8_t*>(&ticket), sizeof(ticket)) == sizeof(ticket);
+}
 // SD bytes can be unaligned; reject partial/old/corrupt records before use.
 inline uint32_t decodeTicket(const void* data, size_t size) {
   if (!data || size != sizeof(Ticket)) return 0;

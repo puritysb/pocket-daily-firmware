@@ -28,10 +28,8 @@ constexpr const char* SUCCESS = "/.pocket/dev-reading.success";
 ReaderAction readerAction = ReaderAction::Capture;
 ReaderPhase readerPhase = ReaderPhase::Reading;
 bool writeTicket(const char* path, uint32_t run) {
-  const Ticket ticket = ticketFor(run);
   HalFile file;
-  return Storage.openFileForWrite("VISUAL", path, file) &&
-         file.write(reinterpret_cast<const uint8_t*>(&ticket), sizeof(ticket)) == sizeof(ticket);
+  return writeTicketTo(Storage, path, file, run);
 }
 uint32_t readTicket(const char* path) {
   Ticket ticket{};
@@ -108,6 +106,13 @@ bool turnPage() {
   readerPhase = ReaderPhase::Turned;
   started = millis();
   return true;
+}
+ReaderReadiness readerReadiness(uint32_t run) {
+  char path[64];
+  bookPath(path, sizeof(path), run);
+  HalFile book = Storage.open(path);
+  return {activeRun, readTicket(REQUEST), readTicket(FIXTURE),
+          run && book && !book.isDirectory() && validBookSize(book.size())};
 }
 bool requestReader(uint32_t run, ReaderAction action) {
   char path[64];

@@ -423,3 +423,37 @@ be reused if any destination exists. Earlier backups are never overwritten; an
 omitted run preserves the original fixed-name safety check. Identity, explicit
 acknowledgement, rollback and bond-reset rules are unchanged. This resets local
 reader settings/bonds, not root books/fonts, host OS bonds or hardware calibration.
+
+## Model-scoped short onboarding acceptance
+
+`run --x3-only` rejects any identified model other than X3 immediately after
+read-only discovery, before firmware installation or hardware scenarios. The
+companion's `scripts/verify_reader_interface.py --onboarding` combines this gate
+with `--wifi-setup`, interface, continuity and screen suites. It has no extended
+standby or X4 stage. Failure/reading/restoration evidence is required; missing
+results cannot count as an onboarding pass. OS permission dialogs and physical
+first-boot button navigation are separate from injected-state regressions.
+
+Developer `GET /api/pocket/v1/dev/reader-capture` retains `completed` and adds
+`activeRun`, `pendingRun`, `fixtureRun`, and `bookReady` for the requested run.
+The first three identify active RAM work and decoded on-SD capture/continuity
+tickets; zero means no valid ticket, not proof that a corrupt file is absent.
+`bookReady` requires the run-named EPUB to exist with an admitted size. The app
+continuity harness attaches this read-only snapshot before each capture request
+and includes recognized firmware rejection messages. This does not clear another
+run's evidence or expose arbitrary file contents; production has no such route.
+
+Ticket writes recreate `/.pocket` if a first-install reset archived it. Reading
+acceptance must work before any screen capture: BMP capture creates its parent
+directory, so running it first used to hide this missing-directory failure.
+The host regression uses missing-parent write rejection and checks mkdir, open,
+and short-write failures; removing directory creation makes its first write fail.
+
+2026-10-13 acceptance: build/install run `20261013T125844-4d5717` passed 935
+host tests, 135 Python tests, strict analysis and default/standby builds. Its
+first reading capture succeeded before a screen capture. Final Mac/X3 run
+`20261013T131358-21d2ed` on `0.1.0-dev-main-e6eb88d5-ble-standby-wdc00da92`
+passed provisioning rollback, all 10 interfaces, two continuation rounds,
+14 screen/sleep/wake captures and original-state restoration. The matching app
+aggregate `20261013T131302-494933` passed 139 Mac tests and package validation.
+X4, long standby and physical first-boot button navigation were excluded.
