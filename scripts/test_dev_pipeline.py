@@ -70,6 +70,50 @@ class PipelineTest(unittest.TestCase):
             broken['continuityValidation']['captures'][0][key] = value
             with self.assertRaises(RuntimeError): validate(broken)
 
+    def test_ble_continuity_requires_every_leg_in_a_bonded_standby_window(self):
+        record = self.evidence()
+        cycles = []
+        for index, (leg, armed, offers) in enumerate(pipeline.BLE_CONTINUITY_LEGS):
+            cycle_run = 123 + 20 + 100 + index + 1
+            cycle = dict(leg=leg, armed=armed, run=cycle_run, reader=dict(
+                run=cycle_run, state=3, close='app-wifi', fromWifi=True, gate='open', offers=offers,
+                lists=1 if armed else 0, connections=2 if armed else 1, minFree=70000, minBlock=60000))
+            if armed: cycle['sent'] = offers
+            cycles.append(cycle)
+        record['continuityValidation'] = dict(passed=True, restored=True, transport='bluetooth',
+            bluetoothCycles=cycles,
+            captures=[dict(name=name, run=143, sha256='a' * 64) for name in
+                ['continuity-seed', 'continuity-app-to-x3-0', 'continuity-x3-to-app-0',
+                 'continuity-app-to-x3-1', 'continuity-x3-to-app-1']],
+            cases=[dict(direction='bidirectional', passed=True, round=index, transport='bluetooth',
+                        noMovementBeforeAcceptance=True, acceptedCharacterVisible=True,
+                        navigatedFromAnotherChapter=True, backwardOffer=backward)
+                   for index, backward in enumerate([False, True])])
+        def validate(value):
+            return pipeline.hardware_evidence(pipeline.MARKER + json.dumps(value),
+                123, 'x-dev-y', True, 'macOS', continuity=True, ble_continuity=True)
+        self.assertTrue(validate(record)['passed'])
+        http = json.loads(json.dumps(record))
+        http['continuityValidation']['transport'] = 'http'
+        with self.assertRaises(RuntimeError): validate(http)
+        missing = json.loads(json.dumps(record))
+        missing['continuityValidation']['bluetoothCycles'].pop()
+        with self.assertRaises(RuntimeError): validate(missing)
+        case = json.loads(json.dumps(record))
+        case['continuityValidation']['cases'][1]['transport'] = 'http'
+        with self.assertRaises(RuntimeError): validate(case)
+        # The unarmed control must neither list nor store an offer.
+        for index, key, value in [(1, 'lists', 1), (1, 'offers', 1), (2, 'offers', 0), (2, 'lists', 0),
+                                  (0, 'close', 'time-up'), (0, 'fromWifi', False), (0, 'gate', 'low-memory'),
+                                  (0, 'state', 2), (0, 'run', 1), (0, 'minFree', 40000)]:
+            broken = json.loads(json.dumps(record))
+            broken['continuityValidation']['bluetoothCycles'][index]['reader'][key] = value
+            with self.assertRaises(RuntimeError, msg=f'{index} {key}'): validate(broken)
+        for index, key, value in [(2, 'sent', 0), (1, 'armed', True), (0, 'leg', 'app-to-x3-0'), (0, 'run', 7)]:
+            broken = json.loads(json.dumps(record))
+            broken['continuityValidation']['bluetoothCycles'][index][key] = value
+            with self.assertRaises(RuntimeError, msg=f'{index} {key}'): validate(broken)
+
     def test_network_fault_requires_real_outage_resume_and_single_publication(self):
         record = self.evidence()
         record['networkFaults'] = [dict(run=123, state=4, point=point, sawOffline=True,

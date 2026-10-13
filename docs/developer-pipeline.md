@@ -348,6 +348,16 @@ through local window events; it does not directly invoke the navigation method. 
 run-bound X3 BMP/PNG captures from XCTest and verifies their hashes. This is HTTP
 exchange plus actual EPUB/confirmation behavior, not BLE-only or iCloud evidence.
 
+Add `--ble-continuity` (X3 `ble_standby` only) to move every position exchange onto
+the bonded BLE reading-sync window. Each leg's `dev/ble-cycle?sleep=standby` run
+restarts into standby, and a test-owned app link exchanges positions. The app's
+normal BLE wake then returns the reader to Same Wi-Fi.
+`check_ble_continuity` requires eight run-bound records (seed, unarmed control,
+then app offer / post-acceptance / reader offer per round). Each needs gate
+`open`, close `app-wifi`, `fromWifi`, and BLE `offers` equal to the app's sent
+count (0 for the control). Armed legs need at least one list; the control needs
+none. App guide: the sibling's `docs/DEVELOPER_PIPELINE.md`.
+
 The developer-only `reader-capture` endpoint accepts `action=seed|accept|advance`
 for `/Pocket visual <run>.epub` (1 byte..4 MiB on SD). `seed` records the initial page;
 `accept` confirms only the reading-offer dialog after its popup is ready;

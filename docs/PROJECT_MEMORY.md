@@ -219,10 +219,16 @@ Read it for repository boundaries, contracts and durable state; read the cited
   <ip>` with `--dev-flash` for developer images. `platformio.local.ini` is
   machine-local.
 
-## Current verified baseline — 2026-10-13
+## Current verified baseline — 2026-10-14
 
-- `main` `95be13f6`; app counterpart `efef528`. Installed X3 image
-  `0.1.0-dev-main-e6eb88d5-ble-standby-wdc00da92` (matches `LATEST_BUILD.txt`).
+- `main` `14bf9624` (code as `95be13f6`); app counterpart `005ec63` plus its
+  2026-10-14 working tree. Installed X3 image
+  `0.1.0-dev-main-14bf9624-ble-standby-w8e68d8a9` (matches `LATEST_BUILD.txt`).
+- 2026-10-14 on that image: BLE-only reading acceptance `20261013T170240-a41674`
+  (`--continuity-suite --ble-continuity`; 8 standby legs incl. unarmed control,
+  window min heap ~62.7 KB) and the full Mac/X3 regression `20261013T171736-315400`
+  (10 interface cases, two Wi-Fi outages, 14 captures, real-EPUB HTTP continuity,
+  BLE wake).
 - Gates: 935 host tests, 135 Python tests, strict analysis, default and
   standby builds. Mac/X3 aggregate `20261013T131302-494933` passed 139 Mac
   regressions and physical run `20261013T131358-21d2ed` (BLE failed-network
@@ -244,7 +250,8 @@ Read it for repository boundaries, contracts and durable state; read the cited
 - Not established: X4 acceptance of nearly everything above, physical iPhone
   flows, measured current draw, overnight or battery-only standby, long-term
   leak absence, optical panel quality, input during the panel waveform,
-  image-rich EPUBs, BLE-only position exchange, remote-frame playback.
+  image-rich EPUBs, BLE-only exchange outside developer standby (book close,
+  wake, pre-sleep windows), remote-frame playback.
 - Unexplained: the historical app download timeout and the historical RF
   advertising delay; router reboot/DHCP changes are untested.
 - Storage: aggregate SD quota, free-space admission/reservation and durable

@@ -74,7 +74,37 @@ INTERFACE_CASES = {'identity-rejection', 'storage-usage', 'preferences-roundtrip
                    'folder-copy', 'inventory-preservation'}
 
 
-def hardware_evidence(log, run, version, standby, platform, interface=False, wifi_setup=False, screens=False, standby_seconds=90, battery_only=False, delayed_advertising=False, wake_control=False, network_faults=False, continuity=False, real_epub=False):
+# Seed, the unarmed control, then per round: app offer, post-acceptance list and reader offer.
+BLE_CONTINUITY_LEGS = [('seed', True, 0), ('control-unarmed', False, 0),
+                       ('app-to-x3-0', True, 1), ('after-accept-0', True, 0), ('x3-to-app-0', True, 0),
+                       ('app-to-x3-1', True, 1), ('after-accept-1', True, 0), ('x3-to-app-1', True, 0)]
+
+
+def check_ble_continuity(reading, run):
+    """Every position exchange went through the bonded BLE standby window.
+
+    Each leg needs its own run-bound reader record: the window opened, the
+    reader stored exactly the offers the app sent (none without an armed link)
+    and the production app wake returned it to Same Wi-Fi.
+    """
+    cycles = reading.get('bluetoothCycles', [])
+    if (reading.get('transport') != 'bluetooth' or len(cycles) != len(BLE_CONTINUITY_LEGS)
+            or any(c.get('transport') != 'bluetooth' for c in reading.get('cases', []))):
+        raise RuntimeError('missing Bluetooth-only reading exchange evidence')
+    for index, (cycle, (leg, armed, offers)) in enumerate(zip(cycles, BLE_CONTINUITY_LEGS)):
+        reader = cycle.get('reader', {})
+        expected_run = (run + 20 + 100 + index + 1) % (2 ** 32)
+        if (cycle.get('leg') != leg or cycle.get('armed') is not armed or cycle.get('run') != expected_run
+                or reader.get('run') != expected_run or reader.get('state') != 3
+                or reader.get('close') != 'app-wifi' or reader.get('fromWifi') is not True
+                or reader.get('gate') != 'open' or reader.get('offers') != offers
+                or (reader.get('lists', 0) < 1 if armed else reader.get('lists') != 0)
+                or (armed and cycle.get('sent') != offers)
+                or reader.get('minFree', 0) <= 50 * 1024 or reader.get('minBlock', 0) < 8 * 1024):
+            raise RuntimeError('Bluetooth reading exchange evidence failed for ' + leg)
+
+
+def hardware_evidence(log, run, version, standby, platform, interface=False, wifi_setup=False, screens=False, standby_seconds=90, battery_only=False, delayed_advertising=False, wake_control=False, network_faults=False, continuity=False, real_epub=False, ble_continuity=False):
     records = []
     for line in log.splitlines():
         if MARKER in line:
@@ -102,6 +132,8 @@ def hardware_evidence(log, run, version, standby, platform, interface=False, wif
                        or c.get('navigatedFromAnotherChapter') is not True for c in cases)
                 or [c.get('backwardOffer') for c in cases] != [False, True]):
             raise RuntimeError('missing bidirectional reading acceptance evidence')
+        if ble_continuity:
+            check_ble_continuity(reading, run)
     if real_epub:
         epub = record.get('continuityValidation', {}).get('epub', {})
         if (not continuity or epub.get('kind') != 'published-book'
@@ -400,7 +432,7 @@ def run(args, config, job):
     version = status['version']
     if getattr(args, 'x3_only', False) and status.get('device') != 'X3':
         raise RuntimeError('X3-only acceptance rejected this reader before hardware mutations')
-    if args.standby and status.get('device') != 'X3':
+    if (args.standby or getattr(args, 'ble_continuity', False)) and status.get('device') != 'X3':
         raise RuntimeError('experimental standby hardware scenario is X3 only')
     if args.checks or args.build_firmware:
         commands = [
@@ -425,7 +457,7 @@ def run(args, config, job):
                                   'sha256': hashlib.sha256(payload).hexdigest()}
         if args.build_firmware:
             shutil.copyfile(ROOT / 'firmware/LATEST_BUILD.txt', job.output / 'LATEST_BUILD.txt')
-    if args.standby and 'ble-standby' not in version:
+    if (args.standby or getattr(args, 'ble_continuity', False)) and 'ble-standby' not in version:
         raise RuntimeError('standby scenario requires the experimental ble_standby artifact')
     job.report['version'] = version
     if args.ios_simulator:
@@ -468,6 +500,7 @@ def run(args, config, job):
                                'DELAYED_ADVERTISING': '1' if getattr(args, 'delayed_advertising', False) else '0',
                                'BATTERY_ONLY': '1' if getattr(args, 'battery_only', False) else '0',
                                'CONTINUITY': '1' if getattr(args, 'continuity_suite', False) and platform == 'macOS' else '0',
+                               'BLE_CONTINUITY': '1' if getattr(args, 'ble_continuity', False) and platform == 'macOS' else '0',
                                'SCREENS': '1' if getattr(args, 'screen_suite', False) and platform == 'macOS' else '0',
                                'NETWORK_FAULTS': '1' if getattr(args, 'network_faults', False) else '0',
                                'WIFI_SETUP': '1' if getattr(args, 'wifi_setup', False) else '0',
@@ -479,7 +512,7 @@ def run(args, config, job):
             try:
                 log = job.command(label, command + ['test-without-building', '-parallel-testing-enabled', 'NO',
                     '-only-testing:' + target + '/ReaderHardwareTests/testDeveloperConnectionCycle',
-                    '-resultBundlePath', str(job.output / (label + '.xcresult'))], cwd=app, env=env, timeout=(1200 if getattr(args, 'interface_suite', False) or getattr(args, 'continuity_suite', False) else 480) + (getattr(args, 'standby_seconds', 90) if args.standby else 0))
+                    '-resultBundlePath', str(job.output / (label + '.xcresult'))], cwd=app, env=env, timeout=(1200 if getattr(args, 'interface_suite', False) or getattr(args, 'continuity_suite', False) else 480) + (getattr(args, 'standby_seconds', 90) if args.standby else 0) + (900 if getattr(args, 'ble_continuity', False) else 0))
             except RuntimeError:
                 bundle = job.output / (label + '.xcresult')
                 if getattr(args, 'continuity_suite', False) and bundle.exists():
@@ -493,7 +526,7 @@ def run(args, config, job):
                     job.flush()
                 raise
             evidence = job.stage(label + '-evidence', lambda: hardware_evidence(
-                log.read_text(), run_id, version, args.standby, platform, getattr(args, 'interface_suite', False), getattr(args, 'wifi_setup', False), getattr(args, 'screen_suite', False) and platform == 'macOS', getattr(args, 'standby_seconds', 90), getattr(args, 'battery_only', False), getattr(args, 'delayed_advertising', False), getattr(args, 'wake_control', False), getattr(args, 'network_faults', False), getattr(args, 'continuity_suite', False) and platform == 'macOS', getattr(args, 'real_epub', False) and platform == 'macOS'))
+                log.read_text(), run_id, version, args.standby, platform, getattr(args, 'interface_suite', False), getattr(args, 'wifi_setup', False), getattr(args, 'screen_suite', False) and platform == 'macOS', getattr(args, 'standby_seconds', 90), getattr(args, 'battery_only', False), getattr(args, 'delayed_advertising', False), getattr(args, 'wake_control', False), getattr(args, 'network_faults', False), getattr(args, 'continuity_suite', False) and platform == 'macOS', getattr(args, 'real_epub', False) and platform == 'macOS', getattr(args, 'ble_continuity', False) and platform == 'macOS'))
             if getattr(args, 'screen_suite', False) and platform == 'macOS':
                 destination = job.output / (label + '-screens')
                 job.command(label + '-export-screens', ['xcrun', 'xcresulttool', 'export', 'attachments',
@@ -537,6 +570,7 @@ def main():
     parser.add_argument('--wifi-setup', action='store_true', help='BLE Wi-Fi setup with nonexistent network and verified rollback')
     parser.add_argument('--real-epub', action='store_true', help='use the published Frankenstein EPUB text fixture; requires --continuity-suite')
     parser.add_argument('--continuity-suite', action='store_true', help='real bidirectional X3 reading offer acceptance and captured text verification')
+    parser.add_argument('--ble-continuity', action='store_true', help='exchange every reading position over the bonded BLE standby window only; requires --continuity-suite (X3 ble_standby)')
     parser.add_argument('--screen-suite', action='store_true', help='physical X3 Home/Brief/cards/EPUB captures and actual deep-sleep validation')
     parser.add_argument('--interface-suite', action='store_true', help='full app interface scenarios with owned fixtures and restoration')
     parser.add_argument('--network-faults', action='store_true', help='actual X3 Wi-Fi outage during upload and after publication; requires --interface-suite')
@@ -553,6 +587,10 @@ def main():
     args = parser.parse_args()
     if args.real_epub and not args.continuity_suite:
         parser.error('--real-epub requires --continuity-suite')
+    if args.ble_continuity and not args.continuity_suite:
+        parser.error('--ble-continuity requires --continuity-suite')
+    if args.ble_continuity and args.build_firmware == 'default':
+        parser.error('--ble-continuity requires --build-firmware ble_standby')
     if args.action == 'run' and args.host:
         parser.error('--host is enrollment only; use configure to change the expected reader')
     if args.network_faults and not args.interface_suite:
