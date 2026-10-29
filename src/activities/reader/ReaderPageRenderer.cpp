@@ -104,8 +104,10 @@ uint32_t prewarmedGlyphs(const GfxRenderer& renderer) {
 }
 }  // namespace
 
-void render(GfxRenderer& renderer, const Page& page, const Options& options, int& pagesUntilFullRefresh,
-            Timings* timings) {
+// Keep the same line-culling storage in the caller's frame. Splitting its
+// lifetime from the render locals bounds both C3 frames without a heap/global buffer.
+__attribute__((noinline)) static void renderPage(GfxRenderer& renderer, const Page& page, const Options& options,
+                                                 int& pagesUntilFullRefresh, InkRows& ink, Timings* timings) {
   StageClock clock(timings);
   const int fontId = options.fontId;
   const int left = options.marginLeft;
@@ -127,7 +129,6 @@ void render(GfxRenderer& renderer, const Page& page, const Options& options, int
   const bool needsTextGrayscale = options.textAntiAliasing;
   const bool needsAnyGrayscale = needsTextGrayscale || pageHasImages;
   if (pageHasImages) Perf::addFlags(Perf::FLAG_IMAGES);
-  InkRows ink;
   renderBwTrackingInk(renderer, page, fontId, left, top, ink);
   Perf::mark(Perf::STAGE_BW_RENDER);
   clock.close(&Timings::bwRenderUs);
@@ -261,6 +262,12 @@ void render(GfxRenderer& renderer, const Page& page, const Options& options, int
   renderer.restoreBwBuffer();
   Perf::mark(Perf::STAGE_GRAY_SYNC);
   clock.close(&Timings::cleanupUs);
+}
+
+void render(GfxRenderer& renderer, const Page& page, const Options& options, int& pagesUntilFullRefresh,
+            Timings* timings) {
+  InkRows ink;
+  renderPage(renderer, page, options, pagesUntilFullRefresh, ink, timings);
 }
 
 }  // namespace ReaderPageRenderer
