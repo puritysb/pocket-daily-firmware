@@ -14,6 +14,7 @@
 
 #include "FirmwareBoardTag.h"
 #include "OtaBootSwitch.h"
+#include "pocket_daily/boot/TrialLease.h"
 
 namespace firmware_flash {
 
@@ -44,6 +45,8 @@ uint8_t* sharedStagingBuffer() { return g_stagingBuf; }
 
 const char* resultName(Result r) {
   switch (r) {
+    case Result::TRIAL_ACTIVE:
+      return "TRIAL_ACTIVE";
     case Result::OK:
       return "OK";
     case Result::OPEN_FAIL:
@@ -285,6 +288,7 @@ Result validateImageFile(const char* sdPath, size_t partitionSize, ChunkObserver
 }
 
 Result flashFromSdPath(const char* sdPath, ProgressCb onProgress, void* ctx, bool alreadyValidated) {
+  if (PocketDaily::TrialLease::active()) return Result::TRIAL_ACTIVE;
   // Resolve destination first so we can size-check during validation. The full image-integrity
   // pass below verifies header, segment table, XOR checksum and SHA256 trailer end-to-end before
   // we touch otadata, so a truncated/corrupted .bin can never become the next boot target.

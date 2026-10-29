@@ -25,6 +25,7 @@
 #include "fontIds.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/nearby_sync/WifiSetup.h"
+#include "pocket_daily/preview/LayoutInputsDevice.h"
 #include "util/QrUtils.h"
 #include "util/TaskWatchdog.h"
 #include "util/UiCjkFont.h"
@@ -669,7 +670,16 @@ void CrossPointWebServerActivity::startWebServer() {
          return activity.presentation.enqueueScreen(surface, generation, activity.renderer);
        },
        [](void* self) { return static_cast<CrossPointWebServerActivity*>(self)->presentation.screen.receipt(); },
-       [](void* self) { return static_cast<CrossPointWebServerActivity*>(self)->presentation.screen.busy(); }});
+       [](void* self) { return static_cast<CrossPointWebServerActivity*>(self)->presentation.screen.busy(); },
+       [](void* self, PocketDaily::Preview::LayoutInputs& out) {
+         auto& activity = *static_cast<CrossPointWebServerActivity*>(self);
+         RenderLock lock(RenderLock::Mode::Try);
+         if (!lock.ownsLock() || !PocketDaily::Preview::captureLayoutInputs(activity.renderer, out)) return false;
+         // E-paper still shows the battery/clock from its last paint. A newer
+         // sensor sample would disagree with that actual presented header.
+         activity.presentation.screen.copyPresentedHeader(out.header, out.profileGeneration);
+         return true;
+       }});
   webServer->begin();
 
   if (webServer->isRunning()) {
@@ -849,8 +859,10 @@ void CrossPointWebServerActivity::loop() {
         }
       }
       lastHandleClientTime = millis();
-      if (presentation.preparationPending() && webServer->presentationTransportIdle())
-        webServer->hideTransferFeedback();
+      // Navigation prepares its font synchronously, so it can be queued for
+      // drawing without preparationPending(). A Saved transfer banner must
+      // yield then too, or it consumes the paint and leaves HTTP gated forever.
+      if (presentation.busy() && webServer->presentationTransportIdle()) webServer->hideTransferFeedback();
       const auto feedback = webServer->transferFeedback();
       if (feedback.phase != transferDisplay.phase || feedback.kind != transferDisplay.kind ||
           (feedback.percent() / 5 != transferDisplay.percent() / 5 && millis() - transferDisplayAt >= 2000)) {

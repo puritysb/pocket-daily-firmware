@@ -18,6 +18,7 @@
 #include "FirmwareBoardTag.h"
 #include "FirmwareFlasher.h"
 #include "FirmwareVersion.h"
+#include "pocket_daily/boot/TrialLease.h"
 
 namespace {
 constexpr char latestReleaseUrl[] = "https://api.github.com/repos/puritysb/pocket-daily-firmware/releases/latest";
@@ -75,6 +76,10 @@ bool OtaUpdater::isUpdateNewer() const {
 const std::string& OtaUpdater::getLatestVersion() const { return latestVersion; }
 
 OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgress, void* ctx) {
+  if (PocketDaily::TrialLease::active()) {
+    LOG_ERR("OTA", "Update disabled during explicit firmware trial");
+    return INTERNAL_UPDATE_ERROR;
+  }
   if (!isUpdateNewer()) {
     return UPDATE_OLDER_ERROR;
   }

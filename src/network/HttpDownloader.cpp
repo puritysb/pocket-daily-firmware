@@ -59,6 +59,9 @@ bool isRedirect(int status) {
 }
 
 struct RedirectCapture {
+  RedirectCapture() = default;
+  RedirectCapture(const RedirectCapture&) = delete;
+  RedirectCapture& operator=(const RedirectCapture&) = delete;
   char* location = nullptr;
   bool truncated = false;
   bool oom = false;

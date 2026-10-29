@@ -40,6 +40,9 @@ class HttpDownloader {
     uint32_t freeHeap = 0;
     uint32_t largestBlock = 0;
   };
+  // Preserve this small diagnostic snapshot across the next request on this
+  // task; a reference would expose subsequent writes to lastFailureState.
+  // cppcheck-suppress returnByReference
   static Failure lastFailure();
 
   // Optional single response-header capture (e.g. X-Frame-Sig). The value is

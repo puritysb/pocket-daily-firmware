@@ -4,6 +4,7 @@
 #include <BoardConfig.h>
 #include <FsHelpers.h>
 #include <HalGPIO.h>
+#include <HalMemory.h>
 #include <HalStorage.h>
 #include <LibraryBuilder.h>
 #include <Logging.h>
@@ -11,11 +12,16 @@
 #include <WiFi.h>
 #include <esp_efuse.h>
 #include <esp_efuse_table.h>
+#include <lwip/sockets.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 
+#include "BoundedFileDownload.h"
+#include "BoundedJsonWriter.h"
 #include "CrossPointSettings.h"
+#include "FirmwareFlasher.h"
 #include "FontInstaller.h"
 #include "OpdsServerStore.h"
 #include "SdCardFontSystem.h"
@@ -29,6 +35,7 @@
 #include "html/SettingsPageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
 #include "pocket_daily/ContentPathPolicy.h"
+#include "pocket_daily/boot/TrialLease.h"
 #include "pocket_daily/direct_session.h"
 #include "pocket_daily/live_studio/DevTrace.h"
 #include "pocket_daily/upload_stream_protocol.h"
@@ -39,6 +46,124 @@ namespace {
 // Folders/files to hide from the web interface file browser
 // Note: Items starting with "." are automatically hidden
 constexpr const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
+
+// Separate the per-entry formatting frame from the request's file/client owners.
+__attribute__((noinline)) bool writeListingEntry(bounded_http::JsonWriter& writer, HalFile& entry,
+                                                 std::string_view name, bool first) {
+  const bool directory = entry.isDirectory();
+  return (first || writer.append(",")) && writer.append("{\"name\":") && writer.quoted(name) &&
+         writer.append(",\"size\":") && writer.number(directory ? 0 : entry.fileSize64()) &&
+         writer.append(",\"isDirectory\":") && writer.append(directory ? "true" : "false") &&
+         writer.append(",\"isEpub\":") &&
+         writer.append(!directory && FsHelpers::hasEpubExtension(name) ? "true" : "false") && writer.append("}");
+}
+
+#ifdef ENABLE_DEV_REMOTE_FLASH
+// User-requested diagnostic counters only: no file names, IDs or payloads.
+struct DownloadTrace {
+  uint32_t phase = 0, readCalls = 0, sendCalls = 0, zeros = 0, lastRead = 0;
+  uint32_t started = 0, elapsed = 0, result = 0;
+  uint64_t body = 0;
+} downloadTrace;
+#endif
+
+// Both file names and HTTP headers use the existing 4KiB main-task staging
+// buffer. No new heap allocation or persistent buffer is added for downloads.
+__attribute__((noinline)) size_t fileDownloadHeader(HalFile& file, uint8_t* buffer, bool epub, uint64_t bytes,
+                                                    const char* version) {
+  char name[128]{};
+  file.getName(name, sizeof(name));
+  return bounded_http::downloadHeader(buffer, firmware_flash::STAGING_BUFFER_BYTES, name, epub, bytes, version);
+}
+__attribute__((noinline)) bool sendFileDownload(HalFile& file, NetworkClient& client, bool epub, const char* version) {
+  struct Context {
+    HalFile* file;
+    int descriptor;
+  } context{&file, client.fd()};
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  downloadTrace = {};
+  downloadTrace.started = millis();
+  downloadTrace.phase = 1;
+#endif
+  const bounded_http::DownloadIO io{
+      &context,
+      [](void* raw, const uint8_t* bytes, size_t count) -> int {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        downloadTrace.phase = 2;
+        ++downloadTrace.sendCalls;
+#endif
+        // lwIP writability includes its send low-water mark. Do not
+        // saturate the packet queue by repeatedly calling send(EAGAIN).
+        auto* context = static_cast<Context*>(raw);
+        fd_set writable;
+        FD_ZERO(&writable);
+        FD_SET(context->descriptor, &writable);
+        timeval wait{0, 20000};
+        const int ready = ::select(context->descriptor + 1, nullptr, &writable, nullptr, &wait);
+        if (ready == 0 || (ready < 0 && errno == EINTR)) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+          ++downloadTrace.zeros;
+#endif
+          return 0;
+        }
+        if (ready < 0) return -1;
+        const int sent = ::send(static_cast<Context*>(raw)->descriptor, bytes, count, MSG_DONTWAIT);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) ++downloadTrace.zeros;
+#endif
+        if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) return 0;
+        return sent > 0 ? sent : -1;
+      },
+      [](void* raw, uint8_t* bytes, size_t count) -> int {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        downloadTrace.phase = 3;
+        ++downloadTrace.readCalls;
+#endif
+        const int got = static_cast<Context*>(raw)->file->read(bytes, count);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        downloadTrace.phase = 4;
+        downloadTrace.lastRead = got > 0 ? static_cast<uint32_t>(got) : 0;
+#endif
+        return got;
+      },
+      []() -> uint32_t { return millis(); },
+      []() {
+        resetTaskWatchdogIfSubscribed();
+        delay(2);
+      }};
+  static_assert(CONFIG_LWIP_TCP_MSS <= firmware_flash::STAGING_BUFFER_BYTES);
+  // The SDK otherwise permits a long close wait when no FIN segment can be
+  // allocated. This per-socket timeout also bounds that low-memory close path.
+  timeval closeBudget{1, 0};
+  if (::setsockopt(context.descriptor, SOL_SOCKET, SO_SNDTIMEO, &closeBudget, sizeof(closeBudget)) != 0) {
+    LOG_ERR("WEB", "Could not configure download close budget");
+    client.stop();
+    return false;
+  }
+  const uint64_t bytes = file.fileSize64();
+  bounded_http::FileDownload writer(io, bounded_http::downloadBudgetMs(bytes), 5000, CONFIG_LWIP_TCP_MSS);
+  auto* buffer = firmware_flash::sharedStagingBuffer();
+  const size_t header = fileDownloadHeader(file, buffer, epub, bytes, version);
+  client.setNoDelay(true);
+  const bool ok = header && writer.write(buffer, header) && writer.copy(bytes, buffer, CONFIG_LWIP_TCP_MSS);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  downloadTrace.phase = 5;
+  downloadTrace.result = static_cast<uint32_t>(writer.status());
+  downloadTrace.body = writer.bodyBytes();
+  downloadTrace.elapsed = millis() - downloadTrace.started;
+#endif
+  // A partial response is explicitly closed, so Content-Length cannot become
+  // a valid truncated download. clear()/flush() do not drain TX in this SDK.
+  client.stop();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  downloadTrace.phase = 6;
+  downloadTrace.elapsed = millis() - downloadTrace.started;
+#endif
+  if (!ok)
+    LOG_ERR("WEB", "Download aborted result=%u bytes=%llu/%llu", static_cast<unsigned>(writer.status()),
+            static_cast<unsigned long long>(writer.bodyBytes()), static_cast<unsigned long long>(bytes));
+  return ok;
+}
 
 // Formats the library index tracks (LibraryIndex isBookName): an upload of any
 // of these must mark the index dirty so the next Library entry rebuilds it.
@@ -146,6 +271,8 @@ void CrossPointWebServer::begin() {
   // Store AP mode flag for later use (e.g., in handleStatus)
   apMode = isInApMode;
 
+  const auto preHttpHeap = HalMemory::getInternalHeap();
+  PocketDaily::TrialLease::recordHttpMemory(false, preHttpHeap.freeBytes, preHttpHeap.largestBlockBytes);
   LOG_DBG("WEB", "[MEM] Free heap before begin: %d bytes", ESP.getFreeHeap());
   LOG_DBG("WEB", "Network mode: %s", apMode ? "AP" : "STA");
 
@@ -294,6 +421,8 @@ void CrossPointWebServer::begin() {
   if (profile == CrossPointWebServerProfile::FULL || liveStudio.pushActive()) {
     LOG_DBG("WEB", "WebSocket at ws://%s:%d/ (liveStudioPush=%d)", ipAddr.c_str(), wsPort, liveStudio.pushActive());
   }
+  const auto readyHeap = HalMemory::getInternalHeap();
+  PocketDaily::TrialLease::recordHttpMemory(true, readyHeap.freeBytes, readyHeap.largestBlockBytes);
   LOG_DBG("WEB", "[MEM] Free heap after server.begin(): %d bytes", ESP.getFreeHeap());
 }
 
@@ -608,6 +737,7 @@ PocketDaily::Web::StatusInputs CrossPointWebServer::statusInputs() const {
   in.profile = profile;
   in.stream = &pocketStream;
   in.contentPresentation = pocketRoutes.presentation.prepare && pocketRoutes.presentation.state;
+  in.layoutInputs = PocketDaily::Web::isSyncProfile(profile) && pocketRoutes.screen.layoutInputs;
   in.screenPresentation = PocketDaily::Web::isSyncProfile(profile) && pocketRoutes.screen.enqueue &&
                           pocketRoutes.screen.state && pocketRoutes.screen.busy;
   in.live.push = liveStudio.pushActive();
@@ -617,70 +747,33 @@ PocketDaily::Web::StatusInputs CrossPointWebServer::statusInputs() const {
 }
 
 void CrossPointWebServer::handleStatus() const {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  String body = PocketDaily::Web::buildStatusJson(statusInputs());
+  char* trace = reinterpret_cast<char*>(firmware_flash::sharedStagingBuffer());
+  constexpr size_t traceCapacity = 192;
+  const int count =
+      snprintf(trace, traceCapacity,
+               ",\"devDownload\":{\"phase\":%lu,\"reads\":%lu,\"sends\":%lu,\"zeros\":%lu,"
+               "\"lastRead\":%lu,\"body\":%llu,\"elapsedMs\":%lu,\"result\":%lu}}",
+               static_cast<unsigned long>(downloadTrace.phase), static_cast<unsigned long>(downloadTrace.readCalls),
+               static_cast<unsigned long>(downloadTrace.sendCalls), static_cast<unsigned long>(downloadTrace.zeros),
+               static_cast<unsigned long>(downloadTrace.lastRead), static_cast<unsigned long long>(downloadTrace.body),
+               static_cast<unsigned long>(downloadTrace.elapsed), static_cast<unsigned long>(downloadTrace.result));
+  // One bounded cold diagnostic String growth; no new buffer in a download loop.
+  if (count > 0 && static_cast<size_t>(count) < traceCapacity && body.endsWith("}") &&
+      body.reserve(body.length() + static_cast<size_t>(count))) {
+    body.remove(body.length() - 1);
+    body += trace;
+  }
+  server->send(200, "application/json", body);
+#else
   server->send(200, "application/json", PocketDaily::Web::buildStatusJson(statusInputs()));
+#endif
 }
 
 void CrossPointWebServer::requestRepaint() { repaintRequested.store(true); }
 
 bool CrossPointWebServer::consumeRepaintRequest() { return repaintRequested.exchange(false); }
-
-void CrossPointWebServer::scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const {
-  HalFile root = Storage.open(path);
-  if (!root) {
-    LOG_DBG("WEB", "Failed to open directory: %s", path);
-    return;
-  }
-
-  if (!root.isDirectory()) {
-    LOG_DBG("WEB", "Not a directory: %s", path);
-    root.close();
-    return;
-  }
-
-  LOG_DBG("WEB", "Scanning files in: %s", path);
-
-  HalFile file = root.openNextFile();
-  char name[500];
-  while (file) {
-    file.getName(name, sizeof(name));
-    auto fileName = String(name);
-
-    // Skip hidden items (starting with ".")
-    bool shouldHide = !SETTINGS.showHiddenFiles && fileName.startsWith(".");
-
-    // Check against explicitly hidden items list
-    if (!shouldHide) {
-      for (const auto* item : HIDDEN_ITEMS) {
-        if (fileName.equals(item)) {
-          shouldHide = true;
-          break;
-        }
-      }
-    }
-
-    if (!shouldHide) {
-      FileInfo info;
-      info.name = fileName;
-      info.isDirectory = file.isDirectory();
-
-      if (info.isDirectory) {
-        info.size = 0;
-        info.isEpub = false;
-      } else {
-        info.size = file.size();
-        info.isEpub = isEpubFile(info.name);
-      }
-
-      callback(info);
-    }
-
-    file.close();
-    yield();                          // Yield to allow WiFi and other tasks to process during long scans
-    resetTaskWatchdogIfSubscribed();  // Reset watchdog to prevent timeout on large directories
-    file = root.openNextFile();
-  }
-  root.close();
-}
 
 bool CrossPointWebServer::isEpubFile(const String& filename) const { return FsHelpers::hasEpubExtension(filename); }
 
@@ -695,39 +788,80 @@ void CrossPointWebServer::handleFileListData() const {
     currentPath = normalizeWebPath(server->arg("path"));
   }
 
-  server->setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server->send(200, "application/json", "");
-  server->sendContent("[");
-  char output[512];
-  constexpr size_t outputSize = sizeof(output);
-  bool seenFirst = false;
-  JsonDocument doc;
-
-  scanFiles(currentPath.c_str(), [this, &output, &doc, seenFirst](const FileInfo& info) mutable {
-    doc.clear();
-    doc["name"] = info.name;
-    doc["size"] = info.size;
-    doc["isDirectory"] = info.isDirectory;
-    doc["isEpub"] = info.isEpub;
-
-    const size_t written = serializeJson(doc, output, outputSize);
-    if (written >= outputSize) {
-      // JSON output truncated; skip this entry to avoid sending malformed JSON
-      LOG_DBG("WEB", "Skipping file entry with oversized JSON for name: %s", info.name.c_str());
-      return;
+  HalFile directory = Storage.open(currentPath.c_str());
+  if (!directory || !directory.isDirectory()) {
+    server->send(404, "text/plain", "Directory not found");
+    return;
+  }
+  auto& client = server->client();
+  // Small bounded batches must drain even before a full TCP MSS is queued.
+  client.setNoDelay(true);
+  int descriptor = client.fd();
+  // One ~2 KiB request workspace: the filename alone exceeds the stack
+  // budget. Reused for every entry, released on every exit; no retained catalog.
+  struct Workspace {
+    char name[500]{};
+    bounded_http::JsonWriter writer;
+    explicit Workspace(int* descriptor)
+        : writer(
+              descriptor,
+              [](void* context, const uint8_t* bytes, size_t count) -> int {
+                const int sent = ::send(*static_cast<int*>(context), bytes, count, MSG_DONTWAIT);
+                if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) return 0;
+                return sent > 0 ? sent : -1;
+              },
+              []() -> uint32_t { return millis(); },
+              []() {
+                resetTaskWatchdogIfSubscribed();
+                delay(1);
+              },
+              8000, 1024 * 1024) {}
+  };
+  auto workspace = makeUniqueNoThrow<Workspace>(&descriptor);
+  if (!workspace) {
+    LOG_ERR("WEB", "File list workspace allocation failed");
+    server->send(503, "text/plain", "Reader memory is too low to list files");
+    return;
+  }
+  auto& writer = workspace->writer;
+  // Close-delimited HTTP avoids WebServer's void, retrying per-chunk writes.
+  // Each socket operation is nonblocking and shares one request deadline.
+  bool ok = writer.append(
+      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+      "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: *\r\n"
+      "Access-Control-Allow-Headers: *\r\nConnection: close\r\n\r\n[");
+  bool first = true;
+  HalFile entry;
+  while (ok && writer.healthy()) {
+    const auto result = directory.openNextEntry(entry);
+    if (result == HalFile::DirectoryRead::End) break;
+    if (result == HalFile::DirectoryRead::Error) {
+      ok = false;
+      break;
     }
-
-    if (seenFirst) {
-      server->sendContent(",");
-    } else {
-      seenFirst = true;
+    const size_t length = entry.getName(workspace->name, sizeof(workspace->name));
+    if (!length || length >= sizeof(workspace->name) - 1) {
+      ok = false;
+      break;
     }
-    server->sendContent(output);
-  });
-  server->sendContent("]");
-  // End of streamed response, empty chunk to signal client
-  server->sendContent("");
-  LOG_DBG("WEB", "Served file listing page for path: %s", currentPath.c_str());
+    const std::string_view name(workspace->name, length);
+    bool hidden = !SETTINGS.showHiddenFiles && name.front() == '.';
+    for (const auto* item : HIDDEN_ITEMS) hidden |= name == item;
+    if (!hidden) {
+      ok = writeListingEntry(writer, entry, name, first);
+      first = false;
+    }
+    resetTaskWatchdogIfSubscribed();
+    delay(1);
+  }
+  ok = ok && writer.healthy() && writer.append("]") && writer.flush();
+  // A failed scan is deliberately incomplete JSON, never a valid partial list.
+  // The SDK's shared client owns the descriptor; do not close the fd directly.
+  client.stop();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  downloadTrace.phase = 6;
+#endif
+  if (!ok) LOG_ERR("WEB", "File listing aborted: read, transport or request budget failure");
 }
 
 void CrossPointWebServer::handleDownload() const {
@@ -770,45 +904,8 @@ void CrossPointWebServer::handleDownload() const {
     return;
   }
 
-  String contentType = "application/octet-stream";
-  if (isEpubFile(itemPath)) {
-    contentType = "application/epub+zip";
-  }
-
-  char nameBuf[128] = {0};
-  String filename = "download";
-  if (file.getName(nameBuf, sizeof(nameBuf))) {
-    filename = nameBuf;
-  }
-
-  server->setContentLength(file.size());
-  server->sendHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
-  server->send(200, contentType.c_str(), "");
-
-  NetworkClient client = server->client();
-  // Keep the main-loop stack and lwIP heap from competing over a 4 KiB burst.
-  // Downloads are throughput-insensitive compared with surviving the transfer.
-  constexpr size_t chunkSize = 1024;
-  uint8_t buffer[chunkSize];
-
-  bool downloadOk = true;
-  while (downloadOk && file.available()) {
-    int result = file.read(buffer, chunkSize);
-    if (result <= 0) break;
-    size_t bytesRead = static_cast<size_t>(result);
-    size_t totalWritten = 0;
-    while (totalWritten < bytesRead) {
-      resetTaskWatchdogIfSubscribed();
-      size_t wrote = client.write(buffer + totalWritten, bytesRead - totalWritten);
-      if (wrote == 0) {
-        downloadOk = false;
-        break;
-      }
-      totalWritten += wrote;
-    }
-  }
-  client.clear();
-  file.close();
+  auto& client = server->client();
+  sendFileDownload(file, client, isEpubFile(itemPath), server->version().c_str());
 }
 
 // Diagnostic counters for upload performance analysis

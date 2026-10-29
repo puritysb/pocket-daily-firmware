@@ -16,14 +16,6 @@
 // pocket web modules); alias keeps every existing call site unchanged.
 using CrossPointWebServerProfile = PocketDaily::Web::Profile;
 
-// Structure to hold file information
-struct FileInfo {
-  String name;
-  size_t size;
-  bool isEpub;
-  bool isDirectory;
-};
-
 class CrossPointWebServer {
  public:
   struct WsUploadStatus {
@@ -151,7 +143,6 @@ class CrossPointWebServer {
   PocketDaily::Web::StatusInputs statusInputs() const;
 
   // File scanning
-  void scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const;
   String formatFileSize(size_t bytes) const;
   bool isEpubFile(const String& filename) const;
 

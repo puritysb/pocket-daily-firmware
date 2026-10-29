@@ -32,6 +32,7 @@ enum class Result {
   ERASE_FAIL,
   WRITE_FAIL,
   OTADATA_FAIL,
+  TRIAL_ACTIVE,
 };
 
 // Progress callback: called after every chunk write. `written`/`total` are bytes.
