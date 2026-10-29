@@ -118,6 +118,36 @@ int32_t pdui_set_cards(pdui_context* context, const pdui_card_input* cards, uint
 // are copied. font=NULL,size=0 removes it and restores the bounded UI mode.
 // A rejected font leaves the previous state unchanged. Invalidates the frame.
 int32_t pdui_set_fallback_font(pdui_context* context, const uint8_t* font, size_t size) PDUI_NOEXCEPT;
+// Version 1 additive: exact point-in-time canonical Sync Home/Brief preview.
+// See docs/layout-inputs-v1.md. All bytes borrowed only for this call. get_info
+// leaves output unchanged on failure; render failure invalidates frame readback.
+// Fetch verified active reader cards with pdui_set_cards; cards_revision must
+// match snapshot metadata. No unsent local draft. Portrait, BoundedUI only.
+typedef struct {
+  char device_id[9];
+  char content_revision[65];
+  uint32_t physical_width, physical_height, card_count, sleep_cover;
+  uint32_t profile_generation, content_generation, font_point_size;
+  char font_family[32];
+} pdui_layout_inputs_info;
+int32_t pdui_get_layout_inputs_info(const uint8_t* snapshot, size_t snapshot_size,
+                                    pdui_layout_inputs_info* output) PDUI_NOEXCEPT;
+int32_t pdui_render_reader_home(pdui_context* context, const pdui_profile* profile, const uint8_t* snapshot,
+                                size_t snapshot_size, const char* cards_revision) PDUI_NOEXCEPT;
+// options is 0 or PDUI_SLEEP_BOOK_COVER. WAKE is intentionally invalid: the
+// canonical Sync Brief says sleep preview, with its radio still on.
+int32_t pdui_render_reader_brief(pdui_context* context, const pdui_profile* profile, const uint8_t* snapshot,
+                                 size_t snapshot_size, const char* cards_revision, uint32_t options) PDUI_NOEXCEPT;
+// Schema2 immutable existing book cover; no paths exposed. CRC is over BMP bytes.
+typedef struct {
+  uint32_t schema, key, size, crc;
+} pdui_layout_asset_info;
+int32_t pdui_get_layout_asset_info(const uint8_t* snapshot, size_t size, pdui_layout_asset_info* output) PDUI_NOEXCEPT;
+// Actual Home (surface0) or powered-off Brief (surface1), includes real cover,
+// localized asleep/wake labels and requested wake cue. options PDUI_SLEEP_ALL.
+int32_t pdui_render_reader_device(pdui_context* context, const pdui_profile* profile, const uint8_t* snapshot,
+                                  size_t size, const char* revision, uint32_t surface, uint32_t options,
+                                  const uint8_t* cover, size_t cover_size) PDUI_NOEXCEPT;
 #ifdef __cplusplus
 }
 #endif

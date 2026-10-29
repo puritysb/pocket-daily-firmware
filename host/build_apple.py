@@ -19,7 +19,7 @@ import tempfile
 SOURCE_ROOTS = (
     "host", "src/pocket_daily", "src/models.h", "lib/GfxRenderer", "lib/EpdFont",
     "lib/Memory", "lib/MiniBidi", "lib/Utf8", "lib/InflateReader", "lib/uzlib",
-    "src/fontIds.h", "src/util/PowerWakeCue.h", "test/gfx_host/HostAbiSwiftCheck.swift",
+    "src/fontIds.h", "src/util/PowerWakeCue.h", "src/util/CjkScript.h", "src/components/icons/headerIcons.h", "src/components/themes/HeaderPainter.h", "src/components/themes/HeaderPainter.cpp", "test/gfx_host/HostAbiSwiftCheck.swift",
 )
 SOURCE_SUFFIXES = {".c", ".cpp", ".h", ".hpp", ".cmake", ".py", ".modulemap", ".t", ".swift"}
 PLATFORMS = (
@@ -70,7 +70,10 @@ def source_state(root: Path) -> dict:
     # cannot reuse an artifact with stale provenance.
     for relative in ("freeink-sdk/libs/display/FreeInkDisplay/include",
                      "freeink-sdk/libs/font/FreeInkFont/include",
-                     "freeink-sdk/libs/font/FreeInkFont/src/FontAlloc.c"):
+                     "freeink-sdk/libs/font/FreeInkFont/src/FontAlloc.c",
+                     "freeink-sdk/libs/ui/FreeInkUI/include",
+                     "freeink-sdk/libs/ui/FreeInkUI/src/FreeInkUI.cpp",
+                     "freeink-sdk/libs/assets/Icons/include"):
         path = root / relative
         candidates = path.rglob("*") if path.is_dir() else (path,)
         names.extend(str(item.relative_to(root)) for item in candidates

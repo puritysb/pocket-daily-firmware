@@ -9,7 +9,9 @@
 #include <span>
 
 #include "HostHome.h"
+#include "HostReaderLayout.h"
 #include "pocket_daily/ContentCard.h"
+#include "pocket_daily/ContentChecksum.h"
 #include "pocket_daily/ContentImageRenderer.h"
 #include "pocket_daily/ContentPageRenderer.h"
 #include "pocket_daily/ContentTextLayout.h"
@@ -91,22 +93,33 @@ struct pdui_context {
   GfxRenderer renderer;
   PocketUIHost::UserCards cards;
   bool frameValid = false;
+  SdCardFont* boundFont = nullptr;
   pdui_context(uint32_t width, uint32_t height, const uint8_t* bytes, size_t size)
       : fontBytes(bytes, bytes + size),
         assets{{fontPath, fontBytes}, {fallbackPath, {}}},
         panel(width, height),
         renderer(panel) {}
   std::span<const PocketUIHost::Asset> assetSpan() const { return {assets, fallback ? 2u : 1u}; }
-  const SdCardFont& activeFont() const { return cachedFont ? *cachedFont : font; }
+  const SdCardFont& activeFont() const { return boundFont ? *boundFont : font; }
   void registerFont(SdCardFont& chosen) {
+    boundFont = nullptr;  // map allocation failure must force a complete retry
     renderer.removeFont(1);
     renderer.insertFont(1, EpdFontFamily(chosen.getEpdFont(0), chosen.getEpdFont(1)));
     renderer.registerSdCardFont(1, &chosen);
+    boundFont = &chosen;
   }
 };
 
 namespace {
 SdCardFont* provideFallback(void* context, bool) { return static_cast<pdui_context*>(context)->fallback.get(); }
+void selectFontMode(pdui_context& context, const bool exact) {
+  auto& chosen = exact || !context.cachedFont ? context.font : *context.cachedFont;
+  context.renderer.setFallbackFontProvider(nullptr, nullptr);
+  context.renderer.clearFallbackCache();
+  if (context.boundFont != &chosen) context.registerFont(chosen);
+  if (!exact && context.fallback) context.renderer.setFallbackFontProvider(&provideFallback, &context);
+}
+
 }  // namespace
 
 uint32_t pdui_abi_version() noexcept { return 1; }
@@ -192,6 +205,7 @@ int32_t pdui_render_content(pdui_context* context, const uint8_t* cardBytes, siz
   try {
     const std::lock_guard<std::mutex> renderLock(renderMutex);
     const PocketUIHost::AssetScope scope(context->assetSpan());
+    selectFontMode(*context, false);
     ContentCard card{};  // Host stack, not the device render-task stack.
     Bytes input{cardBytes, cardSize}, image{imageBytes, imageSize};
     if (cardBytes && decodeContentCard(input.source(), card) != CardResult::Ok) return PDUI_INVALID_CARD;
@@ -319,6 +333,7 @@ int32_t pdui_render_home(pdui_context* context, const pdui_profile* profile, uin
   try {
     const std::lock_guard<std::mutex> renderLock(renderMutex);
     const PocketUIHost::AssetScope scope(context->assetSpan());
+    selectFontMode(*context, false);
     const auto sample = PocketUIHost::buildSample(samples);
     PocketDaily::Home::Row rows[PocketDaily::DailyProfile::HOME_ITEM_CAP];
     PocketDaily::Home::HomeView view;
@@ -355,6 +370,7 @@ int32_t pdui_render_sleep_brief(pdui_context* context, const pdui_profile* profi
   try {
     const std::lock_guard<std::mutex> renderLock(renderMutex);
     const PocketUIHost::AssetScope scope(context->assetSpan());
+    selectFontMode(*context, false);
     const auto sample = PocketUIHost::buildSample(samples);
     PocketDaily::Home::BriefView view;
     view.isSleep = true;
@@ -405,4 +421,102 @@ int32_t pdui_copy_frame(const pdui_context* context, uint8_t* output, size_t cap
   if (capacity < context->panel.getBufferSize()) return PDUI_BUFFER_TOO_SMALL;
   std::memcpy(output, context->panel.getFrameBuffer(), context->panel.getBufferSize());
   return PDUI_OK;
+}
+
+int32_t pdui_get_layout_inputs_info(const uint8_t* bytes, const size_t size, pdui_layout_inputs_info* output) noexcept {
+  if (!output) return PDUI_INVALID_ARGUMENT;
+  PocketDaily::Preview::LayoutInputs in;
+  if (!PocketDaily::Preview::decodeLayoutInputs(bytes, size, in)) return PDUI_INVALID_ARGUMENT;
+  pdui_layout_inputs_info info{};
+  memcpy(info.device_id, in.deviceId, sizeof(info.device_id));
+  memcpy(info.content_revision, in.contentRevision, sizeof(info.content_revision));
+  info.physical_width = in.physicalWidth;
+  info.physical_height = in.physicalHeight;
+  info.card_count = in.cardCount;
+  info.sleep_cover = in.sleepCover;
+  info.profile_generation = in.profileGeneration;
+  info.content_generation = in.contentGeneration;
+  info.font_point_size = in.fontPointSize;
+  memcpy(info.font_family, in.fontFamily, sizeof(info.font_family));
+  *output = info;
+  return PDUI_OK;
+}
+
+namespace {
+int32_t renderReaderLayout(pdui_context* context, const pdui_profile* profile, const uint8_t* bytes, const size_t size,
+                           const char* revision, const bool brief, const uint32_t options, const bool actual = false,
+                           const uint8_t* cover = nullptr, const size_t coverSize = 0) {
+  if (!context) return PDUI_INVALID_ARGUMENT;
+  context->frameValid = false;
+  PocketDaily::DailyProfile::Profile parsed;
+  PocketDaily::Preview::LayoutInputs in;
+  if (!profile || !toProfile(*profile, parsed) || !PocketDaily::Preview::decodeLayoutInputs(bytes, size, in) ||
+      !revision || strnlen(revision, 65) > 64 || strcmp(revision, in.contentRevision) != 0 ||
+      context->cards.size() != in.cardCount || (options & ~(actual ? PDUI_SLEEP_ALL : PDUI_SLEEP_BOOK_COVER)) ||
+      context->renderer.getOrientation() != GfxRenderer::Orientation::Portrait ||
+      context->panel.getDisplayWidth() != in.physicalWidth || context->panel.getDisplayHeight() != in.physicalHeight ||
+      (brief && parsed.sleepMode != PocketDaily::DailyProfile::SleepMode::Brief))
+    return PDUI_INVALID_ARGUMENT;
+  if (!in.fontPointSize || in.fontPointSize != 12) return PDUI_INVALID_FONT;
+  const std::lock_guard<std::mutex> renderLock(renderMutex);
+  const PocketUIHost::AssetScope scope(context->assetSpan());
+  // Select before painting, under the normal exception boundary. Never restore
+  // maps in a destructor: map insertion can throw and a noexcept destructor
+  // would terminate. Every sample/content render selects its own mode too.
+  if (actual &&
+      (in.schema != 2 || coverSize != in.coverSize ||
+       (coverSize && (!cover || ~PocketDaily::Content::contentCrcUpdate(UINT32_MAX, cover, coverSize) != in.coverCrc))))
+    return PDUI_INVALID_IMAGE;
+  selectFontMode(*context, !actual);
+  if (!PocketUIHost::renderReaderLayout(context->renderer, in, parsed, context->cards, brief,
+                                        (options & PDUI_SLEEP_BOOK_COVER) != 0, actual,
+                                        (options & PDUI_SLEEP_WAKE_INDICATOR) != 0, cover, coverSize) ||
+      context->font.boundedReadFailed() || !context->panel.guardsIntact())
+    return PDUI_RENDER_FAILED;
+  context->frameValid = true;
+  return PDUI_OK;
+}
+}  // namespace
+int32_t pdui_render_reader_home(pdui_context* context, const pdui_profile* profile, const uint8_t* bytes,
+                                const size_t size, const char* revision) noexcept {
+  try {
+    return renderReaderLayout(context, profile, bytes, size, revision, false, 0);
+  } catch (const std::bad_alloc&) {
+    return PDUI_OUT_OF_MEMORY;
+  } catch (...) {
+    return PDUI_INTERNAL_ERROR;
+  }
+}
+int32_t pdui_render_reader_brief(pdui_context* context, const pdui_profile* profile, const uint8_t* bytes,
+                                 const size_t size, const char* revision, const uint32_t options) noexcept {
+  try {
+    return renderReaderLayout(context, profile, bytes, size, revision, true, options);
+  } catch (const std::bad_alloc&) {
+    return PDUI_OUT_OF_MEMORY;
+  } catch (...) {
+    return PDUI_INTERNAL_ERROR;
+  }
+}
+
+int32_t pdui_get_layout_asset_info(const uint8_t* bytes, size_t size, pdui_layout_asset_info* output) noexcept {
+  if (!output) return PDUI_INVALID_ARGUMENT;
+  PocketDaily::Preview::LayoutInputs in;
+  if (!PocketDaily::Preview::decodeLayoutInputs(bytes, size, in)) return PDUI_INVALID_ARGUMENT;
+  *output = {in.schema, in.coverKey, in.coverSize, in.coverCrc};
+  return PDUI_OK;
+}
+int32_t pdui_render_reader_device(pdui_context* context, const pdui_profile* profile, const uint8_t* bytes, size_t size,
+                                  const char* revision, uint32_t surface, uint32_t options, const uint8_t* cover,
+                                  size_t coverSize) noexcept {
+  try {
+    if (surface > 1) {
+      if (context) context->frameValid = false;
+      return PDUI_INVALID_ARGUMENT;
+    }
+    return renderReaderLayout(context, profile, bytes, size, revision, surface == 1, options, true, cover, coverSize);
+  } catch (const std::bad_alloc&) {
+    return PDUI_OUT_OF_MEMORY;
+  } catch (...) {
+    return PDUI_INTERNAL_ERROR;
+  }
 }

@@ -96,3 +96,13 @@ or trust/authentication boundary**. A failed build directory is left for diagnos
 The app-side sync/import script must verify this record before accepting the
 artifact and retain it alongside the XCFramework. No device firmware, source
 tree or font is part of this package. App integration remains a separate step.
+
+
+### Connected canonical Home/Brief
+
+The additive `pdui_get_layout_inputs_info`, `pdui_render_reader_home` and
+`pdui_render_reader_brief` APIs consume a bounded reader snapshot and the verified
+active cards. They share the reader's Home/Brief and exact generic header
+painters, use BoundedUI, and leave existing sample APIs available offline.
+Wire ownership, errors, font compatibility and Sync-only placeholder-cover /
+sleep-preview scope are specified in [layout-inputs-v1](../docs/layout-inputs-v1.md).

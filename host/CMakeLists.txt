@@ -3,7 +3,11 @@ project(pdui_host LANGUAGES C CXX)
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 # Single host archive; no GoogleTest or device-only dependencies.
 add_library(pdui_host STATIC
-  PocketUIHost.cpp HostChecksums.cpp HostHome.cpp
+  PocketUIHost.cpp HostChecksums.cpp HostHome.cpp HostReaderLayout.cpp
+  ${REPO_ROOT}/src/components/themes/HeaderPainter.cpp
+  ${REPO_ROOT}/src/pocket_daily/preview/LayoutInputs.cpp
+  ${REPO_ROOT}/src/pocket_daily/PocketGlance.cpp
+  ${REPO_ROOT}/freeink-sdk/libs/ui/FreeInkUI/src/FreeInkUI.cpp
   ${REPO_ROOT}/src/pocket_daily/home/HomeDrawing.cpp
   ${REPO_ROOT}/src/pocket_daily/home/HomeRenderer.cpp
   ${REPO_ROOT}/src/pocket_daily/PocketProfile.cpp
@@ -44,3 +48,7 @@ target_include_directories(pdui_host PUBLIC
 target_sources(pdui_host PRIVATE
   ${REPO_ROOT}/freeink-sdk/libs/font/FreeInkFont/src/FontAlloc.c
   ${REPO_ROOT}/lib/Memory/BuildScratch.cpp)
+
+target_include_directories(pdui_host PUBLIC
+  ${REPO_ROOT}/freeink-sdk/libs/ui/FreeInkUI/include
+  ${REPO_ROOT}/freeink-sdk/libs/assets/Icons/include)
