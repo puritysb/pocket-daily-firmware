@@ -1,5 +1,9 @@
 #include "HalPowerManager.h"
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+#include "DevTimerPolicy.h"
+#endif
+
 #include <BoardConfig.h>
 #include <Logging.h>
 #include <PowerManager.h>
@@ -178,11 +182,24 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   freeink::PowerManager::deepSleepUntilPowerButton();
 }
 
+bool HalPowerManager::armRecoveryTimer(uint32_t seconds) const {
+#if FREEINK_MCU_C3
+  if (seconds == 0 || seconds > 180 || !gpio.isXteinkDevice() || (!gpio.deviceIsX3() && !gpio.isUsbConnected()))
+    return false;
+  return esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(seconds) * 1000000) == ESP_OK;
+#else
+  return false;
+#endif
+}
+
 #ifdef ENABLE_DEV_REMOTE_FLASH
+bool HalPowerManager::devSleepTimerSupported() const {
+  return PocketDaily::Dev::timerSleepSupported(gpio.deviceIsX3(), gpio.isXteinkDevice(), gpio.isUsbConnected());
+}
 bool HalPowerManager::armDevSleepTimer() const {
-  // X4 drops its battery latch in startDeepSleep(), so a timer cannot guarantee
-  // its return. Do not generalize this experiment to that board.
-  return gpio.deviceIsX3() && esp_sleep_enable_timer_wakeup(3000000ULL) == ESP_OK;
+  // X4 still drops its battery latch. External USB power is mandatory and
+  // rechecked here, immediately before the ordinary terminal sleep path.
+  return devSleepTimerSupported() && esp_sleep_enable_timer_wakeup(3000000ULL) == ESP_OK;
 }
 
 bool HalPowerManager::devWokeFromTimer() const { return esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER; }

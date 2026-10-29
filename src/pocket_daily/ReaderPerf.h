@@ -138,6 +138,11 @@ void close();
 bool save();
 // Turns recorded since the last save, for the periodic idle save.
 uint16_t unsavedTurns();
+// Copy completed records only; the caller serializes with the reader render task.
+bool copyRecent(size_t newestFirstIndex, TurnRecord& record);
+// Copies only a newly completed turn; a repeated or in-progress sample is refused.
+// The caller owns the cursor for its reader session (no allocation or wire change).
+bool copyNewestAfter(uint32_t& completedTurnCursor, TurnRecord& record);
 // Reads PATH for /api/status.
 bool load(Snapshot& snapshot);
 

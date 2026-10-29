@@ -44,14 +44,37 @@ TextLayoutResult drawWrappedText(const char* text, int width, unsigned maxLines,
     char line[128]{};
     unsigned fit = 0, lastSpace = 0;
     while (text[fit] && text[fit] != '\n' && text[fit] != '\r') {
-      const unsigned bytes = span(text + fit);
-      if (fit + bytes >= sizeof(line) - 3) break;
-      memcpy(line + fit, text + fit, bytes);
-      if (text[fit] == '\t') line[fit] = ' ';
-      line[fit + bytes] = '\0';
-      if (painter.measure(painter.context, line) > width) break;
+      unsigned end = fit;
+      do {
+        const unsigned bytes = span(text + end);
+        if (end + bytes >= sizeof(line) - 3) break;
+        memcpy(line + end, text + end, bytes);
+        if (text[end] == '\t') line[end] = ' ';
+        end += bytes;
+      } while (!space(text[fit]) && text[end] && !space(text[end]));
+      if (end == fit) break;
+      line[end] = '\0';
+      // Shape the whole candidate at word boundaries: a ligature can make a
+      // word fit even when an intermediate prefix would have been too wide.
+      // Whitespace still fits individually, preserving boundary/trailing spaces.
+      const bool partialWord = !space(text[fit]) && text[end] && !space(text[end]);
+      if (partialWord || painter.measure(painter.context, line) > width) {
+        if (fit) break;  // Keep the preceding words; retry this word on the next line.
+        // The first word exceeds the width or scratch capacity. Retain the
+        // original UTF-8 prefix fitting, without another buffer or allocation.
+        while (fit < end) {
+          const unsigned next = fit + span(text + fit);
+          const char saved = line[next];
+          line[next] = '\0';
+          const bool fits = painter.measure(painter.context, line) <= width;
+          line[next] = saved;
+          if (!fits) break;
+          fit = next;
+        }
+        break;
+      }
       if (space(text[fit])) lastSpace = fit;
-      fit += bytes;
+      fit = end;
     }
     unsigned consumed = fit;
     if (text[fit] && !space(text[fit]) && lastSpace) fit = consumed = lastSpace;

@@ -115,7 +115,7 @@ class UploadStreamServer final {
   bool beginFromHeader();
   bool createStagingFile(const String& path, size_t expected);
   bool reopenStagingFile(const String& path, size_t received);
-  void removeStaleStagingFiles(const String& directory, const String& keepName) const;
+  static void removeStaleStagingFiles(const String& directory, const String& keepName);
   bool appendPayload(const uint8_t* data, size_t count);
   bool flushBatch();
   void finish();

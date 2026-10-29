@@ -248,7 +248,7 @@ void UploadStreamServer::suspend(const char* message) {
   lastActivity_ = millis();
 }
 
-void UploadStreamServer::removeStaleStagingFiles(const String& directory, const String& keepName) const {
+void UploadStreamServer::removeStaleStagingFiles(const String& directory, const String& keepName) {
   // A reboot or power loss during a transfer leaves a hidden `.pocket-*.part`
   // file that may hold a preallocated multi-megabyte span. Sweep only the
   // destination directory of the new transfer. `.pocket-backup.part` is never

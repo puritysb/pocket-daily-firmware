@@ -6,7 +6,24 @@
 namespace PocketDaily::DevCapture {
 // On-SD admission bound; the EPUB parser streams bytes, never allocates this size.
 inline constexpr bool validBookSize(size_t size) { return size > 0 && size <= 4 * 1024 * 1024; }
-enum class ReaderAction : uint8_t { Capture, Seed, Accept, Advance };
+enum class ReaderAction : uint8_t { Capture, Seed, Accept, Advance, Walk };
+// Persisted action5 requires paint evidence even if both paint files are missing.
+// Public action=walk and the in-memory ReaderAction remain unchanged.
+inline constexpr uint32_t PAINT_WALK_ACTION = 5;
+inline constexpr uint32_t LIBRARY_ACTION_TICKET = 6;
+inline constexpr bool isWalkActionTicket(uint32_t action) {
+  return action == static_cast<uint32_t>(ReaderAction::Walk) || action == PAINT_WALK_ACTION ||
+         action == LIBRARY_ACTION_TICKET;
+}
+inline constexpr bool walkRecoveryMatches(uint32_t action, uint32_t request, bool valid, uint32_t storedRun) {
+  return !isWalkActionTicket(action) || (request && valid && storedRun == request);
+}
+inline constexpr bool paintEvidenceRequired(uint32_t action, bool markerExists, bool recordExists) {
+  return action == PAINT_WALK_ACTION || action == LIBRARY_ACTION_TICKET || markerExists || recordExists;
+}
+inline constexpr bool paintAllowsCleanup(uint32_t action, bool markerExists, bool recordExists, bool validComplete) {
+  return isWalkActionTicket(action) && (!paintEvidenceRequired(action, markerExists, recordExists) || validComplete);
+}
 enum class ReaderPhase : uint8_t { Reading, Accepted, Turned, Closing };
 inline constexpr bool readyToCapture(ReaderAction action, ReaderPhase phase) {
   switch (action) {
@@ -17,6 +34,8 @@ inline constexpr bool readyToCapture(ReaderAction action, ReaderPhase phase) {
       return phase == ReaderPhase::Accepted;
     case ReaderAction::Advance:
       return phase == ReaderPhase::Turned;
+    case ReaderAction::Walk:
+      return false;  // Walk completion uses actual rendered-page evidence.
   }
   return false;
 }

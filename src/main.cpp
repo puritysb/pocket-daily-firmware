@@ -42,6 +42,8 @@
 #include "pocket_daily/StagedFirmwareStore.h"
 #include "pocket_daily/boot/ProductBoot.h"
 #include "pocket_daily/boot/StandbyReturn.h"
+#include "pocket_daily/boot/TrialLease.h"
+#include "pocket_daily/boot/TrialReader.h"
 #include "pocket_daily/dev/ScreenCapture.h"
 #include "pocket_daily/nearby_sync/DevSleepCycle.h"
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
@@ -51,6 +53,7 @@
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 #include "util/Timezones.h"
+#include "util/TrialSnapshot.h"
 
 #if CROSSPOINT_VECTOR_FONTS
 // Rendering (incl. FreeType TTF rasterization) runs on the Arduino loop task.
@@ -194,6 +197,9 @@ enum class BootResume : uint8_t {
 // device back up against the user's sleep gesture. Never cleared:
 // startDeepSleep() does not return, so a set latch only ends at the wakeup reset.
 static bool deepSleepInProgress = false;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+static bool devHomeWakePending = false;
+#endif
 
 // A silent restart is internal maintenance, so the light must come back exactly
 // as the user left it. SETTINGS.frontlightOn is the saved preference and
@@ -299,6 +305,14 @@ void enterDeepSleep(bool fromTimeout = false) {
   Pocket::NearbySync::DevSleepCycle::checkpoint(Pocket::NearbySync::DevSleepCycle::Checkpoint::WifiEntry,
                                                 powerManager.getBatteryPercentage());
 #endif
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (Pocket::NearbySync::DevSleepCycle::timerRequested()) {
+    RenderLock lock;
+    const auto run = Pocket::NearbySync::DevSleepCycle::runNumber();
+    if (!PocketDaily::DevCapture::saveLayoutInputs(run, false) || !PocketDaily::DevCapture::saveHome(run))
+      LOG_ERR("VISUAL", "Actual Home evidence failed");
+  }
+#endif
   // A wake/book-close window may still own the radio. Reclaim it before the
   // sleep paint can load fonts; after releasing the frame, start a fresh window.
   Pocket::NearbySync::Window::close(Pocket::NearbySync::Window::CloseReason::SLEEP_FRAME);
@@ -335,7 +349,8 @@ void enterDeepSleep(bool fromTimeout = false) {
 #ifdef ENABLE_DEV_REMOTE_FLASH
   if (Pocket::NearbySync::DevSleepCycle::timerRequested()) {
     RenderLock lock;
-    if (!PocketDaily::DevCapture::save(Pocket::NearbySync::DevSleepCycle::runNumber()))
+    if (!PocketDaily::DevCapture::saveLayoutInputs(Pocket::NearbySync::DevSleepCycle::runNumber(), true) ||
+        !PocketDaily::DevCapture::save(Pocket::NearbySync::DevSleepCycle::runNumber()))
       LOG_ERR("VISUAL", "Sleep capture failed");
   }
 #endif
@@ -420,6 +435,7 @@ void enterDeepSleep(bool fromTimeout = false) {
         }
 #endif
         Storage.prepareForDeepSleep();
+        PocketDaily::TrialLease::beforeSleep();
         powerManager.startDeepSleep(gpio);
       }
     }
@@ -457,6 +473,7 @@ void enterDeepSleep(bool fromTimeout = false) {
     for (;;) delay(1000);
   }
 #endif
+  PocketDaily::TrialLease::beforeSleep();
   powerManager.startDeepSleep(gpio);
 }
 
@@ -521,6 +538,11 @@ void setup() {
 #endif
 #endif
 
+  // Explicit trial recovery must precede GPIO/SD/display initialization.
+#ifdef ENABLE_RTC_PROBE_ARENA
+  LOG_INF("TRIAL", "RTC_PROBE_RESERVED_V1: explicit non-shipping diagnostic image");
+#endif
+  PocketDaily::TrialLease::onBoot();
   HalSystem::begin();
 
   // Read-and-clear so a panic later in setup() doesn't loop into silent reboot.
@@ -587,7 +609,8 @@ void setup() {
 #else
   constexpr bool devTimerWake = false;
 #endif
-  const bool isSleepWake = devTimerWake || wakeupReason == HalGPIO::WakeupReason::PowerButton ||
+  const bool isSleepWake = PocketDaily::TrialReader::resuming() || devTimerWake ||
+                           wakeupReason == HalGPIO::WakeupReason::PowerButton ||
                            standbyReturn != PocketDaily::Boot::StandbyReturn::None;
   const bool isPersistedSleepWake = isSleepWake && !APP_STATE.showBootScreen;
 
@@ -634,18 +657,23 @@ void setup() {
 
   if (standbyReturn == PocketDaily::Boot::StandbyReturn::Reader) wakePowerReleasePending = true;
 
+  // A checked one-shot maintenance return must rejoin Wi-Fi even after a
+  // cold USB boot; ordinary charge-sleep and wake-hold policy are unchanged.
   switch (wakeupReason) {
     case HalGPIO::WakeupReason::PowerButton:
       // With Short Power Button Press = Sleep, a single click wakes on any
       // device; otherwise the button must still be held (ghost-wake debounce).
-      if (!wakeHoldVerified && SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::SLEEP) {
+      if (PocketDaily::TrialLease::requestedSurface() == PocketDaily::TrialLease::Surface::None && !wakeHoldVerified &&
+          SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::SLEEP) {
         LOG_DBG("MAIN", "Power-button wake not held through verification, sleeping");
         Storage.prepareForDeepSleep();
+        PocketDaily::TrialLease::beforeSleep();
         powerManager.startDeepSleep(gpio);
       }
       wakePowerReleasePending = true;
       break;
     case HalGPIO::WakeupReason::AfterUSBPower:
+      if (PocketDaily::TrialLease::requestedSurface() != PocketDaily::TrialLease::Surface::None) break;
       // Most devices return to sleep after a USB-powered cold boot.
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");
 #if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_PAPERMONO || FREEINK_DEVICE_EEGO_A4
@@ -658,6 +686,7 @@ void setup() {
       break;
 #else
       Storage.prepareForDeepSleep();
+      PocketDaily::TrialLease::beforeSleep();
       powerManager.startDeepSleep(gpio);
       break;
 #endif
@@ -667,6 +696,12 @@ void setup() {
     default:
       break;
   }
+
+#ifdef ENABLE_RTC_PROBE_ARENA
+  // Follows the unchanged native GPIO wake/hold policy. Release only a verified
+  // run-owned electrical actuator before normal input dispatch.
+  PocketDaily::TrialReader::releaseGPIOProbe(wakeupReason == HalGPIO::WakeupReason::PowerButton, wakeHoldVerified);
+#endif
 
   LOG_DBG("MAIN", "Starting CrossPoint version " CROSSPOINT_VERSION);
 
@@ -746,6 +781,8 @@ void setup() {
 #ifdef ENABLE_DEV_REMOTE_FLASH
   // A failed explicit experiment returns to its pre-armed LAN route so its
   // crash report can be inspected remotely. Ordinary crash boots are unchanged.
+  devHomeWakePending = devTimerWake && devBootReturn == PocketDaily::Boot::DevBootReturn::SyncSta &&
+                       Pocket::NearbySync::DevSleepCycle::homeWakeRequested(PocketDaily::DevCapture::savedRun());
   const bool devCycleInterrupted =
       devBootReturn == PocketDaily::Boot::DevBootReturn::SyncSta &&
       (Pocket::NearbySync::DevSleepCycle::interruptIfRunning() || PocketDaily::DevCapture::recoverReader());
@@ -763,13 +800,41 @@ void setup() {
     // Panic, watchdog and power-fault resets all leave an SD report. Surface it
     // immediately instead of silently resuming into the failing interaction.
     activityManager.goToCrashReport();
+  } else if (PocketDaily::TrialReader::begin()) {
+    // Only a checked developer-provisioned lease can select its owned fixture.
+  } else if (const auto surface = PocketDaily::TrialLease::requestedSurface();
+             surface != PocketDaily::TrialLease::Surface::None) {
+    using PocketDaily::TrialLease::Surface;
+    switch (surface) {
+      case Surface::Sync:
+        activityManager.goToPocketNearbySync(true);
+        break;
+      case Surface::FileTransfer:
+        activityManager.goToFileTransfer(true);
+        break;
+      case Surface::Home:
+        activityManager.goHome();
+        break;
+      case Surface::Library:
+        activityManager.goToLibrary();
+        break;
+      case Surface::Settings:
+        activityManager.goToSettings();
+        break;
+      case Surface::None:
+        break;
+    }
   } else if (Pocket::NearbySync::WifiSetup::wantsJoin()) {
     activityManager.goToPocketNearbySync(true);
   } else if (Pocket::NearbySync::WifiSetup::wantsBluetooth()) {
     activityManager.goToPocketNearbySync();
   } else if (standbyReturn == PocketDaily::Boot::StandbyReturn::SameWifi) {
     activityManager.goToPocketNearbySync(true);
-  } else if (devBootReturn != PocketDaily::Boot::DevBootReturn::None) {
+  } else if (devBootReturn != PocketDaily::Boot::DevBootReturn::None
+#ifdef ENABLE_DEV_REMOTE_FLASH
+             && !devHomeWakePending
+#endif
+  ) {
     // Dev loop only: consume the one-shot marker before reconnecting. Missing
     // credentials or association failure leaves the normal Wi-Fi chooser.
     using PocketDaily::Boot::DevBootReturn;
@@ -894,6 +959,19 @@ void loop() {
   mappedInputManager.update();
 
 #ifdef ENABLE_DEV_REMOTE_FLASH
+  if (devHomeWakePending) {
+    devHomeWakePending = false;
+    activityManager.loop();
+    activityManager.requestUpdateAndWait();
+    {
+      RenderLock lock;
+      const auto run = PocketDaily::DevCapture::savedRun();
+      if (!PocketDaily::DevCapture::saveLayoutInputs(run, false, true) || !PocketDaily::DevCapture::saveHome(run, true))
+        LOG_ERR("VISUAL", "Returned Home capture failed");
+    }
+    activityManager.goToPocketNearbySync(true);
+    return;
+  }
   if (Pocket::NearbySync::DevSleepCycle::active() && millis() >= allowSleepAt &&
       (!Pocket::NearbySync::DevSleepCycle::standbyRequested() || WiFi.status() == WL_CONNECTED ||
        millis() - allowSleepAt >= 30000)) {
@@ -944,6 +1022,17 @@ void loop() {
     if (line.startsWith("CMD:")) {
       String cmd = line.substring(4);
       cmd.trim();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+      if (cmd == "DEV_SYNC_STA") {
+        if (PocketDaily::Boot::requestDevSyncSta()) {
+          LOG_INF("DEVUSB", "Same Wi-Fi return armed");
+          logSerial.flush();
+          ESP.restart();
+        } else {
+          LOG_ERR("DEVUSB", "Could not save Same Wi-Fi return; staying here");
+        }
+      }
+#endif
       if (cmd == "SCREENSHOT") {
         const uint32_t bufferSize = display.getBufferSize();
         logSerial.printf("SCREENSHOT_START:%d\n", bufferSize);
@@ -957,7 +1046,7 @@ void loop() {
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();
   if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.wasTouchActivity() || halTiltSensor.hadActivity() ||
-      activityManager.preventAutoSleep()) {
+      activityManager.preventAutoSleep() || PocketDaily::TrialReader::preparingAutoWake()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
   }
@@ -1038,6 +1127,7 @@ void loop() {
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
   if (sleepTimeoutMs > 0 && millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
+    PocketDaily::TrialReader::observeAutoSleep(sleepTimeoutMs, millis() - lastActivityTime);
     enterDeepSleep(true);
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
     return;
@@ -1106,6 +1196,21 @@ void loop() {
 
   const unsigned long activityStartTime = millis();
   activityManager.loop();
+  PocketDaily::TrialReader::loop();
+  // Existing screens only, under an explicitly provisioned image-bound lease.
+  if (PocketDaily::TrialLease::active() &&
+      PocketDaily::TrialLease::capturesUi(PocketDaily::TrialLease::requestedSurface()) && millis() > 5000) {
+    activityManager.requestUpdateAndWait();
+    bool captured = false;
+    {
+      RenderLock lock;
+      captured = PocketDaily::TrialSnapshot::save(PocketDaily::TrialLease::runningTrial()->run, display);
+    }
+    const auto heap = HalMemory::getInternalHeap();
+    if (!captured || !PocketDaily::TrialLease::recordSurfaceMemory(heap.freeBytes, heap.largestBlockBytes))
+      LOG_ERR("TRIAL", "UI frame or memory checkpoint failed");
+    PocketDaily::TrialLease::returnNow();
+  }
 #ifdef ENABLE_DEV_REMOTE_FLASH
   PocketDaily::DevCapture::readerLoop();
 #endif

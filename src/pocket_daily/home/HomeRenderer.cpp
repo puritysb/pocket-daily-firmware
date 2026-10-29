@@ -449,8 +449,9 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
       renderer.drawText(UI_12_FONT_ID, x + cw - pw, y, pct, true);
       titleW = cw - pw - 8;
     }
-    renderer.drawText(tf, x, y, renderer.truncatedText(tf, renderReadingSnapshot.title, titleW).c_str(), true,
-                      EpdFontFamily::BOLD);
+    renderer.drawText(tf, x, y,
+                      renderer.truncatedText(tf, renderReadingSnapshot.title, titleW, EpdFontFamily::BOLD).c_str(),
+                      true, EpdFontFamily::BOLD);
     y += line12 + 4;
     char sub[96];
     sub[0] = '\0';

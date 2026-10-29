@@ -372,3 +372,24 @@ TEST(FreshStart, ExplicitRunRollsBackAllPartialArchiveFailures) {
     EXPECT_TRUE(files.bonds);
   }
 }
+
+#include "hal/DevTimerPolicy.h"
+TEST(DevSleepCycle, TimerRequiresExternalPowerOnX4AndRejectsOtherBoards) {
+  using PocketDaily::Dev::timerSleepSupported;
+  EXPECT_TRUE(timerSleepSupported(true, true, false));
+  EXPECT_TRUE(timerSleepSupported(false, true, true));
+  EXPECT_FALSE(timerSleepSupported(false, true, false));
+  EXPECT_FALSE(timerSleepSupported(false, false, true));
+  EXPECT_FALSE(timerSleepSupported(false, false, false));
+}
+
+TEST_F(DevCycle, TimedHomeRequiresCompletedArmedMatchingRun) {
+  ASSERT_TRUE(DevSleepCycle::request(191, DevSleepCycle::ReturnMode::TimedHome));
+  ASSERT_TRUE(DevSleepCycle::begin());
+  EXPECT_TRUE(DevSleepCycle::timerRequested());
+  EXPECT_FALSE(DevSleepCycle::homeWakeRequested(191));
+  DevSleepCycle::timerArmed(true);
+  ASSERT_TRUE(DevSleepCycle::complete(nullptr));
+  EXPECT_FALSE(DevSleepCycle::homeWakeRequested(190));
+  EXPECT_TRUE(DevSleepCycle::homeWakeRequested(191));
+}

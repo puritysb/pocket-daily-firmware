@@ -101,6 +101,15 @@ void ScreenshotUtil::takeScreenshot(GfxRenderer& renderer) {
   }
 }
 
+namespace {
+// Keep the BMP header and row-buffer frames separate on the C3 main task.
+[[gnu::noinline]] bool writeScreenshotHeader(HalFile& file, int width, int height) {
+  BmpHeader header;
+  createBmpHeader(&header, width, height, BmpRowOrder::BottomUp);
+  return file.write(reinterpret_cast<uint8_t*>(&header), sizeof(header)) == sizeof(header);
+}
+}  // namespace
+
 bool ScreenshotUtil::saveFramebufferAsBmp(const char* filename, const uint8_t* framebuffer, int width, int height) {
   if (!framebuffer) {
     return false;
@@ -113,7 +122,7 @@ bool ScreenshotUtil::saveFramebufferAsBmp(const char* filename, const uint8_t* f
   std::string path(filename);
   size_t last_slash = path.find_last_of('/');
   if (last_slash != std::string::npos) {
-    std::string dir = path.substr(0, last_slash);
+    std::string dir = last_slash == 0 ? "/" : path.substr(0, last_slash);
     if (!Storage.exists(dir.c_str())) {
       if (!Storage.mkdir(dir.c_str())) {
         return false;
@@ -127,14 +136,7 @@ bool ScreenshotUtil::saveFramebufferAsBmp(const char* filename, const uint8_t* f
     return false;
   }
 
-  BmpHeader header;
-
-  createBmpHeader(&header, phyWidth, phyHeight, BmpRowOrder::BottomUp);
-
-  bool write_error = false;
-  if (file.write(reinterpret_cast<uint8_t*>(&header), sizeof(header)) != sizeof(header)) {
-    write_error = true;
-  }
+  bool write_error = !writeScreenshotHeader(file, phyWidth, phyHeight);
 
   if (write_error) {
     // Explicitly close() file before calling Storage.remove()

@@ -54,6 +54,10 @@ class HalGPIO {
 
  public:
   HalGPIO() = default;
+#ifdef ENABLE_RTC_PROBE_ARENA
+  // Releases only the C3 X4 test actuator; never asserts a button.
+  bool releaseProbePowerButton();
+#endif
 
   // Inline device type helpers for cleaner downstream checks
   inline bool deviceIsX3() const { return _deviceType == DeviceType::X3; }

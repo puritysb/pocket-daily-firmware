@@ -44,6 +44,10 @@ enum class LoadResult : uint8_t { Ready, OutOfMemory, Unavailable };
 // failure. Does not load fonts.
 LoadResult loadFrame(Surface surface, const DailyProfile::Profile& profile, std::unique_ptr<Frame>& out);
 
+// Read-only preview inputs, independent of the selected profile: always loads
+// the real daily word so a proposed profile may reveal it locally.
+LoadResult loadPreviewFrame(std::unique_ptr<Frame>& out);
+
 // Every string the frame draws through the painters' font resolvers or the
 // header, in no particular order. Stops and returns false when `visit` does.
 bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* context, const char* text));
@@ -51,5 +55,5 @@ bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* conte
 // Render task, RenderLock held: draws the frame without presenting it. Text
 // that needs CJK uses `cjkFont` (0: built-in fonts only). False when the frame
 // cannot be certified (a header whose font is no longer the checked one).
-bool drawFrame(GfxRenderer& renderer, const Frame& frame, int cjkFont);
+bool drawFrame(GfxRenderer& renderer, const Frame& frame, int cjkFont, HeaderPainter::Inputs* header = nullptr);
 }  // namespace PocketDaily::Screen

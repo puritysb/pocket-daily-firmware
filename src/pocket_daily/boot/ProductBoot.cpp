@@ -88,6 +88,24 @@ void paintWakeCue(GfxRenderer& renderer, const bool isX3) {
   for (int i = 0; i < 3; ++i) renderer.fillRect(dotsX + i * 9, cy + 2, 4, 4, false);
 }
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+bool requestDevSyncSta() { return requestDevStaReturn(DevBootReturn::SyncSta); }
+bool requestDevStaReturn(DevBootReturn target) {
+  if (target != DevBootReturn::SyncSta && target != DevBootReturn::FileTransferSta) return false;
+  const uint8_t expected = target == DevBootReturn::SyncSta ? 'S' : '1';
+  {
+    HalFile marker;
+    const uint8_t mode = expected;
+    if (!Storage.openFileForWrite("DEVUSB", PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER, marker) ||
+        marker.write(&mode, 1) != 1)
+      return false;
+  }
+  HalFile marker = Storage.open(PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER);
+  uint8_t mode = 0;
+  return marker && marker.size() == 1 && marker.read(&mode, 1) == 1 && mode == expected;
+}
+#endif
+
 DevBootReturn consumeDevBootReturn() {
 #ifdef ENABLE_DEV_REMOTE_FLASH
   if (!Storage.exists(PocketDaily::DEV_BOOT_FILE_TRANSFER_MARKER)) return DevBootReturn::None;

@@ -1,0 +1,3 @@
+add_executable(trial_reader_test TrialReaderTest.cpp)
+target_link_libraries(trial_reader_test PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(trial_reader_test)

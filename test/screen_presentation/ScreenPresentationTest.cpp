@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "PresentationFakes.h"
+#include "components/themes/HeaderPainter.h"
 #include "pocket_daily/ContentSessionInput.h"
 #include "pocket_daily/PocketProfileStore.h"
 #include "pocket_daily/PresentationSlot.h"
@@ -78,10 +79,15 @@ bool visitFrameText(const Frame&, void* context, bool (*visit)(void*, const char
     if (!visit(context, text.c_str())) return false;
   return true;
 }
-bool drawFrame(GfxRenderer&, const Frame&, int cjkFont) {
+bool drawFrame(GfxRenderer&, const Frame&, int cjkFont, HeaderPainter::Inputs* header) {
   ++ScreenFake::draws;
   ScreenFake::drawnFont = cjkFont;
   ScreenFake::drawOrientation = PresentationFake::orientation;
+  if (header) {
+    header->batteryPercent = 91;
+    strcpy(header->batteryLabel, "91%");
+    strcpy(header->clock, "12:59");
+  }
   if (ScreenFake::duringDraw) ScreenFake::duringDraw();
   return ScreenFake::drawSucceeds;
 }
@@ -215,6 +221,36 @@ TEST_F(ScreenPresentationTest, LatinFramePaintsInPortraitWithoutFontsAndReleases
   EXPECT_TRUE(screen.render(renderer));
   EXPECT_EQ(ScreenFake::draws, 1);
   EXPECT_EQ(PresentationFake::displays, 1);
+}
+
+TEST_F(ScreenPresentationTest, HeaderReceiptExistsOnlyForTheSuccessfullyPresentedGeneration) {
+  HeaderPainter::Inputs header;
+  header.batteryPercent = 92;
+  EXPECT_FALSE(screen.copyPresentedHeader(header, 7));
+  ASSERT_TRUE(screen.enqueue(Surface::Home, 7));
+  ASSERT_TRUE(screen.service(renderer, 20000, 8000));
+  EXPECT_FALSE(screen.copyPresentedHeader(header, 7));
+  PresentationFake::duringDisplay = [&] { EXPECT_FALSE(screen.copyPresentedHeader(header, 7)); };
+  ASSERT_TRUE(screen.render(renderer));
+  EXPECT_FALSE(screen.copyPresentedHeader(header, 8));
+  EXPECT_EQ(header.batteryPercent, 92);  // no partial/stale metadata publication
+  ASSERT_TRUE(screen.copyPresentedHeader(header, 7));
+  EXPECT_EQ(header.batteryPercent, 91);
+  EXPECT_STREQ(header.batteryLabel, "91%");
+  EXPECT_STREQ(header.clock, "12:59");
+  // A newer sensor/clock sample must not replace the frame e-paper retains.
+  header.batteryPercent = 94;
+  strcpy(header.clock, "13:00");
+  ASSERT_TRUE(screen.copyPresentedHeader(header, 7));
+  EXPECT_EQ(header.batteryPercent, 91);
+  EXPECT_STREQ(header.clock, "12:59");
+  screen.hide(renderer);
+  EXPECT_FALSE(screen.copyPresentedHeader(header, 7));
+  ASSERT_TRUE(screen.enqueue(Surface::Home, 7));
+  ASSERT_TRUE(screen.service(renderer, 20000, 8000));
+  ScreenFake::drawSucceeds = false;
+  ASSERT_TRUE(screen.render(renderer));
+  EXPECT_FALSE(screen.copyPresentedHeader(header, 7));
 }
 
 TEST_F(ScreenPresentationTest, CjkFrameLoadsBoundedFontOnceAndChecksEveryStringInBothStyles) {
@@ -415,6 +451,28 @@ TEST_F(PresentationSlotTest, EitherKindQueuedOrDrawingRefusesTheOther) {
   ASSERT_TRUE(slot.service(renderer, 20000, 8000));
   EXPECT_FALSE(slot.enqueueContent(revision, 7, renderer));
   EXPECT_EQ(slot.screen.receipt().surface, Surface::Home);
+}
+
+TEST_F(PresentationSlotTest, NavigationNeedsADrawEvenWithoutDeferredPreparation) {
+  ASSERT_TRUE(slot.enqueueContent(revision, 7, renderer));
+  ASSERT_TRUE(slot.service(renderer, 20000, 8000));
+  ASSERT_TRUE(slot.render(renderer, input));
+  const int previousDraws = PresentationFake::draws;
+  const int previousReleases = PresentationFake::releases;
+
+  // A Next action after an upload prepares synchronously. The activity must
+  // clear its transfer banner for busy(), not only preparationPending(), or
+  // that banner consumes the paint and the HTTP exclusion never releases.
+  ASSERT_TRUE(slot.content.navigate(true, renderer));
+  EXPECT_TRUE(slot.busy());
+  EXPECT_FALSE(slot.preparationPending());
+  EXPECT_FALSE(slot.service(renderer, 20000, 8000));
+  EXPECT_EQ(slot.content.receipt().phase, PresentationPhase::Queued);
+  ASSERT_TRUE(slot.render(renderer, input));
+  EXPECT_EQ(PresentationFake::draws, previousDraws + 1);
+  EXPECT_EQ(PresentationFake::releases, previousReleases + 1);
+  EXPECT_FALSE(slot.busy());
+  EXPECT_TRUE(rendered(slot));
 }
 
 TEST_F(PresentationSlotTest, BackDismissesEitherKindAndCardNavigationNeedsAVisibleCardPage) {

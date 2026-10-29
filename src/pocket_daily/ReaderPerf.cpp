@@ -297,6 +297,22 @@ void addToLastTurn(const Stage stage, const uint32_t ms) {
 
 uint16_t unsavedTurns() { return live ? live->unsaved : 0; }
 
+bool copyRecent(const size_t newestFirstIndex, TurnRecord& record) {
+  if (!live || live->active) return false;
+  const auto* recent = live->snapshot.recent(newestFirstIndex);
+  if (!recent) return false;
+  record = *recent;
+  return true;
+}
+
+bool copyNewestAfter(uint32_t& completedTurnCursor, TurnRecord& record) {
+  if (!live || live->active || live->snapshot.totals.turns == completedTurnCursor || !copyRecent(0, record)) {
+    return false;
+  }
+  completedTurnCursor = live->snapshot.totals.turns;
+  return true;
+}
+
 void open() {
   if (live) return;
   // ~0.9 KB for the reader session: a stack copy would exceed the frame budget, and a

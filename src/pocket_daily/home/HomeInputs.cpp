@@ -6,6 +6,7 @@
 #include <HalSystem.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Utf8.h>
 
 #include <cstdio>
 #include <string>
@@ -19,6 +20,16 @@
 #include "pocket_daily/home/GlanceFormat.h"
 
 namespace PocketDaily::Home {
+namespace {
+template <size_t N>
+void copyBookText(char (&out)[N], const char* text) {
+  // Keep the longest complete prefix; byte truncation can split a Korean
+  // title/author and make the otherwise valid layout snapshot fail UTF-8 checks.
+  const size_t length = strnlen(text, N - 1);
+  memcpy(out, text, length);
+  out[utf8SafeTruncateBuffer(out, static_cast<int>(length))] = '\0';
+}
+}  // namespace
 
 Strings deviceStrings() {
   Strings s;
@@ -66,15 +77,15 @@ const RecentBook* readOpenBook(OpenBook& out) {
   const RecentBook* found = nullptr;
   for (const auto& book : RECENT_BOOKS.getBooks()) {
     if (book.path != APP_STATE.openEpubPath) continue;
-    snprintf(out.title, sizeof(out.title), "%s", book.title.c_str());
-    snprintf(out.author, sizeof(out.author), "%s", book.author.c_str());
+    copyBookText(out.title, book.title.c_str());
+    copyBookText(out.author, book.author.c_str());
     found = &book;
     break;
   }
   if (!out.title[0]) {
     const char* path = APP_STATE.openEpubPath.c_str();
     const char* slash = strrchr(path, '/');
-    snprintf(out.title, sizeof(out.title), "%s", slash ? slash + 1 : path);
+    copyBookText(out.title, slash ? slash + 1 : path);
   }
 
   // The seventh progress byte is a backwards-compatible whole-book percent.

@@ -7,6 +7,12 @@
 #include "ContentPresentation.h"
 
 class GfxRenderer;
+namespace HeaderPainter {
+struct Inputs;
+}
+namespace PocketDaily::Preview {
+struct LayoutInputs;
+}
 
 // Home and Daily Brief presentation inside a Sync session
 // (docs/pocket-screen-present-v1.md). Structured like ContentPresentation:
@@ -51,6 +57,9 @@ class ScreenPresentation {
   Receipt receipt() const;
   // True while per-paint inputs are held (queued or drawing); for tests.
   bool holdsInputs() const { return frame_ != nullptr; }
+  // RenderLock held. Only the header actually painted for this generation;
+  // never a future battery/clock sample or an unfinished/hidden frame.
+  bool copyPresentedHeader(HeaderPainter::Inputs& out, uint32_t generation) const;
 
  private:
   void fail(GfxRenderer& renderer, Content::PresentationFailure failure);
@@ -60,6 +69,9 @@ class ScreenPresentation {
   // One per-paint bundle (ScreenFrame.h), allocated in service() and freed
   // after the paint or on any failure. Never retained while idle.
   std::unique_ptr<Frame> frame_;
+  // Cold, bounded header receipt only while this Sync presentation exists.
+  // No framebuffer, cards or full scene remain resident after painting.
+  std::unique_ptr<HeaderPainter::Inputs> presentedHeader_;
   int font_ = 0;  // bounded CJK UI font, 0 when every drawn string is Latin
   // <=24B activity-owned request metadata; retained after failure so a lost
   // POST is recoverable by GET.
@@ -77,5 +89,6 @@ struct ScreenPresentationHost {
   bool (*enqueue)(void*, Surface, uint32_t) = nullptr;
   Receipt (*state)(void*) = nullptr;
   bool (*busy)(void*) = nullptr;
+  bool (*layoutInputs)(void*, Preview::LayoutInputs&) = nullptr;
 };
 }  // namespace PocketDaily::Screen

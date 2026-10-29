@@ -17,6 +17,7 @@
 #include "CrossPointState.h"
 #include "HalGPIO.h"
 #include "RecentBooksStore.h"
+#include "SdCardFontSystem.h"
 #include "SilentRestart.h"
 #include "agent/AgentLog.h"
 #include "components/UITheme.h"  // GUI (theme) + ThemeMetrics + Rect
@@ -25,10 +26,12 @@
 #include "pocket_daily/PocketGlanceStore.h"
 #include "pocket_daily/PocketProfileStore.h"
 #include "pocket_daily/home/DailyWord.h"
+#include "pocket_daily/home/HomeCover.h"
 #include "pocket_daily/home/HomeDrawing.h"
 #include "pocket_daily/home/HomeInputs.h"
 #include "pocket_daily/home/HomeRenderer.h"
 #include "pocket_daily/learning_pack.h"
+#include "util/CjkScript.h"
 #include "util/PowerWakeCue.h"
 #include "util/UiCjkFont.h"
 
@@ -37,6 +40,14 @@ namespace {
 // preview). Pull them into this translation unit's unqualified scope.
 using PocketDaily::HomeDraw::formatWeatherSnapshotDate;
 
+// Home/Brief chrome has a stable UI family/size, independent of whichever
+// reading font was resident before entering Pocket Daily. Preserve the existing
+// coverage/fallback behavior when that family is absent or lacks a glyph.
+int pocketUiFont(const GfxRenderer& renderer, const char* text, int fallback, EpdFontFamily::Style style) {
+  if (CjkScript::needsCjkFont(text))
+    sdFontSystem.ensureUiFamilyLoaded(const_cast<GfxRenderer&>(renderer), "PocketSansWorld");
+  return UiCjkFont::fontForText(renderer, text, fallback, style, UiCjkFont::CoveragePolicy::RequireFull);
+}
 // The device picks an installed SD CJK font for text the built-in fonts lack.
 PocketDaily::HomeDraw::FontResolver deviceFonts(const GfxRenderer& renderer) {
   return {const_cast<GfxRenderer*>(&renderer),
@@ -44,7 +55,7 @@ PocketDaily::HomeDraw::FontResolver deviceFonts(const GfxRenderer& renderer) {
           // host preview; a `const void*` parameter would not convert to it.
           // cppcheck-suppress constParameterPointer
           [](void* context, const char* text, int fallback, EpdFontFamily::Style style) {
-            return UiCjkFont::fontForText(*static_cast<const GfxRenderer*>(context), text, fallback, style);
+            return pocketUiFont(*static_cast<const GfxRenderer*>(context), text, fallback, style);
           }};
 }
 
@@ -409,8 +420,7 @@ bool PocketDailyActivity::applyPocketChoice(const PocketDaily::Card& card, int s
 }
 
 int PocketDailyActivity::fontForText(int uiFontId, const char* text) const {
-  return UiCjkFont::fontForText(renderer, text, uiFontId, EpdFontFamily::REGULAR,
-                                UiCjkFont::CoveragePolicy::RequireFull);
+  return pocketUiFont(renderer, text, uiFontId, EpdFontFamily::REGULAR);
 }
 
 void PocketDailyActivity::preparePersonalSnapshot() {
@@ -427,19 +437,8 @@ void PocketDailyActivity::preparePersonalSnapshot() {
   // Title, author and percent are shared with the Sync screen presenter
   // (pocket_daily/home/HomeInputs); only the cover path is Pocket's own.
   renderReadingSnapshot.clear();
-  const RecentBook* book = PocketDaily::Home::readOpenBook(renderReadingSnapshot);
-  if (book && !book->coverBmpPath.empty()) {
-    // Pocket's editorial hero needs the full retained cover. The previous
-    // code always selected Home's small thumbnail; drawBitmap deliberately
-    // does not upscale, so additional layout space could never enlarge it.
-    std::string fullPath = book->coverBmpPath;
-    const size_t thumb = fullPath.rfind("/thumb_");
-    if (thumb != std::string::npos) fullPath.replace(thumb, std::string::npos, "/cover.bmp");
-    const std::string thumbPath =
-        UITheme::getCoverThumbPath(book->coverBmpPath, UITheme::getInstance().getMetrics().homeCoverHeight);
-    const std::string& displayPath = Storage.exists(fullPath.c_str()) ? fullPath : thumbPath;
-    snprintf(renderReadingSnapshot.coverBmpPath, sizeof(renderReadingSnapshot.coverBmpPath), "%s", displayPath.c_str());
-  }
+  PocketDaily::Home::readOpenBook(renderReadingSnapshot);
+  PocketDaily::Home::openBookCoverPath(renderReadingSnapshot.coverBmpPath, sizeof(renderReadingSnapshot.coverBmpPath));
 }
 
 bool PocketDailyActivity::drawReadingCover(int x, int y, int width, int height) const {

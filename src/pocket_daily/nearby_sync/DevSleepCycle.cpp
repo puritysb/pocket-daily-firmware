@@ -64,7 +64,7 @@ bool read(Record& record) {
          record.advertisingDelayMs < record.standbyLimitMs &&
          (record.advertisingDelayMs == 0 || record.returnMode == ReturnMode::AppStandby) &&
          (record.returnMode == ReturnMode::Restart || record.returnMode == ReturnMode::TimedDeepSleep ||
-          record.returnMode == ReturnMode::AppStandby) &&
+          record.returnMode == ReturnMode::AppStandby || record.returnMode == ReturnMode::TimedHome) &&
          (record.state == State::Requested || record.state == State::Running || record.state == State::Completed ||
           record.state == State::Interrupted);
 }
@@ -103,7 +103,13 @@ void advertisingStarted(const uint32_t elapsedMs) {
 }
 
 bool active() { return running; }
-bool timerRequested() { return running && current.returnMode == ReturnMode::TimedDeepSleep; }
+bool timerRequested() {
+  return running && (current.returnMode == ReturnMode::TimedDeepSleep || current.returnMode == ReturnMode::TimedHome);
+}
+bool homeWakeRequested(uint32_t captureRun) {
+  return !running && captureRun && read(current) && current.run == captureRun && current.state == State::Completed &&
+         current.returnMode == ReturnMode::TimedHome && current.timerArmed;
+}
 bool standbyRequested() { return running && current.returnMode == ReturnMode::AppStandby; }
 void startedOnWifi(const bool connected) {
   if (running) current.fromWifi = connected;

@@ -41,6 +41,8 @@ gtest_discover_tests(reading_sync_ble_memory_test)
 
 add_executable(reading_sync_ble_dev_cycle_test
   DevSleepCycleTest.cpp
+  ReaderWalkTest.cpp
+  LibraryTrialTest.cpp
   ${REPO_ROOT}/src/pocket_daily/nearby_sync/DevSleepCycle.cpp
   ${REPO_ROOT}/src/pocket_daily/nearby_sync/ReadSyncStats.cpp)
 target_compile_definitions(reading_sync_ble_dev_cycle_test PRIVATE ENABLE_DEV_REMOTE_FLASH)

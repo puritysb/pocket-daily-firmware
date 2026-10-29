@@ -7,6 +7,9 @@
 #include <Wire.h>
 #include <XteinkDetect.h>
 #include <esp_sleep.h>
+#ifdef ENABLE_RTC_PROBE_ARENA
+#include <driver/gpio.h>
+#endif
 
 #include <cstdint>
 
@@ -353,3 +356,26 @@ HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
   }
   return WakeupReason::Other;
 }
+
+#ifdef ENABLE_RTC_PROBE_ARENA
+bool HalGPIO::releaseProbePowerButton() {
+#if FREEINK_MCU_C3
+  if (BoardConfig::ACTIVE.board != BoardConfig::Board::XteinkX4 || BoardConfig::ACTIVE.input.power != 3) return false;
+  // Release a retained open-drain LOW and return to the normal product input.
+  if (gpio_hold_dis(GPIO_NUM_3) != ESP_OK || gpio_set_direction(GPIO_NUM_3, GPIO_MODE_INPUT) != ESP_OK ||
+      gpio_pullup_en(GPIO_NUM_3) != ESP_OK || gpio_pulldown_dis(GPIO_NUM_3) != ESP_OK) {
+    LOG_ERR("GPIO", "Could not release owned RTC power-button probe");
+    return false;
+  }
+  // Allow the real pull-up/debounce capacitance to settle after open-drain
+  // release. A persistent LOW remains a failed actuator observation.
+  for (unsigned attempt = 0; attempt < 10; ++attempt) {
+    if (gpio_get_level(GPIO_NUM_3) == 1) return true;
+    delay(1);
+  }
+  return false;
+#else
+  return false;
+#endif
+}
+#endif

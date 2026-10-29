@@ -7,6 +7,7 @@ add_executable(screen_presentation_test ScreenPresentationTest.cpp ../content_pr
   ${REPO_ROOT}/src/pocket_daily/ContentPresentation.cpp
   ${REPO_ROOT}/src/pocket_daily/ContentTextLayout.cpp)
 target_include_directories(screen_presentation_test BEFORE PRIVATE ../content_presentation/stubs
-  ${REPO_ROOT}/lib/EpdFont)
+  ${REPO_ROOT}/lib/EpdFont ${REPO_ROOT}/lib/Memory
+  ${REPO_ROOT}/freeink-sdk/libs/ui/FreeInkUI/include)
 target_link_libraries(screen_presentation_test PRIVATE crosspoint_test_common GTest::gtest_main)
 gtest_discover_tests(screen_presentation_test)

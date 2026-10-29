@@ -102,6 +102,7 @@ struct DrawContext {
   const Frame* frame;
   int font;
   bool refused;
+  HeaderPainter::Inputs* header;
 };
 
 // FontResolver::pick is a fixed `void*` callback type shared with the host
@@ -119,7 +120,8 @@ bool visitStrings(void* context, bool (*visit)(void*, const char*), std::initial
 }
 }  // namespace
 
-LoadResult loadFrame(const Surface surface, const DailyProfile::Profile& profile, std::unique_ptr<Frame>& out) {
+static LoadResult loadFrameInputs(const Surface surface, const DailyProfile::Profile& profile,
+                                  std::unique_ptr<Frame>& out, const bool includeHiddenWord) {
   out.reset();
   if (surface == Surface::None) return LoadResult::Unavailable;
   // ~2.2 KB of paint inputs: too large for the loop-task stack; one fallible
@@ -168,7 +170,7 @@ LoadResult loadFrame(const Surface surface, const DailyProfile::Profile& profile
     case Surface::None:
       break;
   }
-  if (wordDrawn) {
+  if (wordDrawn || includeHiddenWord) {
     const uint32_t day =
         Home::dailyWordDay(Home::dailyWordEpoch(now, frame->glance.savedEpoch), frame->glance.utcOffsetMinutes);
     if (Home::lightDailyWord(day, frame->word) == Home::WordSource::OutOfMemory) return LoadResult::OutOfMemory;
@@ -180,6 +182,14 @@ LoadResult loadFrame(const Surface surface, const DailyProfile::Profile& profile
 
   out = std::move(frame);
   return LoadResult::Ready;
+}
+
+LoadResult loadFrame(const Surface surface, const DailyProfile::Profile& profile, std::unique_ptr<Frame>& out) {
+  return loadFrameInputs(surface, profile, out, false);
+}
+
+LoadResult loadPreviewFrame(std::unique_ptr<Frame>& out) {
+  return loadFrameInputs(Surface::Home, DailyProfile::defaults(), out, true);
 }
 
 bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* context, const char* text)) {
@@ -247,8 +257,8 @@ bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* conte
   return false;
 }
 
-bool drawFrame(GfxRenderer& renderer, const Frame& frame, const int cjkFont) {
-  DrawContext context{&frame, cjkFont, false};
+bool drawFrame(GfxRenderer& renderer, const Frame& frame, const int cjkFont, HeaderPainter::Inputs* header) {
+  DrawContext context{&frame, cjkFont, false, header};
   Home::Env env;
   env.metrics = Home::deviceMetrics();
   // Latin text keeps the built-in fonts; CJK text uses the one preflighted
@@ -272,7 +282,10 @@ bool drawFrame(GfxRenderer& renderer, const Frame& frame, const int cjkFont) {
         return;
       }
     }
-    GUI.drawHeader(r, Rect{x, y, width, height}, title, subtitle);
+    if (d.header)
+      GUI.drawHeaderAndDescribe(r, Rect{x, y, width, height}, title, subtitle, true, *d.header);
+    else
+      GUI.drawHeader(r, Rect{x, y, width, height}, title, subtitle);
   };
   // Covers are never decoded: the device's own no-art placeholder. Env's
   // drawCover type takes a mutable renderer (the device decodes bitmaps).

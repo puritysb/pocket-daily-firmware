@@ -1,0 +1,5 @@
+add_executable(logging_test LoggingTest.cpp ${REPO_ROOT}/lib/Logging/Logging.cpp)
+target_include_directories(logging_test BEFORE PRIVATE stubs ${REPO_ROOT}/lib/Logging)
+target_compile_definitions(logging_test PRIVATE ARDUINO_USB_CDC_ON_BOOT=1)
+target_link_libraries(logging_test PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(logging_test)

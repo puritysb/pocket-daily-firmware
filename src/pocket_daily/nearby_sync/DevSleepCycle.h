@@ -8,7 +8,7 @@
 // Explicit LAN-requested developer experiment; never a production boot mode.
 namespace Pocket::NearbySync::DevSleepCycle {
 enum class State : uint32_t { Requested = 1, Running, Completed, Interrupted };
-enum class ReturnMode : uint32_t { Restart = 0, TimedDeepSleep = 1, AppStandby = 2 };
+enum class ReturnMode : uint32_t { Restart = 0, TimedDeepSleep = 1, AppStandby = 2, TimedHome = 3 };
 enum class Checkpoint : uint32_t { None, WifiEntry, FrameReleased, BeforeLightSleep, RadioReady, StandbyAlive };
 struct Record {
   uint32_t magic = 0;
@@ -42,6 +42,7 @@ bool begin();
 bool interruptIfRunning();
 bool active();
 bool timerRequested();
+bool homeWakeRequested(uint32_t captureRun);
 bool standbyRequested();
 void timerArmed(bool armed);
 void startedOnWifi(bool connected);

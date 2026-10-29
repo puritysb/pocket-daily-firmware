@@ -28,6 +28,7 @@ struct StatusInputs {
   bool contentPresentation = false;
   // Home / Daily Brief presentation routes are registered (Sync profiles only).
   bool screenPresentation = false;
+  bool layoutInputs = false;
   LiveInputs live;
 };
 

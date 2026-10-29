@@ -56,6 +56,7 @@ add_subdirectory(content_manifest)
 add_subdirectory(content_store)
 add_subdirectory(content_presentation)
 add_subdirectory(screen_presentation)
+add_subdirectory(logging)
 add_subdirectory(sd_font)
 add_subdirectory(gfx_host)
 add_subdirectory(hal_storage)
@@ -123,3 +124,13 @@ foreach(target reader_layout_test reading_position_layout_test)
 endforeach()
 
 add_subdirectory(wifi_setup)
+add_subdirectory(home_inputs)
+
+add_subdirectory(trial_lease)
+
+# Bounded close-delimited legacy file-list response writer.
+add_subdirectory(bounded_http)
+
+add_subdirectory(trial_reader)
+
+add_subdirectory(book_cache_utils)

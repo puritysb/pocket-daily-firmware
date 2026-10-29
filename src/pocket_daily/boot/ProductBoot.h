@@ -38,6 +38,14 @@ void paintWakeCue(GfxRenderer& renderer, bool isX3);
 // attempt. Invalid/unremovable markers never trigger automatic connection.
 DevBootReturn consumeDevBootReturn();
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+// USB bootstrap after an explicitly authorized developer install. Reuses the
+// one-shot saved-network return; never carries or changes Wi-Fi credentials.
+bool requestDevSyncSta();
+// Explicit developer maintenance; only saved-network Sync or File Transfer.
+bool requestDevStaReturn(DevBootReturn target);
+#endif
+
 }  // namespace PocketDaily::Boot
 
 // silentRestartToPocketDaily() / silentRestartToPocketNearbySync() stay

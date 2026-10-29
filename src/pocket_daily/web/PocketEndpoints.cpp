@@ -1,5 +1,9 @@
-#include "pocket_daily/web/PocketEndpoints.h"
+#ifdef ENABLE_RTC_PROBE_ARENA
+#include <esp_heap_caps.h>
 
+#include "pocket_daily/boot/RTCProbePolicy.h"
+extern uint8_t _rtc_probe_start[], _rtc_probe_end[], _rtc_force_slow_end[];
+#endif
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <HalStorage.h>
@@ -21,6 +25,7 @@
 #include "articles/ArticleStorage.h"
 #include "components/UITheme.h"
 #include "network/FirmwareFlasher.h"
+#include "network/OtaBootSwitch.h"
 #include "pocket_daily/ContentActiveStore.h"
 #include "pocket_daily/ContentPathPolicy.h"
 #include "pocket_daily/ContentRevisionStore.h"
@@ -32,16 +37,22 @@
 #include "pocket_daily/ReadingProgress.h"
 #include "pocket_daily/StagedFirmwareStore.h"
 #include "pocket_daily/boot/DevBootReturn.h"
+#include "pocket_daily/boot/ProductBoot.h"
+#include "pocket_daily/boot/TrialLease.h"
+#include "pocket_daily/boot/TrialReader.h"
+#include "pocket_daily/home/HomeCover.h"
 #include "pocket_daily/live_studio/DevTrace.h"
 #include "pocket_daily/live_studio/HeapMap.h"
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/live_studio/StackReport.h"
 #include "pocket_daily/nearby_sync/WifiSetup.h"
+#include "pocket_daily/preview/LayoutInputs.h"
 #include "pocket_daily/staged_firmware.h"
 #include "pocket_daily/web/DisplayState.h"
 #include "pocket_daily/web/ExactRouteDispatch.h"
 #include "pocket_daily/web/GenerationArgument.h"
 #include "pocket_daily/web/LegacyFontSize.h"
+#include "pocket_daily/web/PocketEndpoints.h"
 #include "pocket_daily/web/PocketStatus.h"
 #include "pocket_daily/web/PreferencesUpdate.h"
 #include "pocket_daily/web/ReaderFilesPolicy.h"
@@ -242,6 +253,97 @@ void handleDisplay(WebServer& server, const RouteDeps& d) {
     return;
   }
   server.send(200, "application/json", json.get());
+}
+
+// The current book's existing immutable cover only; never a client-supplied path.
+void handleLayoutCover(WebServer& server, const RouteDeps& d) {
+  char identity[9];
+  if (!admitContentOperation(server, d, identity)) return;
+  if ((d.screen.busy && d.screen.busy(d.screen.self)) ||
+      (d.presentation.busy && d.presentation.busy(d.presentation.self))) {
+    server.send(409, "text/plain", "Reader is drawing");
+    return;
+  }
+  uint32_t key = 0, offset = 0, size = 0;
+  const String k = server.arg("key"), o = server.arg("offset"), n = server.arg("size");
+  if (!parseGeneration({k.c_str(), k.length()}, key) || !key || !parseGeneration({o.c_str(), o.length()}, offset) ||
+      !parseGeneration({n.c_str(), n.length()}, size) || !size || size > 131072) {
+    server.send(400, "text/plain", "Invalid cover request");
+    return;
+  }
+  char path[160];
+  if (!Home::openBookCoverPath(path, sizeof(path)) || Home::coverPathKey(path) != key) {
+    server.send(409, "text/plain", "Book cover changed");
+    return;
+  }
+  HalFile file = Storage.open(path);
+  if (!file || file.size() != size || offset >= size || !file.seek(offset)) {
+    server.send(409, "text/plain", "Book cover changed");
+    return;
+  }
+  const size_t count = std::min<size_t>(4096, size - offset);
+  uint8_t* bytes = firmware_flash::sharedStagingBuffer();
+  if (file.read(bytes, count) != static_cast<int>(count)) {
+    server.send(500, "text/plain", "Cover read failed");
+    return;
+  }
+  server.sendHeader("Cache-Control", "no-store");
+  server.setContentLength(count);
+  server.send(200, "application/octet-stream", "");
+  server.sendContent(reinterpret_cast<const char*>(bytes), count);
+}
+
+// One explicit, read-only capture; never paint, allocate a framebuffer or poll.
+void handleLayoutInputs(WebServer& server, const RouteDeps& d) {
+  char deviceId[9];
+  if (!admitContentOperation(server, d, deviceId)) return;
+  if (!d.screen.layoutInputs || (d.screen.busy && d.screen.busy(d.screen.self)) ||
+      (d.presentation.busy && d.presentation.busy(d.presentation.self))) {
+    server.send(409, "text/plain", "Reader display is busy");
+    return;
+  }
+  // Request scoped ~6 KB snapshot + existing <=5 KB frame/cards while capturing,
+  // then <=8 KB encoded bytes. Leave room for HAL handles and HTTP. These are
+  // admission gates, not measured claims of a universally safe heap minimum.
+  if (ESP.getFreeHeap() < 24576 || ESP.getMaxAllocHeap() < 8192) {
+    server.send(503, "text/plain", "Reader memory is too low for layout preview");
+    return;
+  }
+  auto inputs = makeUniqueNoThrow<Preview::LayoutInputs>();
+  if (!inputs) {
+    LOG_ERR("PREVIEW", "OOM allocating layout inputs");
+    server.send(503, "text/plain", "Reader memory is too low for layout preview");
+    return;
+  }
+  if (!d.screen.layoutInputs(d.screen.self, *inputs) || strcmp(inputs->deviceId, deviceId) != 0) {
+    server.send(503, "text/plain", "Reader layout inputs are unavailable");
+    return;
+  }
+  const size_t count = Preview::encodeLayoutInputs(*inputs, nullptr, Preview::MAX_BYTES);
+  if (!count) {
+    server.send(503, "text/plain", "Reader layout inputs cannot be encoded");
+    return;
+  }
+  // Exact bounded response size, not a permanent 8 KB reserve. Too large for
+  // the HTTP task stack; freed immediately after the bounded socket write.
+  auto bytes = makeUniqueNoThrow<uint8_t[]>(count);
+  if (!bytes) {
+    LOG_ERR("PREVIEW", "OOM allocating %u B layout response", static_cast<unsigned>(count));
+    server.send(503, "text/plain", "Reader memory is too low for layout response");
+    return;
+  }
+  if (Preview::encodeLayoutInputs(*inputs, bytes.get(), count) != count) {
+    server.send(500, "text/plain", "Reader layout response failed validation");
+    return;
+  }
+  inputs.reset();
+  server.client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
+  feedLoopWDT();
+  server.setContentLength(count);
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/octet-stream", "");
+  server.sendContent(reinterpret_cast<const char*>(bytes.get()), count);
+  feedLoopWDT();
 }
 
 // Pocket Daily profile (docs/pocket-profile-v1.md). Identity/heap gated like
@@ -655,17 +757,34 @@ void handleDevScreenCapture(WebServer& server, const RouteDeps& d) {
     server.send(204, "text/plain", "");
     return;
   }
-  const bool wake = server.arg("frame") == "wake";
-  if (!server.arg("frame").isEmpty() && !wake) {
+  const String frameArg = server.arg("frame");
+  const bool returned = frameArg == "returned-home" || frameArg == "returned-home-inputs";
+  const bool home = returned || frameArg == "home" || frameArg == "home-inputs";
+  const bool inputs =
+      returned ? frameArg == "returned-home-inputs" : frameArg == "home-inputs" || frameArg == "sleep-inputs";
+  const bool wake = frameArg == "wake";
+  const bool libraryOriginal = frameArg == "library-original";
+  const bool libraryOwned = frameArg == "library-owned";
+  const bool library = libraryOriginal || libraryOwned;
+  if (!frameArg.isEmpty() && !wake && !home && !inputs && !library) {
     server.send(400, "text/plain", "Invalid capture frame");
     return;
   }
-  if ((wake ? DevCapture::wakeEvidence().run : DevCapture::savedRun()) != run) {
+  if ((library ? DevCapture::libraryFrameRun(libraryOriginal)
+       : wake  ? DevCapture::wakeEvidence().run
+       : home  ? DevCapture::homeRun(returned)
+               : DevCapture::savedRun()) != run) {
     server.send(409, "text/plain", "Capture run mismatch");
     return;
   }
   if (server.method() == HTTP_DELETE) {
-    if (!(wake ? DevCapture::removeWake(run) : DevCapture::remove(run))) {
+    if (library) {
+      server.send(409, "text/plain", "Library frames require completed trial acknowledgement");
+      return;
+    }
+    if (!(wake   ? DevCapture::removeWake(run)
+          : home ? DevCapture::removeHome(run, returned)
+                 : DevCapture::remove(run))) {
       server.send(500, "text/plain", "Capture cleanup failed");
       return;
     }
@@ -678,7 +797,14 @@ void handleDevScreenCapture(WebServer& server, const RouteDeps& d) {
     server.send(400, "text/plain", "Invalid capture offset");
     return;
   }
-  HalFile file = Storage.open(wake ? DevCapture::WAKE_PATH : kScreenCapturePath);
+  HalFile file =
+      Storage.open(library  ? (libraryOriginal ? DevCapture::LIBRARY_ORIGINAL_PATH : DevCapture::LIBRARY_OWNED_PATH)
+                   : inputs ? (returned ? DevCapture::RETURNED_HOME_INPUTS
+                               : home   ? DevCapture::HOME_INPUTS
+                                        : DevCapture::SLEEP_INPUTS)
+                   : wake   ? DevCapture::WAKE_PATH
+                   : home   ? (returned ? DevCapture::RETURNED_HOME_PATH : DevCapture::HOME_PATH)
+                            : kScreenCapturePath);
   if (!file || offset >= file.size() || !file.seek(offset)) {
     server.send(416, "text/plain", "Capture offset unavailable");
     return;
@@ -1345,6 +1471,121 @@ void handleDevFreshStart(WebServer& server, const RouteDeps& d) {
   ESP.restart();
 }
 
+void handleDevBuildFailure(WebServer& server, const RouteDeps& d) {
+  char identity[9];
+  if (!admitContentOperation(server, d, identity)) return;
+  if (!Storage.ready()) {
+    server.send(503, "text/plain", "SD card is unavailable");
+    return;
+  }
+  if (d.apMode) {
+    server.send(409, "text/plain", "Requires idle Same Wi-Fi");
+    return;
+  }
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock()) {
+    server.send(409, "text/plain", "Reader is drawing");
+    return;
+  }
+  uint32_t run = 0;
+  const String arg = server.arg("run");
+  if (!arg.isEmpty() && (!parseGeneration({arg.c_str(), arg.length()}, run) || !run)) {
+    server.send(400, "text/plain", "run must be a nonzero uint32");
+    return;
+  }
+  BuildFailureLog::Entry entry;
+  if (run ? !DevCapture::loadWalkFailure(run, entry) : !BuildFailureLog::load(entry)) {
+    server.send(!run && Storage.exists(BuildFailureLog::PATH) ? 422 : 404, "text/plain",
+                "No valid matching build failure");
+    return;
+  }
+  uint8_t* body = firmware_flash::sharedStagingBuffer();
+  const size_t count = BuildFailureLog::encode(entry, body, BuildFailureLog::RECORD_BYTES);
+  server.client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
+  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("X-Build-Failure-Run", String(run));
+  server.setContentLength(count);
+  feedLoopWDT();
+  server.send(200, "application/octet-stream", "");
+  server.sendContent(reinterpret_cast<const char*>(body), count);
+  feedLoopWDT();
+}
+
+__attribute__((noinline)) void handleLibraryBackup(WebServer& server, uint32_t run, std::string_view selector) {
+  char* body = reinterpret_cast<char*>(firmware_flash::sharedStagingBuffer());
+  if (selector == "manifest") {
+    const int count = DevCapture::formatLibraryBackup(run, body, firmware_flash::STAGING_BUFFER_BYTES);
+    if (count < 0 || static_cast<size_t>(count) >= firmware_flash::STAGING_BUFFER_BYTES) {
+      server.send(409, "text/plain", "Library backup unavailable");
+      return;
+    }
+    server.sendHeader("Cache-Control", "no-store");
+    server.setContentLength(count);
+    server.send(200, "application/json", "");
+    server.sendContent(body, count);
+    return;
+  }
+  const char* path = DevCapture::libraryBackupPath(selector);
+  uint32_t offset = 0;
+  const String arg = server.arg("offset");
+  if (!path || !parseGeneration({arg.c_str(), arg.length()}, offset)) {
+    server.send(400, "text/plain", "Invalid backup selector or offset");
+    return;
+  }
+  HalFile file = Storage.open(path);
+  const uint32_t cap = selector == "index" ? 8 * 1024 * 1024 : selector == "dirty" ? 1024 : 65536;
+  if (!file || file.isDirectory() || file.size() > cap || offset > file.size() || !file.seekSet(offset)) {
+    server.send(409, "text/plain", "Backup file changed or unavailable");
+    return;
+  }
+  const size_t count = std::min<size_t>(CRASH_REPORT_CHUNK_BYTES, file.size() - offset);
+  if (file.read(body, count) != static_cast<int>(count)) {
+    server.send(409, "text/plain", "Backup read failed");
+    return;
+  }
+  server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("X-Backup-Run", String(run));
+  server.sendHeader("X-Backup-Total", String(file.size()));
+  server.sendHeader("X-Backup-Offset", String(offset));
+  server.client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
+  server.setContentLength(count);
+  server.send(200, "application/octet-stream", "");
+  if (count) server.sendContent(body, count);
+}
+
+// Keep the parser's existing internal frame separate from schema checks and
+// response handling; the document owns all borrowed strings through admission.
+__attribute__((noinline)) bool parseLibraryAdmission(JsonDocument& doc, const String& body) {
+  return body.length() <= 1024 && !deserializeJson(doc, body);
+}
+__attribute__((noinline)) bool validLibraryAdmission(JsonObjectConst doc) {
+  return doc["pages"].is<uint32_t>() && doc["bytes"].is<uint32_t>() && doc["referencePath"].is<const char*>() &&
+         doc["sourceSHA256"].is<const char*>() && doc["titleSHA256"].is<const char*>() &&
+         doc["backupDigest"].is<const char*>() && doc["backupAcknowledged"].is<bool>() &&
+         doc["backupAcknowledged"].as<bool>();
+}
+__attribute__((noinline)) bool requestLibraryAdmission(uint32_t run, JsonObjectConst doc) {
+  return DevCapture::requestLibrary(run, doc["pages"].as<uint32_t>(), doc["bytes"].as<uint32_t>(),
+                                    doc["referencePath"].as<const char*>(), doc["sourceSHA256"].as<const char*>(),
+                                    doc["titleSHA256"].as<const char*>(), doc["backupDigest"].as<const char*>());
+}
+__attribute__((noinline)) void handleLibraryAdmission(WebServer& server, uint32_t run) {
+  const String body = server.arg("plain");
+  JsonDocument doc;
+  if (!parseLibraryAdmission(doc, body) || !validLibraryAdmission(doc.as<JsonObjectConst>())) {
+    server.send(400, "text/plain", "Invalid Library trial or backup acknowledgement");
+    return;
+  }
+  if (!requestLibraryAdmission(run, doc.as<JsonObjectConst>())) {
+    server.send(409, "text/plain", "Library preflight or checked admission failed; preserve evidence");
+    return;
+  }
+  server.sendHeader("Connection", "close");
+  server.send(202, "text/plain", "Library trial scheduled; automatic Same Wi-Fi return");
+  delay(750);
+  ESP.restart();
+}
+
 void handleDevReaderCapture(WebServer& server, const RouteDeps& d) {
   char identity[9];
   if (!admitContentOperation(server, d, identity)) return;
@@ -1354,22 +1595,130 @@ void handleDevReaderCapture(WebServer& server, const RouteDeps& d) {
     server.send(400, "text/plain", "Requires Same Wi-Fi and a nonzero run");
     return;
   }
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock()) {
+    server.send(409, "text/plain", "Reader is drawing");
+    return;
+  }
   if (server.method() == HTTP_DELETE) {
-    server.send(DevCapture::clearFixture(run) ? 204 : 409, "text/plain", "");
+    const bool ack = server.arg("libraryAck") == "true";
+    server.send((ack ? DevCapture::acknowledgeLibrary(run) : DevCapture::clearFixture(run)) ? 204 : 409, "text/plain",
+                "");
     return;
   }
   if (server.method() == HTTP_GET) {
+    if (server.hasArg("performance")) {
+      if (server.arg("performance") != "1") {
+        server.send(400, "text/plain", "Unknown reader performance format");
+        return;
+      }
+      auto* buffer = firmware_flash::sharedStagingBuffer();
+      const size_t size = DevCapture::readWalkPerformance(run, buffer, firmware_flash::STAGING_BUFFER_BYTES);
+      if (!size) {
+        server.send(404, "text/plain", "Complete reader performance trace unavailable");
+        return;
+      }
+      server.sendHeader("X-Reader-Performance-Run", String(run));
+      server.sendHeader("Cache-Control", "no-store");
+      server.client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
+      server.setContentLength(size);
+      server.send(200, "application/octet-stream", "");
+      server.sendContent(reinterpret_cast<const char*>(buffer), size);
+      return;
+    }
+    const String backup = server.arg("libraryBackup");
+    if (!backup.isEmpty()) {
+      if ((d.host.httpUploadBusy && d.host.httpUploadBusy(d.host.self)) || (d.stream && d.stream->receiving()) ||
+          DevCapture::readerActive()) {
+        server.send(409, "text/plain", "Requires idle reader");
+        return;
+      }
+      handleLibraryBackup(server, run, {backup.c_str(), backup.length()});
+      return;
+    }
     const auto state = DevCapture::readerReadiness(run);
-    char body[176];
-    snprintf(body, sizeof(body),
-             "{\"completed\":%s,\"activeRun\":%lu,\"pendingRun\":%lu,\"fixtureRun\":%lu,\"bookReady\":%s}",
-             DevCapture::continuitySucceeded(run) ? "true" : "false", static_cast<unsigned long>(state.active),
-             static_cast<unsigned long>(state.pending), static_cast<unsigned long>(state.fixture),
-             state.bookReady ? "true" : "false");
-    server.send(200, "application/json", body);
+    const auto walk = DevCapture::readerWalkEvidence(run);
+    char* body = reinterpret_cast<char*>(firmware_flash::sharedStagingBuffer());
+    constexpr size_t RESPONSE_BYTES = 3072;
+    static_assert(RESPONSE_BYTES <= firmware_flash::STAGING_BUFFER_BYTES);
+    // The v1 portion plus performance capabilities is at most 665 bytes; settings plus the image object fit
+    // within the shared staging buffer without allocating another JSON buffer.
+    static_assert(665 + 96 + epub_image_diagnostics::MAX_JSON_BYTES + 96 + epub_paint_diagnostics::MAX_JSON_BYTES <
+                  RESPONSE_BYTES - 512);
+    int count = snprintf(
+        body, RESPONSE_BYTES,
+        "{\"completed\":%s,\"activeRun\":%lu,\"pendingRun\":%lu,\"fixtureRun\":%lu,\"bookReady\":%s,"
+        "\"walkReceiptPresent\":%s,\"walkReceiptRun\":%lu,"
+        "\"walkVersion\":1,\"maxWalkPages\":128,\"walkPerformanceVersion\":1,\"maxPerformancePages\":16,"
+        "\"walk\":{\"protocolVersion\":1,\"run\":%lu,\"state\":\"%s\","
+        "\"requestedPages\":%lu,\"renderedPages\":%lu,\"turns\":%lu,\"lastSpine\":%lu,\"lastPage\":%lu,"
+        "\"progressPercent\":%lu,\"failureStep\":%lu,\"failureDetail\":%lu,\"elapsedMs\":%lu,"
+        "\"freeHeap\":%lu,\"largestBlock\":%lu,\"captureReady\":%s,\"historyIsolated\":true,\"progressMonotonic\":true}"
+        ",\"currentImageRendering\":%u,\"imageDiagnosticsVersion\":1,\"imageDiagnostics\":",
+        DevCapture::continuitySucceeded(run) ? "true" : "false", static_cast<unsigned long>(state.active),
+        static_cast<unsigned long>(state.pending), static_cast<unsigned long>(state.fixture),
+        state.bookReady ? "true" : "false", state.walkReceiptPresent ? "true" : "false",
+        static_cast<unsigned long>(state.walkReceiptRun), static_cast<unsigned long>(walk.run),
+        DevCapture::walkStateName(walk.state), static_cast<unsigned long>(walk.requested),
+        static_cast<unsigned long>(walk.rendered), static_cast<unsigned long>(walk.turns),
+        static_cast<unsigned long>(walk.spine), static_cast<unsigned long>(walk.page),
+        static_cast<unsigned long>(walk.progress), static_cast<unsigned long>(walk.step),
+        static_cast<unsigned long>(walk.detail), static_cast<unsigned long>(walk.elapsed),
+        static_cast<unsigned long>(walk.freeHeap), static_cast<unsigned long>(walk.largestBlock),
+        walk.captureReady ? "true" : "false", static_cast<unsigned>(SETTINGS.imageRendering));
+    if (count <= 0 || static_cast<size_t>(count) >= RESPONSE_BYTES) {
+      server.send(500, "text/plain", "Reader evidence exceeds response bound");
+      return;
+    }
+    epub_image_diagnostics::Snapshot images;
+    const bool validImages = DevCapture::loadImageDiagnostics(run, images);
+    const int imageBytes =
+        epub_image_diagnostics::formatJson(body + count, RESPONSE_BYTES - count, validImages ? &images : nullptr);
+    if (imageBytes < 0 || static_cast<size_t>(count + imageBytes + 2) > RESPONSE_BYTES) {
+      server.send(500, "text/plain", "Reader image evidence exceeds response bound");
+      return;
+    }
+    count += imageBytes;
+    const int paintPrefix =
+        snprintf(body + count, RESPONSE_BYTES - count,
+                 ",\"currentReaderFontPoints\":%u,\"paintDiagnosticsVersion\":1,\"paintDiagnostics\":",
+                 static_cast<unsigned>(SETTINGS.fontPointSize));
+    if (paintPrefix < 0 || static_cast<size_t>(count + paintPrefix) >= RESPONSE_BYTES) {
+      server.send(500, "text/plain", "Reader paint evidence exceeds response bound");
+      return;
+    }
+    count += paintPrefix;
+    const int paintBytes = DevCapture::formatPaintDiagnostics(run, body + count, RESPONSE_BYTES - count);
+    if (paintBytes < 0 || static_cast<size_t>(count + paintBytes + 2) > RESPONSE_BYTES) {
+      server.send(500, "text/plain", "Reader paint evidence exceeds response bound");
+      return;
+    }
+    count += paintBytes;
+    const int libraryPrefix = snprintf(body + count, RESPONSE_BYTES - count, ",\"libraryTrialVersion\":1,\"library\":");
+    if (libraryPrefix < 0 || static_cast<size_t>(count + libraryPrefix) >= RESPONSE_BYTES) {
+      server.send(500, "text/plain", "Library evidence exceeds response bound");
+      return;
+    }
+    count += libraryPrefix;
+    const int libraryBytes = DevCapture::formatLibraryEvidence(run, body + count, RESPONSE_BYTES - count);
+    if (libraryBytes < 0 || static_cast<size_t>(count + libraryBytes + 2) > RESPONSE_BYTES) {
+      server.send(500, "text/plain", "Library evidence exceeds response bound");
+      return;
+    }
+    count += libraryBytes;
+    body[count++] = '}';
+    body[count] = '\0';
+    server.sendHeader("Cache-Control", "no-store");
+    server.setContentLength(static_cast<size_t>(count));
+    server.send(200, "application/json", "");
+    server.sendContent(body, static_cast<size_t>(count));
     return;
   }
   const String action = server.arg("action");
+  if (action == "library-walk") {
+    handleLibraryAdmission(server, run);
+    return;
+  }
   DevCapture::ReaderAction selected = DevCapture::ReaderAction::Capture;
   if (action == "seed")
     selected = DevCapture::ReaderAction::Seed;
@@ -1377,11 +1726,24 @@ void handleDevReaderCapture(WebServer& server, const RouteDeps& d) {
     selected = DevCapture::ReaderAction::Accept;
   else if (action == "advance")
     selected = DevCapture::ReaderAction::Advance;
+  else if (action == "walk")
+    selected = DevCapture::ReaderAction::Walk;
   else if (action.length()) {
     server.send(400, "text/plain", "Unknown reading action");
     return;
   }
-  if (!DevCapture::requestReader(run, selected)) {
+  uint32_t pages = 0;
+  const String pageArg = server.arg("pages");
+  if (selected == DevCapture::ReaderAction::Walk) {
+    if (!parseGeneration({pageArg.c_str(), pageArg.length()}, pages) || !DevCapture::validWalkPages(pages)) {
+      server.send(400, "text/plain", "walk pages must be 1..128 including the first rendered page");
+      return;
+    }
+  } else if (!pageArg.isEmpty()) {
+    server.send(400, "text/plain", "pages is only supported for walk");
+    return;
+  }
+  if (!DevCapture::requestReader(run, selected, pages)) {
     server.send(409, "text/plain", "Missing reader fixture or request could not be saved");
     return;
   }
@@ -1409,14 +1771,17 @@ void handleDevBleCycle(WebServer& server, const RouteDeps& d) {
 #ifdef ENABLE_BLE_STANDBY
   standbySupported = gpio.deviceIsX3();
 #endif
-  if ((sleep != "" && sleep != "timer" && sleep != "standby") || (sleep == "timer" && !gpio.deviceIsX3()) ||
+  if ((sleep == "timer-home" && gpio.deviceIsX3()) ||
+      (sleep != "" && sleep != "timer" && sleep != "timer-home" && sleep != "standby") ||
+      ((sleep == "timer" || sleep == "timer-home") && !powerManager.devSleepTimerSupported()) ||
       (sleep == "standby" && !standbySupported)) {
-    server.send(400, "text/plain", "timer sleep is supported only for X3 trials");
+    server.send(400, "text/plain", "Timer sleep requires X3 or an externally USB-powered X4");
     return;
   }
-  const auto mode = sleep == "standby" ? ReturnMode::AppStandby
-                    : sleep == "timer" ? ReturnMode::TimedDeepSleep
-                                       : ReturnMode::Restart;
+  const auto mode = sleep == "timer-home" ? ReturnMode::TimedHome
+                    : sleep == "standby"  ? ReturnMode::AppStandby
+                    : sleep == "timer"    ? ReturnMode::TimedDeepSleep
+                                          : ReturnMode::Restart;
   uint32_t standbySeconds = 90;
   const String seconds = server.arg("standbySeconds");
   if ((!seconds.isEmpty() && !parseGeneration({seconds.c_str(), seconds.length()}, standbySeconds)) ||
@@ -1465,8 +1830,10 @@ void handleDevBleCycleResult(WebServer& server) {
   doc["advertisingDelayMs"] = record->advertisingDelayMs;
   doc["advertisingStartedMs"] = record->advertisingStartedMs;
   doc["timerWake"] = powerManager.devWokeFromTimer();
+  doc["usbPower"] = gpio.isUsbConnected();
   const auto& wake = DevCapture::wakeEvidence();
   doc["wakeCaptureRun"] = wake.run;
+  doc["returnedHomeRun"] = DevCapture::homeRun(true);
   doc["wakeRefreshMs"] = wake.refreshMs;
   doc["wakeSkipped"] = wake.skipped;
   doc["lightSleeps"] = record->lightSleeps;
@@ -1501,12 +1868,301 @@ void handleDevBleCycleResult(WebServer& server) {
   server.send(200, "application/json", response);
 }
 
+// Keep JSON parsing and the checked lease record in separate C3 stack frames.
+__attribute__((noinline)) PocketDaily::Boot::DevBootReturn readDevTransferMode(WebServer& server) {
+  using PocketDaily::Boot::DevBootReturn;
+  const String body = server.arg("plain");
+  JsonDocument doc;
+  if (body.length() > 128 || deserializeJson(doc, body) || !doc.is<JsonObject>() || doc.size() != 2 ||
+      !doc["restartAcknowledged"].is<bool>() || !doc["restartAcknowledged"].as<bool>() ||
+      !doc["mode"].is<const char*>()) {
+    server.send(400, "text/plain", "Explicit saved-network maintenance restart required");
+    return DevBootReturn::None;
+  }
+  const char* mode = doc["mode"].as<const char*>();
+  if (strcmp(mode, "sync") == 0) return DevBootReturn::SyncSta;
+  if (strcmp(mode, "file-transfer") == 0) return DevBootReturn::FileTransferSta;
+  server.send(400, "text/plain", "Unsupported maintenance mode");
+  return DevBootReturn::None;
+}
+
+__attribute__((noinline)) void handleDevTransferMode(WebServer& server, const RouteDeps& d) {
+  char identity[9];
+  if (!admitContentOperation(server, d, identity)) return;
+  using PocketDaily::Boot::DevBootReturn;
+  if (d.apMode || (d.stream && d.stream->receiving())) {
+    server.send(409, "text/plain", "Requires idle Same Wi-Fi");
+    return;
+  }
+  const auto target = readDevTransferMode(server);
+  if (target == DevBootReturn::None) return;
+  PocketDaily::TrialLease::Record record;
+  const auto* running = esp_ota_get_running_partition();
+  if (!running ||
+      (PocketDaily::TrialLease::read(record) &&
+       !PocketDaily::TrialLease::allowsMaintenanceMode(record, running->address, target == DevBootReturn::SyncSta))) {
+    server.send(409, "text/plain", "Pending trial permits only a preserved-slot Sync recovery restart");
+    return;
+  }
+  if (!PocketDaily::Boot::requestDevStaReturn(target)) {
+    server.send(422, "text/plain", "Failed maintenance return marker");
+    return;
+  }
+  server.sendHeader("Connection", "close");
+  server.send(202, "text/plain", "Maintenance return accepted; observe without replay");
+  delay(750);
+  ESP.restart();
+}
+
+__attribute__((noinline)) void appendTrialRecord(JsonDocument& doc, const PocketDaily::TrialLease::Record& record) {
+  doc["surface"] = PocketDaily::TrialLease::surfaceName(record.surface);
+  doc["surfaceFree"] = record.surfaceFree;
+  doc["surfaceLargest"] = record.surfaceLargest;
+  doc["preHttpFree"] = record.preHttpFree;
+  doc["preHttpLargest"] = record.preHttpLargest;
+  doc["readyFree"] = record.readyFree;
+  doc["readyLargest"] = record.readyLargest;
+  doc["run"] = record.run;
+  doc["phase"] = static_cast<uint32_t>(record.phase);
+  doc["seconds"] = record.seconds;
+  doc["returnAddress"] = record.returnAddress;
+  doc["trialAddress"] = record.trialAddress;
+  doc["imageBytes"] = record.imageBytes;
+  doc["returnAttempts"] = record.returnAttempts;
+  doc["resetReason"] = record.resetReason;
+  doc["wakeCause"] = record.wakeCause;
+  doc["failure"] = static_cast<uint32_t>(record.failure);
+  char hex[65];
+  for (size_t i = 0; i < 32; ++i) snprintf(hex + i * 2, 3, "%02x", record.returnSHA256[i]);
+  doc["returnSHA256"] = hex;
+  for (size_t i = 0; i < 32; ++i) snprintf(hex + i * 2, 3, "%02x", record.trialSHA256[i]);
+  doc["trialSHA256"] = hex;
+}
+
+__attribute__((noinline)) bool readTrialRecord(JsonDocument& doc) {
+  PocketDaily::TrialLease::Record record;
+  const bool present = PocketDaily::TrialLease::read(record);
+  if (present) appendTrialRecord(doc, record);
+  return present;
+}
+
+// Report actual device layout before deciding whether this trial contract fits.
+// These are app-partition metadata only; no arbitrary flash or NVS export.
+__attribute__((noinline)) void appendTrialLayout(JsonDocument& doc) {
+  const auto* running = esp_ota_get_running_partition();
+  const auto* next = esp_ota_get_next_update_partition(nullptr);
+  if (running) {
+    doc["runningAddress"] = running->address;
+    doc["runningBytes"] = running->size;
+  }
+  if (next) {
+    doc["nextAddress"] = next->address;
+    doc["nextBytes"] = next->size;
+  }
+}
+
+__attribute__((noinline)) void appendReaderWake(JsonObject result, uint32_t run) {
+  PocketDaily::TrialWake::Record wake;
+  if (PocketDaily::TrialReader::readWake(wake) && wake.run == run) {
+    auto w = result["autoWake"].to<JsonObject>();
+    w["schema"] = 1;
+    w["stage"] = static_cast<uint32_t>(wake.stage);
+    w["timeoutMs"] = wake.timeoutMs;
+    w["idleMs"] = wake.idleMs;
+    w["resetReason"] = wake.resetReason;
+    w["wakeCause"] = wake.wakeCause;
+    w["positionMatched"] = wake.positionMatched;
+    w["pageAdvanced"] = wake.pageAdvanced;
+  }
+}
+
+__attribute__((noinline)) void appendReaderTrial(JsonDocument& doc) {
+  PocketDaily::TrialReader::Record reader;
+  if (PocketDaily::TrialReader::read(reader)) {
+    auto result = doc["reader"].to<JsonObject>();
+    result["schema"] = 1;
+    result["minFreeHeap"] = reader.minFreeHeap;
+    result["minLargestBlock"] = reader.minLargestBlock;
+    result["memorySamples"] = reader.memorySamples;
+    result["renderMemorySamples"] = reader.renderMemorySamples;
+    result["run"] = reader.run;
+    result["stage"] = static_cast<uint32_t>(reader.stage);
+    result["requested"] = reader.requested;
+    result["rendered"] = reader.rendered;
+    result["spine"] = reader.spine;
+    result["page"] = reader.page;
+    result["reopened"] = reader.reopened;
+    result["missingObserved"] = reader.missingObserved;
+    result["recovered"] = reader.recovered;
+    appendReaderWake(result, reader.run);
+  }
+}
+
+#ifdef ENABLE_RTC_PROBE_ARENA
+__attribute__((noinline)) void appendRTCProbe(JsonDocument& doc) {
+  auto arena = doc["rtcProbe"].to<JsonObject>();
+  arena["version"] = 1;
+  arena["start"] = reinterpret_cast<uintptr_t>(_rtc_probe_start);
+  arena["end"] = reinterpret_cast<uintptr_t>(_rtc_probe_end);
+  arena["heapReservationEnd"] = reinterpret_cast<uintptr_t>(_rtc_force_slow_end);
+  arena["traceAddress"] = PocketDaily::RTCProbe::TRACE_ADDRESS;
+  arena["heapIntegrity"] = heap_caps_check_integrity_all(false);
+  arena["rtcHeapFree"] = heap_caps_get_free_size(MALLOC_CAP_RTCRAM);
+  PocketDaily::TrialLease::Record lease;
+  const auto* trace = reinterpret_cast<const volatile uint32_t*>(PocketDaily::RTCProbe::TRACE_ADDRESS);
+  if (PocketDaily::TrialLease::read(lease) && trace[0] == 0x50445731 && trace[1] == lease.run) {
+    auto values = arena["trace"].to<JsonArray>();
+    for (size_t i = 0; i < 32; ++i) values.add(static_cast<uint32_t>(trace[i]));
+  }
+}
+#endif
+
+__attribute__((noinline)) void handleDevTrialStatus(WebServer& server) {
+  JsonDocument doc;
+  doc["schema"] = 4;
+  doc["capability"] = PocketDaily::TrialLease::kCapability;
+  doc["present"] = readTrialRecord(doc);
+  appendTrialLayout(doc);
+  appendReaderTrial(doc);
+#ifdef ENABLE_RTC_PROBE_ARENA
+  appendRTCProbe(doc);
+#endif
+  String body;
+  serializeJson(doc, body);
+  server.send(200, "application/json", body);
+}
+
+// Explicit developer transaction only. Production contains the inactive boot
+// consumer, but this provision/install/status surface is compiled out there.
+__attribute__((noinline)) void handleDevTrialImage(WebServer& server, const RouteDeps& d) {
+  namespace Lease = PocketDaily::TrialLease;
+  uint64_t offset = 0;
+  const String text = server.arg("imageOffset");
+  const auto* part = esp_ota_get_running_partition();
+  if (d.apMode || (d.stream && d.stream->receiving()) || !part ||
+      (part->size != Lease::kSlotSize && part->size != Lease::kX3SlotSize) ||
+      !parseByteCount({text.c_str(), text.length()}, offset) || offset >= part->size) {
+    server.send(400, "text/plain", "Expected one bounded current-image offset on idle Same Wi-Fi");
+    return;
+  }
+  const size_t count = std::min(static_cast<size_t>(part->size - offset), firmware_flash::STAGING_BUFFER_BYTES);
+  auto* bytes = firmware_flash::sharedStagingBuffer();
+  if (esp_partition_read(part, offset, bytes, count) != ESP_OK) {
+    server.send(500, "text/plain", "Could not read current firmware image");
+    return;
+  }
+  server.client().setTimeout(DIAGNOSTIC_SEND_TIMEOUT_MS);
+  feedLoopWDT();
+  server.sendHeader("Cache-Control", "no-store");
+  server.setContentLength(count);
+  server.send(200, "application/octet-stream", "");
+  server.sendContent(reinterpret_cast<const char*>(bytes), count);
+  feedLoopWDT();
+  return;
+}
+
+__attribute__((noinline)) void installDevTrial(WebServer& server, const JsonDocument& doc) {
+  namespace Lease = PocketDaily::TrialLease;
+  const uint32_t run = doc["run"].as<uint32_t>();
+  const auto* destination = esp_ota_get_next_update_partition(nullptr);
+  const bool reader = !doc["readerPages"].isNull();
+  if (reader &&
+      !PocketDaily::TrialReader::prepare(run, doc["readerPages"].as<uint32_t>(), doc["readerBytes"].as<uint32_t>(),
+                                         doc["readerSHA256"].as<const char*>(), doc["readerAutoWake"] | false)) {
+    server.send(422, "text/plain", "Owned reader fixture preparation refused");
+    return;
+  }
+  if (!destination ||
+      firmware_flash::validateImageFile("/update.bin", destination->size) != firmware_flash::Result::OK ||
+      !Lease::prepare(run, doc["seconds"].as<uint32_t>(), doc["imageSHA256"].as<const char*>(),
+                      doc["returnSHA256"].as<const char*>(), Lease::surfaceFromName(doc["surface"] | "sync"))) {
+    if (reader) PocketDaily::TrialReader::clear(run);
+    server.send(422, "text/plain", "Trial preparation refused; preserve evidence before another request");
+    return;
+  }
+  if (!PocketDaily::Boot::requestDevSyncSta()) {
+    Lease::cancelPrepared(run);
+    server.send(503, "text/plain", "Trial return marker failed; firmware was not installed");
+    return;
+  }
+  server.sendHeader("Connection", "close");
+  server.send(202, "text/plain", "Explicit firmware trial accepted; observe without replay");
+  delay(750);
+  const auto result = firmware_flash::flashFromSdPath("/update.bin", nullptr, nullptr, true);
+  if (result != firmware_flash::Result::OK || !Lease::verifyDestination()) {
+    // A failed image is never booted; restore the current selector if the
+    // generic flasher had already selected its destination.
+    ota_boot::switchTo(esp_ota_get_running_partition());
+    Lease::cancelPrepared(run);
+    return;
+  }
+  ESP.restart();
+}
+
+__attribute__((noinline)) void mutateDevTrial(WebServer& server) {
+  namespace Lease = PocketDaily::TrialLease;
+  const String body = server.arg("plain");
+  JsonDocument doc;
+  if (body.length() > 512 || deserializeJson(doc, body) || !doc.is<JsonObject>() || !doc["run"].is<uint32_t>() ||
+      !doc["backupAcknowledged"].is<bool>() || !doc["backupAcknowledged"].as<bool>()) {
+    server.send(400, "text/plain", "Explicit trial and backup acknowledgement required");
+    return;
+  }
+  const uint32_t run = doc["run"].as<uint32_t>();
+  if (server.method() == HTTP_DELETE) {
+    PocketDaily::TrialReader::Record reader;
+    if (doc.size() != 2 || (PocketDaily::TrialReader::read(reader) && !PocketDaily::TrialReader::clear(run)) ||
+        !Lease::clear(run)) {
+      server.send(409, "text/plain", "Only the matching terminal trial can be cleared");
+      return;
+    }
+    server.send(200, "text/plain", "Trial record cleared");
+    return;
+  }
+  const bool autoWake = doc.size() == 10 && doc["readerAutoWake"].is<bool>() && doc["readerAutoWake"].as<bool>();
+  const bool reader = (doc.size() == 9 || autoWake) && doc["readerPages"].is<uint32_t>() &&
+                      doc["readerBytes"].is<uint32_t>() && doc["readerSHA256"].is<const char*>();
+  const bool surface = doc.size() == 7 && doc["surface"].is<const char*>() &&
+                       Lease::surfaceFromName(doc["surface"].as<const char*>()) != Lease::Surface::None;
+  const uint32_t limit = surface ? Lease::durationLimit(Lease::surfaceFromName(doc["surface"].as<const char*>())) : 180;
+  if ((autoWake && doc["seconds"].as<uint32_t>() != 360) || (!autoWake && doc["seconds"].as<uint32_t>() > limit) ||
+      (!reader && !surface && doc.size() != 6) || !doc["seconds"].is<uint32_t>() ||
+      !doc["imageSHA256"].is<const char*>() || !doc["returnSHA256"].is<const char*>() ||
+      !doc["installAcknowledged"].is<bool>() || !doc["installAcknowledged"].as<bool>()) {
+    server.send(400, "text/plain", "Explicit bounded installation acknowledgement required");
+    return;
+  }
+  installDevTrial(server, doc);
+}
+
+void handleDevTrial(WebServer& server, const RouteDeps& d) {
+  char identity[9];
+  if (!admitContentOperation(server, d, identity)) return;
+  if (server.method() == HTTP_GET) {
+    if (server.hasArg("imageOffset"))
+      handleDevTrialImage(server, d);
+    else
+      handleDevTrialStatus(server);
+    return;
+  }
+  if (d.apMode || (d.stream && d.stream->receiving())) {
+    server.send(409, "text/plain", "Firmware trial requires idle Same Wi-Fi");
+    return;
+  }
+  mutateDevTrial(server);
+}
+
 // Developer builds only. Validates and flashes the staged /update.bin, then
 // reboots; a one-shot marker makes the next boot rejoin the saved STA network.
 // Missing credentials fall back to the normal Wi-Fi chooser. The response is sent before
 // flashing because the loop blocks for the erase/write and ends in a chip
 // restart.
 void handleDevFlash(WebServer& server, const RouteDeps& d) {
+  PocketDaily::TrialLease::Record lease;
+  if (PocketDaily::TrialLease::read(lease) && PocketDaily::TrialLease::pending(lease.phase)) {
+    server.send(409, "text/plain", "A firmware trial is pending; preserve its evidence");
+    return;
+  }
   HalSystem::setCrashBreadcrumb("dev:remote-flash");
   // Allowed on the reader's own hotspot too: when the STA path is the thing
   // being repaired, the dedicated AP link is the delivery route (and it has
@@ -1594,6 +2250,15 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
   }
   // Home / Daily Brief share the content slot; Sync profiles only.
   if (isSyncProfile(d.profile) && d.screen.enqueue && d.screen.state && d.screen.busy) {
+    routes.on("/api/pocket/v1/layout-cover", HTTP_GET, [server = &server, deps = &d] {
+      note(*deps);
+      handleLayoutCover(*server, *deps);
+    });
+    if (d.screen.layoutInputs)
+      routes.on("/api/pocket/v1/layout-inputs", HTTP_GET, [server = &server, deps = &d] {
+        note(*deps);
+        handleLayoutInputs(*server, *deps);
+      });
     routes.on("/api/pocket/v1/screen/present", HTTP_POST, [server = &server, deps = &d] {
       note(*deps);
       handleScreenPresentation(*server, *deps, true);
@@ -1746,10 +2411,28 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
   });
   routes.on("/api/pocket/v1/dev/fresh-start", HTTP_POST,
             [server = &server, deps = &d] { handleDevFreshStart(*server, *deps); });
+  routes.on("/api/pocket/v1/dev/transfer-mode", HTTP_POST, [server = &server, deps = &d] {
+    note(*deps);
+    handleDevTransferMode(*server, *deps);
+  });
+  routes.on("/api/pocket/v1/dev/trial-lease", HTTP_GET, [server = &server, deps = &d] {
+    note(*deps);
+    handleDevTrial(*server, *deps);
+  });
+  routes.on("/api/pocket/v1/dev/trial-lease", HTTP_POST, [server = &server, deps = &d] {
+    note(*deps);
+    handleDevTrial(*server, *deps);
+  });
+  routes.on("/api/pocket/v1/dev/trial-lease", HTTP_DELETE, [server = &server, deps = &d] {
+    note(*deps);
+    handleDevTrial(*server, *deps);
+  });
   routes.on("/api/pocket/v1/dev/flash", HTTP_POST, [server = &server, deps = &d] {
     note(*deps);
     handleDevFlash(*server, *deps);
   });
+  routes.on("/api/pocket/v1/dev/build-failure", HTTP_GET,
+            [server = &server, deps = &d] { handleDevBuildFailure(*server, *deps); });
   for (const auto method : {HTTP_POST, HTTP_GET, HTTP_DELETE}) {
     routes.on("/api/pocket/v1/dev/reader-capture", method,
               [server = &server, deps = &d] { handleDevReaderCapture(*server, *deps); });

@@ -1,0 +1,5 @@
+add_executable(trial_lease_test TrialLeaseTest.cpp ${REPO_ROOT}/src/pocket_daily/boot/TrialLease.cpp)
+target_compile_definitions(trial_lease_test PRIVATE ENABLE_DEV_REMOTE_FLASH)
+target_include_directories(trial_lease_test BEFORE PRIVATE stubs)
+target_link_libraries(trial_lease_test PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(trial_lease_test)

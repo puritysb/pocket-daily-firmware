@@ -2,11 +2,13 @@
 
 #include <GfxRenderer.h>
 #include <HalSystem.h>
+#include <Memory.h>
 
 #include "ContentTextLayout.h"
 #include "PocketProfileStore.h"
 #include "ScreenFrame.h"
 #include "SdCardFontSystem.h"
+#include "components/themes/HeaderPainter.h"
 #include "util/CjkScript.h"
 
 namespace PocketDaily::Screen {
@@ -55,6 +57,7 @@ bool ScreenPresentation::enqueue(const Surface surface, const uint32_t generatio
   requested_.surface = surface;
   requested_.generation = generation;
   frame_.reset();  // a retained frame never outlives its paint; defensive
+  presentedHeader_.reset();
   preparationPending_ = true;
   failure_ = PresentationFailure::None;
   phase_ = PresentationPhase::Queued;
@@ -70,6 +73,12 @@ bool ScreenPresentation::service(GfxRenderer& renderer, const uint32_t freeHeap,
   // Preserve the cold admission budget; only its lifetime moves out of HTTP.
   // Fail once, never spin/retry or change the radio.
   if (freeHeap < kMinFreeHeap || largestBlock < kMinLargestBlock) {
+    fail(renderer, PresentationFailure::Memory);
+    return false;
+  }
+  static_assert(sizeof(HeaderPainter::Inputs) <= 192, "Bound the retained header receipt");
+  presentedHeader_ = makeUniqueNoThrow<HeaderPainter::Inputs>();
+  if (!presentedHeader_) {
     fail(renderer, PresentationFailure::Memory);
     return false;
   }
@@ -128,7 +137,7 @@ bool ScreenPresentation::render(GfxRenderer& renderer) {
   // Pocket Daily paints in portrait; restore the transfer view's orientation.
   const auto orientation = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
-  bool drawn = drawFrame(renderer, *frame_, font_);
+  bool drawn = drawFrame(renderer, *frame_, font_, presentedHeader_.get());
   // A bounded read failure while drawing latches; never certify that frame.
   if (font_ && !sdFontSystem.boundedUiFontReady(font_)) drawn = false;
   renderer.setOrientation(orientation);
@@ -151,6 +160,7 @@ void ScreenPresentation::hide(GfxRenderer& renderer) {
   preparationPending_ = false;
   requested_ = {};
   release(renderer);
+  presentedHeader_.reset();
   failure_ = PresentationFailure::None;
   phase_ = PresentationPhase::Idle;
   drawing_.store(false, std::memory_order_release);
@@ -163,6 +173,14 @@ Receipt ScreenPresentation::receipt() const {
   return receipt;
 }
 
+bool ScreenPresentation::copyPresentedHeader(HeaderPainter::Inputs& out, const uint32_t generation) const {
+  if (phase_.load(std::memory_order_acquire) != PresentationPhase::Rendered || requested_.generation != generation ||
+      !presentedHeader_)
+    return false;
+  out = *presentedHeader_;
+  return true;
+}
+
 void ScreenPresentation::release(GfxRenderer& renderer) {
   if (font_) sdFontSystem.releaseLoaded(renderer);
   font_ = 0;
@@ -171,6 +189,7 @@ void ScreenPresentation::release(GfxRenderer& renderer) {
 
 void ScreenPresentation::fail(GfxRenderer& renderer, const PresentationFailure failure) {
   release(renderer);
+  presentedHeader_.reset();
   failure_ = failure;
   phase_ = PresentationPhase::Failed;
   drawing_.store(false, std::memory_order_release);

@@ -10,6 +10,7 @@
 #include "pocket_daily/BuildFailureLog.h"
 #include "pocket_daily/FirmwareIdentity.h"
 #include "pocket_daily/ReaderPerf.h"
+#include "pocket_daily/boot/TrialLease.h"
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
 #include "pocket_daily/nearby_sync/WifiSetup.h"
 #include "pocket_daily/web/UploadStreamServer.h"
@@ -22,6 +23,20 @@ namespace {
 // reader reports diagnostics as unavailable and answers 503 so the companion
 // never queues dozens of requests at a starved reader; transfers remain.
 constexpr uint32_t DIAGNOSTIC_MIN_FREE_HEAP = 10U * 1024U;
+
+__attribute__((noinline)) void appendTrialStatus(JsonDocument& doc) {
+  if (const auto* lease = PocketDaily::TrialLease::runningTrial()) {
+    JsonObject trial = doc["trialLease"].to<JsonObject>();
+    trial["version"] = 4;
+    trial["surface"] = PocketDaily::TrialLease::surfaceName(lease->surface);
+    trial["run"] = lease->run;
+    trial["slot"] = lease->trialAddress;
+    trial["seconds"] = lease->seconds;
+    char hex[65];
+    for (size_t i = 0; i < 32; ++i) snprintf(hex + i * 2, 3, "%02x", lease->trialSHA256[i]);
+    trial["imageSHA256"] = hex;
+  }
+}
 }  // namespace
 
 bool diagnosticsAffordable() { return ESP.getFreeHeap() >= DIAGNOSTIC_MIN_FREE_HEAP; }
@@ -56,6 +71,7 @@ String buildStatusJson(const StatusInputs& in) {
     transfer["percent"] = feedback.percent();
   }
   if (in.screenPresentation) doc["screenPresentation"] = 1;
+  if (in.layoutInputs && isSyncProfile(in.profile)) doc["layoutInputs"] = 2;
   // Pocket Daily profile endpoints (docs/pocket-profile-v1.md) exist on Sync.
   if (isSyncProfile(in.profile)) doc["pocketProfile"] = 1;
   // POST /api/pocket/v1/glance (docs/pocket-glance-v1.md) sits beside it.
@@ -63,6 +79,7 @@ String buildStatusJson(const StatusInputs& in) {
   // GET /api/pocket/v1/content/file: read-only published revision files.
   doc["contentRead"] = 1;
   doc["version"] = CROSSPOINT_VERSION;
+  appendTrialStatus(doc);
   doc["firmwareLineage"] = PocketDaily::FirmwareIdentity::LINEAGE;
   doc["crossPointBase"] = PocketDaily::FirmwareIdentity::CROSSPOINT_BASE;
   doc["ip"] = ipAddr;
@@ -70,6 +87,8 @@ String buildStatusJson(const StatusInputs& in) {
   doc["rssi"] = in.apMode ? 0 : WiFi.RSSI();
   doc["freeHeap"] = ESP.getFreeHeap();
   doc["totalHeap"] = ESP.getHeapSize();
+  doc["largestFreeBlock"] = ESP.getMaxAllocHeap();
+  doc["minimumFreeHeap"] = ESP.getMinFreeHeap();
   // 2: list/delete/storage plus piece download (docs/reader-files.md).
   if (isSyncProfile(in.profile)) doc["readerFiles"] = 2;
   // GET/POST /api/pocket/v1/reading (docs/reading-progress-v1.md), Sync profiles only.
