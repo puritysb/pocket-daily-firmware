@@ -30,24 +30,94 @@ not the Sync heartbeat profile, free heap at least 10 KiB), status carries:
 }
 ```
 
-The key is absent when nothing was recorded. `freeHeap`/`largestBlock` are read
-right after the failure, before the section is released.
+The key is also absent in the Sync profile, below the diagnostic heap gate, or
+when the record cannot be read or validated; absence does not prove that no
+failure occurred. `freeHeap`/`largestBlock` are read after the failed build
+returns, before the section is released. ZIP input/output buffers and inflater
+state have already been freed at this point: these are **post-cleanup** values,
+not the available heap at the failing allocation.
 
 | step | where the build stopped | detail |
 |---|---|---|
-| `html-stream` | inflating the chapter into `html/<spine>.html` | `ZipFile::StreamError`: `open`, `entry`, `read-buffer`, `output-buffer`, `window` (deflate window segments), `inflate`, `read`, `write`, `method` |
+| `html-stream` | inflating the chapter into `html/<spine>.html` | `ZipFile::StreamError`: `open`, `entry`, `read-buffer`, `output-buffer`, `window` (inflater state or contiguous window allocation), `inflate`, `read`, `write`, `method` |
 | `section-file` | opening `sections/<spine>.bin.part` | — |
 | `build-context`, `parser` | allocating build state or the chapter parser | — |
 | `begin-parse` | opening the HTML or starting expat | — |
 | `layout` | parse or layout error while building pages | `out-of-memory` when layout ran out of heap |
 | `commit` | writing the tables or moving the section file into place | — |
 
-The record is informational: nothing reads it back on the reader, and deleting
-it is harmless. The file is also downloadable through File Transfer.
+The record is diagnostic only and does not control reading. The file is
+downloadable through File Transfer. Developer firmware additionally provides
+the bounded diagnostic route described in [developer-pipeline.md](developer-pipeline.md);
+production Sync does not expose this file. Internal retries do not increment
+the record count: only an ultimately failed section build does. A successful
+retry leaves the previous failure record unchanged.
 
-## Background (2026-09-27)
+## Current inflater and bounded retry (2026-10-25)
 
-The first recorded case, an X3 reading a bilingual novel, failed at
-`html-stream` before this log existed: the chapter's inflated HTML and section
-file were never created. The streaming inflater then needed one contiguous
-32 KiB window; it now uses four 8 KiB segments (`lib/InflateReader`).
+The EPUB stream uses `ZipFile` and `lib/miniz/src/InflateStream.cpp`. For entries at least
+as large as the output chunk, the normal chapter path allocates an 8 KiB input
+buffer, an 8 KiB output buffer, a miniz state of about 8 KiB and one contiguous
+32 KiB window. The four 8 KiB segments in
+`lib/InflateReader` belong to a separate inflater used by fonts; they are not the
+EPUB streaming path.
+
+An X3 record from production 0.1.0 confirmed `html-stream` / `window` on spine 1
+of the original English acceptance fixture. The precise page is unknown.
+Its 86,920 free bytes and 49,140-byte largest block were measured after cleanup;
+freed buffers can coalesce into a block larger than was available during init.
+The `window` detail covers both state and window initialization failures and
+does not identify which allocation failed by itself.
+
+Section keeps its existing maximum of three attempts. After `Window` only, the
+next attempt uses 1 KiB input/output buffers, reducing their transient footprint
+by 14 KiB. The initial attempt and retries after other errors retain 8 KiB
+buffers. Every attempt starts a fresh inflater and truncates its temporary HTML;
+only a complete successful inflate may be renamed into the HTML cache. A temp
+file open failure reports `write`, even if an earlier attempt failed at `window`.
+Large-entry decoding and its 32 KiB window are unchanged. The later semantic
+section-cache invalidation is described below.
+
+Host fault tests exercise the actual Section/ZIP/miniz pipeline, including
+bounded repeated failure, allocation cleanup and byte-identical HTML/section
+output after recovery. They are not an ESP32 allocator or SD-card simulation:
+the device still needs a contiguous window and physical validation is required.
+
+
+## Small ZIP entries and image header probes
+
+A later X3 development walk confirmed display mode `0` with one image header
+probe and its fallback extraction both failing at inflater initialization
+(`Window`), followed by an ALT label. The pre-probe heap was 55,608 bytes free
+with a 40,948-byte largest block. These are before the ZIP input/output/state
+allocations, not the block available when the ring is allocated. The original
+PNG was a 409-byte deflated entry.
+
+`ZipFile::readFileToStream` now uses the existing output chunk as a complete
+non-wrapping destination when the declared uncompressed entry is **strictly
+smaller** than that chunk. No new allocation is added; the transient miniz state
+remains, while the separate 32 KiB ring is unnecessary. This covers any small
+entry, including a PNG probed with 1024-byte chunks, extracted with 4096-byte
+chunks or lazily extracted with 8192-byte chunks. Exact-boundary and larger
+entries keep the existing streaming path.
+
+The strict inequality leaves space to observe the deflate end marker in a
+single call. A small entry must return `Done` with exactly its declared size
+before any bytes reach the sink; its buffer start is never reused for a second
+inflate call. Valid short writes still succeed only with explicit
+`allowEarlyStop`. Malformed small entries now fail before a header sink can turn
+a partial result into success. This is an intentional tightening of malformed
+input handling; large-entry early-stop behavior is unchanged.
+
+The section byte layout is unchanged, but its semantic version is now136.
+Completed v135 sections and partial trailers tagged135 are rejected and rebuilt
+when normally opened, so previously cached ALT output is not retained forever.
+Only the affected section file and its temporary file are removed at that time;
+retained HTML, metadata, progress and reading-offer records remain. The reader
+restores by saved visible-text offset when available, otherwise by its existing
+chapter page-ratio fallback; page numbers can change when an image is restored.
+Physical verification first uses a fresh owned fixture path and does not manually
+delete original caches. This change does not establish that
+large images fit the available heap or that the PNG decoder can allocate and
+paint successfully. The physical run must confirm mode, image diagnostics and
+actual pixels after installing the candidate.

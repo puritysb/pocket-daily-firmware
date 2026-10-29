@@ -201,6 +201,22 @@ Decided 2026-10-01 (owner): Pocket Daily's first button reads **Home**; books
 return to the shell that opened them; stock screens host no BLE window; UI
 packs and live frame capture leave the firmware and the themes return to stock.
 
+- **Developer USB bootstrap** (`main.cpp`, `ProductBoot`): `CMD:DEV_SYNC_STA`
+  arms the verified existing saved-Wi-Fi return marker, then restarts. No new
+  persistent preference or radio service; compiled out of release builds.
+- **Actual X4 sleep trial** (`HalPowerManager`, `main.cpp`): developer-only
+  timer return requires HAL-confirmed external USB power on X4; its ordinary
+  battery-latch shutdown is preserved. The normal activity's Home/Brief frames
+  and bounded PDLI inputs are saved before sleep; run/CRC-bound SD evidence is
+  consumed only by the opted-in developer scenario. No production remote input
+  path, second framebuffer or battery-only timer guarantee is added.
+- **Serial log backpressure** (2026-10-18, working tree,
+  `lib/Logging/Logging.cpp`): only write a complete diagnostic record when the
+  serial TX buffer can admit it; a non-waiting atomic flag prevents competing
+  logger writes from consuming the checked capacity. Skip serial output on
+  congestion while retaining the RTC record. No driver/global SDK edits,
+  allocation or timeout reduction. Generic robustness candidate, not an
+  upstream submission; hardware evidence is in the sibling X4 acceptance doc.
 - **Boot and wake routing** (`main.cpp`): Pocket Daily is the default shell
   (`startupApp`); Back held opens Home; OK held or waking from a book's Quick
   Resume page reopens the book with stock's boot-loop guard. Documented in
@@ -225,6 +241,14 @@ packs and live frame capture leave the firmware and the themes return to stock.
   (`BaseTheme::drawMenuPageArrows`) so the Pocket Daily row cannot draw over
   the button hints. Pocket content cards and Articles rows are drawn outside
   the themes (`b5be8778`, `4485e457`).
+- **Header input extraction** (2026-10-18, working tree): `BaseTheme` delegates
+  header painting to generic `HeaderPainter` and can return the exact resolved
+  inputs. No product include, device-frame cache or new theme setting lives in
+  the component. The Pocket Sync presentation owns a maximum 192-byte receipt
+  after display; the read-only PDLI endpoint uses it for matching generations.
+  Stock/header host comparisons and receipt lifetime/fault tests cover the
+  split. Reconcile upstream header behavior when merging; the product snapshot
+  API is not an upstream candidate. Contract: `layout-inputs-v1.md`.
 - **Home**: one Pocket Daily row with the stock `Recent` icon (Classic draws no
   menu icons, as in stock). Stock Home shows 4 rows (+OPDS); with ours, Classic
   fits 5 rows per page on X3/X4, so only an OPDS-configured Home pages (with
@@ -248,7 +272,7 @@ packs and live frame capture leave the firmware and the themes return to stock.
 
 ## H — device and fork patches (kept, never sent upstream)
 
-- Section cache v134, 0xFF partial sentinel, 7/12-byte progress record
+- Section cache v136, 0xFF partial sentinel, 7/12-byte progress record
   (`lib/Epub/AGENTS.md`, `ReaderProgressCodec.h`); TXT cache v4.
 - 12 KB build-suspend floor, X3 76-row render strips, ReaderPerf stages.
 - BoundedUI font mode, kerning/ligature lookup hooks, page glyph pinning
@@ -274,7 +298,7 @@ Documented by their own contracts; the seam mechanics are in `docs/SEAM.md`.
 | Bilingual EPUB | `docs/bilingual-epub.md` | Parser filter, reader cycle, long-press value |
 | Companion web routes, port-82 upload, private AP | `docs/webserver-endpoints.md`, `docs/transfer-control-v1.md`, `docs/SEAM.md` | Web server hooks E1–E5 |
 | Live Studio (WebSocket status/prefs push; UI packs and frame capture removed 2026-10-01) | `docs/live-studio-v1.md` | `wireLiveStudioHost()` thunks in `CrossPointWebServer.cpp`; no theme or render-task hooks |
-| Glance, profile, content cards | `docs/pocket-glance-v1.md`, `docs/pocket-profile-v1.md`, `docs/content-*.md` | none outside `src/pocket_daily/` |
+| Glance, profile, content cards | `docs/pocket-glance-v1.md`, `docs/pocket-profile-v1.md`, `docs/content-*.md` | Sync activity presentation thunks; its loop yields transfer feedback to queued navigation as well as deferred preparation (2026-10-18) |
 | Staged firmware offer, dev remote flash | `docs/dev-update-return.md` | `main.cpp` boot, `SdFirmwareUpdateActivity` |
 | Daily Brief sleep frame, WAKE cue | `docs/nearby-sync-v1.md` | `Activity::paintSleepFrame`, `SleepActivity` |
 
@@ -287,3 +311,10 @@ Documented by their own contracts; the seam mechanics are in `docs/SEAM.md`.
   the row moves to "merged upstream" with the PR number.
 - Each upstream sync re-runs the reproduction commands at the top and updates
   the baseline line.
+
+- 2026-10-17: `GfxRenderer` scales the automatic PocketSansWorld reading face
+  from its installed bitmap size, including measurement/kerning/line metrics
+  and grayscale/rotated/clipped raster writes. One scale-specific reader alias
+  shares the existing font/glyph cache; native UI/card IDs remain unscaled.
+  Section v135 invalidates old single-size layouts. Physical X4 typography
+  acceptance is required; a saved preference alone is not rendering evidence.

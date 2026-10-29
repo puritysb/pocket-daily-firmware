@@ -75,35 +75,32 @@ CrossPoint is open-source e-reader firmware - community-built, fully hackable, f
 
 ---
 
-## USB-locked devices (Xteink Unlocker)
+## Model compatibility and USB-locked readers
 
-Some Xteink units purchased from third-party stores (e.g. AliExpress) ship with USB flashing locked from the factory.
-If your device is locked, you will need to use the **Xteink Unlocker** tool available at
-https://crosspointreader.com/#unlock-tool before you can flash CrossPoint.
+Identify the exact model, installed firmware and installation eligibility
+before choosing an image. This product targets X3 and X4 with ESP32-C3; X4
+Classic/V2 and X4 Pro are different devices. An unfamiliar model or USB lock
+is not a reason to try a generic X3/X4 image.
 
-**You do not need this tool if you bought your device directly from xteink.com.** Those units are not locked.
-
-**Not sure if your device is locked?** Power it on, connect the USB-C cable, and try flashing via the web flasher first (see
-[Install firmware](#install-firmware) below). If the browser's serial device picker does not show your device, try a different
-USB port or browser before assuming the device is locked. Only reach for the unlocker if the device still doesn't appear.
-
-> ### ⚠️ WARNING: READ THIS BEFORE USING THE UNLOCKER ⚠️
-> 
-> **The only officially supported firmwares in the unlock tool are CrossPoint and CrossInk.**
-> 
-> Flashing any other firmware on a USB-locked device may **permanently brick the device** or leave it **permanently
-> stuck on that firmware with no recovery path**. Once USB flashing is re-locked, your only way back is via OTA, and if
-> the firmware you flashed doesn't support OTA, **there is no way out**.
-> 
-> **The Papyrix fork has removed OTA update support from its code.** If you flash Papyrix onto a
-> USB-locked unit, you will have **zero update or recovery path** and will be stuck on it forever. **Do not flash
-> Papyrix (or any other unsupported firmware) on a locked device.**
+Do not use the CrossPoint unlocker to install Pocket Daily. The
+[upstream installation guidance](https://github.com/crosspoint-reader/crosspoint-reader#install-firmware)
+limits that unlocker to CrossPoint and CrossInk; installing CrossPoint first
+does not establish that a locked unit can safely run or recover from this fork.
+For locked or uncertain units, consult the seller or model-specific upstream
+instructions and use the app's offline reading meanwhile. Factory and
+USB-locked starting states have not been verified on hardware for Pocket Daily.
 
 ## Install firmware
 
 Pocket Daily releases are published at
 [github.com/puritysb/pocket-daily-firmware/releases](https://github.com/puritysb/pocket-daily-firmware/releases).
-One `firmware.bin` serves both X3 and X4.
+One `firmware.bin` serves the supported ESP32-C3 X3 and X4 models.
+
+As checked on 2026-10-25, the current product release `pocket-v0.1.0` has not
+been published. GitHub's latest release is the historical `v1.6.6`; the current
+app excludes it and the retired pre-reset betas. The update instructions below
+require a supported `pocket-v…` release. Local-image selection belongs to the
+Debug-only development path below; a local build is not a published release.
 
 ### Update a reader that already runs Pocket Daily
 
@@ -111,72 +108,83 @@ One `firmware.bin` serves both X3 and X4.
   **Same Wi-Fi**, then tap **Update reader** in the app. The app downloads the
   latest release, validates it and sends it. When you leave the transfer
   screen, the reader shows **Update firmware?** and flashes only after you
-  confirm. You can also send a `firmware.bin` you downloaded yourself under
-  Files, over the same Wi-Fi or a direct connection.
-- **On the reader:** press **Sync** and choose **Check for updates** (also under
+  confirm. For Direct connection, prepare the official update before joining
+  the reader's private network. The shipping app does not import local firmware
+  files; **Send a Local Build…** is available only in Debug builds.
+- **On X4:** press **Sync** and choose **Check for updates** (also under
   Settings). The reader joins a saved Wi-Fi network and installs only after you
-  confirm. It needs memory for an HTTPS session that an X3 does not have with
-  the stock TLS buffers; there the screen says so and points to the app.
+  confirm. This path still needs acceptance on the exact release image.
+- **On X3:** use the app or SD-card update. Reader-native HTTPS update checks
+  and downloads are outside the current 0.x support scope because the stock
+  TLS buffers exceed available memory. The reader explains the memory failure
+  and points to the app; this is not a successful on-reader update check.
 
-Nothing installs automatically after a transfer.
+Nothing installs automatically after a transfer. After confirming installation
+on the reader, reconnect to the same reader and check its reported version.
+Keep a previous compatible image available for SD-card recovery. The model-specific
+acceptance criteria are in [the release checklist](docs/release-checklist.md).
 
 ### Move from CrossPoint Reader
 
-A recent CrossPoint Reader can receive `firmware.bin` from the Pocket Daily app
-over the same Wi-Fi (or copy it to the SD card root) and install it with
-Settings → System → SD Card Firmware Update. No USB flashing is needed.
+On an eligible reader, open File Transfer → Join a Network. In the app choose
+Find on Same Wi-Fi, then Manage Reader → Firmware → **Install Pocket Daily…**.
+The shipping app needs a supported official release; it validates the image,
+copies `pocket-daily.bin` to the SD root and reads the file back for SHA-256
+verification. On the reader press Back → Settings → System → SD Card Firmware
+Update, choose `pocket-daily.bin` and confirm.
+
+This route passed on one X4 with a CrossPoint `1.4.1-dev` fork on 2026-10-16.
+On the same X4 with upstream CrossPoint `1.6.5`, upload/readback failed under
+low heap; a clean-card comparison remains untested. Copying a published image
+to SD with a card reader is the fallback, but that complete route has not yet
+been rehearsed. The later developer USB installation does not establish that
+the failed Wi-Fi route is fixed. The companion repository's `docs/OOBE.md`
+records these starting states and their route-specific evidence.
 
 ### First install from factory firmware
 
-The app cannot talk to factory firmware, so the first install is over USB:
+The app cannot connect directly to factory firmware or bootstrap it wirelessly.
+Confirm the exact model, software and installation eligibility with the seller
+or manufacturer instructions; app-only reading works while this is unresolved.
+Factory-firmware installation has not been verified on hardware.
 
-1. Connect the reader via USB-C and wake/unlock it.
-2. Download `firmware.bin` from the Pocket Daily releases page.
-3. Go to https://crosspointreader.com/#flash-tools, select the device (X3 or
-   X4), click "Custom .bin" and upload that `firmware.bin`.
-
-Check the USB-lock warning above first. Later updates use the reader or the app.
+A customer-facing Pocket Daily USB installer, in the app or a web flasher, is
+not built. USB serial installation is a developer procedure today, and a
+shipping-app flashing path needs a separate product decision. This README does
+not establish a customer USB installation route for factory or locked readers.
 
 ### Revert to CrossPoint or official firmware
 
-Flash upstream CrossPoint or the official firmware with
-https://crosspointreader.com/#flash-tools.
-
-### Command line
-
-1. Install [`esptool`](https://github.com/espressif/esptool):
-
-```bash
-pip install esptool
-```
-
-2. Download `firmware.bin` from the [Pocket Daily releases page](https://github.com/puritysb/pocket-daily-firmware/releases).
-3. Connect your device via USB-C.
-4. Find the device port. On Linux, run `dmesg` after connecting. On macOS:
-
-```bash
-log stream --predicate 'subsystem == "com.apple.iokit"' --info
-```
-
-5. Flash:
-
-```bash
-esptool.py --chip esp32c3 --port /dev/ttyACM0 --baud 921600 write_flash 0x10000 /path/to/firmware.bin
-```
-
-Adjust `/dev/ttyACM0` to match your system.
+Confirm a compatible recovery image and the exact model's supported recovery
+method before installation. Do not assume a locked unit can return to other
+firmware. The release checklist requires SD recovery acceptance on both target
+models; earlier developer recovery evidence is not approval of every starting
+state.
 
 ### Development builds
 
 Every successful local build stages `firmware/update.bin`. Send it with the
-app or `scripts/pocket_put.py`, or copy it to the SD card root and install it
-from Settings. See [Development quick start](#development-quick-start) below.
+Debug app's **Send a Local Build…** (or **Copy a Local Build…** for CrossPoint),
+use `scripts/pocket_put.py`, or copy it to the SD card root and install from
+Settings. Local firmware selection is absent from the shipping app, and a
+Debug transfer does not sign off its official-release update flow. Authorized
+developer hardware procedures are in
+[the developer pipeline](docs/developer-pipeline.md); see also
+[Development quick start](#development-quick-start).
 
 ### Releasing
 
-Bump `version` in `platformio.ini`, then push a `vX.Y.Z` tag. The release
-workflow builds `gh_release` and publishes the GitHub release that readers
-check for updates.
+Set `version` in `platformio.ini` and complete
+[the release checklist](docs/release-checklist.md) for the exact production
+commit and image on X3 and X4. Only after owner authorization, publish a
+`pocket-v<version>` tag (for example `pocket-v0.1.0`). The workflow builds
+`gh_release`, verifies its embedded version and publishes a normal GitHub
+release marked latest. The old `vX.Y.Z` tags do not trigger this workflow.
+
+`pocket-v<version>-beta.<n>` builds `gh_release_beta` and publishes a prerelease
+for development apps; it does not replace latest or establish stable hardware
+acceptance. See [product versioning](docs/product-versioning.md) for the 0.x
+support scope and the full `1.0.0` gates.
 
 ---
 

@@ -109,7 +109,30 @@ complete SDK configuration and changes only RX/TX buffer limits and the RX
 block-ACK window, using no heap. Diagnostic buffers are separately gated by
 `ENABLE_DEV_NETWORK_DIAGNOSTICS`, not by remote-flash availability.
 
+### Explicit developer-provisioned production trial lease
+
+`pocket_daily/boot/TrialLease` has an inactive consumer in normal firmware and
+provision/status/clear handlers only inside `ENABLE_DEV_REMOTE_FLASH`.
+`main.cpp` calls `onBoot()` before GPIO/SD initialization and routes a checked
+one-shot trial/return to Same Wi-Fi. The 116-byte CRC-checked NVS record binds
+the two actual fixed OTA slots, whole return-slot SHA and candidate-byte SHA.
+An explicitly armed 30–180s timer restarts the trial; the next startup selects
+the preserved slot. A repeated boot also returns before normal setup.
+`main.cpp` calls `TrialLease::beforeSleep` before each terminal sleep; the HAL
+`armRecoveryTimer` adds a 5s RTC return timer only during a lease,
+on X3 or USB-powered X4; unsupported power conditions restart instead.
+`FirmwareFlasher` and `OtaUpdater` protect the preserved slot during the trial.
+No production HTTP trial/flash endpoint, bootloader change, shipping-app auto
+installation, credential storage, new UI or ordinary-boot timer is added.
+The existing 4KiB main-task staging buffer is reused for image hashes.
+See [developer trial contract](developer-trial-lease.md) for activation, failures
+and the remaining pre-framework/physical-power limits.
+
 ### `src/main.cpp` (~30 of 755 lines)
+
+Developer-only serial `CMD:DEV_SYNC_STA` calls `Boot::requestDevSyncSta` to
+verify the existing one-shot `S` marker before reboot. It bootstraps USB
+acceptance without a menu press; absent from production builds.
 
 - `#include "pocket_daily/boot/ProductBoot.h"`.
 - Boot hooks after SD init: `PocketDaily::Boot::begin(renderer,
@@ -148,6 +171,11 @@ block-ACK window, using no heap. Diagnostic buffers are separately gated by
 - `setContentPresentation(...)` thunk block: enqueue/receipt/busy plus
   `describe` (resolved display inputs via `ContentPresentation::describe`).
   The live-frame capture thunk and its include were removed 2026-10-01.
+- The loop clears transfer feedback for any busy presentation after its upload
+  transport releases, including card navigation without deferred preparation.
+  Otherwise a Saved banner can consume the only render request and leave HTTP
+  excluded indefinitely. This is existing presentation ownership, not a new
+  render task or a change to the transport admission budget (2026-10-18).
 
 ### Already-clean registrations
 
@@ -205,7 +233,21 @@ follow-up, never send product stack upstream):
 - `lib/GfxRenderer/`, `lib/EpdFont/`, `lib/OpdsParser/`,
   `lib/KOReaderSync/` — parser/renderer fixes.
 
+- `lib/Logging/Logging.cpp` — best-effort serial records: a non-waiting atomic
+  writer guard and whole-record TX-capacity admission keep an enumerated USB
+  port with no reader from delaying card rendering/HTTP. The internal RTC log
+  still records skipped output. No new allocation or driver patch; ROM output
+  is unchanged. See the X4 app acceptance record and `bounded-ui-fonts.md`.
+
 Fork-resident product patches (no upstream intent):
+
+- `lib/hal/HalPowerManager` — developer timer admission also permits X4 only
+  with HAL-confirmed external USB power, rechecked when arming. The existing
+  battery-latch shutdown and terminal deep-sleep path are unchanged. Battery-only
+  X4 remains unsupported for unattended timer return; see developer-pipeline.
+- `src/main.cpp` — developer timer trials save actual Home and powered-off Brief
+  input/capture evidence before framebuffer release. SD files only, bounded
+  request allocations, no additional framebuffer or production control route.
 
 - `src/components/themes/` — upstream's themes (restored 2026-10-01,
   `6a9b8c8c`) plus only: per-label `UiCjkFont::fontForText` at text sites
@@ -215,8 +257,14 @@ Fork-resident product patches (no upstream intent):
   Pocket screens draw their own content (`PocketDaily::Content::drawContentPage`,
   `ArticlesActivity` rows). `scripts/test_sync_routes.py`
   (`test_stock_themes_carry_no_product_code`) keeps `pocket_daily/` includes
-  and the removed theme API out of `src/components`. On a merge, take
-  upstream's theme and re-apply those three additions.
+  and the removed theme API out of `src/components`.
+  Since 2026-10-18, `HeaderPainter` also factors the stock header painter into
+  a platform-neutral helper. `BaseTheme::drawHeaderAndDescribe` returns the
+  exact resolved inputs used by that paint, without owning Pocket state or
+  including product code. `ScreenPresentation` owns the bounded receipt used
+  by the read-only layout-input endpoint; see `layout-inputs-v1.md`. On a merge,
+  take upstream's theme, re-apply the three UI additions, and reconcile the
+  shared header helper against upstream's pixel behavior.
 - `src/network/FirmwareFlasher.{h,cpp}` — shared staging buffer + image
   validation used by Pocket transfer/diagnostics; `validateImageFile` takes an
   optional chunk observer (the staged prompt reads the image version in the

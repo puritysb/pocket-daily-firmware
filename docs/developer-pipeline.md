@@ -55,7 +55,28 @@ stale, skipped or failed discovery is not success. The runner then independently
 rechecks HTTP identity/version before atomically updating only the saved host.
 The rest of the requested inventory/transfer/standby suites proceeds normally.
 
-No IP input or re-enrollment is needed for a network/DHCP address change. Reports
+The generic fallback uses the app's startup-selected model. It cannot discover
+an enrolled X4 through a selected X3 registration's identity gate, and a visible
+UI selection does not replace that test bridge. Do not weaken the gate or
+remove/reorder registrations. For this case the Mac Debug
+`ReaderX4SettingsTests/testDiscoverEnrolledReader` provides an explicit read-only
+LAN search using an isolated model, empty Bluetooth remembered store and no-radio
+transport. Its required test-host flags are `POCKET_HARDWARE_ENABLED=1`,
+`POCKET_HARDWARE_DISCOVERY=1` and `POCKET_HARDWARE_MODEL=X4` (passed to Xcode with
+`TEST_RUNNER_` prefixes), plus the existing private enrolled identity, old host
+hint and fresh nonzero run. It accepts only that X4 in STA/developer/HTTP-poll
+mode on port 80, then verifies a fresh HTTP response. No settings/content/upload,
+flash or Bluetooth wake command is sent. The selected app model remains paused
+until test-host exit; its registration is preserved.
+
+Follow the [Mac invocation and private environment pattern](../../pocket-daily/docs/DEVELOPER_PIPELINE.md#x4-lan-discovery-before-installation).
+Validate the single run-tagged `POCKET_DISCOVERY_RESULT`, independently recheck
+HTTP identity/model/version, and update only the config host hint atomically.
+This is not an automatic X4 fallback in this runner. Discovery failure must not
+change enrollment, and discovery success does not establish hardware acceptance.
+
+For the matching selected registration, no IP input or re-enrollment is needed
+for a network/DHCP address change. Reports
 record `discovery.method` (`saved-address` or `app-discovery`) and whether the
 address changed; the discovery log and `.xcresult` stay in the private run folder.
 The discovery scenario deliberately seeds the app with the runner's old address,
@@ -121,12 +142,39 @@ python3 scripts/dev_pipeline.py run --firmware firmware/update.bin --flash --sta
 
 `--flash` is explicit developer installation, separate from normal app update
 confirmation. The image is frozen under the run directory before installation.
-The Mac app is built before preflight so it can discover an unreachable saved IP.
+The normal acceptance path builds the Mac app before preflight so it can
+discover an unreachable saved IP; `--install-only` skips both steps.
 All requested firmware/app build and test gates precede installation. An exact
 version already installed skips flashing. Otherwise upload uses the existing
 port-82 acknowledgement/commit protocol, sends the developer flash request once,
 and verifies the same reader and exact embedded build version after reboot.
 Neither an ambiguous installation nor a standby request is blindly replayed.
+
+### Installation without hardware acceptance
+
+To install a prevalidated frozen developer image before inspecting native X4
+settings, keep the X4 enrollment separate and use:
+
+```sh
+python3 scripts/dev_pipeline.py run --app ../pocket-daily \
+  --config build/dev-pipeline-x4.json --firmware "$FROZEN_FIRMWARE" \
+  --flash --install-only
+```
+
+`FROZEN_FIRMWARE` is the absolute path to the unchanged local artifact. This
+requires `run`, explicit `--firmware` and `--flash`; other scenarios, iOS,
+builds/checks and nondefault cycle options are rejected. It performs no app
+build, discovery or hardware test. The private config must already contain a
+freshly identity-verified reachable address; stale addresses fail closed.
+The existing exclusive lock, stopped-companion checks, image snapshot,
+enrolled identity/STA/developer preflight, one-shot flash and exact post-reboot
+version check remain. An already matching version skips flash.
+
+The result has `installationOnly=true`, `acceptancePerformed=false` and
+`hardware=[]`. Save pre/post state separately and record the installer source
+hash independently from the frozen firmware's build provenance. Installation
+success is not app, native-setting, reading, sleep or other hardware acceptance.
+Inspect native settings before starting a suite that changes them.
 
 `--cycles N` repeats the scenario 1–20 times and stops on the first failure.
 This is a bounded validation loop, not a process that generates or edits code.
@@ -166,6 +214,15 @@ This adds the same scenario on that physical iPhone after the Mac scenario.
 verify radio, local-network permission, iPhone sleep/background behavior, or a
 physical iOS connection. The runner never labels simulator success as hardware
 success. X4 and current/battery-life measurements remain separate gates.
+
+Production public-API acceptance uses the app's separate production opt-in,
+not this developer runner. Its Mac Debug X4 branch has an isolated temporary
+registry and NoRadio model while retaining the shipping fleet identity guard;
+the startup-selected reader stays paused. It requires the production reader to
+already expose Same Wi-Fi and does not enter Sync after a production USB boot.
+X3 and physical iOS retain their startup-selected model behavior. See the
+[app production test contract](../../pocket-daily/docs/DEVELOPER_PIPELINE.md#production-firmware-explicit-public-protocol-acceptance)
+for backups, exact identity/version/capabilities and restoration limits.
 
 ## Reports and failure recovery
 
@@ -222,6 +279,28 @@ provisioning is a separate test requiring a reachable network supplied by the us
 
 ## Development screen capture
 
+`run --app <checkout> --config build/dev-pipeline-x4.json --x4-sleep` is the
+separate actual-X4 Home/Brief/deep-sleep scenario. It requires external USB
+power detected by the HAL, retains the normal X4 battery-latch shutdown, and
+adds only a developer three-second timer. External power is rechecked at timer
+arming; battery-only X4 requests are rejected. Do not disconnect the cable.
+No USB monitor, physical button actuator or altered production power path is used.
+
+Seven cases cover all four Home/three Brief presets, WAKE on/off and cover on/off.
+The developer `sleep=timer-home` mode (returnMode3) first follows normal startup
+routing after wake, saves the actual returned Home, then switches to Same Wi-Fi
+without another reset. Each requires real Pocket Daily activity frames, HAL timer-arm and timer-wake
+receipts, matching reset reason, original identity/version, exact app preview
+pixels, persisted settings/cards and unchanged body on wake. X4's documented
+bottom waking-status band changes independently of its optional sleep WAKE tab.
+The runner exports49 hash-verified PNGs and rejects missing frames or restoration.
+Developer-only home/sleep PDLI files retain the same paint's inputs on SD; they
+allocate no second framebuffer and are absent from Release.
+
+This establishes externally powered CPU deep sleep/timer return. Battery-only
+latch power-off, physical power-button wake and optical panel quality remain
+separate physical checks. The X3 screen suite below remains X3-specific.
+
 `run --app <checkout> --screen-suite` runs the companion-owned physical X3
 Home/Brief/card/EPUB/sleep tests (13 captures), exports BMP/PNG evidence through XCTest attachments with hashes,
 and runs the app-owned local Vision OCR checks. The runner does not read the app's
@@ -251,7 +330,7 @@ restores the original profile/cards even when a screen check fails.
 
 `POST /api/pocket/v1/dev/reader-capture?deviceID=...&run=...` is development-only.
 It accepts only the existing `/.`-free root fixture `/Pocket visual <run>.epub`,
-1–65536 bytes, and writes a checked request plus one-shot `R` boot marker. Before
+1 byte..4 MiB, and writes a checked request plus one-shot `R` boot marker. Before
 opening the real EPUB activity it pre-arms the usual `S` Same Wi-Fi recovery.
 It waits for a completed reader page under the rendering lock, saves its native
 framebuffer and restarts to the saved network; no extra framebuffer, server or
@@ -393,6 +472,45 @@ selected Brief and the actual deep-sleep frame (power/wake header/footer exclude
 Omit `--standby` for a short run; `--screen-suite` still performs its bounded timer
 sleep and automatic network return.
 
+### Isolated X4 HTTP continuity
+
+`--x4-continuity` is a standalone Mac/X4 scenario for the generated checkpoint
+EPUB. Pass a fresh private X4 config and the explicit frozen artifact matching
+its installed developer version:
+
+```sh
+python3 scripts/dev_pipeline.py run --app ../pocket-daily \
+  --config "$X4_CONFIG" --firmware "$FROZEN_FIRMWARE" --x4-continuity
+```
+
+It refuses flash/build-firmware/checks, other hardware scenarios, published-book
+or BLE overrides, iOS and nondefault cycle options. The runner builds the Mac
+host, checks the saved-address enrolled X4/STA/developer status and exact artifact
+version, then invokes `ReaderX4SettingsTests/testBidirectionalReading`. It does
+not fall back to the generic selected-reader discovery. Stale saved addresses
+must first be refreshed through the isolated X4 discovery workflow.
+
+The app requires `ENABLED=1`, `X4_CONTINUITY=1`, `MODEL=X4` under the hardware test
+environment prefix. Its model has an empty remembered-reader store and NoRadio
+transport, retains exact identity/model/version admission on every reconnect,
+and leaves the selected fleet registration unchanged. Only this scenario reserves
+20 following run IDs because the existing fixture uses run+20. Two HTTP rounds
+and five legacy capture names remain compatible with the existing checker; outer
+and continuity records identify X4, zero radio calls are required, and exported
+BMP headers must be native 480x800 in addition to matching the recorded hash.
+
+Keep supported known raw-selector, public-state and PDBF backups and
+after-state comparisons outside the test. Confirm
+the canonical native font baseline (14 for this acceptance fixture) and current
+non-Walk prerequisites: readerActivityLoadCount=0, non-inverted output and a saved sleep
+timeout longer than 90 seconds. Seed/Accept/Advance do not use Walk-only
+auto-sleep suppression. The app's
+reading-list/inventory and owned-file cleanup checks do not prove complete raw
+state restoration. A failed non-Walk action can replace PDBF; interrupted cleanup
+requires reading saved evidence before any retry. Scope is generated-EPUB HTTP
+continuity; it excludes BLE, published-book coverage, iCloud and optical panel
+quality. Installer, test-harness and frozen firmware provenance remain separate.
+
 ## Explicit first-install rehearsal
 
 Developer builds expose `POST /api/pocket/v1/dev/fresh-start` only for an idle
@@ -467,3 +585,505 @@ passed provisioning rollback, all 10 interfaces, two continuation rounds,
 14 screen/sleep/wake captures and original-state restoration. The matching app
 aggregate `20261013T131302-494933` passed 139 Mac tests and package validation.
 X4, long standby and physical first-boot button navigation were excluded.
+
+## X4 app settings acceptance and USB bootstrap
+
+`--x4-settings` requires an enrolled X4 and runs the sibling app's dedicated
+physical settings/preview/reboot test. Use a separate `--config` to preserve an
+existing X3 enrollment. Every app preference, profile values and card bytes
+are re-read; four orientation cases require exact card-preview pixels and
+reboot persistence. PNG attachments are exported and their hashes checked.
+The sibling `docs/X4_SETTINGS_ACCEPTANCE.md` holds the scope and actual results.
+
+After an authorized USB install via `scripts/pio.sh run -e default -t upload`,
+run `~/.platformio/penv/bin/python scripts/dev_usb_sync.py --port <USB-port>`
+when that environment provides pyserial. The developer-only serial command
+`CMD:DEV_SYNC_STA` verifies the existing one-byte `S` return marker, then
+restarts into saved-network Sync. No credential is transmitted, no new setting
+is added, and production contains no such command. Native USB open may reset
+the device first. HTTP identity/version are verified again after network return.
+
+
+The X4 settings suite now requires three isolated portrait EPUB changes (font
+size, line spacing and margin), in addition to four-rotation settings/card checks.
+The full run exports 23 native captures. `--x4-settings --x4-typography-only`
+checks portrait plus those three controls after a known broad baseline; the
+validator refuses to treat that reduced run as four-rotation acceptance.
+
+
+### Bundled card and preset acceptance on X4
+
+`--x4-starters --app <checkout> --config build/dev-pipeline-x4.json` runs the
+app's real catalog: 36 card pixel comparisons, 12 three-card collection reboots
+and seven Home/Sleep preset reboots. It rejects missing or mismatched cases,
+restoration failures and stale captures, and exports/hash-checks 62 native
+480×800 PNGs. The app's 36 card previews and 14 connected layout previews are
+XCTest attachments. Home and Sync Brief must use verified reader snapshot
+inputs and match the complete device frame before and after each reboot;
+sample data cannot pass. Each card records shipping Apply/read-back/presentation
+seconds so identical public cards can be compared across firmware versions.
+The sibling `docs/X4_SETTINGS_ACCEPTANCE.md` describes the procedure and results.
+This mode is mutually exclusive with other hardware scenarios and never flashes
+implicitly. Connected layout acceptance requires `layoutInputs: 1` firmware and
+its matching imported host renderer. This is input-snapshot rendering, not a
+live-frame subscription or optical panel/deep-sleep measurement.
+
+Run latency acceptance with the optional USB serial monitor closed, including
+when the cable remains connected for power. This exercises normal operation
+without a host draining diagnostic output. Do not open USB or issue competing
+HTTP requests during the scenario; opening native USB can reset the X4. Use a
+separate, explicitly labelled diagnostic run when serial evidence is needed.
+
+`--x4-starters --x4-layout-only` skips cards/collection reboots and checks the
+same seven presets (14 physical captures). Its report is explicitly focused;
+it cannot pass the full-card validator or establish card latency improvement.
+
+X4 recovery copies now also persist in the app's Application Support /
+`PocketHardwareRecovery`, with device/run metadata, rather than relying on a
+transient test-host tmp directory. `--x4-recover-from <directory>` selects an
+existing backup explicitly. `--x4-recover-empty-revision <hash>` is restricted
+to starter tests and must match the canonical empty manifest; use it only when
+prior-run evidence proves the original was empty. It is not a generic reset.
+Both restore through the app and verify read-back before starting acceptance.
+
+
+### Wi-Fi-only developer reading walk and failure evidence
+
+These routes require `ENABLE_DEV_REMOTE_FLASH`; production images expose neither.
+Starting from production still uses the supported staged-image validation and the
+reader's physical installation confirmation. A successful file upload is not an
+installation, and this protocol does not bypass that first confirmation.
+
+`GET /api/pocket/v1/dev/build-failure?deviceID=<enrolled ID>` reads only the fixed
+last EPUB build-failure record. It requires idle Same Wi-Fi, matching identity,
+SD availability and the render lock. The response is the validated96-byte PDBF
+record (`BuildFailureLog.h`: CRC, firmware version, path hash, spine, failure
+step/detail/count, free heap, largest block and uptime). No book text or arbitrary
+file path is accepted; there is no clear operation. Missing records return404,
+invalid global records422 and unavailable SD503. Preserve this old record before
+installing or running a trial; its firmware version and hash distinguish historic
+failures from the new run. Adding `run=<walk run>` selects only that run's separate
+fixed failure record, with `X-Build-Failure-Run` binding the response. A walk never
+replaces the user's global `/.crosspoint/last-build-error.bin`.
+
+`POST /api/pocket/v1/dev/reader-capture?deviceID=<ID>&run=<nonzero uint32>&action=walk&pages=<1..128>`
+uses only the owned `/Pocket visual <run>.epub` (1 byte..4 MiB). The host copies the
+original fixture bytes unchanged to that path, verifies its bytes and records the
+firmware/image identity before admission. `pages` counts completed unique page
+renders **including the first page**: request21 or more to exercise20 page turns.
+There is one entry reboot to leave Wi-Fi, then all turns run in the same actual
+EPUB activity and boot; the reading engine, ordinary background layout, real
+font/glyph cache and page renderer are used. No per-page reboot or second
+framebuffer is used. Turns wait at least1 second after the preceding page. The
+whole walk is bounded to600 seconds and each completed-page gap to45 seconds.
+The existing activity auto-sleep guard is enabled only while Walk is active;
+no user sleep setting is changed. Critical-battery and physical-power behavior
+keep their existing policy. An early EOF or timeout cannot satisfy a larger requested count.
+
+Admission writes checked run/action/page tickets and a64-byte checksummed running
+receipt. Before parsing, boot validates their run/page/action agreement and arms
+the existing one-shot Same Wi-Fi recovery. A missing or corrupt walk action must
+not downgrade into Capture. The post-render hook counts only strictly increasing
+`(spine,page)` positions after a requested turn; requests, stale `pageRendered`
+flags and repeated paints do not count. A build failure after the last paint still
+overrides success. Final evidence is written and read back before consuming the
+recovery request; a crash returns interrupted/unknown evidence, never success.
+A final owned-reader frame is saved with the existing bounded screen-capture
+route, then the reader automatically reboots to saved Same Wi-Fi. If it left the
+reader activity, it reports interrupted with no capture instead of capturing the
+user's Home or card screen.
+
+GET on `reader-capture` preserves existing `completed`, `activeRun`, `pendingRun`,
+`fixtureRun` and `bookReady` meanings; `completed` remains the continuity ticket,
+not a Walk success indicator. It adds `walkVersion:1`, `maxWalkPages:128`,
+`walkReceiptPresent` (including corrupt/other-run receipts), and `walkReceiptRun`
+(valid stored run, otherwise0). A fresh host run must reject any existing active,
+pending, fixture or walk receipt **before uploading** its owned EPUB.
+The `walk` object always includes `protocolVersion:1`, `run`, `state`,
+`requestedPages`, `renderedPages`, `turns`, `lastSpine` (zero-based), `lastPage`
+(one-based), `progressPercent`, `failureStep`, `failureDetail`, `elapsedMs`,
+`freeHeap`, `largestBlock`, `captureReady`, `historyIsolated` and
+`progressMonotonic`. A mismatched/absent run yields `state:absent,run:0`; it is not a
+pass. States are `running`, `completed`, `build-failed`, `timed-out`, `interrupted`,
+`end-of-book` and `capture-failed`. Only a matching completed run with
+`renderedPages == requestedPages`, `turns == requestedPages - 1`, a matching final
+capture and unchanged original history can pass. Heap/step/detail fields describe
+the captured build failure when present; zero is not a measured heap baseline.
+
+Walk is history-isolated even when unchanged EPUB bytes share the original
+book's document digest. It does not register the continuity exchange fixture,
+consume/accept offers, publish progress or destructor reading records, modify
+APP_STATE/recents, or perform end-of-book moves. It may create caches only for the
+owned path and write its own diagnostic files. The existing reader performance
+sampler can also update the shared `/.crosspoint/reader-perf.bin`; include that
+file in diagnostic backup/comparison when preserving the prior performance
+record. This trial does not promise that the entire SD card is unchanged.
+Capture/Seed/Accept/Advance keep
+their existing behavior. The host still compares original reading history before
+and after; the protocol flags describe the enforced policy, not physical proof.
+
+The host saves result/error/frame evidence locally before successful cleanup.
+Matching-run DELETE of `reader-capture` removes only its walk tickets/receipt/error
+files, and refuses an active reader. A surviving checked request plus Walk action
+also permits explicit cleanup of corrupt owned Walk evidence, except when the
+required image diagnostics are missing, incomplete or corrupt. DELETE of screen-capture
+and the owned EPUB remain separate. Failures retain their artifacts; do not retry
+an ambiguous POST or erase an old run to make a new run appear clean. The static
+walk controller is bounded to72 bytes by a compile-time assertion; record buffers are64/96 bytes and HTTP uses the existing staging
+buffer. No new heap allocation, activity, reader setting or production route is
+introduced. Hardware behavior remains unverified until the selected development
+image and exact fixture run complete on the physical reader.
+
+
+The Python runner prepares an offline plan without touching a reader:
+
+```sh
+python3 scripts/dev_reader_walk.py plan --config build/dev-pipeline.json \
+  --expected-version '<exact-development-version>' --model X3 --pages 24 \
+  --fixture en='<original-English.epub>' --fixture ko='<original-Korean.epub>' \
+  --output build/dev-reader-walk-<fresh-run>
+```
+
+The authorized hardware executor uses `run --plan <plan.json> --execute
+--backup-receipt <private-original-backup-receipt.json> --backup-confirmed
+--no-unrecovered-transfers`. These acknowledgements require actual saved backup
+and transfer evidence; a path or a local build alone is insufficient. After an
+ambiguous reply or interrupted host process, `observe --plan <plan.json>
+--execute --label en` observes that saved run without resending its POST.
+Successful cleanup requires saved local evidence and original-history comparison;
+failed runs retain both local and device artifacts. Plans, identities, addresses,
+backups and captures remain private ignored artifacts.
+
+Development `reader-capture` GET also advertises `imageDiagnosticsVersion:1` and
+`currentImageRendering` (`0` display, `1` ALT placeholder, `2` suppress). The
+current value is read when GET runs; it is not inferred from old settings or a
+successful walk. `imageDiagnostics` is `null` when the checked record is absent,
+corrupt or belongs to another run. Otherwise its fields are `version:1`, `run`,
+`mode` (the setting at Walk start), `complete`, `seen`, `probeStreamFailures`,
+`dimensionFailures`, `lastProbeError`, `extractAttempts`, `extractFailures`,
+`lastExtractError`, `altFallbacks`, `imageBlocks`, `beforeProbeFreeHeap` and
+`beforeProbeLargestBlock`. Current mode and run mode are preserved independently.
+
+The counters cover parsing throughout the run, including background layout ahead
+of the last painted page. `dimensionFailures` counts header probes that did not
+obtain dimensions; it is separate from ZIP stream failure. `extractFailures`
+counts the subsequent whole-image fallback ZIP extraction failures, including
+failure to open its output file. The two last-error fields are captured immediately
+after their corresponding ZIP call: `0` none, `1` open, `2` entry, `3` read buffer,
+`4` output buffer, `5` inflate initialization/window, `6` inflate, `7` read,
+`8` write, `9` method. Heap fields describe the last header probe immediately
+before its ZIP allocations; zero means no observation. `imageBlocks` counts
+created PageImage layout elements, not successful PNG decoding or painting.
+`altFallbacks` counts emitted ALT labels; suppress mode and empty ALT do not
+increment it.
+
+Observation uses one fixed 56-byte scalar state and no per-image allocation,
+framebuffer, log or SD write. The final 64-byte checksummed record and a checked
+run ticket are read back before consuming the recovery request. `complete:false`
+is an initial record, never terminal evidence. Missing, partial, corrupt or
+incomplete diagnostics preserve the request and block cleanup; orphan image
+records also block a new run. The existing global build-failure record is never
+changed. JSON uses at most 2048 bytes of the existing 4096-byte staging buffer
+and rejects overflow instead of sending truncated JSON. All device observation,
+storage and endpoint additions compile out of production.
+
+Development GET additionally reports `currentReaderFontPoints` from the current
+native `fontPointSize` setting, not the companion's coarser font-size bucket.
+It is read-only and does not describe a previous run or change the setting.
+
+`paintDiagnosticsVersion:1` advertises a separate `paintDiagnostics` object;
+`null` means absent, corrupt or another run. Its fields are `version:1`, `run`,
+`complete`, `renderCalls`, `cacheHits`, `lazyExtractAttempts`,
+`lazyExtractFailures`, `lastLazyExtractError`, `decoderAttempts`,
+`decoderSuccesses`, `placeholderCalls`, `suppressedCalls`, `pngAttempts`,
+`pngEntryFreeHeap`, `pngEntryLargestBlock`, `pngObjectBytes`, `pngHeapGateBytes`,
+`firstFailureStage`, `firstFailureCode`, `firstFailureFreeHeap` and
+`firstFailureLargestBlock`. Counts saturate at uint32 max and include repeated
+BW/grayscale passes; prewarm scans are skipped. Lazy extraction is the render-time
+ZIP call, distinct from the layout fallback extraction in image diagnostics v1.
+Its ZIP error is cleared before and captured immediately after that call, so a
+wrapper failure before entering ZIP reports0 rather than a stale earlier error.
+PNG entry memory, actual
+`sizeof(PNG)` and the heap gate are captured only on the first paint decode;
+`pngAttempts:0` leaves all four entry fields zero. Entry free heap is the exact
+value used by the existing PNG gate; new largest-block and failure measurements
+use `HalMemory::getDefaultHeap()`. These are distinct from the
+heap measured immediately at the first failure, which stays latched through
+later suppression, decoder failures and successful passes.
+
+Failure stages are `0` none, `1` lazy ZIP extraction, `2` image file open,
+`3` empty image, `4` decoder factory, `5` PNG heap gate, `6` PNG allocation,
+`7` PNG open, `8` PNG dimensions, `9` PNG crop, `10` PNG internal row bound,
+`11` PNG bit depth, `12` PNG expanded gray row bound, `13` PNG line allocation,
+`14` PNG decode, `15` generic decoder result and `16` render bounds.
+`firstFailureCode` is signed int32: the ZIP error for stage1, PNG return code for
+stage7/14. Stage6 now identifies the failed allocation/binding component:
+`1` PNG object, `2` 32 KiB dictionary, `3` inflate state, `4` scanlines,
+`5` workspace binding; older images reported0 for the embedded decoder object.
+Other stages use0. Stage0 has zero code and failure heap fields. The diagnostic
+record and stage numbers are unchanged; observations alone do not verify pixels.
+
+PNGdec remains pinned to 1.1.6. `scripts/patch_pngdec.py` applies the reviewed
+three-file patch only to the active project-local PlatformIO environment, checks
+upstream/patched file hashes and the patch checksum, and refuses missing, changed
+or partially patched sources. Clean builds compile every PNG translation unit
+against the same patched header. Native callers can apply the same patch with
+`python3 scripts/patch_pngdec.py --library <local-copy-of-PNGdec>`.
+The reproducible native API regression (no downloads) is
+`python3 scripts/test_png_workspace_native.py --library <patched-local-copy> --output build/png-workspace-api`;
+it checks a nonuniform pixel oracle, invalid regions, repeated decode, close,
+reopen and the unsupported acceleration mode. `scripts/test_patch_pngdec.py`
+checks patch provenance, idempotency and active-environment scope.
+The decoder algorithm, 32 KiB dictionary and existing row/bit-depth limits remain.
+Caller-owned transient allocations replace the embedded 59,456-byte ESP object:
+32 KiB dictionary, `sizeof(inflate_state)` (7,128 bytes on ESP32-C3), and exactly
+`2*(pitch+1)+32` scanline bytes (at most 16,416), plus at most 15 bytes of alignment
+padding. The smaller PNG object retains palette, metadata and file buffering;
+`pngObjectBytes` reports this object's size, **not** the total workspace.
+The existing 61,440-byte total-heap admission gate is unchanged; allocation can
+still fail on a fragmented heap. Workspace storage is fallible and temporary,
+bound only after successful header parsing and validation, and outlives close
+and decoder destruction. Null, short, overlapping, overflowing or unaligned
+regions are rejected; open/reopen and close discard bindings. Binding restores
+the original zero initialization. Repeated decode remains supported.
+`PNG_FAST_PALETTE` is rejected explicitly because this firmware never uses its
+extra row-array alias; the normal option 0 path and CRC option retain their
+existing behavior. No cache-format change or automatic cache deletion is added.
+
+Cold reader images are prepared before the page font scan/prewarm. The renderer
+first releases the preceding RAM pixel-cache slot and clears rebuildable glyph
+caches while preserving layout advance tables, then renders only image elements
+that still need decoding. Successful decoding writes the existing SD pixel cache;
+the normal text prewarm, BW refresh and grayscale passes follow unchanged. Cached
+images are excluded from preparation so their RAM slot cannot crowd a later cold
+decoder. No framebuffer, decoder limit, cache format or failure-suppression lifetime
+changes. A decode without a valid persisted pixel cache still follows the normal
+BW fallback; successful preparation alone is not proof of final pixels.
+
+Paint observation occupies at most 96 bytes of fixed state; its checked SD record
+is 88 bytes. Hooks add no heap allocation, framebuffer, log or SD write. Boot initialization and
+terminal walk handling write and verify the run-bound record. New walks store
+a distinct checked action5 ticket before boot (normalized to ordinary Walk in
+RAM), so missing paint files cannot be mistaken for legacy completed walks.
+An orphan paint marker/record blocks every new reader trial. New walk admission
+writes the paint marker first; a torn later write preserves that unknown state.
+New walk cleanup/recovery requires matching complete paint evidence, including
+when both paint files are missing but action5 survives. Existing action4 walks
+without paint files retain firmware-side cleanup compatibility. The newer Python
+runner still fails closed if new firmware advertises paint support but that old
+result has no paint record: finish and clean trials before upgrading; automatic
+resume/cleanup of a pre-upgrade trial is not supported. Non-walk Capture,
+Seed, Accept and Advance do not require a fresh paint record. Existing image-v1
+and global build-failure records retain their meaning. All new observation,
+storage and endpoint code is under `ENABLE_DEV_REMOTE_FLASH`.
+
+The Python runner saves the complete terminal `reader-capture` response as private
+`terminal-readiness.json` before cleanup, with its byte count and SHA256 in the
+report. Image and paint diagnostics, the current `currentReaderFontPoints`
+setting snapshot and unknown future fields are kept. When either diagnostic
+capability is advertised, a missing, incomplete, malformed or wrong-run record
+stops cleanup after preserving the response, PDBF, available capture and public
+state. Older firmware without these capabilities remains compatible. Finish and
+clean up a pending trial before upgrading firmware: an old pending trial cannot
+be automatically observed or cleaned up under a new version, and a newly
+advertised capability never makes a missing diagnostic record acceptable.
+`imageValidation` and `paintValidation` are always `not-performed`; both
+verification-pending flags remain true. Image-block counts include layout-ahead
+work, and paint counters describe renderer attempts rather than verified pixels.
+Neither an ALT fallback, decoder-success count nor a successful page walk proves
+image appearance or geometry. The current font snapshot is not a full settings
+backup or proof of restoration.
+
+The shared Python client used by `dev_reader_walk.py` and `dev_library_walk.py`
+retries only a GET expecting 200, with no request body, on these exact complete
+409 responses: `dev/reader-capture` → `Reader is drawing`, or `files/content` →
+`Reader is drawing; retry the download`. It allows at most six attempts with
+one-second backoff under a monotonic ten-second request budget. Remaining budget
+reduces each request timeout and is checked before another attempt and successful
+return; it is cooperative, not a separate watchdog that cancels an in-flight
+socket read. The response/socket closes before backoff. Existing longer trial
+observation deadlines are unchanged.
+
+POST, PUT and DELETE remain single-shot. Other statuses/bodies, incomplete error
+bodies, transport errors and redirects do not trigger this retry. Errors retain
+only the method, a fixed route, status, attempt count and an allowlisted fixed
+body; at most 257 error bytes are read and unknown/truncated bodies are redacted.
+Host, query, identity and filenames are excluded. This adds no generic mutation
+recovery: preserve failed reports and state after ambiguous outcomes, and never
+replay an unknown POST or commit merely because a later GET was busy.
+
+## Developer Library entry trial
+
+`dev_library_walk.py` is a separate, explicitly opted-in developer experiment.
+It requires an already installed exact developer build, enrolled device ID,
+Same Wi-Fi, a fresh diagnostic state and one unchanged EPUB fixture. It does
+not install firmware. Production builds omit its device endpoints and hooks.
+The normal Capture/Seed/Accept/Advance and Walk action values remain unchanged;
+Library uses persisted action 6 and requires the existing image and paint
+records. Finish and clean any earlier trial before changing firmware versions.
+
+The reference is an exact ASCII root EPUB path whose bytes and size equal the
+local fixture. The temporary `/Pocket visual <run>.epub` copy has its own cold
+path-keyed cache. The trial enters the real `LibraryListActivity`, builds or
+opens the normal index, locates and captures the reference row without opening
+it, captures the temporary copy's row, then calls the existing
+`openSelectedBook()` once for that copy. Both rows must have the expected
+metadata title and be fully inside the actual rendered viewport; merely being
+in the loaded row window is insufficient. The subsequent reader walk retains
+its history isolation. Neither row counters nor a successful page walk proves
+visible title glyphs, image pixels, buttons or optical panel quality: review
+the two saved Library BMPs and reader BMP independently.
+
+Before upload, the runner privately saves the exact known `state`, `recent`,
+`settings`, `index` and `dirty` files through the fixed `libraryBackup` selector.
+There is no arbitrary-path read or write API. Each chunk is run/offset/size
+bound, each full file is SHA-256 checked against a manifest, and a second
+manifest must match. The upload and admission use one-shot requests; original
+book bytes, state, recents and settings are checked again before opening and
+before cleanup. Existing unfinished index staging, noncanonical recents,
+unknown diagnostic ownership and any competing upload reject admission.
+Normal recent pruning/persistence is suppressed only for this isolated trial.
+
+The derivative Library index may be rebuilt. It is backed up for inspection,
+not restored over a newer index. Successful cleanup removes only the owned
+book/cache, marks the index dirty, rebuilds it through the normal builder, and
+checks that the owned row is absent while the reference row remains. State,
+recents and settings must retain their original bytes, and the public reading,
+preferences, profile, content and original build-failure snapshots must match.
+This is not a complete SD backup or a claim that every original cache byte was
+examined. The original book is never opened or its cache explicitly removed.
+
+The developer builder budget caps 4,096 scanned entries, 131,072 work units and
+45 seconds of cooperative work. It checks before/after metadata extraction and
+before index replacement or clearing an unchanged index's dirty marker.
+Individual SD, metadata and sort calls are not preempted; this is not a hard
+45-second response guarantee. A failed budget retains the previous index.
+The Library preparation also has a cooperative 90-second bound; the subsequent
+reader walk keeps its existing page and time bounds.
+
+A checked Library record and run marker survive interrupted admission, reboot,
+frame failure and partial cleanup. The runner saves the complete terminal JSON,
+all available run-bound frames, build-failure evidence and before/after raw and
+public state before accepting completion or deleting anything. An interrupted
+Library phase may coexist with a still-running saved Walk record; this is a
+failed trial, not permission to replay the open. Failed or ambiguous runs retain
+the owned book/cache and diagnostic records for inspection. The runner does
+not provide generic remote recovery or automatically erase those failures.
+
+Successful cleanup is one `DELETE reader-capture`; a lost reply is observed
+without repeating it. A distinct `libraryAck=true` DELETE removes the successful
+run's evidence only after all three frames, protected state checks, final
+index and original-byte verification are durable locally. A failed or lost ACK
+is never replayed automatically. Both deletion gates recheck matching request,
+action, page, Walk, image and paint ownership. Do not start another trial until
+any retained or partially removed evidence has been reviewed.
+
+Prepare with `python3 scripts/dev_library_walk.py plan --help`; planning reads
+only local configuration and freezes unchanged fixture bytes. `run` requires
+`--execute --backup-confirmed --no-unrecovered-transfers`; `observe --execute`
+can resume only the same authorized pending one-shot admission, not a cleanup
+or ACK. All backups, book paths and raw settings remain in mode-0600 files
+inside the private plan directory and are not printed to stdout.
+
+Offline validation covers checked-record corruption, request ownership,
+fully-drawn row admission, one-shot opening, actual LibraryBuilder/LibraryIndex
+path/title/order and cleanup behavior, and injected Python transport/state
+failures. The index tests use deterministic metadata fixtures; they do not
+execute the full Activity/widget lifecycle. Actual Library frames and opening
+on X3/X4 remain separate device acceptance gates.
+
+## Image-bound production trial lease V4
+
+`scripts/dev_trial_lease.py` is an explicitly authorized developer acceptance
+workflow, separate from the shipping app's firmware-staging/reader-confirmation
+flow. Plan offline first; each stage/start/cleanup/clear uses a fresh private
+output directory and requires `--execute`. Inspect the command's `--help` and
+prior receipt before any mutation. Never replay a lost POST/DELETE or reuse a
+consumed intent. Preserve the original active image, whole known book bytes,
+public state, fixed raw files and known caches before installation.
+
+The V4 CRC-protected NVS record binds model layout, run, production image length
+and SHA-256, validated return slot and bounded duration. Its capability is
+`POCKET_TRIAL_LEASE_V4`; older trial records are rejected. The production status
+contains an optional `trialLease` witness with `version: 4`, run, image hash,
+seconds, slot and surface. Optional root `largestFreeBlock` and
+`minimumFreeHeap` are observations, not shipping capabilities or authentication.
+The app's NearbySyncProtocolTests verifies that these extra fields do not grant
+new shipping features.
+
+Explicit surfaces select existing Sync, File Transfer STA, Home, Library or
+Settings activities. Sync/File Transfer may run at most900 seconds; UI surfaces
+at most180 seconds. The normal six-field Sync producer still caps180 seconds;
+reader-auto-wake remains360 seconds. Home/Library/Settings capture only after
+the ordinary render completes, save a run-owned BMP and memory checkpoint, then
+return. The provisioned image-bound route is not a production remote-control or
+flash endpoint; ordinary boots and reader installation confirmation are unchanged.
+The timer callback only records a checked deadline ticket and restarts; return
+slot/hash validation runs in the main task before SD operations.
+
+The optional reader fixture completes20 native pages, captures the image after
+initial indexing and cache reopen, observes an owned-file absence/recovery, and
+samples HAL/ReaderPerf reading minima. Auto-wake releases the normal one-minute
+inactivity clock and requires actual timer reset/wake, matching persisted
+position and a completed next page. It does not establish mechanical power,
+battery cold-on, physical SD removal, optical display quality or battery drain.
+The UI memory checkpoint and pre/ready HTTP checkpoint are stage-specific.
+Home/reading retain the >50KiB criterion; radio gates remain independently
+specified in `release-checklist.md`.
+
+For File Transfer, `dev_trial_transfer.py` freezes exact1MiB/20MiB valid EPUBs,
+a4097-byte boundary TXT and a4099-byte Korean-name TXT. Acceptance compares
+whole-response bytes/SHA, framing and HTTP1.0, slow reads, RST and deliberate
+stalls with no transport retries. A subsequent Sync `--download-plan` must bind
+the same reader/image and the immutable File Transfer owner plan. It checks
+public4096-byte piece responses, whole reconstructed SHA and malformed/forbidden
+requests. Only a complete recognized low-memory503 GET body gets bounded
+backoff; ambiguous transport failures and mutations never retry. Cleanup hashes
+all owned fixture bytes before one deletion each; it never removes user books.
+
+R13 `build/release-closeout-20261028` is the private orchestration/evidence folder.
+Its frozen runner additionally checks the existing eight preferences across all
+four orientations, rejects mixed-invalid changes atomically, restores the prior
+values and round-trips a generated Unicode transfer. After app tests the owner
+restores the original active firmware and nine known fixed SD files (including
+ReaderPerf bin/tmp), clears owned trial/cache files and compares original public
+state and whole books. This is scoped restoration, not whole-SD/NVS/flash equality.
+Failed trials and unknown outcomes must retain their evidence and remain failures.
+
+For an actual-app public-interface run, `plan --app-acceptance --seconds 600`
+uses a separate explicit Sync lease (maximum900 seconds). It cannot be combined
+with reader, auto-wake, UI/File Transfer or owned-download-plan scenarios. The
+plain/default Sync producer retains180 seconds. Its host-only plan bit sends the
+existing V4 explicit `surface: sync` payload; no firmware endpoint or image change
+is involved. Check the production run/image witness before launching the test
+host; do not run the normal polling/download observer concurrently with it.
+
+Use the app's explicit `testProductionConnectionAndInterface` opt-in, separate
+from developer flags. Capture its original-state/recovery attachments and exact
+run-bound result; this executes shipping model calls, not physical button UI.
+Before its profile roundtrip, additionally back up both fixed
+`/.crosspoint/pocket-profile.{0,1}.bin` slots through the bridge's File Transfer
+mode. After the bounded production return, clear only the matching terminal
+lease, restore those slots once with whole readback, then restart Sync and compare
+both original profile values and generation. The public profile API cannot roll
+back generations. Keep these two extra slot receipts alongside the existing
+nine-file restoration, and never claim whole-SD or whole-NVS equality.
+
+### Build-storage retention
+
+Reuse the native PlatformIO/host build and versioned package cache unless a
+compiler/SDK comparison requires isolation. Archive each unique accepted image
+and its ELF/MAP/source pins once; reference it from hardware plans. A staging
+backup needs the specific hashed return image and metadata, not a recursive copy
+of the entire historical `firmware/` directory. Verified APFS clones retain
+independent future writes without duplicating identical historical file blocks.
+Keep original-device backups, exact accepted candidates and failure receipts.
+Do not remove those as if they were compiler caches. The 2026-10-29 audit removed
+13.01GiB of old app compiler caches and converted3270 identical old package/BIN
+files to verified clones; actual available space increased16.61GiB.
+
+The plain Sync `--transfer` receipt records its owned destination as `target`;
+reader/FT plan entries use `fixture`/`path`. Normalize the receipt only after
+checking `target == plan.fixture`, then verify its complete bytes/SHA before one
+DELETE. Do not assume every receipt uses a `path` key, or replay an ambiguous
+cleanup mutation. R13 retains its original failed helper and corrected mapping.

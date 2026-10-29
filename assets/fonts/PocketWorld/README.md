@@ -31,3 +31,11 @@ needed by the current page are paged from SD, preserving the X3 heap budget.
 - License: SIL Open Font License 1.1; see `../PocketKR/OFL.txt`
 
 Rebuild with `python scripts/build-pocket-fonts.py`.
+
+
+Since 2026-10-17 the automatic reader face scales the installed bitmap to the
+selected reading point size, applying the same ratio to layout metrics and
+pixels. Its scale-specific renderer alias shares these glyph bytes/cache;
+Home/card UI retain the native 12pt face. Additional per-size SD assets are not
+required. Cached sections from the earlier fixed-size behavior are rebuilt
+with fork format v135.

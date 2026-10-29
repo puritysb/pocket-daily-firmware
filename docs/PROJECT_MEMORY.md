@@ -1,27 +1,20 @@
 # Pocket Daily Firmware Project Memory
 
-This is concise, repository-owned context for future sessions. It is not a chat
-transcript. Current source and release records override dated observations.
-Read it for repository boundaries, contracts and durable state; read the cited
-`docs/*.md` for detail. The full dated history up to 2026-10-13 is archived in
-`docs/history/PROJECT_MEMORY-to-2026-10-13.md` (historical, may contradict code).
+Current source/release records override dated observations. Details: cited docs.
+Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
 
 ## Repositories and collaboration
 
 - Firmware: this repository (`puritysb/pocket-daily-firmware`). App: sibling
   `pocket-daily` next to this clone (`puritysb/pocket-daily`). Resolve the
   sibling relative to this checkout; absolute `~/github/` paths are stale.
-- Firmware owns device behavior, endpoints, local persistence, memory gates and
-  flashing. The app owns the Apple-platform client. Every contract below spans
-  both repositories: change and verify both sides together and record paired
-  commits here.
+- Firmware owns device behavior/storage/memory/flashing; the app owns its client.
+  Change and verify contracts on both sides together; record paired commits.
 - Remote topology: `origin` = this repo, product branch `main`; `upstream` =
   `crosspoint-reader/crosspoint-reader`, foundation `upstream/master`. Product
   directories are downstream-only; merge upstream, never rebase product history.
-- OpenCode, Claude Code and Codex share `AGENTS.md` (only instruction file) and
-  this memory. Scoped guides are `lib/Epub/AGENTS.md` and other nested
-  `AGENTS.md`; skills live in `.claude/skills/` and are indexed from `AGENTS.md`.
-  Do not reintroduce `CLAUDE.md` (it would hide `AGENTS.md` from Claude Code).
+- Agents share `AGENTS.md` and this memory. Scoped guides/skills are indexed
+  there; never add `CLAUDE.md`, which would hide that guide from Claude Code.
 - Upstream sync hazard (#3058, 2026-08-15): upstream made `AGENTS.md` real,
   `CLAUDE.md` a symlink, and moved skills to `.skills/`. On merge keep the fork's
   `AGENTS.md`, port rule changes into it or `docs/embedded-reference.md`, keep
@@ -31,6 +24,12 @@ Read it for repository boundaries, contracts and durable state; read the cited
 
 ## Upstream base and fork delta
 
+- Audit 2026-10-28: `main`/`origin/main` `3f0bade2` includes stable `93e98bb7`;
+  develop `40a633e7` adds 177 ancestry commits, 74 merge-conflict paths. No RC
+  firmware imported; `--check` reports development separately. Candidates,
+  exclusions and existing seam failures: `docs/upstream-audit-2026-10-28.md`.
+- Reader A/B loop: `docs/reader-benchmark.md`; bounded dev traces and paired
+  trials, no automatic adoption. Devices unreachable on 2026-10-28; gains unmeasured.
 - Base: CrossPoint 1.6.5 (`93e98bb7`) integrated on `main` at `ee188fe7`
   (PR #4), FreeInk SDK `111fdcc7`. wolfSSL intentionally excluded.
   `docs/upstream-integration-1.6.5.md`.
@@ -68,8 +67,9 @@ Read it for repository boundaries, contracts and durable state; read the cited
 - 0.x releases are published as normal (latest) GitHub releases tagged
   `pocket-v<version>`; `1.0.0` is the first stabilized release. Reason:
   `/releases/latest` must not resolve to historical `v1.6.6` while every product
-  release is a prerelease. As of 2026-10-13 `pocket-v0.1.0` is not tagged;
-  newest tags are prereleases `pocket-v1.0.0-beta.1` and `v1.7.0-beta.4`.
+  release is a prerelease. Checked 2026-10-25: `pocket-v0.1.0` is unpublished;
+  latest is `v1.6.6`, excluded by current product update parsing. No current
+  app channel offers a supported image; old betas remain historical.
   Tagging needs the owner's direct confirmation and exact-image device pass.
 - GitHub releases are the production OTA source; the asset name must be exactly
   `firmware.bin`. Stable release requires exact-artifact X3/X4 sign-off in
@@ -122,6 +122,16 @@ Read it for repository boundaries, contracts and durable state; read the cited
 
 ## App–reader contracts (all v1 unless noted)
 
+- Connected inputs: `docs/layout-inputs-v1.md`, capability1/2, PDLI≤8KiB with
+  CRC/UTF-8 validation and same-reader active cards. Schema2 adds bounded current
+  book cover chunks and asleep/WAKE labels for actual Home/Brief; schema1 keeps
+  Sync placeholder/footer. Paint-time header receipt≤192B, no persistent scene
+  or framebuffer. Actual UI uses canonical World12 Cached/fallback independently
+  of the reading font; cards/legacy Sync use BoundedUI. Native ABI1 additive.
+- BoundedUI font reads retain two HAL handles and a 2 KiB metadata cache while
+  loaded (total owned read state ≤2,816 B, excluding HAL internals). Bitmaps
+  bypass it; I/O faults latch invalid state. Cached mode is unchanged.
+  `docs/bounded-ui-fonts.md` owns measurements and limits.
 - Nearby Sync and preferences: `docs/nearby-sync-v1.md`. Preferences GET/POST
   validate the whole body and roll back every field on a failed save; absent keys
   mean unsupported and the app sends only keys GET reported. Fields include
@@ -179,7 +189,7 @@ Read it for repository boundaries, contracts and durable state; read the cited
 
 ## Reader engine facts
 
-- Section cache v134 (`lib/Epub/Epub/Section.cpp`); cache formats, version
+- Section cache v136 (`lib/Epub/Epub/Section.cpp`), rebuilding prior ALT image layouts; cache formats, version
   bytes and invalidation rules are in `lib/Epub/AGENTS.md`. Partials carry a
   format tag; a parse before any bilingual marker is tagged mode-agnostic.
 - `ReaderLayoutAhead` lays out ahead on the render task after each page and
@@ -219,35 +229,73 @@ Read it for repository boundaries, contracts and durable state; read the cited
   <ip>` with `--dev-flash` for developer images. `platformio.local.ini` is
   machine-local.
 
-## Current verified baseline — 2026-10-14
+## Current candidate and device state — 2026-10-29
 
-- `main` `14bf9624` (code as `95be13f6`); app counterpart `005ec63` plus its
-  2026-10-14 working tree. Installed X3 image
-  `0.1.0-dev-main-14bf9624-ble-standby-w8e68d8a9` (matches `LATEST_BUILD.txt`).
-- 2026-10-14 on that image: BLE-only reading acceptance `20261013T170240-a41674`
-  (`--continuity-suite --ble-continuity`; 8 standby legs incl. unarmed control,
-  window min heap ~62.7 KB) and the full Mac/X3 regression `20261013T171736-315400`
-  (10 interface cases, two Wi-Fi outages, 14 captures, real-EPUB HTTP continuity,
-  BLE wake).
-- Gates: 935 host tests, 135 Python tests, strict analysis, default and
-  standby builds. Mac/X3 aggregate `20261013T131302-494933` passed 139 Mac
-  regressions and physical run `20261013T131358-21d2ed` (BLE failed-network
-  rollback, 10 interface cases, bidirectional reading rounds, screen/sleep/wake
-  captures, original-state restoration). Reset can remove `/.pocket`; capture
-  ticket writes now recreate it.
-- Fresh-settings BLE onboarding (pairing code, keychain autofill, Wi-Fi
-  transfer, LAN discovery, Welcome EPUB) passed on Mac/X3 on 2026-10-13.
-- Real EPUB continuity `20261012T153747-86b9c6`: byte-identical
-  import/transfer/download, two real Wi-Fi interruptions, timer deep sleep.
-- Wi-Fi loss during upload/after publication `20261011T173129-98ca79` and delayed
-  advertising recovery `20261011T152735-7c55e9` (3/3) passed.
-- Standby: three 90 s cycles `20261011T122403-b8cecb` (reconnect 13-15 s,
-  BLE min heap ~64.4 KB, largest block 55,284 B); one 30-minute idle
-  `20261011T105840-d292e9` (reconnect 12.2 s).
+- Current local production0.1.0 gh_release:6,372,784B, SHA
+  `b423bd02c0e61f9fc471203ac370fd750ab07af7a7839b9cbad8e416a256e7cf`.
+  Reading-memory repair and original restoration evidence:
+  `build/reading-memory-20261029/fresh-samples-004/final-scope-audit.json`.
+  Full scope: [release checklist](release-checklist.md) and sibling app handoff.
+  Later clang-format21-only rebuild2e599a...de1a is hardware-unverified; frozen
+  b423 staging/evidence retained. Never inherit exact-BIN sign-off across hashes.
+- Bounded2KiB HTML-tail finalization releases parser/CSS/layout state before
+  glyph/grayscale memory overlap. Large chapters remain incremental; section136
+  and page bytes/offsets unchanged. No new per-page heap/global buffer.
+- Each model/language passed20 native pages with20 distinct render samples,
+  24 newly saved records and CRC-checked fresh tail16. English free minima:
+  X3 61,280B/X4 69,424B; Korean59,036B/65,536B, all >51,200B.
+  Reopen/owned absence-recovery/natural60s idle/SDK8 timer4/position/next-page,
+  plus Home and digital frames passed. No optical/physical-power acceptance.
+- Older trial counters could reuse the same render record; old R13/0f8 memory
+  passes are not20-distinct proof. Current renderer starts missing turns, trial
+  rejects duplicate/in-progress records and flushes native-wake records before reset.
+  Historical same-version cumulative minima are preserved, not current-image gates.
+- Original X3 wb05eda4a/X4 wd4859597 active images and Same Wi-Fi identity restored.
+  Profile slots2, raw9, known cache/crash subset, public state and whole original
+  books16/3,062,182B and7/2,540,279B match, log growth0. Owned fixtures/trials
+  removed; worker/awake owners closed. No whole-SD/NVS/flash equality claim.
+- Host1149/strictCppcheck2.11/default·gh_release warning0/seam passed; freshness
+  mutants3 and epoch negative cases6 detected. Render stack224/176B, combined400B
+  versus368B, no new per-page heap. Explicit4B cursor fits unchanged BSS total.
+- Actual X3 slots0x10000/0x780000 each0x770000; X4 slots0x10000/0x650000 each0x640000.
+  Never infer layouts from local partitions.csv or reuse another model's backup.
+  Shipping SD confirmation remains; no production HTTP developer flash/control.
+- R13 transport/settings/Mac-interface evidence belongs to its older818a BIN.
+  Physical power-button/battery cold-on excluded by user. Radio/iOS/SD/iCloud/
+  long-book/optical/current/overnight/normal updater and external gates separate.
+- Existing .pio/host caches reused; historical toolchain/index/products cleanup
+  retains artifacts/reader backups/evidence. App185 shipping inputs unchanged.
+  User authorized commit/push on2026-10-29; upload/tag/public release remain held.
+
+## Historical X3 BLE baseline — 2026-10-14
+
+- Previously installed `0.1.0-dev-main-14bf9624-ble-standby-w8e68d8a9`, `main`
+  `14bf9624` (code `95be13f6`), app `005ec63` plus its working tree. This is
+  historical evidence, not the currently installed image or fresh BLE acceptance.
+- BLE-only reading `20261013T170240-a41674` used eight standby legs including
+  unarmed control, window min heap ~62.7 KB. Full Mac/X3 `20261013T171736-315400`
+  covered ten interface cases, two Wi-Fi outages, 14 captures, real-EPUB HTTP
+  continuity and BLE wake. That baseline passed 935 host / 135 Python tests.
+- Fresh-settings Mac/X3 BLE onboarding passed on 2026-10-13. Earlier runs:
+  real EPUB/outages/sleep `20261012T153747-86b9c6`; upload outages
+  `20261011T173129-98ca79`; delayed advertising `20261011T152735-7c55e9`;
+  three 90 s standby cycles `20261011T122403-b8cecb`; 30-minute idle
+  `20261011T105840-d292e9`, reconnect 12–15 s. Keep results tied to those images.
+
+## Historical X4 settings baseline — 2026-10-18
+
+- `…w1ab14140` passed USB-powered timer/Home/Brief run `20261017T182523-470eea`
+  (7 cycles, 49 PNGs, wake refresh 1,873–1,874 ms). It is no longer installed.
+  Exact earlier hashes/scope remain in sibling app `docs/X4_HOME_SLEEP_ACCEPTANCE.md`.
+- Prior Sync `…w8014224c` / `20261017T165221-1e51ac` covered 36 cards and 19
+  software reboots; typography `…w850c3968` / `20261017T004252-999a2a` covered
+  23 captures. Earlier latency numbers are not current-image measurements.
+  One install needed manual Wi-Fi recovery with unresolved cause. The USB timer
+  policy is developer-only; no battery-only, button-wake or X3 latency claim.
 
 ## Open limitations
 
-- Not established: X4 acceptance of nearly everything above, physical iPhone
+- Not established: X4 standby/BLE and physical buttons beyond these suites, iPhone
   flows, measured current draw, overnight or battery-only standby, long-term
   leak absence, optical panel quality, input during the panel waveform,
   image-rich EPUBs, BLE-only exchange outside developer standby (book close,
@@ -273,14 +321,4 @@ Read it for repository boundaries, contracts and durable state; read the cited
   access while `/usr/bin/curl` works; an empty Python scan is not evidence that
   the reader is absent.
 
-## Maintenance rules
-
-- Add only durable decisions, verified baselines, protocol contracts or
-  non-obvious constraints; date mutable facts and name their source of truth.
-- Replace stale notes instead of accumulating contradictions. Keep this file
-  under ~300 lines; move superseded detail to `docs/history/` instead of
-  appending. Per-run narratives belong in run reports or the cited docs.
-- A memory entry must be committed together with the change it describes.
-  Uncommitted work is not a verified baseline.
-
-Archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
+Follow AGENTS for memory maintenance; working-tree evidence is not a committed baseline.

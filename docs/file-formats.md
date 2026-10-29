@@ -123,7 +123,7 @@ changing their cached word-style flags and page layout.
 
 ### Version 44
 
-> Pocket Daily writes finalized sections as fork-private **v134**, incorporating
+> Pocket Daily writes finalized sections as fork-private **v136**, incorporating
 > CrossPoint 1.6.5 (upstream v44) with these additions:
 > - `bilingualViewMode` follows `characterSpacing` and `wordSpacingPercent`, before `pageCount`.
 > - Five header LUT pointers cover pages, anchors, paragraphs, list items and visible text offsets.
@@ -131,9 +131,19 @@ changing their cached word-style flags and page layout.
 > - Packed text blocks and page links use the upstream layout; visible offsets count rendered text
 >   separately from the app's raw DOM offsets.
 > - A partial section uses `0xFF` and a **12-byte** `{bytesConsumed, totalBytes, formatTag}`
->   trailer after the visible-offset LUT. `formatTag = 0x50440000 | 134`;
+>   trailer after the visible-offset LUT. `formatTag = 0x50440000 | 136`;
 >   older partials and finalized sections are rebuilt automatically.
 > - The header font key remains `fontId ^ GfxRenderer::glyphLayoutKey()`.
+>
+> v135 retains v134's bytes but invalidates layouts made before automatic
+> PocketSansWorld reading fonts honored the selected point size. A bounded
+> renderer alias shares the font/glyph bytes with the native UI face; its ID
+> includes the 8.8 scale so changing size also changes the section layout key.
+>
+> v136 retains the same bytes and invalidates cached ALT layouts produced when
+> a small ZIP image could not allocate the streaming inflater window. Both final
+> v135 sections and partials tagged135 rebuild through the normal open path;
+> retained HTML, metadata and progress records are preserved.
 >
 > The ImHex v25 layout below is historical, not a decoder for v134.
 

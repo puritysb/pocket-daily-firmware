@@ -27,7 +27,9 @@ lineage (`src/pocket_daily/FirmwareIdentity.h`):
 A reader on lineage 2 compares `pocket-v<version>` tags numerically
 (`FirmwareVersion::isNewerStable`): `0.1.0` sees `pocket-v0.1.1`,
 `pocket-v0.2.0` and `pocket-v1.0.0` as updates, and reports "no update"
-without an error when `/releases/latest` is its own version. Tags without the
+when a successful HTTPS check finds its own version at `/releases/latest`.
+This comparison does not establish TLS availability: X3's current native
+HTTPS path is memory-limited; see the supported update scope below. Tags without the
 `pocket-v` prefix (the historical `v1.6.6`) are never offered.
 
 Readers on lineage 1 or without a lineage cannot find 0.x by themselves:
@@ -54,12 +56,45 @@ embedded image version, including development suffixes
 (`0.1.0-dev-<branch>-<sha>-w<fingerprint>`). Verify the manifest and SHA-256 of
 `update.bin` before installing a local image.
 
+As checked on 2026-10-25, `pocket-v0.1.0` has not been published and GitHub
+latest is still historical `v1.6.6`. Current app release parsing excludes that
+tag and retired `pocket-v1.0.0-beta.*`; no supported official image is available
+through either current app channel. A local image or an earlier development
+hardware result does not establish publication or production acceptance.
+
+## Supported update scope for 0.x
+
+Both X3 and X4 use the companion to download and validate firmware, stage it
+on SD over Same Wi-Fi or Direct, and request installation through the reader's
+own confirmation. Download before Direct connection; verify installation by
+the same reader identity and reported version after reconnecting. SD recovery
+with a previous compatible image remains required.
+
+X3 reader-native HTTPS checking/downloading is unsupported in the current 0.x
+scope because its stock TLS buffers exceed available memory. Its memory-failure
+message and companion guidance must be verified, and recorded separately from
+the successful companion/SD path. X4's certificate-verified native HTTPS check
+and installation remain required. Neither model may silently install after
+staging. Model-specific error, cancellation, validation and recovery criteria
+are in [the release checklist](release-checklist.md).
+
 ## What a 0.x release still requires
 
 A 0.x release is offered to every reader on lineage 2 and to every companion
 on the stable channel, so it is not a private test build. Before tagging:
 CI green on `main` for the tagged commit, and the exact release image
 installed and exercised on an X3 and an X4 as far as
-`docs/release-checklist.md` lists for a development release. `1.0.0` requires
-the full checklist with both device rows signed off against the commit and
-image SHA-256. A host build or staging an image does not sign off a device.
+[the release checklist](release-checklist.md) lists for a development release,
+including pre-tag model-specific update/recovery gates. Candidate identity, app
+build, tester/date and physical results remain required even for 0.x. Checks
+that require the new official release endpoint remain pending until publication:
+the released image must match the tested hash, app release discovery must work,
+and X4 must pass native OTA and the same-version no-update check before final
+release sign-off.
+
+`1.0.0` requires the full checklist with both device rows signed off against
+the commit and image SHA-256. Before stable sign-off, resolve and test X3
+native HTTPS or explicitly decide and publicly document its continued exclusion
+from the product scope; the current 0.x limitation does not automatically
+approve that scope for `1.0.0`. A host build or staging an image does not sign
+off a device.

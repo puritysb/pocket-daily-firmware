@@ -62,6 +62,39 @@ and `sdOpens` are SD work the firmware controls. A turn with flag 1 but not 2 or
 64 opened a cached chapter; flag 64 means the next chapter was ready before the
 turn.
 
+## Short-chapter build lifetime
+
+After an incremental build emits the requested pages, `Section::buildSomeMore`
+finishes a remaining HTML tail of at most 2,048 bytes before returning. This
+lets finalization release the XML parser, CSS store, unfinished layout page and
+write buffer before glyph prewarm and grayscale scratch overlap them. Chapters
+with more input remaining still yield and retain incremental/resumable layout.
+This adds no resident buffer, allocation or cache-format change. Parsing errors
+in that final tail still fail the build; completed page bytes and text offsets
+must match a full build. Device free/largest-block evidence is required separately
+from these host checks; the reading gate remains strictly above 50 KiB.
+
+## Fresh samples and local candidate epochs
+
+The shared page renderer starts a new turn if its caller did not start one.
+Automatic/developer turns therefore produce their own render-heap samples.
+Unmarked renders have no input timestamp; their pre-render layout/queue timings
+are unavailable rather than physical-button latency measurements. An explicitly
+started activity turn keeps its existing flags and full stage timings.
+
+`copyNewestAfter` rejects active or already-observed records. A reader trial may
+sleep only after every requested page has a distinct completed render sample.
+The cursor costs four static bytes; there is no added per-page allocation or
+wire/cache layout change. An explicit native-wake trial flushes its final two
+records before returning by software reset, which does not call reader `onExit`.
+
+Several local BINs can report the same product version. Their cumulative
+`reader-perf.bin` minimum can include an older candidate and must not certify a
+new image. Bind acceptance to the trial image SHA and fresh per-page samples,
+then compare the per-scenario turn-count delta and CRC-checked recent records
+for cached reopen, recovery and wake. Preserve the original diagnostic file and
+restore it with the other backed-up state.
+
 ## Record format
 
 `/.crosspoint/reader-perf.bin`, 844 bytes, little-endian, written to a `.tmp`
