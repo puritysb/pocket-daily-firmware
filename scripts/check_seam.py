@@ -17,6 +17,17 @@ EXCEPTIONS = {
         "RecentBooksStore.h": "reading sync and removal update the reader's recent list",
         "articles/ArticleStorage.h": "product article storage used by app routes",
         "activities/RenderLock.h": "developer screen capture locks the existing renderer before reading its framebuffer",
+        "network/OtaBootSwitch.h": "developer-only checked trial admission selects the validated production slot",
+    },
+    "src/pocket_daily/boot/TrialLease.cpp": {
+        "network/OtaBootSwitch.h": "image-bound recovery selects the preserved, whole-hash-validated return slot",
+    },
+    "src/pocket_daily/boot/TrialReader.cpp": {
+        "activities/ActivityManager.h": "bounded owned-book acceptance uses normal reader open and leave transitions",
+        "activities/RenderLock.h": "completed-page evidence observes the single framebuffer under its render lock",
+        "activities/reader/EpubReaderActivity.h": "acceptance reads native position and page-render completion without a second reader engine",
+        "util/TrialSnapshot.h": "exports the run-owned initial and cached frame through the bounded existing BMP writer",
+        "util/ScreenshotUtil.h": "optional RTC probe exports its owned wake frame through the existing writer",
     },
 }
 

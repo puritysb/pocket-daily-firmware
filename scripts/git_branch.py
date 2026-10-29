@@ -4,6 +4,12 @@ CROSSPOINT_VERSION for developer environments, including recovery/diagnostics.
 
 Results in a version string like:  1.1.0-dev-feat-kosync-xpath-05c6cf8
 Release environments are unaffected; they set CROSSPOINT_VERSION in the ini.
+
+The define is attached only to the sources that name it. A project-wide define
+would change every object's build signature whenever the dirty-worktree suffix
+changes, so each edit-build cycle would recompile everything and add a full
+copy of the build to the PlatformIO cache (`build_cache_dir`), which never
+evicts.
 """
 
 import configparser
@@ -121,10 +127,50 @@ def get_base_version(project_dir):
     return config.get('crosspoint', 'version')
 
 
+VERSION_TOKEN = re.compile(rb'\bCROSSPOINT_VERSION\b')
+SOURCE_SUFFIXES = ('.c', '.cc', '.cpp', '.S')
+HEADER_SUFFIXES = ('.h', '.hh', '.hpp', '.inc')
+
+
+def find_version_users(project_dir):
+    """Return (sources, headers) under src/ and lib/ that use the version."""
+    sources, headers = set(), []
+    for top in ('src', 'lib'):
+        for root, _, files in os.walk(os.path.join(project_dir, top)):
+            for name in files:
+                if not name.endswith(SOURCE_SUFFIXES + HEADER_SUFFIXES):
+                    continue
+                path = os.path.join(root, name)
+                with open(path, 'rb') as source:
+                    if not VERSION_TOKEN.search(source.read()):
+                        continue
+                if name.endswith(HEADER_SUFFIXES):
+                    headers.append(os.path.relpath(path, project_dir))
+                else:
+                    sources.add(os.path.realpath(path))
+    return sources, headers
+
+
+def define_for_users(env, define, project_dir):
+    sources, headers = find_version_users(project_dir)
+    if headers:
+        # Every includer would need the define; fall back to the whole project.
+        warn(f'CROSSPOINT_VERSION used in headers {headers}; defining it project-wide')
+        env.Append(CPPDEFINES=[define])
+        return
+
+    def add_define(node_env, node):
+        if os.path.realpath(node.srcnode().get_abspath()) not in sources:
+            return node
+        return node_env.Object(node, CPPDEFINES=list(node_env.get('CPPDEFINES', [])) + [define])
+
+    env.AddBuildMiddleware(add_define)
+
+
 def inject_version(env):
     # Only applies to developer environments; release envs set the
     # version via build_flags in platformio.ini and are unaffected.
-    if env['PIOENV'] not in ('default', 'network_diagnostics', 'sta_recovery', 'ble_standby'):
+    if env['PIOENV'] not in ('default', 'network_diagnostics', 'sta_recovery', 'ble_standby', 'rtc_probe_bridge'):
         return
 
     project_dir = env['PROJECT_DIR']
@@ -138,7 +184,7 @@ def inject_version(env):
     if worktree:
         version_string += f'-w{worktree}'
 
-    env.Append(CPPDEFINES=[('CROSSPOINT_VERSION', f'\\"{version_string}\\"')])
+    define_for_users(env, ('CROSSPOINT_VERSION', f'\\"{version_string}\\"'), project_dir)
     print(f'CrossPoint build version: {version_string}')
 
 
@@ -151,6 +197,7 @@ try:
 except NameError:
     class _Env(dict):
         def Append(self, **_): pass
+        def AddBuildMiddleware(self, *_): pass
 
     _project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     inject_version(_Env({'PIOENV': 'default', 'PROJECT_DIR': _project_dir}))

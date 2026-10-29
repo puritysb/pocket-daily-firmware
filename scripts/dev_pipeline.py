@@ -11,6 +11,7 @@ import fcntl
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import plistlib
 from pathlib import Path
@@ -102,6 +103,128 @@ def check_ble_continuity(reading, run):
                 or (armed and cycle.get('sent') != offers)
                 or reader.get('minFree', 0) <= 50 * 1024 or reader.get('minBlock', 0) < 8 * 1024):
             raise RuntimeError('Bluetooth reading exchange evidence failed for ' + leg)
+
+
+STARTER_COLLECTIONS = ['everyday', 'ko-everyday', 'reading', 'ko-reading', 'focus', 'learning',
+                       'writing', 'ko-english-travel', 'ko-english-work', 'ko-japanese-basics',
+                       'ko-japanese-travel', 'ko-review']
+STARTER_PRESETS = [('Home', name) for name in ('quiet', 'daily', 'study', 'vocabulary')] + [
+    ('Sleep', name) for name in ('quiet', 'daily', 'study')]
+
+
+def check_x4_starters(record, layout_only=False):
+    detail = record.get('x4StartersValidation', {})
+    cards, collections, presets, captures = [detail.get(key, []) for key in ('cards', 'collections', 'presets', 'captures')]
+    names = [c.get('name') for c in captures]
+    expected = []
+    for collection in collections:
+        ids = collection.get('cards', [])
+        if len(ids) != 3 or len(set(ids)) != 3:
+            raise RuntimeError('missing three-card collection evidence')
+        expected += ['starter-card-' + card for card in ids[1:] + ids[:1]]
+        expected += ['starter-retained-' + collection['id']]
+    expected += [f'preset-{scope.lower()}-{name}{suffix}' for scope, name in STARTER_PRESETS for suffix in ('', '-retained')]
+    health = detail.get('health', [])
+    health_names = [c.get('card') for c in cards] + [f'preset-{scope.lower()}-{name}' for scope, name in STARTER_PRESETS]
+    if (record.get('device') != 'X4' or detail.get('passed') is not True or detail.get('restored') is not True
+            or detail.get('layoutPreviewParity') is not True or detail.get('layoutOnly') is not layout_only
+            or len(cards) != (0 if layout_only else 36) or len({c.get('card') for c in cards}) != (0 if layout_only else 36)
+            or [c.get('id') for c in collections] != ([] if layout_only else STARTER_COLLECTIONS)
+            or [(p.get('scope'), p.get('id')) for p in presets] != STARTER_PRESETS
+            or any(c.get('pixelDifference') != 0 or c.get('readBack') is not True
+                   or not isinstance(c.get('applySeconds'), (int, float)) or isinstance(c.get('applySeconds'), bool)
+                   or not math.isfinite(c['applySeconds']) or c['applySeconds'] <= 0 for c in cards)
+            or any(c.get('rebootPersisted') is not True or c.get('retainedPixelDifference') != 0 for c in collections)
+            or any([c.get('card') for c in cards if c.get('collection') == group['id']] != group['cards'][1:] + group['cards'][:1]
+                   for group in collections)
+            or any(p.get('profileReadBack') is not True or p.get('unrelatedSettingsPreserved') is not True
+                   or p.get('rebootPersisted') is not True or p.get('cardsPreserved') is not True
+                   or p.get('retainedBodyPixelDifference') != 0
+                   or p.get('previewUsesReaderData') is not True
+                   or p.get('previewPixelDifference') != 0 or p.get('retainedPreviewPixelDifference') != 0
+                   or p.get('changeFromPrevious', 0) <= 500 and p.get('id') != 'quiet' for p in presets)
+            or names != expected or len(set(names)) != (14 if layout_only else 62)
+            or [item.get('case') for item in health] != health_names
+            or any(type(item.get('freeHeap')) is not int or item['freeHeap'] < 16384
+                   or type(item.get('uptime')) is not int or item['uptime'] < 0
+                   or type(item.get('crashReportAvailable')) is not bool for item in health)
+            or any(c.get('width') != 480 or c.get('height') != 800
+                   or not re.fullmatch('[0-9a-f]{64}', c.get('sha256', '')) for c in captures)):
+        raise RuntimeError('missing X4 starter cards/presets/reboot acceptance evidence')
+
+
+def check_x4_sleep(record):
+    detail = record.get('x4SleepValidation', {})
+    cases, captures = detail.get('cases', []), detail.get('captures', [])
+    run = int(record.get('run', 0))
+    if (record.get('device') != 'X4' or detail.get('passed') is not True or detail.get('restored') is not True
+            or len(cases) != 7 or len(captures) != 49):
+        raise RuntimeError('missing full actual X4 Home/sleep/wake evidence')
+    homes = ['quiet', 'daily', 'study', 'vocabulary', 'quiet', 'daily', 'study']
+    sleeps = ['quiet', 'daily', 'study', 'quiet', 'quiet', 'daily', 'study']
+    for i, case in enumerate(cases):
+        cycle = case.get('cycle', {})
+        if (case.get('home') != homes[i] or case.get('sleep') != sleeps[i]
+                or case.get('sleepWakeIndicator') is not (i < 4) or case.get('index') != i or case.get('run') != run + i + 1 or case.get('pixelDifferences') != [0, 0, 0]
+                or case.get('settingsRetained') is not True or cycle.get('run') != run + i + 1
+                or cycle.get('timerArmed') is not True or cycle.get('timerWake') is not True
+                or cycle.get('usbPower') is not True or cycle.get('state') != 3 or cycle.get('returnMode') != 3
+                or cycle.get('returnedHomeRun') != run + i + 1 or cycle.get('wakeCaptureRun') != run + i + 1 or cycle.get('wakeSkipped') is not False
+                or case.get('wakePixels', 0) <= 100):
+            raise RuntimeError('invalid actual X4 deep-sleep/cue/preview retention evidence')
+    expected = [f'actual-{i}-{name}' for i in range(7) for name in ('home', 'home-preview', 'sleep', 'sleep-preview', 'returned-home', 'returned-home-preview', 'wake')]
+    if ([c.get('name') for c in captures] != expected
+            or any(c.get('run') != run + i // 7 + 1 or c.get('width') != 480 or c.get('height') != 800
+                   or len(c.get('sha256', '')) != 64 for i, c in enumerate(captures))):
+        raise RuntimeError('stale or missing actual X4 frame attachments')
+
+
+def check_x4_settings(record, typography_only=False):
+    detail = record.get('x4SettingsValidation', {})
+    cases = detail.get('cases', [])
+    captures = detail.get('captures', [])
+    typography = detail.get('typography', [])
+    typography_fields = ('fontSize', 'lineSpacing', 'screenMargin')
+    orientations = [0] if typography_only else [0, 1, 2, 3]
+    if (record.get('device') != 'X4' or detail.get('passed') is not True or detail.get('restored') is not True
+            or [c.get('orientation') for c in cases] != orientations
+            or any(c.get('preferencesReadBack') is not True or c.get('profileReadBack') is not True
+                   or c.get('rebootPersisted') is not True or c.get('homeRetainedDifference') != 0 or c.get('cardPixelDifference') != 0 or c.get('readingFrameChanged') is not True or c.get('cardPersisted') is not True for c in cases)
+            or [c.get('name') for c in captures] != ([f'x4-{surface}-{i}' for i in orientations for surface in ('home', 'home-retained', 'brief', 'card', 'reading')]
+                                                   + [f'x4-typography-{field}' for field in typography_fields])
+            or [c.get('field') for c in typography] != list(typography_fields)
+            or any(c.get('rebootPersisted') is not True or c.get('bodyPixelDifference', 0) <= 500 for c in typography)
+            or any(c.get('width') != 480 or c.get('height') != 800 or len(c.get('sha256', '')) != 64 for c in captures)):
+        raise RuntimeError('missing X4 settings/preview/reboot acceptance evidence')
+
+
+def check_x4_continuity(record):
+    reading = record.get('continuityValidation', {})
+    epub = reading.get('epub', {})
+    if (record.get('device') != 'X4' or record.get('model') != 'X4'
+            or type(record.get('bluetoothCalls')) is not int or record['bluetoothCalls'] != 0
+            or record.get('identityVerified') is not True
+            or record.get('sharedReaderExchangeIsolatedFromStartup') is not True
+            or record.get('glanceSourcesUnconfigured') is not True
+            or reading.get('model') != 'X4' or reading.get('transport') != 'http'
+            or reading.get('bluetoothCycles') != []
+            or any(c.get('transport') != 'http' for c in reading.get('cases', []))
+            or any(c.get('width') != 480 or c.get('height') != 800
+                   for c in reading.get('captures', []))
+            or epub.get('kind') != 'generated' or not isinstance(epub.get('sha256'), str)
+            or re.fullmatch(r'[0-9a-f]{64}', epub['sha256']) is None
+            or type(epub.get('bytes')) is not int or not 0 < epub['bytes'] <= 4 * 1024 * 1024
+            or epub.get('roundTripBytesMatch') is not True or epub.get('libraryReimportMatches') is not True):
+        raise RuntimeError('missing isolated X4 HTTP continuity evidence')
+
+
+def check_x4_continuity_bitmaps(destination, captures):
+    for capture in captures:
+        data = (destination / (capture['name'] + '.bmp')).read_bytes()
+        if (len(data) < 54 or data[:2] != b'BM'
+                or int.from_bytes(data[18:22], 'little', signed=True) != 480
+                or int.from_bytes(data[22:26], 'little', signed=True) != 800):
+            raise RuntimeError('X4 continuity capture does not have native 480x800 dimensions')
 
 
 def hardware_evidence(log, run, version, standby, platform, interface=False, wifi_setup=False, screens=False, standby_seconds=90, battery_only=False, delayed_advertising=False, wake_control=False, network_faults=False, continuity=False, real_epub=False, ble_continuity=False):
@@ -272,6 +395,24 @@ def collect_screen_artifacts(destination, captures):
             (destination / name).write_bytes(payload)
 
 
+def collect_x4_artifacts(destination, captures):
+    manifest = json.loads((destination / 'manifest.json').read_text())
+    attachments = [item for test in manifest for item in test['attachments']]
+    for capture in captures:
+        matches = [item for item in attachments
+                   if item['suggestedHumanReadableName'].startswith(capture['name'] + '_')
+                   and item['exportedFileName'].endswith('.png')]
+        if len(matches) != 1:
+            raise RuntimeError('Missing or ambiguous X4 capture: ' + capture['name'])
+        filename = matches[0]['exportedFileName']
+        if Path(filename).name != filename:
+            raise RuntimeError('Invalid exported attachment path')
+        payload = (destination / filename).read_bytes()
+        if hashlib.sha256(payload).hexdigest() != capture['sha256']:
+            raise RuntimeError('X4 PNG differs from saved evidence')
+        (destination / (capture['name'] + '.png')).write_bytes(payload)
+
+
 class Pipeline:
     def __init__(self, output):
         self.output = output
@@ -413,23 +554,78 @@ def discover_with_app(job, base, app, config):
     return record
 
 
+def x4_continuity_argument_error(args):
+    if not getattr(args, 'x4_continuity', False):
+        return None
+    if args.action != 'run' or not args.firmware:
+        return '--x4-continuity requires run and --firmware for the already installed developer artifact'
+    conflicts = ('host', 'flash', 'install_only', 'build_firmware', 'checks', 'ios_simulator', 'ios_device',
+                 'x4_recover_empty_revision', 'x4_recover_from', 'x4_sleep', 'x4_starters',
+                 'x4_layout_only', 'x4_settings', 'x4_typography_only', 'x3_only', 'wifi_setup',
+                 'real_epub', 'continuity_suite', 'ble_continuity', 'screen_suite', 'interface_suite',
+                 'network_faults', 'standby', 'wake_control', 'delayed_advertising', 'battery_only')
+    if any(getattr(args, name, False) for name in conflicts):
+        return '--x4-continuity is a standalone Mac/X4 HTTP scenario; installation and all other scenarios are separate'
+    if args.cycles != 1 or args.standby_seconds != 90 or args.cppcheck != 'build/cppcheck-source/cppcheck':
+        return '--x4-continuity requires cycles=1 and default unused scenario/check options'
+    return None
+
+
+def install_only_argument_error(args):
+    if not getattr(args, 'install_only', False):
+        return None
+    if args.action != 'run' or not args.flash or not args.firmware:
+        return '--install-only requires run, --flash and --firmware'
+    conflicts = ('host', 'x4_continuity', 'build_firmware', 'checks', 'ios_simulator', 'ios_device',
+                 'x4_recover_empty_revision', 'x4_recover_from', 'x4_sleep',
+                 'x4_starters', 'x4_layout_only', 'x4_settings', 'x4_typography_only',
+                 'x3_only', 'wifi_setup', 'real_epub', 'continuity_suite',
+                 'ble_continuity', 'screen_suite', 'interface_suite', 'network_faults',
+                 'standby', 'wake_control', 'delayed_advertising', 'battery_only')
+    if any(getattr(args, name, False) for name in conflicts):
+        return '--install-only excludes hardware scenarios, iOS, checks and firmware builds'
+    if args.cycles != 1 or args.standby_seconds != 90 or args.cppcheck != 'build/cppcheck-source/cppcheck':
+        return '--install-only requires cycles=1 and default unused scenario/check options'
+    return None
+
+
 def run(args, config, job):
+    scope_error = x4_continuity_argument_error(args) or install_only_argument_error(args)
+    if scope_error:
+        raise ValueError(scope_error)
     job.stage('exclusive-app-preflight', require_companion_stopped)
     host, identity = private_host(config['host']), config['deviceID']
     app = args.app.resolve()
     job.report['sources'] = {'firmware': source_state(ROOT), 'app': source_state(app),
                              'sdk': source_state(ROOT / 'freeink-sdk')}
-    job.command('app-project', ['xcodegen', 'generate'], cwd=app)
-    derived = app / '.build/dev-pipeline-mac'
-    base = ['xcodebuild', '-project', 'Pocket.xcodeproj', '-scheme', 'PocketMac', '-configuration', 'Debug',
-            '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', str(derived), 'CODE_SIGNING_ALLOWED=YES']
-    job.command('mac-build', base + ['build-for-testing'], cwd=app)
-    app_binary = derived / 'Build/Products/Debug/Pocket.app/Contents/MacOS/Pocket'
-    job.report['macApp'] = {'path': str(app_binary), 'sha256': hashlib.sha256(app_binary.read_bytes()).hexdigest()}
-    host, status, discovery = job.stage('reader-preflight', lambda: resolve_reader(
-        config, args.config, lambda: discover_with_app(job, base, app, config)))
+    if getattr(args, 'install_only', False):
+        job.report.update(installationOnly=True, acceptancePerformed=False, hardware=[])
+        if not isinstance(identity, str) or not identity:
+            raise ValueError('missing enrolled reader identity; enroll once before running')
+        # No app build, discovery or test can change settings before inspection.
+        # A stale address fails closed; it never substitutes for enrollment.
+        status = job.stage('reader-preflight', lambda: reader_status(host, identity))
+        discovery = {'method': 'saved-address', 'identityVerified': True}
+    else:
+        job.command('app-project', ['xcodegen', 'generate'], cwd=app)
+        derived = app / '.build/dev-pipeline-mac'
+        base = ['xcodebuild', '-project', 'Pocket.xcodeproj', '-scheme', 'PocketMac', '-configuration', 'Debug',
+                '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', str(derived), 'CODE_SIGNING_ALLOWED=YES']
+        job.command('mac-build', base + ['build-for-testing'], cwd=app)
+        app_binary = derived / 'Build/Products/Debug/Pocket.app/Contents/MacOS/Pocket'
+        job.report['macApp'] = {'path': str(app_binary), 'sha256': hashlib.sha256(app_binary.read_bytes()).hexdigest()}
+        if getattr(args, 'x4_continuity', False):
+            if not isinstance(identity, str) or not identity:
+                raise ValueError('missing enrolled reader identity; enroll once before running')
+            status = job.stage('reader-preflight', lambda: reader_status(host, identity))
+            discovery = {'method': 'saved-address', 'identityVerified': True}
+        else:
+            host, status, discovery = job.stage('reader-preflight', lambda: resolve_reader(
+                config, args.config, lambda: discover_with_app(job, base, app, config)))
     job.report['discovery'] = discovery
     version = status['version']
+    if (getattr(args, 'x4_settings', False) or getattr(args, 'x4_starters', False) or getattr(args, 'x4_sleep', False) or getattr(args, 'x4_continuity', False)) and status.get('device') != 'X4':
+        raise RuntimeError('X4 settings acceptance requires an enrolled X4')
     if getattr(args, 'x3_only', False) and status.get('device') != 'X3':
         raise RuntimeError('X3-only acceptance rejected this reader before hardware mutations')
     if (args.standby or getattr(args, 'ble_continuity', False)) and status.get('device') != 'X3':
@@ -472,7 +668,7 @@ def run(args, config, job):
         job.report['iosSimulator'] = 'passed; physical hardware scenario skipped'
     job.report['testedSources'] = {'firmware': source_state(ROOT), 'app': source_state(app),
                              'sdk': source_state(ROOT / 'freeink-sdk')}
-    platforms = [('macOS', base, 'PocketMacTests')]
+    platforms = [] if getattr(args, 'install_only', False) else [('macOS', base, 'PocketMacTests')]
     if args.ios_device:
         ios = ['xcodebuild', '-project', 'Pocket.xcodeproj', '-scheme', 'Pocket', '-configuration', 'Debug',
                '-destination', f'platform=iOS,id={args.ios_device}', '-derivedDataPath', str(app / '.build/dev-pipeline-device'),
@@ -489,11 +685,27 @@ def run(args, config, job):
             job.report['installation'] = 'exact version already running; flash skipped'
         job.stage('installed-version', lambda: reader_status(host, identity, version))
     job.report['hardware'] = []
+    if getattr(args, 'install_only', False):
+        job.report['scope'] = 'installation-only'
+        job.report['installationOnly'] = True
+        job.report['acceptancePerformed'] = False
+        job.report['hardwareAcceptance'] = 'not performed; installation/version verification only'
+        job.report['passed'] = True
+        job.flush()
+        return
     for platform, command, target in platforms:
         for index in range(args.cycles):
-            run_id = secrets.randbelow(0xffffffff - 16) + 1  # reserve capture sequence IDs
+            reserve = 20 if getattr(args, 'x4_continuity', False) else 16
+            run_id = secrets.randbelow(0xffffffff - reserve) + 1  # reserve capture sequence IDs
             env = {key: value for key, value in os.environ.items() if not key.startswith('TEST_RUNNER_POCKET_HARDWARE_')}
             for key, value in {'ENABLED': '1', 'HOST': host, 'DEVICE_ID': identity, 'VERSION': version,
+                               'X4_CONTINUITY': '1' if getattr(args, 'x4_continuity', False) else '0',
+                               'MODEL': 'X4' if getattr(args, 'x4_continuity', False) else '',
+                               'X4_SLEEP': '1' if getattr(args, 'x4_sleep', False) else '0',
+                               'X4_STARTERS': '1' if getattr(args, 'x4_starters', False) else '0',
+                               'X4_LAYOUT_ONLY': '1' if getattr(args, 'x4_layout_only', False) else '0',
+                               'X4_SETTINGS': '1' if getattr(args, 'x4_settings', False) else '0',
+                               'X4_TYPOGRAPHY_ONLY': '1' if getattr(args, 'x4_typography_only', False) else '0',
                                'RUN': str(run_id), 'STANDBY': '1' if args.standby else '0',
                                'STANDBY_SECONDS': str(getattr(args, 'standby_seconds', 90)),
                                'WAKE_CONTROL': '1' if getattr(args, 'wake_control', False) else '0',
@@ -506,16 +718,20 @@ def run(args, config, job):
                                'WIFI_SETUP': '1' if getattr(args, 'wifi_setup', False) else '0',
                                'INTERFACE': '1' if getattr(args, 'interface_suite', False) else '0'}.items():
                 env['TEST_RUNNER_POCKET_HARDWARE_' + key] = value
+            if getattr(args, 'x4_recover_empty_revision', None):
+                env['TEST_RUNNER_POCKET_HARDWARE_X4_EMPTY_REVISION'] = args.x4_recover_empty_revision
+            if getattr(args, 'x4_recover_from', None):
+                env['TEST_RUNNER_POCKET_HARDWARE_X4_RECOVERY_ROOT'] = args.x4_recover_from
             if getattr(args, 'real_epub', False) and platform == 'macOS':
                 env['TEST_RUNNER_POCKET_HARDWARE_CONTINUITY_EPUB'] = str(ROOT / 'test/reading_progress/fixtures/frankenstein-se.epub')
             label = f'{platform}-hardware-{index + 1}'
             try:
                 log = job.command(label, command + ['test-without-building', '-parallel-testing-enabled', 'NO',
-                    '-only-testing:' + target + '/ReaderHardwareTests/testDeveloperConnectionCycle',
-                    '-resultBundlePath', str(job.output / (label + '.xcresult'))], cwd=app, env=env, timeout=(1200 if getattr(args, 'interface_suite', False) or getattr(args, 'continuity_suite', False) else 480) + (getattr(args, 'standby_seconds', 90) if args.standby else 0) + (900 if getattr(args, 'ble_continuity', False) else 0))
+                    '-only-testing:' + target + ('/ReaderX4SettingsTests/testBidirectionalReading' if getattr(args, 'x4_continuity', False) else '/ReaderX4SettingsTests/testActualHomeSleepAndWake' if getattr(args, 'x4_sleep', False) else '/ReaderX4SettingsTests/testStarterContentAndPresets' if getattr(args, 'x4_starters', False) else '/ReaderX4SettingsTests/testSettingsPreviewAndReboot' if getattr(args, 'x4_settings', False) else '/ReaderHardwareTests/testDeveloperConnectionCycle'),
+                    '-resultBundlePath', str(job.output / (label + '.xcresult'))], cwd=app, env=env, timeout=(1800 if getattr(args, 'x4_sleep', False) else 3600 if getattr(args, 'x4_starters', False) else 1800 if getattr(args, 'x4_settings', False) else 1200 if getattr(args, 'interface_suite', False) or getattr(args, 'continuity_suite', False) or getattr(args, 'x4_continuity', False) else 480) + (getattr(args, 'standby_seconds', 90) if args.standby else 0) + (900 if getattr(args, 'ble_continuity', False) else 0))
             except RuntimeError:
                 bundle = job.output / (label + '.xcresult')
-                if getattr(args, 'continuity_suite', False) and bundle.exists():
+                if (getattr(args, 'x4_starters', False) or getattr(args, 'x4_settings', False) or getattr(args, 'continuity_suite', False) or getattr(args, 'x4_continuity', False)) and bundle.exists():
                     destination = job.output / (label + '-continuity-failed')
                     try:
                         job.command(label + '-export-failed-continuity', ['xcrun', 'xcresulttool', 'export', 'attachments',
@@ -526,7 +742,27 @@ def run(args, config, job):
                     job.flush()
                 raise
             evidence = job.stage(label + '-evidence', lambda: hardware_evidence(
-                log.read_text(), run_id, version, args.standby, platform, getattr(args, 'interface_suite', False), getattr(args, 'wifi_setup', False), getattr(args, 'screen_suite', False) and platform == 'macOS', getattr(args, 'standby_seconds', 90), getattr(args, 'battery_only', False), getattr(args, 'delayed_advertising', False), getattr(args, 'wake_control', False), getattr(args, 'network_faults', False), getattr(args, 'continuity_suite', False) and platform == 'macOS', getattr(args, 'real_epub', False) and platform == 'macOS', getattr(args, 'ble_continuity', False) and platform == 'macOS'))
+                log.read_text(), run_id, version, args.standby, platform, getattr(args, 'interface_suite', False), getattr(args, 'wifi_setup', False), getattr(args, 'screen_suite', False) and platform == 'macOS', getattr(args, 'standby_seconds', 90), getattr(args, 'battery_only', False), getattr(args, 'delayed_advertising', False), getattr(args, 'wake_control', False), getattr(args, 'network_faults', False), (getattr(args, 'continuity_suite', False) or getattr(args, 'x4_continuity', False)) and platform == 'macOS', getattr(args, 'real_epub', False) and platform == 'macOS', getattr(args, 'ble_continuity', False) and platform == 'macOS'))
+            if getattr(args, 'x4_continuity', False):
+                job.stage(label + '-x4-continuity-evidence', lambda: check_x4_continuity(evidence))
+            if getattr(args, 'x4_sleep', False):
+                job.stage(label + '-actual-sleep-evidence', lambda: check_x4_sleep(evidence))
+                destination = job.output / (label + '-x4-sleep')
+                job.command(label + '-export-actual-sleep', ['xcrun', 'xcresulttool', 'export', 'attachments',
+                    '--path', str(job.output / (label + '.xcresult')), '--output-path', str(destination)])
+                collect_x4_artifacts(destination, evidence['x4SleepValidation']['captures'])
+            if getattr(args, 'x4_starters', False):
+                job.stage(label + '-starter-evidence', lambda: check_x4_starters(evidence, getattr(args, 'x4_layout_only', False)))
+                destination = job.output / (label + '-x4-starters')
+                job.command(label + '-export-starters', ['xcrun', 'xcresulttool', 'export', 'attachments',
+                    '--path', str(job.output / (label + '.xcresult')), '--output-path', str(destination)])
+                collect_x4_artifacts(destination, evidence['x4StartersValidation']['captures'])
+            if getattr(args, 'x4_settings', False):
+                job.stage(label + '-x4-evidence', lambda: check_x4_settings(evidence, getattr(args, 'x4_typography_only', False)))
+                destination = job.output / (label + '-x4-settings')
+                job.command(label + '-export-x4', ['xcrun', 'xcresulttool', 'export', 'attachments',
+                    '--path', str(job.output / (label + '.xcresult')), '--output-path', str(destination)])
+                collect_x4_artifacts(destination, evidence['x4SettingsValidation']['captures'])
             if getattr(args, 'screen_suite', False) and platform == 'macOS':
                 destination = job.output / (label + '-screens')
                 job.command(label + '-export-screens', ['xcrun', 'xcresulttool', 'export', 'attachments',
@@ -539,11 +775,13 @@ def run(args, config, job):
                     raise RuntimeError('Reader image semantics did not pass')
                 evidence['screenValidation']['semanticValidation'] = semantic
                 evidence['screenValidation']['exportedDirectory'] = str(destination)
-            if getattr(args, 'continuity_suite', False) and platform == 'macOS':
+            if (getattr(args, 'continuity_suite', False) or getattr(args, 'x4_continuity', False)) and platform == 'macOS':
                 destination = job.output / (label + '-continuity')
                 job.command(label + '-export-continuity', ['xcrun', 'xcresulttool', 'export', 'attachments',
                     '--path', str(job.output / (label + '.xcresult')), '--output-path', str(destination)])
                 collect_screen_artifacts(destination, evidence['continuityValidation']['captures'])
+                if getattr(args, 'x4_continuity', False):
+                    check_x4_continuity_bitmaps(destination, evidence['continuityValidation']['captures'])
                 evidence['continuityValidation']['exportedDirectory'] = str(destination)
             job.report['hardware'].append(evidence)
             if platform == 'iOS-device':
@@ -566,6 +804,15 @@ def main():
     parser.add_argument('--firmware', type=Path, help='snapshot and verify this developer artifact')
     parser.add_argument('--build-firmware', choices=['default', 'ble_standby'])
     parser.add_argument('--flash', action='store_true', help='explicitly install the chosen developer artifact')
+    parser.add_argument('--install-only', action='store_true', help='install an explicit developer artifact and verify its version without building or running app hardware scenarios')
+    parser.add_argument('--x4-recover-empty-revision', help='with --x4-starters, restore only a canonical empty revision already identified in prior-run evidence')
+    parser.add_argument('--x4-recover-from', help='with --x4-starters, restore originals from a failed X4 app-sandbox recovery directory before retesting')
+    parser.add_argument('--x4-sleep', action='store_true', help='actual X4 Home, USB-powered timer deep sleep/wake, exact preview and setting retention')
+    parser.add_argument('--x4-starters', action='store_true', help='physical X4 36 bundled cards, seven presets, preview captures and reboot persistence')
+    parser.add_argument('--x4-layout-only', action='store_true', help='with --x4-starters, only seven exact connected-preview/preset/reboot checks; no card timing matrix')
+    parser.add_argument('--x4-continuity', action='store_true', help='standalone Mac/X4 HTTP reading continuity using the already installed explicit developer artifact')
+    parser.add_argument('--x4-settings', action='store_true', help='physical X4 preferences, profile, card preview parity and reboot persistence')
+    parser.add_argument('--x4-typography-only', action='store_true', help='with --x4-settings, check portrait plus independent typography controls; does not establish all rotations')
     parser.add_argument('--x3-only', action='store_true', help='reject non-X3 readers before any installation or hardware scenario')
     parser.add_argument('--wifi-setup', action='store_true', help='BLE Wi-Fi setup with nonexistent network and verified rollback')
     parser.add_argument('--real-epub', action='store_true', help='use the published Frankenstein EPUB text fixture; requires --continuity-suite')
@@ -585,6 +832,23 @@ def main():
     parser.add_argument('--ios-simulator', help='simulator UDID for protocol regression/build validation')
     parser.add_argument('--ios-device', help='physical iPhone UDID; already paired/permissioned Debug app required')
     args = parser.parse_args()
+    scope_error = x4_continuity_argument_error(args) or install_only_argument_error(args)
+    if scope_error:
+        parser.error(scope_error)
+    if args.x4_layout_only and not args.x4_starters:
+        parser.error('--x4-layout-only requires --x4-starters')
+    if args.x4_recover_empty_revision and (not args.x4_starters or args.x4_recover_from):
+        parser.error('--x4-recover-empty-revision requires --x4-starters and excludes --x4-recover-from')
+    if args.x4_recover_from and not args.x4_starters:
+        parser.error('--x4-recover-from requires --x4-starters')
+    if args.x4_sleep and (args.x4_starters or args.x4_settings or args.standby or args.screen_suite or args.interface_suite or args.ios_device or args.continuity_suite):
+        parser.error('--x4-sleep is a dedicated Mac/X4 externally-powered acceptance scenario')
+    if args.x4_starters and (args.x4_settings or args.standby or args.screen_suite or args.interface_suite or args.ios_device or args.continuity_suite or args.wifi_setup):
+        parser.error('--x4-starters is a dedicated Mac/X4 acceptance scenario')
+    if getattr(args, 'x4_settings', False) and (args.standby or args.screen_suite or args.interface_suite or args.ios_device or args.continuity_suite):
+        parser.error('--x4-settings is a dedicated Mac/X4 acceptance scenario')
+    if args.x4_typography_only and not args.x4_settings:
+        parser.error('--x4-typography-only requires --x4-settings')
     if args.real_epub and not args.continuity_suite:
         parser.error('--real-epub requires --continuity-suite')
     if args.ble_continuity and not args.continuity_suite:

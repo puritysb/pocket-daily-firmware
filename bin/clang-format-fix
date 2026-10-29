@@ -30,6 +30,22 @@ if [[ -z "${CLANG_FORMAT_MAJOR}" || "${CLANG_FORMAT_MAJOR}" -lt 21 ]]; then
   exit 1
 fi
 
+# Explicit task files avoid formatting unrelated dirty work during release checks.
+if [[ "${1:-}" == "--files" ]]; then
+  shift
+  [[ "$#" -gt 0 ]] || { echo "Error: --files requires source paths"; exit 1; }
+  for path in "$@"; do
+    case "$path" in
+      lib/EpdFont/builtinFonts/*|lib/Epub/Epub/hyphenation/generated/*|lib/uzlib/*|lib/miniz/third_party/*)
+        echo "Error: generated/vendor file excluded: $path"; exit 1 ;;
+      *.c|*.cpp|*.h|*.hpp) [[ -f "$path" ]] || { echo "Error: missing file: $path"; exit 1; } ;;
+      *) echo "Error: expected C/C++ source: $path"; exit 1 ;;
+    esac
+  done
+  "$CLANG_FORMAT_BIN" -style=file -i -- "$@"
+  exit
+fi
+
 # --- Main Logic ---
 
 # Format all files (or only modified files if -g is passed)

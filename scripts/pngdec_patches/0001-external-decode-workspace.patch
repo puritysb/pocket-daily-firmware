@@ -1,0 +1,225 @@
+--- a/src/PNGdec.h
++++ b/src/PNGdec.h
+@@ -34,6 +34,13 @@
+ #include "zutil.h"
+ #include "inftrees.h"
+ #include "inflate.h"
++#include <stddef.h>
++
++// Pocket Daily: caller-owned transient decoder workspace, same zlib and row limits.
++#define PNG_EXTERNAL_WORKSPACE_VERSION 1
++#define PNG_DECODE_STATE_BYTES sizeof(struct inflate_state)
++#define PNG_DECODE_WINDOW_BYTES 32768u
++#define PNG_DECODE_ROWS_ALIGNMENT 16u
+ //
+ // PNG Decoder
+ // Written by Larry Bank
+@@ -156,9 +163,11 @@
+     PNG_DRAW_CALLBACK *pfnDraw;
+     PNG_CLOSE_CALLBACK *pfnClose;
+     PNGFILE PNGFile;
+-    uint8_t ucZLIB[32768 + sizeof(struct inflate_state)]; // put this here to avoid needing malloc/free
++    struct inflate_state *pInflateState;
++    uint8_t *pInflateWindow;
++    uint8_t *ucPixels;
++    size_t iPixelBufferSize;
+     uint8_t ucPalette[1024];
+-    uint8_t ucPixels[PNG_MAX_BUFFERED_PIXELS];
+     uint8_t ucFileBuf[PNG_FILE_BUF_SIZE]; // holds temp file data
+ } PNGIMAGE;
+ 
+@@ -187,6 +196,10 @@
+     int getBufferSize();
+     uint8_t *getBuffer();
+     void setBuffer(uint8_t *pBuffer);
++    // Bind after open; buffers remain owned by the caller until close/reopen.
++    // Invalid binding clears the old binding. Repeated decode is supported.
++    bool setDecodeWorkspace(void *state, size_t stateBytes, uint8_t *window,
++                            size_t windowBytes, uint8_t *rows, size_t rowBytes);
+     uint8_t getAlphaMask(PNGDRAW *pDraw, uint8_t *pMask, uint8_t ucThreshold);
+     void getLineAsRGB565(PNGDRAW *pDraw, uint16_t *pPixels, int iEndianness, uint32_t u32Bkgd);
+ 
+@@ -211,6 +224,8 @@
+ int PNG_isInterlaced(PNGIMAGE *pPNG);
+ uint8_t *PNG_getBuffer(PNGIMAGE *pPNG);
+ void PNG_setBuffer(PNGIMAGE *pPNG, uint8_t *pBuffer);
++int PNG_setDecodeWorkspace(PNGIMAGE *pPNG, void *state, size_t stateBytes,
++                          uint8_t *window, size_t windowBytes, uint8_t *rows, size_t rowBytes);
+ #endif // __cplusplus
+ 
+ // Due to unaligned memory causing an exception, we have to do these macros the slow way
+--- a/src/PNGdec.cpp
++++ b/src/PNGdec.cpp
+@@ -78,6 +78,13 @@
+     return PNGInit(&_png);
+ 
+ } /* open() */
++// Workspace allocation belongs to the caller, never to the decoder.
++bool PNG::setDecodeWorkspace(void *state, size_t stateBytes, uint8_t *window,
++                            size_t windowBytes, uint8_t *rows, size_t rowBytes)
++{
++    return PNGSetDecodeWorkspace(&_png, state, stateBytes, window, windowBytes, rows, rowBytes) != 0;
++}
++
+ //
+ // return the last error (if any)
+ //
+@@ -181,6 +188,10 @@
+ {
+     if (_png.pfnClose)
+         (*_png.pfnClose)(_png.PNGFile.fHandle);
++    _png.pInflateState = NULL;
++    _png.pInflateWindow = NULL;
++    _png.ucPixels = NULL;
++    _png.iPixelBufferSize = 0;
+ } /* close() */
+ 
+ //
+--- a/src/png.inl
++++ b/src/png.inl
+@@ -68,6 +68,10 @@
+ // C API
+ int PNG_openRAM(PNGIMAGE *pPNG, uint8_t *pData, int iDataSize, PNG_DRAW_CALLBACK *pfnDraw)
+ {
++    pPNG->pInflateState = NULL;
++    pPNG->pInflateWindow = NULL;
++    pPNG->ucPixels = NULL;
++    pPNG->iPixelBufferSize = 0;
+     pPNG->iError = PNG_SUCCESS;
+     pPNG->pfnRead = readFLASH;
+     pPNG->pfnSeek = seekMem;
+@@ -97,6 +101,10 @@
+ }
+ int PNG_openFile(PNGIMAGE *pPNG, const char *szFilename, PNG_DRAW_CALLBACK *pfnDraw)
+ {
++    pPNG->pInflateState = NULL;
++    pPNG->pInflateWindow = NULL;
++    pPNG->ucPixels = NULL;
++    pPNG->iPixelBufferSize = 0;
+     pPNG->iError = PNG_SUCCESS;
+     pPNG->pfnRead = readFile;
+     pPNG->pfnSeek = seekFile;
+@@ -116,6 +124,10 @@
+ {
+     if (pPNG->pfnClose)
+         (*pPNG->pfnClose)(pPNG->PNGFile.fHandle);
++    pPNG->pInflateState = NULL;
++    pPNG->pInflateWindow = NULL;
++    pPNG->ucPixels = NULL;
++    pPNG->iPixelBufferSize = 0;
+ } /* PNG_close() */
+ 
+ int PNG_getWidth(PNGIMAGE *pPNG)
+@@ -750,6 +762,63 @@
+ {
+     return PNGParseInfo(pPNG); // gather info for image
+ } /* PNGInit() */
++// External workspaces retain the original decode algorithm and dictionary size.
++// All regions must be disjoint and live until close/reopen; zcfree remains a no-op.
++PNG_STATIC int PNGWorkspaceOverlaps(uintptr_t a, size_t an, uintptr_t b, size_t bn)
++{
++    return a < b + bn && b < a + an;
++}
++
++PNG_STATIC int PNGSetDecodeWorkspace(PNGIMAGE *pPNG, void *state, size_t stateBytes,
++                                    uint8_t *window, size_t windowBytes, uint8_t *rows, size_t rowBytes)
++{
++    if (!pPNG) return 0;
++    const uintptr_t a = (uintptr_t)state, b = (uintptr_t)window, c = (uintptr_t)rows;
++#ifdef __cplusplus
++    const size_t stateAlignment = alignof(struct inflate_state);
++#else
++    const size_t stateAlignment = _Alignof(struct inflate_state);
++#endif
++    pPNG->pInflateState = NULL;
++    pPNG->pInflateWindow = NULL;
++    pPNG->ucPixels = NULL;
++    pPNG->iPixelBufferSize = 0;
++    if (!state || !window || !rows || pPNG->iWidth <= 0 || pPNG->iHeight <= 0 ||
++        pPNG->iPitch <= 0 || pPNG->iPitch > PNG_MAX_BUFFERED_PIXELS ||
++        stateBytes < PNG_DECODE_STATE_BYTES || windowBytes < PNG_DECODE_WINDOW_BYTES ||
++        a % stateAlignment || b % sizeof(uint32_t) || c % PNG_DECODE_ROWS_ALIGNMENT ||
++        stateBytes > UINTPTR_MAX - a || windowBytes > UINTPTR_MAX - b || rowBytes > UINTPTR_MAX - c ||
++        PNGWorkspaceOverlaps(a, stateBytes, b, windowBytes) ||
++        PNGWorkspaceOverlaps(a, stateBytes, c, rowBytes) ||
++        PNGWorkspaceOverlaps(b, windowBytes, c, rowBytes)) {
++        pPNG->iError = PNG_INVALID_PARAMETER;
++        return 0;
++    }
++    const size_t needed = ((size_t)pPNG->iPitch + 1) * 2 + 32;
++    if (needed > PNG_MAX_BUFFERED_PIXELS || rowBytes < needed) {
++        pPNG->iError = PNG_NO_BUFFER;
++        return 0;
++    }
++    // open previously zeroed these embedded arrays. Preserve that initialization.
++    memset(state, 0, PNG_DECODE_STATE_BYTES);
++    memset(window, 0, PNG_DECODE_WINDOW_BYTES);
++    memset(rows, 0, needed);
++    pPNG->pInflateState = (struct inflate_state *)state;
++    pPNG->pInflateWindow = window;
++    pPNG->ucPixels = rows;
++    pPNG->iPixelBufferSize = rowBytes;
++    pPNG->iError = PNG_SUCCESS;
++    return 1;
++}
++
++#ifndef __cplusplus
++int PNG_setDecodeWorkspace(PNGIMAGE *pPNG, void *state, size_t stateBytes,
++                          uint8_t *window, size_t windowBytes, uint8_t *rows, size_t rowBytes)
++{
++    return PNGSetDecodeWorkspace(pPNG, state, stateBytes, window, windowBytes, rows, rowBytes);
++}
++#endif
++
+ //
+ // Decode the PNG file
+ //
+@@ -767,6 +836,18 @@
+     uint8_t *s = pPage->ucFileBuf;
+     struct inflate_state *state;
+     
++    // This firmware never requests the optional palette acceleration, whose
++    // extra table otherwise aliases the end of the internal row array.
++    if (iOptions & PNG_FAST_PALETTE) {
++        pPage->iError = PNG_UNSUPPORTED_FEATURE;
++        return pPage->iError;
++    }
++    if (!pPage->pInflateState || !pPage->pInflateWindow || !pPage->ucPixels ||
++        pPage->iPitch <= 0 || pPage->iPitch > PNG_MAX_BUFFERED_PIXELS ||
++        ((size_t)pPage->iPitch + 1) * 2 + 32 > pPage->iPixelBufferSize) {
++        pPage->iError = PNG_NO_BUFFER;
++        return pPage->iError;
++    }
+     // Either the image buffer must be allocated or a draw callback must be set before entering
+     if (pPage->pImage == NULL && pPage->pfnDraw == NULL) {
+         pPage->iError = PNG_NO_BUFFER;
+@@ -790,9 +871,9 @@
+     d_stream.zfree = (free_func)0;
+     d_stream.opaque = (voidpf)0;
+     // Insert the memory pointer here to avoid having to use malloc() inside zlib
+-    state = (struct inflate_state FAR *)pPage->ucZLIB;
++    state = pPage->pInflateState;
+     d_stream.state = (struct internal_state FAR *)state;
+-    state->window = &pPage->ucZLIB[sizeof(struct inflate_state)]; // point to 32k dictionary buffer
++    state->window = pPage->pInflateWindow; // caller-owned 32k dictionary buffer
+     err = inflateInit(&d_stream);
+ #ifdef FUTURE
+ //    if (inpage->cCompression == PIL_COMP_IPHONE_FLATE)
+@@ -852,7 +933,7 @@
+                     int i, iColors = 1 << pPage->ucBpp;
+                     uint16_t usPixel, *d;
+                     uint8_t *s = pPage->ucPalette;
+-                    d = (uint16_t *)&pPage->ucPixels[sizeof(pPage->ucPixels)-512];
++                    d = (uint16_t *)&pPage->ucPixels[pPage->iPixelBufferSize-512];
+                     for (i=0; i<iColors; i++) {
+                     usPixel = (s[2] >> 3); // blue
+                     usPixel |= ((s[1] >> 2) << 5); // green
+@@ -925,7 +1006,7 @@
+                                 pngd.iPitch = pPage->iPitch;
+                                 pngd.iWidth = pPage->iWidth;
+                                 pngd.pPalette = pPage->ucPalette;
+-                                pngd.pFastPalette = (iOptions & PNG_FAST_PALETTE) ? (uint16_t *)&pPage->ucPixels[sizeof(pPage->ucPixels)-512] : NULL;
++                                pngd.pFastPalette = (iOptions & PNG_FAST_PALETTE) ? (uint16_t *)&pPage->ucPixels[pPage->iPixelBufferSize-512] : NULL;
+                                 pngd.pPixels = pCurr+1;
+                                 pngd.iPixelType = pPage->ucPixelType;
+                                 pngd.iHasAlpha = pPage->iHasAlpha;

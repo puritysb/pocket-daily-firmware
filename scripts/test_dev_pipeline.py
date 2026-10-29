@@ -12,6 +12,94 @@ import dev_pipeline as pipeline
 
 
 class PipelineTest(unittest.TestCase):
+    def test_x4_settings_requires_all_orientations_pixels_and_reboot(self):
+        import copy
+        evidence = {'device': 'X4', 'x4SettingsValidation': {
+            'passed': True, 'restored': True,
+            'cases': [dict(orientation=i, preferencesReadBack=True, profileReadBack=True,
+                           rebootPersisted=True, homeRetainedDifference=0, cardPixelDifference=0, readingFrameChanged=True, cardPersisted=True) for i in range(4)],
+            'captures': [dict(name=f'x4-{surface}-{i}', width=480, height=800, sha256='a' * 64)
+                         for i in range(4) for surface in ('home', 'home-retained', 'brief', 'card', 'reading')]
+                        + [dict(name=f'x4-typography-{field}', width=480, height=800, sha256='a' * 64)
+                           for field in ('fontSize', 'lineSpacing', 'screenMargin')],
+            'typography': [dict(field=field, bodyPixelDifference=501, rebootPersisted=True)
+                           for field in ('fontSize', 'lineSpacing', 'screenMargin')]}}
+        pipeline.check_x4_settings(evidence)
+        portrait_only = copy.deepcopy(evidence)
+        portrait_only['x4SettingsValidation']['cases'] = portrait_only['x4SettingsValidation']['cases'][:1]
+        captures = portrait_only['x4SettingsValidation']['captures']
+        portrait_only['x4SettingsValidation']['captures'] = captures[:5] + captures[-3:]
+        pipeline.check_x4_settings(portrait_only, typography_only=True)
+        with self.assertRaises(RuntimeError): pipeline.check_x4_settings(portrait_only)
+        with self.assertRaises(RuntimeError): pipeline.check_x4_settings(evidence, typography_only=True)
+        for key, value in [('rebootPersisted', False), ('homeRetainedDifference', 1), ('readingFrameChanged', False), ('cardPersisted', False), ('cardPixelDifference', 1),
+                           ('preferencesReadBack', False), ('profileReadBack', False), ('orientation', 9)]:
+            bad = copy.deepcopy(evidence)
+            bad['x4SettingsValidation']['cases'][0][key] = value
+            with self.assertRaises(RuntimeError): pipeline.check_x4_settings(bad)
+        for key, value in [('width', 528), ('height', 792), ('sha256', ''), ('name', 'stale')]:
+            bad = copy.deepcopy(evidence)
+            bad['x4SettingsValidation']['captures'][0][key] = value
+            with self.assertRaises(RuntimeError): pipeline.check_x4_settings(bad)
+        for key, value in [('passed', False), ('restored', False), ('captures', []), ('cases', []), ('typography', [])]:
+            bad = copy.deepcopy(evidence)
+            bad['x4SettingsValidation'][key] = value
+            with self.assertRaises(RuntimeError): pipeline.check_x4_settings(bad)
+        for key, value in [('field', 'ignored'), ('bodyPixelDifference', 500), ('rebootPersisted', False)]:
+            bad = copy.deepcopy(evidence)
+            bad['x4SettingsValidation']['typography'][0][key] = value
+            with self.assertRaises(RuntimeError): pipeline.check_x4_settings(bad)
+
+    def test_x4_starters_reject_missing_cards_presets_reboots_and_stale_frames(self):
+        import copy
+        groups = [dict(id=name, cards=[name + str(i) for i in range(3)], rebootPersisted=True,
+                       retainedPixelDifference=0) for name in pipeline.STARTER_COLLECTIONS]
+        cards = [dict(collection=g['id'], card=card, pixelDifference=0, readBack=True, applySeconds=2.5)
+                 for g in groups for card in g['cards'][1:] + g['cards'][:1]]
+        presets = [dict(scope=scope, id=name, profileReadBack=True, unrelatedSettingsPreserved=True,
+                        rebootPersisted=True, cardsPreserved=True, retainedBodyPixelDifference=0,
+                        previewUsesReaderData=True, previewPixelDifference=0, retainedPreviewPixelDifference=0, changeFromPrevious=1000)
+                   for scope, name in pipeline.STARTER_PRESETS]
+        names = []
+        for group in groups:
+            names += ['starter-card-' + c for c in group['cards'][1:] + group['cards'][:1]]
+            names += ['starter-retained-' + group['id']]
+        names += [f'preset-{scope.lower()}-{name}{suffix}' for scope, name in pipeline.STARTER_PRESETS for suffix in ('', '-retained')]
+        evidence = dict(device='X4', x4StartersValidation=dict(passed=True, restored=True, cards=cards,
+            collections=groups, presets=presets, layoutPreviewParity=True, layoutOnly=False,
+            health=[dict(case=name, freeHeap=30000, uptime=60, crashReportAvailable=False) for name in
+                    [c['card'] for c in cards] + [f'preset-{scope.lower()}-{name}' for scope, name in pipeline.STARTER_PRESETS]],
+            captures=[dict(name=n, width=480, height=800, sha256='a'*64) for n in names]))
+        pipeline.check_x4_starters(evidence)
+        faults = {
+            'cards': [('pixelDifference', 1), ('readBack', False), ('card', 'unrelated'), ('collection', 'unknown'), ('applySeconds', float('nan')), ('applySeconds', 0), ('applySeconds', True)],
+            'collections': [('rebootPersisted', False), ('retainedPixelDifference', 1), ('cards', ['one'])],
+            'presets': [('profileReadBack', False), ('unrelatedSettingsPreserved', False), ('cardsPreserved', False),
+                        ('rebootPersisted', False), ('retainedBodyPixelDifference', 1), ('previewPixelDifference', 1), ('retainedPreviewPixelDifference', 1), ('previewUsesReaderData', False), ('id', 'invalid')],
+            'captures': [('name', 'stale'), ('width', 528), ('sha256', 'z'*64)],
+            'health': [('case', 'stale'), ('freeHeap', 16383), ('freeHeap', True), ('uptime', -1), ('crashReportAvailable', None)]}
+        for section, mutations in faults.items():
+            for key, value in mutations:
+                bad = copy.deepcopy(evidence)
+                bad['x4StartersValidation'][section][0][key] = value
+                with self.subTest(section=section, key=key), self.assertRaises(RuntimeError):
+                    pipeline.check_x4_starters(bad)
+        for key in ('cards', 'collections', 'presets', 'captures', 'health', 'restored', 'passed', 'layoutPreviewParity'):
+            bad = copy.deepcopy(evidence)
+            bad['x4StartersValidation'][key] = [] if isinstance(bad['x4StartersValidation'][key], list) else False
+            with self.subTest(missing=key), self.assertRaises(RuntimeError): pipeline.check_x4_starters(bad)
+        bad = copy.deepcopy(evidence)
+        bad['x4StartersValidation']['presets'][1]['changeFromPrevious'] = 0
+        with self.assertRaises(RuntimeError): pipeline.check_x4_starters(bad)
+        focused = copy.deepcopy(evidence)
+        d = focused['x4StartersValidation']
+        d.update(cards=[], collections=[], layoutOnly=True)
+        d['captures'] = d['captures'][-14:]
+        d['health'] = d['health'][-7:]
+        pipeline.check_x4_starters(focused, layout_only=True)
+        with self.assertRaises(RuntimeError): pipeline.check_x4_starters(focused)
+        with self.assertRaises(RuntimeError): pipeline.check_x4_starters(evidence, layout_only=True)
+
     def test_published_epub_manifest_matches_the_committed_test_file(self):
         payload = (pipeline.ROOT / 'test/reading_progress/fixtures/frankenstein-se.epub').read_bytes()
         self.assertEqual(len(payload), pipeline.REAL_EPUB_BYTES)
@@ -527,6 +615,388 @@ class PipelineTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 pipeline.private_host(address)
         self.assertEqual(pipeline.private_host('192.168.1.2'), '192.168.1.2')
+
+
+
+
+class InstallOnlyTest(unittest.TestCase):
+    def args(self, root, **changes):
+        from types import SimpleNamespace
+        fields = dict(action='run', app=root, config=root / 'config.json', host=None,
+                      firmware=root / 'input.bin', flash=True, install_only=True,
+                      checks=False, build_firmware=None, ios_simulator=None, ios_device=None,
+                      cycles=1, standby=False, standby_seconds=90,
+                      cppcheck='build/cppcheck-source/cppcheck')
+        fields.update(changes)
+        return SimpleNamespace(**fields)
+
+    def status(self, version='v-dev-old', **changes):
+        return dict(deviceID='enrolled', device='X4', mode='STA', version=version, **changes)
+
+    def execute(self, root, responses, *, command_error=None, companion_error=None, payload=None, identity='enrolled'):
+        args = self.args(root)
+        args.firmware.write_bytes(payload if payload is not None else b'CrossPoint version: v-dev-next\0')
+        config = dict(host='192.168.1.2', deviceID=identity)
+        job = pipeline.Pipeline(root / 'run')
+        commands = []
+        def command(name, argv, **kwargs):
+            commands.append((name, list(argv)))
+            self.assertEqual(name, 'upload-install-reboot', 'install-only must not run app/build/hardware commands')
+            self.assertEqual(Path(argv[2]).read_bytes(), args.firmware.read_bytes())
+            self.assertIn('--dev-flash', argv)
+            def perform():
+                if command_error:
+                    raise command_error
+                path = job.output / 'mock-upload.log'
+                path.write_text('offline command double\n')
+                return path
+            return job.stage(name, perform)
+        error = None
+        with patch.object(pipeline, 'source_state', return_value={'offline': True}), \
+             patch.object(pipeline, 'require_companion_stopped', side_effect=companion_error) as stopped, \
+             patch.object(pipeline, 'discover_with_app', side_effect=AssertionError('no app discovery')) as discover, \
+             patch.object(pipeline.cycle, 'get_json', side_effect=responses) as status, \
+             patch.object(job, 'command', side_effect=command):
+            try:
+                pipeline.run(args, config, job)
+            except Exception as caught:
+                error = caught
+        discover.assert_not_called()
+        return args, job, commands, status.call_count, stopped.call_count, error
+
+    def test_install_requires_explicit_run_flash_and_firmware(self):
+        for change in [dict(action='configure'), dict(flash=False), dict(firmware=None)]:
+            with self.subTest(change=change):
+                self.assertIsNotNone(pipeline.install_only_argument_error(self.args(Path('/unused'), **change)))
+        self.assertIsNone(pipeline.install_only_argument_error(self.args(Path('/unused'))))
+
+    def test_all_scenarios_and_unused_options_conflict(self):
+        names = ('host', 'build_firmware', 'checks', 'ios_simulator', 'ios_device',
+                 'x4_recover_empty_revision', 'x4_recover_from', 'x4_sleep', 'x4_starters',
+                 'x4_layout_only', 'x4_settings', 'x4_typography_only', 'x3_only', 'wifi_setup',
+                 'real_epub', 'continuity_suite', 'ble_continuity', 'screen_suite',
+                 'interface_suite', 'network_faults', 'standby', 'wake_control',
+                 'delayed_advertising', 'battery_only')
+        for name in names:
+            with self.subTest(name=name):
+                self.assertIsNotNone(pipeline.install_only_argument_error(self.args(Path('/unused'), **{name: True})))
+        for change in [dict(cycles=0), dict(cycles=2), dict(standby_seconds=91), dict(cppcheck='/custom')]:
+            with self.subTest(change=change):
+                self.assertIsNotNone(pipeline.install_only_argument_error(self.args(Path('/unused'), **change)))
+
+    def test_invalid_cli_rejected_before_lock_config_status_or_commands(self):
+        argv_sets = [
+            ['configure', '--install-only', '--flash', '--firmware', '/unused'],
+            ['run', '--install-only', '--firmware', '/unused'],
+            ['run', '--install-only', '--flash'],
+        ] + [['run', '--install-only', '--flash', '--firmware', '/unused'] + flags for flags in [
+            ['--checks'], ['--build-firmware', 'default'], ['--ios-device', 'offline'],
+            ['--ios-simulator', 'offline'], ['--x4-settings'], ['--cycles', '2'],
+            ['--screen-suite'], ['--continuity-suite']]]
+        import contextlib, io
+        for argv in argv_sets:
+            with self.subTest(argv=argv), patch.object(sys, 'argv', ['dev_pipeline.py'] + argv), \
+                 patch.object(pipeline, 'exclusive') as lock, \
+                 patch.object(pipeline.cycle, 'get_json') as status, \
+                 patch.object(pipeline, 'run') as run, \
+                 patch.object(pipeline.os, 'umask'), \
+                 patch.dict(pipeline.os.environ, {}, clear=True), \
+                 contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as failure:
+                    pipeline.main()
+                self.assertEqual(failure.exception.code, 2)
+                lock.assert_not_called(); status.assert_not_called(); run.assert_not_called()
+
+    def test_run_entry_also_rejects_invalid_install_scope_before_io(self):
+        args = self.args(Path('/unused'), flash=False)
+        job = Mock()
+        with self.assertRaises(ValueError), patch.object(pipeline, 'require_companion_stopped') as stopped:
+            pipeline.run(args, {}, job)
+        stopped.assert_not_called(); job.stage.assert_not_called()
+
+    def test_install_success_freezes_bytes_checks_exact_version_and_runs_no_hardware(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args, job, commands, calls, stopped, error = self.execute(Path(tmp), [self.status(), self.status(), self.status('v-dev-next')])
+            self.assertIsNone(error)
+            self.assertEqual(len(commands), 1)
+            self.assertEqual(calls, 3)
+            self.assertEqual(stopped, 2)
+            self.assertEqual((job.output / 'candidate.bin').read_bytes(), args.firmware.read_bytes())
+            self.assertEqual(job.report['artifact']['sha256'], hashlib.sha256(args.firmware.read_bytes()).hexdigest())
+            self.assertTrue(job.report['passed']); self.assertTrue(job.report['installationOnly'])
+            self.assertFalse(job.report['acceptancePerformed']); self.assertEqual(job.report['hardware'], [])
+            self.assertEqual(job.report['scope'], 'installation-only')
+            self.assertNotIn('macApp', job.report)
+            self.assertEqual(job.report['stages'][-1]['name'], 'installed-version')
+            self.assertEqual(job.report['stages'][-1]['state'], 'passed')
+
+    def test_already_installed_skips_flash_but_rechecks_exact_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, job, commands, calls, _, error = self.execute(Path(tmp), [self.status('v-dev-next')] * 3)
+            self.assertIsNone(error); self.assertEqual(commands, []); self.assertEqual(calls, 3)
+            self.assertIn('flash skipped', job.report['installation'])
+            self.assertTrue(job.report['passed']); self.assertFalse(job.report['acceptancePerformed'])
+
+    def test_stale_or_wrong_initial_identity_mode_version_never_flashes_or_discovers(self):
+        cases = [OSError('offline'), {**self.status(), 'deviceID': 'other'},
+                 {**self.status(), 'mode': 'AP'}, {**self.status(), 'version': '0.1.0'}]
+        for response in cases:
+            with self.subTest(response=type(response).__name__), tempfile.TemporaryDirectory() as tmp:
+                _, job, commands, calls, _, error = self.execute(Path(tmp), [response])
+                self.assertIsNotNone(error); self.assertEqual(commands, []); self.assertEqual(calls, 1)
+                self.assertFalse(job.report['passed']); self.assertFalse(job.report['acceptancePerformed'])
+
+    def test_missing_enrollment_fails_before_reader_io(self):
+        for identity in ['', None, 7]:
+            with self.subTest(identity=identity), tempfile.TemporaryDirectory() as tmp:
+                _, job, commands, calls, _, error = self.execute(Path(tmp), [], identity=identity)
+                self.assertIsInstance(error, ValueError); self.assertEqual(commands, []); self.assertEqual(calls, 0)
+                self.assertFalse(job.report['passed'])
+
+    def test_valid_cli_retains_exclusive_lock_around_run(self):
+        from contextlib import contextmanager
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); config = root / 'reader.json'
+            config.write_text(json.dumps(dict(host='192.168.1.2', deviceID='enrolled')))
+            locked = []
+            @contextmanager
+            def exclusive(path):
+                self.assertEqual(path, root / 'build/dev-pipeline.lock')
+                locked.append(True)
+                try:
+                    yield
+                finally:
+                    locked.pop()
+            def run(args, config, job):
+                self.assertEqual(locked, [True]); self.assertTrue(args.install_only)
+                self.assertFalse(pipeline.install_only_argument_error(args))
+            argv = ['dev_pipeline.py', 'run', '--install-only', '--flash', '--firmware', '/unused', '--config', str(config)]
+            with patch.object(sys, 'argv', argv), patch.object(pipeline, 'ROOT', root), \
+                 patch.object(pipeline, 'exclusive', side_effect=exclusive) as lock, \
+                 patch.object(pipeline, 'run', side_effect=run) as invoke, \
+                 patch.object(pipeline.os, 'umask'), patch.dict(pipeline.os.environ, {}, clear=True):
+                pipeline.main()
+            lock.assert_called_once(); invoke.assert_called_once(); self.assertEqual(locked, [])
+
+    def test_identity_rechecked_immediately_before_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, job, commands, calls, _, error = self.execute(Path(tmp), [self.status(), {**self.status(), 'deviceID': 'other'}])
+            self.assertIsNotNone(error); self.assertEqual(commands, []); self.assertEqual(calls, 2)
+            self.assertFalse(job.report['passed'])
+
+    def test_install_error_stops_without_retry_or_success_probe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, job, commands, calls, _, error = self.execute(Path(tmp), [self.status(), self.status()], command_error=RuntimeError('lost flash outcome'))
+            self.assertIsInstance(error, RuntimeError); self.assertEqual(len(commands), 1); self.assertEqual(calls, 2)
+            self.assertFalse(job.report['passed']); self.assertEqual(job.report['stages'][-1]['state'], 'failed')
+
+    def test_post_version_identity_or_mode_failure_never_passes(self):
+        for post in [self.status('v-dev-wrong'), {**self.status('v-dev-next'), 'deviceID': 'other'},
+                     {**self.status('v-dev-next'), 'mode': 'AP'}]:
+            with self.subTest(post=post['version']), tempfile.TemporaryDirectory() as tmp:
+                _, job, commands, calls, _, error = self.execute(Path(tmp), [self.status(), self.status(), post])
+                self.assertIsNotNone(error); self.assertEqual(len(commands), 1); self.assertEqual(calls, 3)
+                self.assertFalse(job.report['passed']); self.assertFalse(job.report['acceptancePerformed'])
+
+    def test_running_companion_prevents_any_reader_or_install_io(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, job, commands, calls, _, error = self.execute(Path(tmp), [], companion_error=RuntimeError('companion running'))
+            self.assertIsNotNone(error); self.assertEqual(commands, []); self.assertEqual(calls, 0)
+            self.assertFalse(job.report['passed'])
+
+    def test_non_developer_artifact_is_rejected_before_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, job, commands, calls, _, error = self.execute(Path(tmp), [self.status()], payload=b'CrossPoint version: 0.1.0\0')
+            self.assertIsInstance(error, pipeline.pocket_put.ProtocolError)
+            self.assertEqual(commands, []); self.assertEqual(calls, 1); self.assertFalse(job.report['passed'])
+
+    def test_normal_run_without_new_flag_keeps_existing_behavior(self):
+        self.assertIsNone(pipeline.install_only_argument_error(self.args(Path('/unused'), install_only=False, flash=False, firmware=None, cycles=2)))
+        # Existing PipelineTest.test_pipeline_continues_hardware_suite_at_verified_new_address
+        # executes the actual ordinary branch and requires its Mac hardware command/result.
+
+
+
+
+class X4ContinuityTest(unittest.TestCase):
+    def args(self, root, **changes):
+        args = InstallOnlyTest().args(root, install_only=False, flash=False, x4_continuity=True)
+        for name, value in changes.items(): setattr(args, name, value)
+        return args
+
+    def evidence(self):
+        names = ['continuity-seed', 'continuity-app-to-x3-0', 'continuity-x3-to-app-0',
+                 'continuity-app-to-x3-1', 'continuity-x3-to-app-1']
+        return dict(passed=True, initialConnection=True, run='123', version='v-dev-current', platform='macOS',
+            device='X4', model='X4', bluetoothCalls=0, identityVerified=True, sharedReaderExchangeIsolatedFromStartup=True,
+            glanceSourcesUnconfigured=True, continuityValidation=dict(passed=True, restored=True, model='X4',
+                transport='http', bluetoothCycles=[],
+                captures=[dict(name=n, run=143, width=480, height=800, sha256='a'*64) for n in names],
+                cases=[dict(direction='bidirectional', round=i, passed=True, transport='http',
+                            backwardOffer=i==1, noMovementBeforeAcceptance=True,
+                            acceptedCharacterVisible=True, navigatedFromAnotherChapter=True) for i in range(2)],
+                epub=dict(kind='generated', sha256='b'*64, bytes=1000,
+                          roundTripBytesMatch=True, libraryReimportMatches=True)))
+
+    def test_scope_requires_explicit_artifact_and_rejects_every_other_action(self):
+        root=Path('/unused')
+        self.assertIsNone(pipeline.x4_continuity_argument_error(self.args(root)))
+        for values in [dict(action='configure'),dict(firmware=None),dict(cycles=2),
+                       dict(standby_seconds=91),dict(cppcheck='other')]:
+            with self.subTest(values=values):self.assertIsNotNone(pipeline.x4_continuity_argument_error(self.args(root,**values)))
+        for key in ('host','flash','install_only','build_firmware','checks','ios_simulator','ios_device',
+                    'x4_recover_empty_revision','x4_recover_from','x4_sleep','x4_starters','x4_layout_only',
+                    'x4_settings','x4_typography_only','x3_only','wifi_setup','real_epub','continuity_suite',
+                    'ble_continuity','screen_suite','interface_suite','network_faults','standby','wake_control',
+                    'delayed_advertising','battery_only'):
+            with self.subTest(key=key):self.assertIsNotNone(pipeline.x4_continuity_argument_error(self.args(root,**{key:True})))
+        self.assertIsNone(pipeline.x4_continuity_argument_error(self.args(root,x4_continuity=False,flash=True)))
+
+    def test_invalid_cli_and_run_refuse_before_lock_or_io(self):
+        with patch.object(sys,'argv',['dev_pipeline.py','run','--x4-continuity','--flash','--firmware','/unused']), \
+             patch.object(pipeline,'exclusive',side_effect=AssertionError('no lock')):
+            with self.assertRaises(SystemExit):pipeline.main()
+        with patch.object(pipeline,'require_companion_stopped',side_effect=AssertionError('no process IO')):
+            with self.assertRaises(ValueError):pipeline.run(self.args(Path('/unused'),flash=True),{},None)
+
+    def test_exact_x4_http_generated_native_evidence_required(self):
+        import copy
+        good=self.evidence()
+        pipeline.hardware_evidence(pipeline.MARKER+json.dumps(good),123,'v-dev-current',False,'macOS',continuity=True)
+        pipeline.check_x4_continuity(good)
+        for key,value in [('device','X3'),('model','X3'),('bluetoothCalls',1),('bluetoothCalls',False),('identityVerified',False),('sharedReaderExchangeIsolatedFromStartup',False),('glanceSourcesUnconfigured',False)]:
+            bad=copy.deepcopy(good);bad[key]=value
+            with self.subTest(key=key),self.assertRaises(RuntimeError):pipeline.check_x4_continuity(bad)
+        for key,value in [('model','X3'),('transport','bluetooth'),('bluetoothCycles',[{}])]:
+            bad=copy.deepcopy(good);bad['continuityValidation'][key]=value
+            with self.subTest(key=key),self.assertRaises(RuntimeError):pipeline.check_x4_continuity(bad)
+        for key,value in [('kind','published-book'),('sha256','z'*64),('sha256',None),('sha256',True),('sha256',7),('sha256',[]),('bytes',0),('bytes',True),('bytes',4*1024*1024+1),('roundTripBytesMatch',False),('libraryReimportMatches',False)]:
+            bad=copy.deepcopy(good);bad['continuityValidation']['epub'][key]=value
+            with self.subTest(key=key),self.assertRaises(RuntimeError):pipeline.check_x4_continuity(bad)
+        for key,value in [('width',528),('height',792)]:
+            bad=copy.deepcopy(good);bad['continuityValidation']['captures'][0][key]=value
+            with self.subTest(key=key),self.assertRaises(RuntimeError):pipeline.check_x4_continuity(bad)
+        bad=copy.deepcopy(good);bad['continuityValidation']['cases'][0]['transport']='bluetooth'
+        with self.assertRaises(RuntimeError):pipeline.check_x4_continuity(bad)
+        for key,value in [('name','foreign'),('run',144),('sha256','')]:
+            bad=copy.deepcopy(good);bad['continuityValidation']['captures'][0][key]=value
+            with self.assertRaises(RuntimeError):pipeline.hardware_evidence(pipeline.MARKER+json.dumps(bad),123,'v-dev-current',False,'macOS',continuity=True)
+
+    def test_exported_bitmap_native_dimensions_not_just_report_claim(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);name='owned';data=bytearray(54);data[:2]=b'BM'
+            data[18:22]=(480).to_bytes(4,'little',signed=True);data[22:26]=(800).to_bytes(4,'little',signed=True)
+            (root/(name+'.bmp')).write_bytes(data)
+            pipeline.check_x4_continuity_bitmaps(root,[dict(name=name)])
+            for modified in [data[:25],b'XX'+data[2:],data[:18]+(528).to_bytes(4,'little')+data[22:],data[:22]+(792).to_bytes(4,'little')+data[26:]]:
+                (root/(name+'.bmp')).write_bytes(modified)
+                with self.assertRaises(RuntimeError):pipeline.check_x4_continuity_bitmaps(root,[dict(name=name)])
+
+    def execute(self, root, *, model='X4', version='v-dev-current', hardware_fail=False, evidence_change=None):
+        args=self.args(root);args.firmware.write_bytes(b'CrossPoint version: v-dev-current\0')
+        job=pipeline.Pipeline(root/'run');commands=[];observed={}
+        report=self.evidence()
+        if evidence_change: report.update(evidence_change)
+        statuses=[dict(deviceID='enrolled',device=model,mode='STA',version=version)]*3
+        def command(name,argv,**kwargs):
+            commands.append(name)
+            def perform():
+                log=job.output/(name+'.log');log.write_text('offline double\n')
+                if name=='mac-build':
+                    binary=root/'.build/dev-pipeline-mac/Build/Products/Debug/Pocket.app/Contents/MacOS/Pocket';binary.parent.mkdir(parents=True);binary.write_bytes(b'offline app')
+                if name=='macOS-hardware-1':
+                    observed.update(argv=argv,env=kwargs['env'],timeout=kwargs['timeout'])
+                    if hardware_fail:
+                        (job.output/'macOS-hardware-1.xcresult').mkdir()
+                        raise RuntimeError('injected hardware failure')
+                    log.write_text(pipeline.MARKER+json.dumps(report))
+                return log
+            return job.stage(name,perform)
+        error=None
+        with patch.object(pipeline,'source_state',return_value={'offline':True}), \
+             patch.object(pipeline,'require_companion_stopped'), \
+             patch.object(pipeline,'resolve_reader',side_effect=AssertionError('no selected-model discovery')), \
+             patch.object(pipeline,'discover_with_app',side_effect=AssertionError('no discovery')), \
+             patch.object(pipeline.cycle,'get_json',side_effect=statuses), \
+             patch.object(pipeline.secrets,'randbelow',return_value=122) as random, \
+             patch.object(pipeline,'collect_screen_artifacts') as export, \
+             patch.object(pipeline,'check_x4_continuity_bitmaps') as bitmap, \
+             patch.object(job,'command',side_effect=command):
+            try:pipeline.run(args,dict(host='192.168.1.2',deviceID='enrolled'),job)
+            except Exception as caught:error=caught
+        return job,commands,observed,error,random,export,bitmap
+
+    def test_only_x4_method_five_capture_export_and_reserved_run(self):
+        with tempfile.TemporaryDirectory() as temp:
+            job,commands,observed,error,random,export,bitmap=self.execute(Path(temp))
+            self.assertIsNone(error);self.assertTrue(job.report['passed']);self.assertEqual(len(job.report['hardware']),1)
+            self.assertIn('-only-testing:PocketMacTests/ReaderX4SettingsTests/testBidirectionalReading',observed['argv'])
+            self.assertEqual(observed['env']['TEST_RUNNER_POCKET_HARDWARE_X4_CONTINUITY'],'1')
+            self.assertEqual(observed['env']['TEST_RUNNER_POCKET_HARDWARE_MODEL'],'X4')
+            for key in ('CONTINUITY','BLE_CONTINUITY','X4_SETTINGS','X4_STARTERS','X4_SLEEP'):
+                self.assertEqual(observed['env']['TEST_RUNNER_POCKET_HARDWARE_'+key],'0')
+            self.assertNotIn('upload-install-reboot',commands);self.assertIn('macOS-hardware-1-export-continuity',commands)
+            self.assertEqual(observed['timeout'],1200);random.assert_called_once_with(0xffffffff-20)
+            export.assert_called_once();bitmap.assert_called_once()
+
+    def test_wrong_model_or_installed_version_never_runs_hardware(self):
+        for changes in [dict(model='X3'),dict(version='v-dev-other')]:
+            with tempfile.TemporaryDirectory() as temp:
+                job,commands,_,error,_,_,_=self.execute(Path(temp),**changes)
+                self.assertIsNotNone(error);self.assertFalse(job.report['passed']);self.assertNotIn('macOS-hardware-1',commands)
+                self.assertNotIn('upload-install-reboot',commands)
+
+    def test_pipeline_rejects_wrong_x4_result_before_export_or_pass(self):
+        with tempfile.TemporaryDirectory() as temp:
+            job,commands,_,error,_,export,bitmap=self.execute(Path(temp),evidence_change={'model':'X3'})
+            self.assertIsInstance(error,RuntimeError);self.assertFalse(job.report['passed'])
+            self.assertEqual(job.report['hardware'],[])
+            self.assertNotIn('macOS-hardware-1-export-continuity',commands)
+            export.assert_not_called();bitmap.assert_not_called()
+
+    def test_failure_exports_evidence_and_never_claims_success(self):
+        with tempfile.TemporaryDirectory() as temp:
+            job,commands,_,error,_,export,bitmap=self.execute(Path(temp),hardware_fail=True)
+            self.assertIsNotNone(error);self.assertFalse(job.report['passed'])
+            self.assertEqual(commands.count('macOS-hardware-1'),1)
+            self.assertIn('macOS-hardware-1-export-failed-continuity',commands)
+            export.assert_not_called();bitmap.assert_not_called()
+
+    def test_valid_x4_cli_keeps_exclusive_lock(self):
+        from contextlib import contextmanager
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); config = root / 'reader.json'
+            config.write_text(json.dumps(dict(host='192.168.1.2', deviceID='enrolled')))
+            locked = []
+            @contextmanager
+            def exclusive(path):
+                self.assertEqual(path, root / 'build/dev-pipeline.lock')
+                locked.append(True)
+                try:
+                    yield
+                finally:
+                    locked.pop()
+            def run(args, config, job):
+                self.assertEqual(locked, [True]); self.assertTrue(args.x4_continuity)
+                self.assertFalse(pipeline.x4_continuity_argument_error(args))
+            argv = ['dev_pipeline.py', 'run', '--x4-continuity', '--firmware', '/unused', '--config', str(config)]
+            with patch.object(sys, 'argv', argv), patch.object(pipeline, 'ROOT', root), \
+                 patch.object(pipeline, 'exclusive', side_effect=exclusive) as lock, \
+                 patch.object(pipeline, 'run', side_effect=run) as invoke, \
+                 patch.object(pipeline.os, 'umask'), patch.dict(pipeline.os.environ, {}, clear=True):
+                pipeline.main()
+            lock.assert_called_once(); invoke.assert_called_once(); self.assertEqual(locked, [])
+
+
+    def test_direct_script_entry_is_after_every_test_class(self):
+        import ast
+        tree=ast.parse(Path(__file__).read_text())
+        guards=[(index,node) for index,node in enumerate(tree.body)
+                if isinstance(node,ast.If) and isinstance(node.test,ast.Compare)
+                and isinstance(node.test.left,ast.Name) and node.test.left.id=='__name__']
+        self.assertEqual(len(guards),1)
+        self.assertIs(guards[0][1],tree.body[-1])
+        self.assertTrue(all(index<guards[0][0] for index,node in enumerate(tree.body) if isinstance(node,ast.ClassDef)))
 
 
 if __name__ == '__main__':

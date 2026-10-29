@@ -1,0 +1,19 @@
+{
+  "version": "1.1.6",
+  "patch": "0001-external-decode-workspace.patch",
+  "files": {
+    "src/PNGdec.h": {
+      "upstreamSHA256": "f01b12dea5d14df02aa0ae7b9e24c415b7d40879221e90ab644d7215a3c2a37f",
+      "patchedSHA256": "c706cbca0d7a6b9215c89f39bd8ec8d4b3568494f6957ec80669aaa43873af82"
+    },
+    "src/PNGdec.cpp": {
+      "upstreamSHA256": "2b534fbac2684848104f5eecb21ebf99402efc47659c686ecaf79e3b604a9f5c",
+      "patchedSHA256": "de6ff63a48e3b26009dcb45c2595971286f8af95dafcbb65db8298c0da8a1328"
+    },
+    "src/png.inl": {
+      "upstreamSHA256": "8008f43fb74e578df3651791da4fb4ac74cb87f946ec6910aeab703fa5b5ea65",
+      "patchedSHA256": "920077554ef0d679515b7d48b3ebf97dbb88fa07d93ff918b2a12ad57c318b1a"
+    }
+  },
+  "patchSHA256": "3bb21bb1b532399ed2152ab92766a5380c4d93a2aa426cb0d8f0459d8f584005"
+}

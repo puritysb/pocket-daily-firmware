@@ -44,7 +44,9 @@ def run_platformio(executable, arguments):
     CppcheckCheckTool.configure_command = native_command(
         CppcheckCheckTool.configure_command, executable)
     sys.argv = ["pio", *arguments]
-    pio_main()
+    # PlatformIO's callable returns its status; only its CLI entry point exits.
+    # Preserve defects as a failing child process for the parent check runner.
+    raise SystemExit(pio_main())
 
 
 def main() -> None:

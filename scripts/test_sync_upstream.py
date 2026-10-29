@@ -66,6 +66,42 @@ class SyncUpstreamTests(unittest.TestCase):
         self.assertEqual((self.work / "reader.txt").read_text(), "user work\n")
         self.assertFalse((self.work / ".git/MERGE_HEAD").exists())
 
+    def test_check_distinguishes_stable_from_development_ancestry(self):
+        self.git(self.upstream, "switch", "-c", "develop")
+        self.commit(self.upstream, "preview.txt", "prerelease feature\n")
+        development = self.git(self.upstream, "rev-parse", "HEAD").strip()
+        result = self.sync("--check")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(f"1 upstream ancestry commits; target {self.target}", result.stdout)
+        self.assertIn("Development watch only: 2 commits absent", result.stdout)
+        self.assertIn(f"target {development}", result.stdout)
+        self.assertIn("not a missing-fixes count", result.stdout)
+        self.assertFalse((self.work / "preview.txt").exists())
+        self.assertUnchanged()
+        # Reporting a development ref must not make it eligible for integration.
+        rejected = self.sync("--ref", development)
+        self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+        self.assertIn("not on the fetched upstream stable line", rejected.stdout)
+        self.assertUnchanged()
+
+    def test_check_reports_unavailable_development_branch(self):
+        result = self.sync("--check")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Development watch unavailable", result.stdout)
+        self.assertUnchanged()
+
+    def test_stable_up_to_date_does_not_hide_development_changes(self):
+        self.git(self.work, "fetch", "upstream")
+        self.git(self.work, "merge", "--no-edit", self.target)
+        self.head = self.git(self.work, "rev-parse", "HEAD").strip()
+        self.git(self.upstream, "switch", "-c", "develop")
+        self.commit(self.upstream, "preview.txt", "prerelease feature\n")
+        result = self.sync("--check")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("0 upstream ancestry commits", result.stdout)
+        self.assertIn("Development watch only: 1 commits absent", result.stdout)
+        self.assertUnchanged()
+
     def test_wrong_branch_does_not_checkout(self):
         result = self.sync("--branch", "main")
         self.assertNotEqual(result.returncode, 0)

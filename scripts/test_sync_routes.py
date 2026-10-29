@@ -146,6 +146,18 @@ class SyncRoutesTest(unittest.TestCase):
                         activity.index("presentation.service("))
         self.assertIn("presentation.preparationPending() && webServer->presentationTransportIdle()", activity)
 
+    def test_navigation_also_releases_transfer_banner_before_copying_display_state(self):
+        root = Path(__file__).resolve().parents[1]
+        activity = (root / "src/activities/network/CrossPointWebServerActivity.cpp").read_text()
+        # The production slot test exercises navigation with busy=true and
+        # preparationPending=false. Wire that lifecycle into the activity:
+        # clear the server's Saved banner before copying it for the render task.
+        gate = activity.index("if (presentation.busy() && webServer->presentationTransportIdle())")
+        hide = activity.index("webServer->hideTransferFeedback();", gate)
+        copy = activity.index("transferDisplay = feedback;", hide)
+        self.assertLess(gate, hide)
+        self.assertLess(hide, copy)
+
     def test_sync_releases_own_time_wait_before_presentation_admission(self):
         root = Path(__file__).resolve().parents[1]
         host = (root / "src/network/CrossPointWebServer.cpp").read_text()

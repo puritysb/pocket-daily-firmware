@@ -46,6 +46,17 @@ pending=$(git rev-list --count "$branch..$target")
 echo "==> $branch: $pending upstream ancestry commits; target $target"
 if [[ "$mode" == check ]]; then
   git log --oneline "$branch..$target"
+  # Stable ancestry alone does not describe the development backlog. Report it
+  # separately without allowing a prerelease ref into the merge path below.
+  if git rev-parse --verify -q refs/remotes/upstream/develop >/dev/null; then
+    development=$(git rev-parse refs/remotes/upstream/develop)
+    development_pending=$(git rev-list --count "$branch..$development")
+    echo "==> Development watch only: $development_pending commits absent from $branch ancestry; target $development"
+    echo "==> This is not a missing-fixes count: downstream equivalents need source review."
+  else
+    echo "==> Development watch unavailable: upstream/develop was not fetched."
+  fi
+  echo "==> Check only; working files and local branches are unchanged. Integration remains stable-only."
   exit 0
 fi
 [[ "$pending" -gt 0 ]] || exit 0

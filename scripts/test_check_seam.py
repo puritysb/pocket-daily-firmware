@@ -31,6 +31,16 @@ class SeamTests(unittest.TestCase):
         self.write("src/pocket_daily/web/Route.cpp", '#include "activities/Activity.h"\n')
         self.assertIn("unregistered inherited include", " ".join(violations(self.root)))
 
+    def test_trial_edges_are_file_scoped_and_do_not_allow_unrelated_dependencies(self):
+        self.write("src/network/OtaBootSwitch.h", "#pragma once\n")
+        self.write("src/pocket_daily/boot/TrialLease.cpp", '#include "network/OtaBootSwitch.h"\n')
+        self.assertEqual(violations(self.root), [])
+        self.write("src/pocket_daily/web/Other.cpp", '#include "network/OtaBootSwitch.h"\n')
+        self.assertIn("unregistered inherited include", " ".join(violations(self.root)))
+        self.write("src/pocket_daily/web/Other.cpp", "")
+        self.write("src/pocket_daily/boot/TrialLease.cpp", '#include "activities/Activity.h"\n')
+        self.assertIn("unregistered inherited include", " ".join(violations(self.root)))
+
     def test_relative_path_cannot_bypass_ownership(self):
         self.write("src/pocket_daily/web/Route.cpp", '#include "../../activities/Activity.h"\n')
         self.assertIn("unregistered inherited include", " ".join(violations(self.root)))
