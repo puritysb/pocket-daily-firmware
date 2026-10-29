@@ -11,6 +11,7 @@
 #include <iterator>
 
 #include "CrossPointSettings.h"
+#include "FontScale.h"
 #include "ReaderFontSizes.h"
 #include "fontIds.h"
 
@@ -570,6 +571,60 @@ int SdCardFontSystem::ensureUiFamilyLoaded(GfxRenderer& renderer, const char* fa
   return manager_.getFontId(familyName);
 }
 
+bool SdCardFontSystem::ensureLibraryUiFont(GfxRenderer& renderer) {
+  // The existing manager owns one bounded family, not a second glyph cache.
+  // Network BoundedUI callers remain disabled; only Library opts in to using
+  // this family for glyphs missing from the built-in UI fonts.
+  const int fontId = ensureUiFamilyLoaded(renderer, "PocketSansWorld", SdCardFont::LoadMode::BoundedUI);
+  if (!boundedUiFontReady(fontId)) {
+    releaseLoaded(renderer);
+    LOG_ERR("SDFS", "Library UI font unavailable");
+    return false;
+  }
+  fallbackMode_ = FallbackMode::UiFamily;
+  return true;
+}
+
+uint32_t SdCardFontSystem::beginReaderOverlayUiFont(GfxRenderer& renderer) {
+  if (renderer_ != &renderer) return 0;
+  if (fallbackMode_ == FallbackMode::ReaderOverlay) {
+    if (!fallback_ || fallback_->boundedReadFailed() || readerOverlayOwners_ == UINT8_MAX) return 0;
+    ++readerOverlayOwners_;
+    return readerOverlayGeneration_;
+  }
+  // Network/Library ownership is not a reader-child scope. Never override it.
+  if (fallbackMode_ != FallbackMode::Symbols) return 0;
+  const auto* family = registry_.findFamily("PocketSansWorld");
+  const auto* selected = family ? family->findNearestSize(12) : nullptr;
+  if (!selected || selected->pointSize != 12) return 0;
+
+  // Reuse the existing owned fallback slot, not the reader manager. The
+  // bounded face has no full interval/advance/page cache: its existing read
+  // state is <=2816 B (HAL handles excluded), and 8 bitmap slots cap at 256 B.
+  // Allocate once per overlay lifetime; Symbols and World never coexist here.
+  dropFallback();
+  fallbackUnavailable_ = false;
+  auto font = makeUniqueNoThrow<SdCardFont>();
+  if (!font || !font->load(selected->path.c_str(), SdCardFont::LoadMode::BoundedUI)) {
+    LOG_ERR("SDFS", "Reader UI bounded font unavailable");
+    return 0;  // still Symbols; its lazy load may retry after this scope
+  }
+  fallback_ = font.release();
+  fallbackPointSize_ = 12;
+  if (++readerOverlayGeneration_ == 0) ++readerOverlayGeneration_;
+  readerOverlayOwners_ = 1;
+  fallbackMode_ = FallbackMode::ReaderOverlay;
+  return readerOverlayGeneration_;
+}
+
+void SdCardFontSystem::endReaderOverlayUiFont(const uint32_t owner) {
+  if (!owner || owner != readerOverlayGeneration_ || fallbackMode_ != FallbackMode::ReaderOverlay ||
+      readerOverlayOwners_ == 0)
+    return;
+  if (--readerOverlayOwners_ != 0) return;
+  setFallbackEnabled(true);  // drops the bounded face before Symbols resumes
+}
+
 int SdCardFontSystem::ensureAutomaticReaderFontLoaded(GfxRenderer& renderer) {
   static constexpr char automaticFamily[] = "PocketSansWorld";
 
@@ -584,9 +639,13 @@ int SdCardFontSystem::ensureAutomaticReaderFontLoaded(GfxRenderer& renderer) {
   const uint8_t sizeEnum = SETTINGS.fontPointSize;
   const auto* selected = family->findNearestSize(sizeEnum);
   const uint8_t wantedPt = selected ? selected->pointSize : 0;
+  const auto readerFontId = [&] {
+    const int id = manager_.getFontId(automaticFamily);
+    return renderer.readerFontAtScale(id, fontScale::ratio(sizeEnum, wantedPt));
+  };
   if (manager_.currentFamilyName() == automaticFamily && manager_.currentPointSize() == wantedPt &&
       manager_.loadMode() == SdCardFont::LoadMode::Cached) {
-    return manager_.getFontId(automaticFamily);
+    return readerFontId();
   }
 
   if (!manager_.currentFamilyName().empty()) {
@@ -599,7 +658,7 @@ int SdCardFontSystem::ensureAutomaticReaderFontLoaded(GfxRenderer& renderer) {
   }
 
   LOG_DBG("SDFS", "Loaded automatic reader font: %s", automaticFamily);
-  return manager_.getFontId(automaticFamily);
+  return readerFontId();
 }
 
 int SdCardFontSystem::currentLoadedFontId() const {
@@ -615,7 +674,22 @@ SdCardFont* SdCardFontSystem::provideFallback(void* context, const bool load) {
 }
 
 SdCardFont* SdCardFontSystem::fallbackFont(const bool load) {
-  if (!fallbackEnabled_) return nullptr;
+  switch (fallbackMode_) {
+    case FallbackMode::Disabled:
+      return nullptr;
+    case FallbackMode::UiFamily: {
+      // Borrow only while the manager owns this bounded font. Every normal
+      // family switch disables this mode before unloading its registered face.
+      const int fontId = currentLoadedFontId();
+      if (!renderer_ || !boundedUiFontReady(fontId)) return nullptr;
+      const auto it = renderer_->getSdCardFonts().find(fontId);
+      return it == renderer_->getSdCardFonts().end() ? nullptr : it->second;
+    }
+    case FallbackMode::ReaderOverlay:
+      return fallback_ && !fallback_->boundedReadFailed() ? fallback_ : nullptr;
+    case FallbackMode::Symbols:
+      break;
+  }
   if (!load) return fallback_;
   if (fallbackUnavailable_) return fallback_;
 
@@ -668,10 +742,13 @@ SdCardFont* SdCardFontSystem::fallbackFont(const bool load) {
 }
 
 void SdCardFontSystem::setFallbackEnabled(const bool enabled) {
-  if (enabled == fallbackEnabled_) return;
-  fallbackEnabled_ = enabled;
+  const auto wanted = enabled ? FallbackMode::Symbols : FallbackMode::Disabled;
+  if (wanted == fallbackMode_) return;
+  const bool endingOverlay = fallbackMode_ == FallbackMode::ReaderOverlay;
+  fallbackMode_ = wanted;
   fallbackUnavailable_ = false;
-  if (!enabled) dropFallback();
+  readerOverlayOwners_ = 0;
+  if (!enabled || endingOverlay) dropFallback();
 }
 
 void SdCardFontSystem::dropFallback() {

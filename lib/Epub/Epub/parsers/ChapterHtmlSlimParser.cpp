@@ -2,6 +2,10 @@
 
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#ifdef ENABLE_DEV_REMOTE_FLASH
+#include <HalMemory.h>
+#include <ZipFile.h>
+#endif
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -19,6 +23,9 @@
 
 #include "../../../../src/fontIds.h"
 #include "Epub.h"
+#ifdef ENABLE_DEV_REMOTE_FLASH
+#include "Epub/ImageDiagnostics.h"
+#endif
 #include "Epub/Page.h"
 #include "Epub/VisibleTextUtils.h"
 #include "Epub/converters/ImageDecoderFactory.h"
@@ -1096,6 +1103,9 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
         src.resize(fragmentPos);
       }
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+      epub_image_diagnostics::active.imageSeen();
+#endif
       // imageRendering: 0=display, 1=placeholder (alt text only), 2=suppress entirely
       if (self->imageRendering == 2) {
         self->skipUntilDepth = self->depth;
@@ -1127,8 +1137,20 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
               // image-heavy chapter from stalling for seconds per image.
               ImageDimensions dims = {0, 0};
               ImageDimsProbe headerProbe;
-              self->epub->readItemContentsToStream(resolvedPath, headerProbe, 1024, /*allowEarlyStop=*/true);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+              const auto probeHeap = HalMemory::getDefaultHeap();
+              epub_image_diagnostics::active.probeStarted(probeHeap.freeBytes, probeHeap.largestBlockBytes);
+              const bool probeStreamed =
+#endif
+                  self->epub->readItemContentsToStream(resolvedPath, headerProbe, 1024, /*allowEarlyStop=*/true);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+              const auto probeError = ZipFile::lastStreamError();
+#endif
               bool gotDimensions = headerProbe.getDimensions(dims);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+              epub_image_diagnostics::active.probeResult(probeStreamed, gotDimensions,
+                                                         static_cast<uint32_t>(probeError));
+#endif
 
               if (!gotDimensions) {
                 // No header within the stream (rare) — fall back to extracting the
@@ -1140,11 +1162,21 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 }
                 HalFile cachedImageFile;
                 bool extractSuccess = false;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+                epub_image_diagnostics::active.extractionStarted();
+                auto extractionError = ZipFile::StreamError::Write;
+#endif
                 if (Storage.openFileForWrite("EHP", cachedImagePath, cachedImageFile)) {
                   extractSuccess = self->epub->readItemContentsToStream(resolvedPath, cachedImageFile, 4096);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+                  extractionError = ZipFile::lastStreamError();
+#endif
                   cachedImageFile.flush();
                   cachedImageFile.close();
                 }
+#ifdef ENABLE_DEV_REMOTE_FLASH
+                epub_image_diagnostics::active.extractionResult(extractSuccess, static_cast<uint32_t>(extractionError));
+#endif
                 if (extractSuccess) {
                   // Retry to absorb SD-card sync latency on slow cards, and to close
                   // the silent-drop bug where a single getDimensions failure was fatal.
@@ -1332,6 +1364,9 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 }
                 if (self->currentPage->elements.empty()) self->currentPage->textOffset = self->textOffset;
                 self->currentPage->elements.push_back(std::move(pageImage));
+#ifdef ENABLE_DEV_REMOTE_FLASH
+                epub_image_diagnostics::active.imageBlock();
+#endif
                 self->setCurrentPageVisibleOffset(self->visibleTextOffset);
                 self->currentPageNextY += displayHeight + imageMarginBottom;
 
@@ -1359,6 +1394,9 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
 
       // Fallback to alt text if image processing fails
       if (!alt.empty()) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        epub_image_diagnostics::active.altFallback();
+#endif
         alt = "[Image: " + alt + "]";
         self->startNewTextBlock(self->blockStyleStack.back()
                                     .getCombinedBlockStyle(centeredBlockStyle, BlockStyle::CombineAxis::Horizontal)

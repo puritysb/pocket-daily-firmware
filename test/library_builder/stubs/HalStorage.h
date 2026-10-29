@@ -24,6 +24,10 @@ inline bool failDirectorySeek = false;
 inline std::string failClosePath;
 inline std::string failWritePath;
 inline unsigned parses = 0;
+inline uint32_t clockMs = 0;
+inline uint32_t metadataDelayMs = 0;
+inline std::string delayClosePath;
+inline uint32_t closeDelayMs = 0;
 inline unsigned reads = 0;
 inline unsigned seeks = 0;
 inline unsigned delays = 0;
@@ -53,6 +57,10 @@ inline void reset() {
   failClosePath.clear();
   failWritePath.clear();
   parses = 0;
+  clockMs = 0;
+  metadataDelayMs = 0;
+  delayClosePath.clear();
+  closeDelayMs = 0;
   reads = 0;
   seeks = 0;
   delays = 0;
@@ -98,6 +106,7 @@ class HalFile {
   explicit operator bool() const { return bool(node); }
   bool isOpen() const { return bool(node); }
   bool close() {
+    if (path == fake::delayClosePath) fake::clockMs += fake::closeDelayMs;
     const bool failed = !fake::failClosePath.empty() && path == fake::failClosePath;
     if (failed) {
       fake::failClosePath.clear();

@@ -285,3 +285,56 @@ TEST(LibraryPath, RootDoesNotGainASecondSeparator) {
 TEST(LibraryPath, NestedFolderGetsOneSeparator) {
   EXPECT_EQ(library::joinLibraryPath("/Books", "book.epub"), "/Books/book.epub");
 }
+
+TEST(LibraryDisplay, ComposesCopiedTitleAndAuthorWithoutChangingIdentity) {
+  const std::string rawTitle =
+      "Pocket RC \u1112\u1161\u11ab\u1100\u116e\u11a8\u110b\u1165 \u110b\u1175\u11b0\u1100\u1175";
+  const std::string rawAuthor = "Cafe\u0301 \u1112\u1161\u11ab";
+  const std::string rawPath = "/" + rawTitle + ".txt";
+  const std::string titleBefore = rawTitle, authorBefore = rawAuthor, pathBefore = rawPath;
+  std::string title = rawTitle, author = rawAuthor;
+  const auto* titleStorage = title.data();
+  const auto* authorStorage = author.data();
+  const auto titleCapacity = title.capacity(), authorCapacity = author.capacity();
+  library::composeDisplayText(title);
+  library::composeDisplayText(author);
+  EXPECT_EQ(title, "Pocket RC 한국어 읽기");
+  EXPECT_EQ(author, "Café 한");
+  EXPECT_EQ(title.data(), titleStorage);
+  EXPECT_EQ(author.data(), authorStorage);
+  EXPECT_EQ(title.capacity(), titleCapacity);
+  EXPECT_EQ(author.capacity(), authorCapacity);
+  EXPECT_EQ(rawTitle, titleBefore);
+  EXPECT_EQ(rawAuthor, authorBefore);
+  EXPECT_EQ(rawPath, pathBefore);
+  library::composeDisplayText(title);
+  EXPECT_EQ(title, "Pocket RC 한국어 읽기");
+}
+
+TEST(LibraryDisplay, PreservesAsciiCjkAndFourByteCodepoints) {
+  for (const char* source : {"", "Pocket RC English Reading", "漢字かなカナ 한국어", "\U00020000 / \U0001f642"}) {
+    std::string display = source;
+    const auto capacity = display.capacity();
+    library::composeDisplayText(display);
+    EXPECT_EQ(display, source);
+    EXPECT_EQ(display.capacity(), capacity);
+  }
+}
+
+TEST(LibraryDisplay, FullByteFieldAndTruncatedUtf8DoNotGrowOrLoseBytes) {
+  // The index's length-prefixed text fields admit at most 255 bytes. Exercise
+  // a final complete composition and every cut through that same UTF-8 suffix.
+  const std::string suffix = "\u1112\u1161\u11ab";
+  const std::string prefix(246, 'x');
+  for (size_t length = 0; length <= suffix.size(); ++length) {
+    std::string display = prefix + suffix.substr(0, length);
+    const auto* storage = display.data();
+    const auto capacity = display.capacity();
+    const std::string expected = prefix + (length < 6 ? suffix.substr(0, length) : "하" + suffix.substr(6, length - 6));
+    library::composeDisplayText(display);
+    EXPECT_EQ(display, length == 9 ? prefix + "한" : expected) << length;
+    EXPECT_EQ(display.data(), storage);
+    EXPECT_EQ(display.capacity(), capacity);
+    EXPECT_LE(display.size(), 255u);
+  }
+}

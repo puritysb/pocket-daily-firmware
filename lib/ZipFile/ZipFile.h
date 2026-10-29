@@ -82,13 +82,17 @@ class ZipFile {
     Entry,         // entry missing or its local header unreadable
     ReadBuffer,    // OOM: compressed read buffer
     OutputBuffer,  // OOM: inflated output buffer
-    Window,        // OOM: deflate window segments
+    Window,        // OOM: inflater state or contiguous 32 KiB streaming ring
     Inflate,       // corrupt deflate data or size mismatch
     Read,          // SD read returned no data
     Write,         // destination accepted fewer bytes
     Method,        // unsupported compression method
   };
   static StreamError lastStreamError() { return lastStreamError_; }
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  // A wrapper may fail before invoking ZIP (e.g. output-file open failure).
+  static void clearStreamErrorForDiagnostics() { lastStreamError_ = StreamError::None; }
+#endif
 
  private:
   inline static StreamError lastStreamError_ = StreamError::None;

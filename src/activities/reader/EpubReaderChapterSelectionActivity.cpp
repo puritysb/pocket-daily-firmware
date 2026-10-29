@@ -3,6 +3,8 @@
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <LibraryText.h>
+#include <SdCardFontSystem.h>
 
 #include <string>
 
@@ -21,6 +23,7 @@ EpubReaderChapterSelectionActivity::EpubReaderChapterSelectionActivity(GfxRender
       currentSpineIndex(currentSpineIndex) {}
 
 void EpubReaderChapterSelectionActivity::onEnter() {
+  RenderLock lock(*this);
   UiListActivity::onEnter();
 
   // The reader underneath pins its page-render glyph arenas while this
@@ -36,6 +39,7 @@ void EpubReaderChapterSelectionActivity::onEnter() {
   if (!epub) {
     return;
   }
+  if (!readerUiFontOwner) readerUiFontOwner = sdFontSystem.beginReaderOverlayUiFont(renderer);
 
   // Start with the current chapter at the top of the viewport; the first
   // screen build pulls the viewport to it (ListNav follow-on-build) and
@@ -64,6 +68,7 @@ void EpubReaderChapterSelectionActivity::refreshTocWindow(const int start) {
     const auto tocItem = epub->getTocItem(clamped + i);
     std::string indent(tocItem.level > 0 ? (tocItem.level - 1) * 2 : 0, ' ');
     windowLabels[i] = indent + tocItem.title;
+    library::composeDisplayText(windowLabels[i]);
     fui::ListItem item;
     item.label = windowLabels[i].c_str();
     item.actionValue = static_cast<int16_t>(clamped + i);
@@ -162,4 +167,12 @@ void EpubReaderChapterSelectionActivity::drawChrome() {
   const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
   GUI.drawHeader(renderer, Rect{safe.x, safe.y + metrics.topPadding, safe.width, metrics.headerHeight},
                  tr(STR_SELECT_CHAPTER));
+}
+
+void EpubReaderChapterSelectionActivity::onExit() {
+  if (readerUiFontOwner) {
+    sdFontSystem.endReaderOverlayUiFont(readerUiFontOwner);
+    readerUiFontOwner = 0;
+  }
+  UiListActivity::onExit();
 }

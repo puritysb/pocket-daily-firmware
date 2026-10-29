@@ -22,6 +22,11 @@ bool isBookCacheDirectoryName(const char* name) {
 }
 
 void clearBookCache(const std::string& path) {
+  // Metadata, diagnostics and firmware changes do not change the book catalog.
+  // In particular, deleting library.dirty must not recreate the same marker.
+  if (!FsHelpers::hasEpubExtension(path) && !FsHelpers::hasXtcExtension(path) && !FsHelpers::hasTxtExtension(path) &&
+      !FsHelpers::hasMarkdownExtension(path))
+    return;
   library::markLibraryIndexDirty();
   if (FsHelpers::hasEpubExtension(path)) {
     Epub(path, "/.crosspoint").clearCache();

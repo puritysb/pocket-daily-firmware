@@ -67,7 +67,9 @@ class GfxRenderer {
   // allocation inside the SdCardFont objects. Same pragmatic compromise as
   // fontCacheManager_ below.
   mutable std::map<int, SdCardFont*> sdCardFonts_;
-  mutable std::map<int, uint16_t> sdCardFontScales_;  // fontId -> 8.8 fixed point scale (256=1.0x)
+  int scaledSdFontId_ = 0;
+  int scaledSdBaseFontId_ = 0;
+  uint16_t sdFontScale_ = 256;  // one resident reader family, no map allocation
   // TTF (vector) fonts: rebuilt per page by ensureSdCardFontReady(). Mutable for
   // the same reason as sdCardFonts_ (const layout path triggers a rebuild).
   mutable std::map<int, TtfEpdFont*> ttfFonts_;
@@ -180,9 +182,10 @@ class GfxRenderer {
   // Coupled to avoid dangling SdCardFont* in sdCardFonts_ when callers free
   // the underlying SdCardFont and forget the SD-side unregister.
   void removeFont(int fontId) {
+    if (scaledSdBaseFontId_ == fontId) clearSdCardFontScales();
     fontMap.erase(fontId);
     sdCardFonts_.erase(fontId);
-    sdCardFontScales_.erase(fontId);
+    if (scaledSdFontId_ == fontId) clearSdCardFontScales();
   }
   void setFontCacheManager(FontCacheManager* m);
   FontCacheManager* getFontCacheManager() const { return fontCacheManager_; }
@@ -207,14 +210,22 @@ class GfxRenderer {
   void unregisterSdCardFont(int fontId) { removeFont(fontId); }
   void clearSdCardFonts() {
     sdCardFonts_.clear();
-    sdCardFontScales_.clear();
+    clearSdCardFontScales();
   }
-  void registerSdCardFontScale(int fontId, uint16_t scale) { sdCardFontScales_[fontId] = scale; }
-  void clearSdCardFontScales() { sdCardFontScales_.clear(); }
-  uint16_t getSdCardFontScale(int fontId) const {
-    auto it = sdCardFontScales_.find(fontId);
-    return (it != sdCardFontScales_.end()) ? it->second : 256;
+  void registerSdCardFontScale(int fontId, uint16_t scale) {
+    scaledSdFontId_ = fontId;
+    sdFontScale_ = scale >= 128 && scale <= 768 ? scale : 256;
   }
+  void clearSdCardFontScales() {
+    if (scaledSdBaseFontId_) {
+      fontMap.erase(scaledSdFontId_);
+      sdCardFonts_.erase(scaledSdFontId_);
+    }
+    scaledSdBaseFontId_ = scaledSdFontId_ = 0;
+    sdFontScale_ = 256;
+  }
+  int readerFontAtScale(int fontId, uint16_t scale);
+  uint16_t getSdCardFontScale(int fontId) const { return fontId == scaledSdFontId_ ? sdFontScale_ : 256; }
   const std::map<int, SdCardFont*>& getSdCardFonts() const { return sdCardFonts_; }
   bool isSdCardFont(int fontId) const { return sdCardFonts_.count(fontId) > 0; }
   // TTF (vector) fonts rendered via TtfEpdFont/FreeInkFont. Registered like an
@@ -380,7 +391,7 @@ class GfxRenderer {
                  bool pixelState) const;
   // Draw glyph ink with clipping and orientation resolved once per glyph.
   void drawGlyphBitmap(const uint8_t* bitmap, int width, int height, const glyphBitmap::Frame& frame, bool twoBit,
-                       RenderMode mode, bool state) const;
+                       RenderMode mode, bool state, uint16_t scale = 256) const;
   void drawLine(int x1, int y1, int x2, int y2, bool state = true) const;
   void drawLine(int x1, int y1, int x2, int y2, int lineWidth, bool state) const;
   void drawArc(int maxRadius, int cx, int cy, int xDir, int yDir, int lineWidth, bool state) const;

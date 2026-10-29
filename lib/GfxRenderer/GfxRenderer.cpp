@@ -442,6 +442,35 @@ void GfxRenderer::insertFont(const int fontId, EpdFontFamily font) {
   }
 }
 
+// A bounded alias keeps normal UI text on the unscaled family. It shares the
+// existing SdCardFont, glyph cache and bitmap bytes. Only the existing font
+// registries gain one node each on a size change (under 256 B host/C3 metadata);
+// every page at the same size reuses them. No raster buffer is allocated.
+int GfxRenderer::readerFontAtScale(int fontId, uint16_t scale) {
+  if (scale < 128 || scale > 768) {
+    LOG_ERR("GFX", "Reader font scale out of range");
+    return 0;
+  }
+  if (scale == 256) {
+    clearSdCardFontScales();
+    return fontId;
+  }
+  const int alias = static_cast<int>(static_cast<uint32_t>(fontId) ^ (0x40000000u | (uint32_t(scale) << 16)));
+  if (scaledSdBaseFontId_ == fontId && scaledSdFontId_ == alias && sdFontScale_ == scale) return alias;
+  clearSdCardFontScales();
+  const auto found = fontMap.find(fontId);
+  if (found == fontMap.end() || fontMap.count(alias) || alias == 0) {
+    LOG_ERR("GFX", "Cannot register scaled reader font");
+    return 0;
+  }
+  insertFont(alias, found->second);
+  if (const auto source = sdCardFonts_.find(fontId); source != sdCardFonts_.end())
+    registerSdCardFont(alias, source->second);
+  scaledSdBaseFontId_ = fontId;
+  registerSdCardFontScale(alias, scale);
+  return alias;
+}
+
 int GfxRenderer::resolveTextFontId(const int fontId, const char* text, const EpdFontFamily::Style style) const {
   if (fallbackFontMap_.empty() || text == nullptr || *text == '\0') {
     return fontId;
@@ -709,7 +738,8 @@ static void renderCharScaled(const GfxRenderer& renderer, const GfxRenderer::Gly
 
 template <TextRotation rotation = TextRotation::None>
 static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
-                           const GfxRenderer::GlyphRef& ref, int cursorX, int cursorY, const bool pixelState) {
+                           const GfxRenderer::GlyphRef& ref, int cursorX, int cursorY, const bool pixelState,
+                           uint16_t scale = 256) {
   const EpdGlyph* glyph = ref.glyph;
   if (!glyph) return;
   if (renderer.grayPlanesAreAbsolute()) renderMode = GfxRenderer::BW;
@@ -718,22 +748,24 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   const bool is2Bit = fontData->is2Bit;
   const uint8_t width = glyph->width;
   const uint8_t height = glyph->height;
-  const int left = glyph->left;
-  const int top = glyph->top;
+  const int left = fontScale::metric(glyph->left, scale);
+  const int top = fontScale::metric(glyph->top, scale);
+  const int scaledWidth = fontScale::extent(width, scale);
+  const int scaledHeight = fontScale::extent(height, scale);
 
   // Tiled-grayscale band culling: if this glyph's physical y-extent is entirely
   // outside the active strip, skip it before the expensive bitmap decode. This
   // is what makes per-band re-rendering cheap. No-op outside strip mode.
   if constexpr (rotation == TextRotation::Rotated90CW) {
-    const int ob = cursorX + fontData->ascender - top;
+    const int ob = cursorX + fontScale::metric(fontData->ascender, scale) - top;
     const int ib = cursorY - left;
-    if (!renderer.glyphIntersectsStrip(ob, ib - (width - 1), ob + height - 1, ib)) {
+    if (!renderer.glyphIntersectsStrip(ob, ib - (scaledWidth - 1), ob + scaledHeight - 1, ib)) {
       return;
     }
   } else {
     const int gx0 = cursorX + left;
     const int gy0 = cursorY - top;
-    if (!renderer.glyphIntersectsStrip(gx0, gy0, gx0 + width - 1, gy0 + height - 1)) {
+    if (!renderer.glyphIntersectsStrip(gx0, gy0, gx0 + scaledWidth - 1, gy0 + scaledHeight - 1)) {
       return;
     }
   }
@@ -746,11 +778,11 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   // y to the right.
   glyphBitmap::Frame frame;
   if constexpr (rotation == TextRotation::Rotated90CW) {
-    frame = {cursorX + fontData->ascender - top, cursorY - left, 0, -1, 1, 0};
+    frame = {cursorX + fontScale::metric(fontData->ascender, scale) - top, cursorY - left, 0, -1, 1, 0};
   } else {
     frame = {cursorX + left, cursorY - top, 1, 0, 0, 1};
   }
-  renderer.drawGlyphBitmap(bitmap, width, height, frame, is2Bit, renderMode, pixelState);
+  renderer.drawGlyphBitmap(bitmap, width, height, frame, is2Bit, renderMode, pixelState, scale);
 }
 
 // Draw an unscaled glyph placed by a logical frame. Equivalent to calling
@@ -759,9 +791,9 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
 // once per pixel.
 void GfxRenderer::drawGlyphBitmap(const uint8_t* bitmap, const int width, const int height,
                                   const glyphBitmap::Frame& frame, const bool twoBit, const RenderMode mode,
-                                  const bool state) const {
+                                  const bool state, uint16_t scale) const {
   // Apply the logical clip rectangle before rotating, in glyph-local pixels.
-  glyphBitmap::Clip clip{0, 0, width, height};
+  glyphBitmap::Clip clip{0, 0, fontScale::extent(width, scale), fontScale::extent(height, scale)};
   glyphBitmap::clipToRect(frame, clipLeft_, clipTop_, clipRight_, clipBottom_, clip);
 
   // Writes go to the framebuffer, or to the strip scratch in tiled grayscale
@@ -783,7 +815,7 @@ void GfxRenderer::drawGlyphBitmap(const uint8_t* bitmap, const int width, const 
   const glyphBitmap::Plane plane = mode == BW              ? glyphBitmap::Plane::BW
                                    : mode == GRAYSCALE_MSB ? glyphBitmap::Plane::GrayMSB
                                                            : glyphBitmap::Plane::GrayLSB;
-  glyphBitmap::draw(bitmap, width, height, twoBit, plane, state, target, clip);
+  glyphBitmap::drawScaled(bitmap, width, height, twoBit, plane, state, target, clip, scale);
 }
 
 // Mark for a grapheme cluster that neither the font nor the fallback font
@@ -793,18 +825,18 @@ void GfxRenderer::drawGlyphBitmap(const uint8_t* bitmap, const int width, const 
 template <TextRotation rotation = TextRotation::None>
 static void renderMissingMark(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
                               const EpdFontData* fontData, int cursorX, int cursorY, const bool pixelState,
-                              const bool halfScale) {
+                              const bool halfScale, uint16_t scale = 256) {
   if (renderMode != GfxRenderer::BW || !fontData) return;
-  int advance = fp4::toPixel(GfxRenderer::missingGlyphAdvanceFP(fontData));
+  int advance = fp4::toPixel(fontScale::metric(GfxRenderer::missingGlyphAdvanceFP(fontData), scale));
   if (halfScale) advance = (advance + 1) / 2;
   const int pad = std::max(1, advance / 5);
   const int width = std::max(2, advance - 2 * pad);
-  const int height = std::max(3, std::min(advance, fontData->ascender * 2 / 3));
+  const int height = std::max(3, std::min(advance, fontScale::metric(fontData->ascender, scale) * 2 / 3));
   const int left = pad;
   const int top = height;  // the box sits on the baseline
   if constexpr (rotation == TextRotation::Rotated90CW) {
-    renderer.noteInk(cursorX + fontData->ascender - top, cursorY - left - (width - 1),
-                     cursorX + fontData->ascender - top + height - 1, cursorY - left);
+    renderer.noteInk(cursorX + fontScale::metric(fontData->ascender, scale) - top, cursorY - left - (width - 1),
+                     cursorX + fontScale::metric(fontData->ascender, scale) - top + height - 1, cursorY - left);
   } else {
     renderer.noteInk(cursorX + left, cursorY - top, cursorX + left + width - 1, cursorY - top + height - 1);
   }
@@ -814,7 +846,7 @@ static void renderMissingMark(const GfxRenderer& renderer, GfxRenderer::RenderMo
       if (!edge || ((gx + gy) & 1) != 0) continue;
       int screenX, screenY;
       if constexpr (rotation == TextRotation::Rotated90CW) {
-        screenX = cursorX + fontData->ascender - top + gy;
+        screenX = cursorX + fontScale::metric(fontData->ascender, scale) - top + gy;
         screenY = cursorY - left - gx;
       } else {
         screenX = cursorX + left + gx;
@@ -938,6 +970,7 @@ int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontF
   // Measure with the same font drawText would render with (see resolveTextFontId)
   // so wrapping, truncation and centering of CJK strings stay consistent.
   const int resolvedFontId = resolveTextFontId(fontId, text, style);
+  const uint16_t scale = getSdCardFontScale(resolvedFontId);
   const auto fontIt = fontMap.find(resolvedFontId);
   if (fontIt == fontMap.end()) {
     LOG_ERR("GFX", "Font %d not found", resolvedFontId);
@@ -967,9 +1000,11 @@ int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontF
       const GlyphRef mark = resolveGlyph(font, cp, style, allowFallback);
       if (!mark.glyph) continue;
       const int markX = combiningMark::anchorOver(combiningMark::anchorFor(cp), lastBaseX, lastBaseLeft, lastBaseWidth,
-                                                  mark.glyph->left, mark.glyph->width);
-      minX = std::min(minX, markX + mark.glyph->left);
-      maxX = std::max(maxX, markX + mark.glyph->left + mark.glyph->width);
+                                                  fontScale::metric(mark.glyph->left, scale),
+                                                  fontScale::extent(mark.glyph->width, scale));
+      minX = std::min(minX, markX + fontScale::metric(mark.glyph->left, scale));
+      maxX = std::max(maxX,
+                      markX + fontScale::metric(mark.glyph->left, scale) + fontScale::extent(mark.glyph->width, scale));
       continue;
     }
     const uint32_t clusterBase = cp;
@@ -977,15 +1012,15 @@ int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontF
     const GlyphRef ref = resolveGlyph(font, cp, style, allowFallback);
     if (hasPrev) {
       const int32_t kernFP = (prevKernCp != 0 && ref.primary) ? font.getKerning(prevKernCp, cp, style) : 0;
-      lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);
+      lastBaseX += fp4::toPixel(fontScale::metric(prevAdvanceFP + kernFP, scale));
     }
     if (ref.glyph) {
-      lastBaseLeft = ref.glyph->left;
-      lastBaseWidth = ref.glyph->width;
+      lastBaseLeft = fontScale::metric(ref.glyph->left, scale);
+      lastBaseWidth = fontScale::extent(ref.glyph->width, scale);
       prevAdvanceFP = ref.glyph->advanceX;
     } else {
       prevAdvanceFP = missingGlyphAdvanceFP(primaryData);
-      const int advance = fp4::toPixel(prevAdvanceFP);
+      const int advance = fp4::toPixel(fontScale::metric(prevAdvanceFP, scale));
       lastBaseLeft = std::max(1, advance / 5);
       lastBaseWidth = std::max(2, advance - 2 * lastBaseLeft);
     }
@@ -1015,6 +1050,7 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   // Route CJK-bearing strings to the fallback font when the requested font
   // lacks the glyphs (e.g. Chinese book titles drawn with a Latin UI font).
   const int resolvedFontId = resolveTextFontId(fontId, text, style);
+  const uint16_t scale = getSdCardFontScale(resolvedFontId);
 
   std::string visual;
   const char* renderedText = resolveVisualText(text, visual, baseDir);
@@ -1069,11 +1105,12 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
       if (!mark.glyph) continue;  // an uncovered mark adds nothing to its cluster
       const EpdGlyph* combiningGlyph = mark.glyph;
       const auto anchor = combiningMark::anchorFor(cp);
-      const int raiseBy =
-          combiningMark::raiseAboveBase(anchor, combiningGlyph->top, combiningGlyph->height, lastBaseTop);
+      const int raiseBy = combiningMark::raiseAboveBase(anchor, fontScale::metric(combiningGlyph->top, scale),
+                                                        fontScale::extent(combiningGlyph->height, scale), lastBaseTop);
       const int combiningX = combiningMark::anchorOver(combiningMark::anchorFor(cp), lastBaseX, lastBaseLeft,
-                                                       lastBaseWidth, combiningGlyph->left, combiningGlyph->width);
-      renderCharImpl<TextRotation::None>(*this, renderMode, mark, combiningX, yPos - raiseBy, black);
+                                                       lastBaseWidth, fontScale::metric(combiningGlyph->left, scale),
+                                                       fontScale::extent(combiningGlyph->width, scale));
+      renderCharImpl<TextRotation::None>(*this, renderMode, mark, combiningX, yPos - raiseBy, black, scale);
       continue;
     }
 
@@ -1086,14 +1123,14 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     // where they fall on the line. Kerning applies only between this font's glyphs.
     if (hasPrev) {
       const int32_t kernFP = (prevKernCp != 0 && ref.primary) ? font.getKerning(prevKernCp, cp, style) : 0;
-      lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP) +
+      lastBaseX += fp4::toPixel(fontScale::metric(prevAdvanceFP + kernFP, scale)) +
                    trackingBetween(prevKernCp, cp, tracking);  // snap 12.4 fixed-point to nearest pixel
     }
 
     const EpdGlyph* glyph = ref.glyph;
-    lastBaseLeft = glyph ? glyph->left : 0;
-    lastBaseWidth = glyph ? glyph->width : 0;
-    lastBaseTop = glyph ? glyph->top : 0;
+    lastBaseLeft = glyph ? fontScale::metric(glyph->left, scale) : 0;
+    lastBaseWidth = glyph ? fontScale::extent(glyph->width, scale) : 0;
+    lastBaseTop = glyph ? fontScale::metric(glyph->top, scale) : 0;
     prevAdvanceFP = glyph ? glyph->advanceX : missingGlyphAdvanceFP(primaryData);  // 12.4 fixed-point
 
     if (isSupSub) {
@@ -1103,12 +1140,15 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     }
 
     if (!glyph) {
-      renderMissingMark<TextRotation::None>(*this, renderMode, primaryData, lastBaseX, yPos, black, isSupSub);
+      renderMissingMark<TextRotation::None>(*this, renderMode, primaryData, lastBaseX, yPos, black, isSupSub, scale);
     } else if (isSupSub) {
       // yPos already carries the vertical offset applied by TextBlock::render().
-      renderCharScaled(*this, ref, lastBaseX, yPos, black);
+      if (scale == 256)
+        renderCharScaled(*this, ref, lastBaseX, yPos, black);
+      else
+        renderCharImpl<TextRotation::None>(*this, renderMode, ref, lastBaseX, yPos, black, scale / 2);
     } else {
-      renderCharImpl<TextRotation::None>(*this, renderMode, ref, lastBaseX, yPos, black);
+      renderCharImpl<TextRotation::None>(*this, renderMode, ref, lastBaseX, yPos, black, scale);
     }
     hasPrev = true;
     prevKernCp = ref.primary ? cp : 0;
@@ -2418,7 +2458,8 @@ int GfxRenderer::getSpaceWidth(const int fontId, const EpdFontFamily::Style styl
   if (sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
     const uint8_t resolvedStyle = resolveSdCardStyle(*sdIt->second, style);
     uint16_t advance = 0;
-    if (sdIt->second->lookupAdvance(' ', resolvedStyle, &advance)) return fp4::toPixel(advance);
+    if (sdIt->second->lookupAdvance(' ', resolvedStyle, &advance))
+      return fp4::toPixel(fontScale::metric(advance, getSdCardFontScale(fontId)));
   }
 
   const auto fontIt = fontMap.find(fontId);
@@ -2428,7 +2469,8 @@ int GfxRenderer::getSpaceWidth(const int fontId, const EpdFontFamily::Style styl
   }
 
   const EpdGlyph* spaceGlyph = fontIt->second.getGlyph(' ', style);
-  return spaceGlyph ? fp4::toPixel(spaceGlyph->advanceX) : 0;  // snap 12.4 fixed-point to nearest pixel
+  return spaceGlyph ? fp4::toPixel(fontScale::metric(spaceGlyph->advanceX, getSdCardFontScale(fontId)))
+                    : 0;  // snap 12.4 fixed-point to nearest pixel
 }
 
 int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const uint32_t rightCp,
@@ -2441,7 +2483,8 @@ int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const 
   if (sdLayout) {
     const uint8_t resolvedStyle = resolveSdCardStyle(*sdIt->second, style);
     uint16_t advance = 0;
-    if (sdIt->second->lookupAdvance(' ', resolvedStyle, &advance)) return fp4::toPixel(advance);
+    if (sdIt->second->lookupAdvance(' ', resolvedStyle, &advance))
+      return fp4::toPixel(fontScale::metric(advance, getSdCardFontScale(fontId)));
   }
 
   const auto fontIt = fontMap.find(fontId);
@@ -2449,26 +2492,30 @@ int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const 
   const auto& font = fontIt->second;
   const EpdGlyph* spaceGlyph = font.getGlyph(' ', style);
   const int32_t spaceAdvanceFP = spaceGlyph ? static_cast<int32_t>(spaceGlyph->advanceX) : 0;
-  if (sdLayout) return fp4::toPixel(spaceAdvanceFP);  // layout measures SD fonts without kerning
+  if (sdLayout)
+    return fp4::toPixel(
+        fontScale::metric(spaceAdvanceFP, getSdCardFontScale(fontId)));  // layout measures SD fonts without kerning
   // Combine space advance + flanking kern into one fixed-point sum before snapping.
   // Snapping the combined value avoids the +/-1 px error from snapping each component separately.
   const int32_t kernFP = static_cast<int32_t>(font.getKerning(leftCp, ' ', style)) +
                          static_cast<int32_t>(font.getKerning(' ', rightCp, style));
-  return fp4::toPixel(spaceAdvanceFP + kernFP);
+  return fp4::toPixel(fontScale::metric(spaceAdvanceFP + kernFP, getSdCardFontScale(fontId)));
 }
 
 int GfxRenderer::getKerning(const int fontId, const uint32_t leftCp, const uint32_t rightCp,
                             const EpdFontFamily::Style style, const int8_t tracking) const {
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) return 0;
-  const int kernFP = fontIt->second.getKerning(leftCp, rightCp, style);      // 4.4 fixed-point
-  return fp4::toPixel(kernFP) + trackingBetween(leftCp, rightCp, tracking);  // snap 4.4 fixed-point to nearest pixel
+  const int kernFP = fontIt->second.getKerning(leftCp, rightCp, style);  // 4.4 fixed-point
+  return fp4::toPixel(fontScale::metric(kernFP, getSdCardFontScale(fontId))) +
+         trackingBetween(leftCp, rightCp, tracking);  // snap 4.4 fixed-point to nearest pixel
 }
 
 int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFamily::Style style, const int8_t tracking,
                                  const BidiUtils::BidiBaseDir baseDir, const TextMeasureMode mode) const {
   // Match the font drawText would use for CJK-bearing strings (see resolveTextFontId).
   const int resolvedFontId = resolveTextFontId(fontId, text, style);
+  const uint16_t scale = getSdCardFontScale(resolvedFontId);
   // Measure the exact codepoint stream drawText renders: bidi-reordered and
   // Arabic-shaped (contextual presentation forms, Lam-Alef collapse).
   // Measuring the raw logical text counts the Alef a ligature absorbs and
@@ -2521,7 +2568,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
       widthFP += isSupSub ? (advFP + 1) / 2 : advFP;
       if (!combining) utf8SkipEmojiClusterTail(reinterpret_cast<const unsigned char**>(&text), cp);
     }
-    return fp4::toPixel(widthFP) + trackingPx;
+    return fp4::toPixel(fontScale::metric(widthFP, scale)) + trackingPx;
   }
 
   uint32_t cp;
@@ -2541,7 +2588,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
     // matching drawText so measurement and rendering agree exactly.
     if (hasPrev) {
       const int32_t kernFP = (prevKernCp != 0 && ref.primary) ? font.getKerning(prevKernCp, cp, style) : 0;
-      widthPx += fp4::toPixel(prevAdvanceFP + kernFP) +
+      widthPx += fp4::toPixel(fontScale::metric(prevAdvanceFP + kernFP, scale)) +
                  trackingBetween(prevKernCp, cp, tracking);  // snap 12.4 fixed-point to nearest pixel
     }
 
@@ -2553,7 +2600,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
     prevKernCp = ref.primary ? cp : 0;
     utf8SkipEmojiClusterTail(reinterpret_cast<const unsigned char**>(&text), clusterBase);
   }
-  widthPx += fp4::toPixel(prevAdvanceFP);  // final glyph's advance
+  widthPx += fp4::toPixel(fontScale::metric(prevAdvanceFP, scale));  // final glyph's advance
   return widthPx;
 }
 
@@ -2564,7 +2611,7 @@ int GfxRenderer::getFontAscenderSize(const int fontId) const {
     return 0;
   }
 
-  return fontIt->second.getData(EpdFontFamily::REGULAR)->ascender;
+  return fontScale::metric(fontIt->second.getData(EpdFontFamily::REGULAR)->ascender, getSdCardFontScale(fontId));
 }
 
 int GfxRenderer::getLineHeight(const int fontId) const {
@@ -2574,7 +2621,7 @@ int GfxRenderer::getLineHeight(const int fontId) const {
     return 0;
   }
 
-  return fontIt->second.getData(EpdFontFamily::REGULAR)->advanceY;
+  return fontScale::metric(fontIt->second.getData(EpdFontFamily::REGULAR)->advanceY, getSdCardFontScale(fontId));
 }
 
 int GfxRenderer::getLineHeight(const int fontId, const float compression) const {
@@ -2587,7 +2634,7 @@ int GfxRenderer::getTextHeight(const int fontId) const {
     LOG_ERR("GFX", "Font %d not found", fontId);
     return 0;
   }
-  return fontIt->second.getData(EpdFontFamily::REGULAR)->ascender;
+  return fontScale::metric(fontIt->second.getData(EpdFontFamily::REGULAR)->ascender, getSdCardFontScale(fontId));
 }
 
 void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y, const char* text, const bool black,
@@ -2599,6 +2646,7 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
 
   // Route CJK-bearing strings to the fallback font (see resolveTextFontId).
   const int resolvedFontId = resolveTextFontId(fontId, text, style);
+  const uint16_t scale = getSdCardFontScale(resolvedFontId);
   // Redirected to the SD fallback: batch-load the string's glyphs so the draw
   // loop below doesn't fault them in one SD read at a time (#2725).
   if (resolvedFontId != fontId) {
@@ -2636,12 +2684,13 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
       const EpdGlyph* combiningGlyph = mark.glyph;
       if (!combiningGlyph) continue;
       const auto anchor = combiningMark::anchorFor(cp);
-      const int raiseBy =
-          combiningMark::raiseAboveBase(anchor, combiningGlyph->top, combiningGlyph->height, lastBaseTop);
+      const int raiseBy = combiningMark::raiseAboveBase(anchor, fontScale::metric(combiningGlyph->top, scale),
+                                                        fontScale::extent(combiningGlyph->height, scale), lastBaseTop);
       const int combiningX = x - raiseBy;
       const int combiningY = combiningMark::anchorOverRotated90CW(anchor, lastBaseY, lastBaseLeft, lastBaseWidth,
-                                                                  combiningGlyph->left, combiningGlyph->width);
-      renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, mark, combiningX, combiningY, black);
+                                                                  fontScale::metric(combiningGlyph->left, scale),
+                                                                  fontScale::extent(combiningGlyph->width, scale));
+      renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, mark, combiningX, combiningY, black, scale);
       continue;
     }
 
@@ -2653,22 +2702,23 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
     // subtracting for the rotated coordinate direction.
     if (hasPrev) {
       const int32_t kernFP = (prevKernCp != 0 && ref.primary) ? font.getKerning(prevKernCp, cp, style) : 0;
-      lastBaseY -= fp4::toPixel(prevAdvanceFP + kernFP);  // snap 12.4 fixed-point to nearest pixel
+      lastBaseY -=
+          fp4::toPixel(fontScale::metric(prevAdvanceFP + kernFP, scale));  // snap 12.4 fixed-point to nearest pixel
     }
 
     const EpdGlyph* glyph = ref.glyph;
-    lastBaseLeft = glyph ? glyph->left : 0;
-    lastBaseWidth = glyph ? glyph->width : 0;
-    lastBaseTop = glyph ? glyph->top : 0;
+    lastBaseLeft = glyph ? fontScale::metric(glyph->left, scale) : 0;
+    lastBaseWidth = glyph ? fontScale::extent(glyph->width, scale) : 0;
+    lastBaseTop = glyph ? fontScale::metric(glyph->top, scale) : 0;
     prevAdvanceFP = glyph ? glyph->advanceX : missingGlyphAdvanceFP(primaryData);  // 12.4 fixed-point
 
     if (glyph) {
       // Rotated glyphs are placed from their font's ascender; keep a fallback
       // glyph on this font's baseline.
-      const int baselineShift = ref.primary ? 0 : primaryData->ascender - ref.data->ascender;
-      renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, ref, x + baselineShift, lastBaseY, black);
+      const int baselineShift = ref.primary ? 0 : fontScale::metric(primaryData->ascender - ref.data->ascender, scale);
+      renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, ref, x + baselineShift, lastBaseY, black, scale);
     } else {
-      renderMissingMark<TextRotation::Rotated90CW>(*this, renderMode, primaryData, x, lastBaseY, black, false);
+      renderMissingMark<TextRotation::Rotated90CW>(*this, renderMode, primaryData, x, lastBaseY, black, false, scale);
     }
     hasPrev = true;
     prevKernCp = ref.primary ? cp : 0;

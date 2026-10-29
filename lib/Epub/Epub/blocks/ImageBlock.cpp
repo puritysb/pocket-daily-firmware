@@ -5,6 +5,12 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <Serialization.h>
+#ifdef ENABLE_DEV_REMOTE_FLASH
+#include <HalMemory.h>
+#include <ZipFile.h>
+
+#include "Epub/ImagePaintDiagnostics.h"
+#endif
 
 #include <cstdlib>
 #include <cstring>
@@ -32,6 +38,12 @@ void ImageBlock::setExtractor(void* ctx, ExtractFn fn) {
 bool ImageBlock::imageExists() const { return Storage.exists(imagePath.c_str()); }
 
 namespace {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+void noteImageFailure(epub_paint_diagnostics::Stage stage) {
+  const auto heap = HalMemory::getDefaultHeap();
+  epub_paint_diagnostics::active.fail(stage, 0, heap.freeBytes, heap.largestBlockBytes);
+}
+#endif
 
 std::string getCachePath(const std::string& imagePath) {
   // Replace extension with .pxc (pixel cache)
@@ -319,11 +331,14 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   // The font-prewarm scan pass only accumulates glyphs; an image contributes
   // none, and its DirectPixelWriter output bypasses the renderer's scan-mode
   // suppression, so it would otherwise do a full (discarded) cache render every
-  // page view. Skip it here. The image still draws in the real BW/grayscale
-  // passes; on first view this just moves the one-time decode to the BW pass.
+  // page view. Skip it here. The reader prepares cold images before font
+  // prewarm; the real BW/grayscale passes then draw their pixel caches.
   FontCacheManager* fcm = renderer.getFontCacheManager();
   if (fcm && fcm->isScanning()) return;
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  epub_paint_diagnostics::active.rendered();
+#endif
   LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d)", x, y, imagePath.c_str(), width, height);
 
   const int screenWidth = renderer.getScreenWidth();
@@ -331,6 +346,9 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
 
   // Bounds check render position using logical screen dimensions
   if (x < 0 || y < 0 || x + width > screenWidth || y + height > screenHeight) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    noteImageFailure(epub_paint_diagnostics::Stage::Bounds);
+#endif
     LOG_ERR("IMG", "Invalid render position: (%d,%d) size (%dx%d) screen (%dx%d)", x, y, width, height, screenWidth,
             screenHeight);
     return;
@@ -347,6 +365,9 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   }
 
   if (imageFailedThisRender(imagePath)) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    epub_paint_diagnostics::active.placeholder(true);
+#endif
     renderPlaceholder(renderer, x, y);
     return;
   }
@@ -354,6 +375,9 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   // Try to render from cache first
   std::string cachePath = getCachePath(imagePath);
   if (renderFromCache(renderer, cachePath, x, y, width, height)) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    epub_paint_diagnostics::active.cacheHit();
+#endif
     renderer.preserveImagePolarity(x, y, width, height);
     return;  // Successfully rendered from cache
   }
@@ -362,7 +386,17 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   // file out of the book now, on first visit to the page.
   if (!srcPath.empty() && extractFn && !Storage.exists(imagePath.c_str())) {
     LOG_DBG("IMG", "Lazy-extracting %s -> %s", srcPath.c_str(), imagePath.c_str());
-    if (!extractFn(extractCtx, srcPath.c_str(), imagePath.c_str())) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    ZipFile::clearStreamErrorForDiagnostics();
+#endif
+    const bool extracted = extractFn(extractCtx, srcPath.c_str(), imagePath.c_str());
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    const auto error = ZipFile::lastStreamError();
+    const auto heap = HalMemory::getDefaultHeap();
+    epub_paint_diagnostics::active.lazyResult(extracted, static_cast<uint32_t>(error), heap.freeBytes,
+                                              heap.largestBlockBytes);
+#endif
+    if (!extracted) {
       LOG_ERR("IMG", "Lazy extraction failed: %s", srcPath.c_str());
     }
   }
@@ -371,6 +405,10 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   // Check if image file exists
   HalFile file;
   if (!Storage.openFileForRead("IMG", imagePath, file)) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    noteImageFailure(epub_paint_diagnostics::Stage::FileOpen);
+    epub_paint_diagnostics::active.placeholder();
+#endif
     LOG_ERR("IMG", "Image file not found: %s", imagePath.c_str());
     rememberImageFailure(imagePath);
     renderPlaceholder(renderer, x, y);
@@ -380,6 +418,10 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   file.close();
 
   if (fileSize == 0) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    noteImageFailure(epub_paint_diagnostics::Stage::EmptyFile);
+    epub_paint_diagnostics::active.placeholder();
+#endif
     LOG_ERR("IMG", "Image file is empty: %s", imagePath.c_str());
     rememberImageFailure(imagePath);
     renderPlaceholder(renderer, x, y);
@@ -401,6 +443,10 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
 
   ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(imagePath);
   if (!decoder) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    noteImageFailure(epub_paint_diagnostics::Stage::DecoderFactory);
+    epub_paint_diagnostics::active.placeholder();
+#endif
     LOG_ERR("IMG", "No decoder found for image: %s", imagePath.c_str());
     rememberImageFailure(imagePath);
     renderPlaceholder(renderer, x, y);
@@ -409,8 +455,18 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
 
   LOG_DBG("IMG", "Using %s decoder", decoder->getFormatName());
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  epub_paint_diagnostics::active.decoderStarted();
+#endif
   bool success = decoder->decodeToFramebuffer(imagePath, renderer, config);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  const auto heap = HalMemory::getDefaultHeap();
+  epub_paint_diagnostics::active.decoderResult(success, heap.freeBytes, heap.largestBlockBytes);
+#endif
   if (!success) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    epub_paint_diagnostics::active.placeholder();
+#endif
     LOG_ERR("IMG", "Failed to decode image: %s", imagePath.c_str());
     rememberImageFailure(imagePath);
     renderPlaceholder(renderer, x, y);

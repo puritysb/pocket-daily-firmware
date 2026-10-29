@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "pocket_daily/ReaderPerf.h"
+#include "pocket_daily/dev/ReaderBenchmark.h"
 
 namespace Perf = PocketDaily::ReaderPerf;
 namespace Clock = ReaderPerfTestClock;
@@ -71,6 +72,60 @@ class ReaderPerf : public testing::Test {
   void TearDown() override { Perf::close(); }
 };
 }  // namespace
+
+TEST_F(ReaderPerf, LiveCopyRejectsIncompleteTurnsAndKeepsWrappedOrder) {
+  Perf::TurnRecord out;
+  EXPECT_FALSE(Perf::copyRecent(0, out));
+  Perf::open();
+  EXPECT_FALSE(Perf::copyRecent(0, out));
+  for (uint8_t i = 0; i < 20; ++i) {
+    Clock::freeHeap = 100000 + i;
+    recordTurn(i);
+  }
+  for (size_t i = 0; i < Perf::RING_SIZE; ++i) {
+    ASSERT_TRUE(Perf::copyRecent(i, out));
+    EXPECT_EQ(out.flags, 19 - i);
+    EXPECT_EQ(out.freeHeap, 100019 - i);
+  }
+  EXPECT_FALSE(Perf::copyRecent(Perf::RING_SIZE, out));
+  Perf::beginTurn(Clock::nowMs, Perf::FLAG_OPEN);
+  EXPECT_FALSE(Perf::copyRecent(0, out));
+}
+
+TEST(ReaderBenchmark, ExplicitLittleEndianWireLayoutAndChecksums) {
+  namespace Benchmark = PocketDaily::ReaderBenchmark;
+  uint8_t header[Benchmark::HEADER_BYTES];
+  ASSERT_TRUE(Benchmark::encodeHeader(0x12345678, 3, header));
+  EXPECT_EQ(header[8], 0x78);
+  EXPECT_EQ(header[11], 0x12);
+  EXPECT_TRUE(Benchmark::validHeader(header, 32 + 3 * 48, 0x12345678, 3));
+  EXPECT_FALSE(Benchmark::validHeader(header, 32 + 3 * 48, 0x12345679, 3));
+  EXPECT_FALSE(Benchmark::validHeader(header, 32 + 3 * 48 - 1, 0x12345678, 3));
+  header[20] = 1;
+  EXPECT_FALSE(Benchmark::validHeader(header, 32 + 3 * 48, 0x12345678, 3));
+  EXPECT_FALSE(Benchmark::encodeHeader(0, 3, header));
+  EXPECT_FALSE(Benchmark::encodeHeader(1, 17, header));
+  uint8_t bytes[Benchmark::RECORD_BYTES];
+  const auto r = record(0x123);
+  Benchmark::encodeRecord(r, 0x456, bytes);
+  for (size_t i = 0; i < Perf::STAGE_COUNT; ++i) {
+    EXPECT_EQ(bytes[i * 2], (0x123 + i) & 255);
+    EXPECT_EQ(bytes[i * 2 + 1], (0x123 + i) >> 8);
+  }
+  for (size_t i = 0; i < Perf::COUNTER_COUNT; ++i) {
+    EXPECT_EQ(bytes[24 + i * 2], (0x246 + i) & 255);
+    EXPECT_EQ(bytes[25 + i * 2], (0x246 + i) >> 8);
+  }
+  EXPECT_EQ(bytes[32], r.strips);
+  EXPECT_EQ(bytes[33], r.flags);
+  EXPECT_EQ(Benchmark::get(bytes + 34), r.freeHeap);
+  EXPECT_EQ(Benchmark::get(bytes + 38), r.largestBlock);
+  EXPECT_EQ(bytes[42], 0x56);
+  EXPECT_EQ(bytes[43], 4);
+  // Independently computed FNV-1a golden vector for these nonuniform fields.
+  EXPECT_EQ(Benchmark::checksum(reinterpret_cast<const uint8_t*>("hello"), 5), 0x4f9f2cabU);
+  EXPECT_EQ(Benchmark::get(bytes + 44), Benchmark::checksum(bytes, 44));
+}
 
 TEST_F(ReaderPerf, FileRoundTripsRingAndTotals) {
   const auto s = snapshotWith(20);  // wraps the 16-entry ring

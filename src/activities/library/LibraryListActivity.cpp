@@ -16,6 +16,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "SdCardFontSystem.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UIScale.h"
@@ -25,6 +26,9 @@
 #include "components/icons/search32.h"
 #include "fontIds.h"
 #include "util/BookCacheUtils.h"
+#ifdef ENABLE_DEV_REMOTE_FLASH
+#include "pocket_daily/dev/ScreenCapture.h"
+#endif
 
 namespace fui = freeink::ui;
 
@@ -86,7 +90,10 @@ void LibraryListActivity::onEnter() {
 
   // Recent is backed by the resident store. Prune before opening the index so
   // its persistence write never overlaps the long-lived index reader.
-  if (RECENT_BOOKS.pruneMissing()) RECENT_BOOKS.saveToFile();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (!PocketDaily::DevCapture::libraryTrialActive())
+#endif
+    if (RECENT_BOOKS.pruneMissing()) RECENT_BOOKS.saveToFile();
 
   // Rebuild when the index is missing, invalid, or was built with the other
   // metadata mode. Otherwise entering the screen stays instant.
@@ -104,6 +111,14 @@ void LibraryListActivity::onEnter() {
     LOG_ERR("LIB", "index was built without duplicate detection");
   }
   resolvePinned();
+  // Metadata can contain scripts absent from the built-in UI faces. The
+  // Library owns a single bounded glyph provider until exit; no reader font
+  // selection or saved settings change, and no full-family prewarm is needed.
+  sdFontSystem.ensureLibraryUiFont(renderer);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (PocketDaily::DevCapture::libraryTrialActive())
+    PocketDaily::DevCapture::libraryEntered(index.isOpen() && !degraded && !index.dedupDegraded());
+#endif
 
   // Entered while Confirm was still held (typical when launched from the home
   // menu): ignore its release, or we would open whatever sits at row 0.
@@ -112,13 +127,24 @@ void LibraryListActivity::onEnter() {
 }
 
 void LibraryListActivity::onExit() {
+  sdFontSystem.releaseLoaded(renderer);
   index.close();
   Activity::onExit();
 }
 
 bool LibraryListActivity::rebuildIndex() {
   library::BuildStats stats;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  const bool trial = PocketDaily::DevCapture::libraryTrialActive();
+  if (trial && !library::beginDevBuildBudget(4096, 131072, 45000)) return false;
+#endif
   const bool ok = library::buildLibraryIndex("/", stats, SETTINGS.libraryUseMetadata != 0);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (trial && library::endDevBuildBudget().exhausted) {
+    PocketDaily::DevCapture::libraryFailed(PocketDaily::DevCapture::LibraryError::Budget);
+    return false;
+  }
+#endif
   if (!ok) {
     LOG_ERR("LIB", "index build failed");
     return false;
@@ -215,6 +241,12 @@ void LibraryListActivity::openSelectedBook() {
 // there. The index handle is released first — on hardware only one reader can
 // hold a file open at a time, and the reader is about to open files of its own.
 void LibraryListActivity::openBookByPath(const std::string& path) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (PocketDaily::DevCapture::libraryTrialActive() && !PocketDaily::DevCapture::libraryOpenOwned(path)) {
+    PocketDaily::DevCapture::libraryFailed(PocketDaily::DevCapture::LibraryError::Open);
+    return;
+  }
+#endif
   app.clearTapFlash();
   index.close();
   onSelectBook(path);
@@ -874,10 +906,37 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
     rows++;
   }
 
+  // Grouping and row identity above use the raw metadata. Compose only the
+  // existing display copies, after every comparison, so NFD filenames render
+  // as syllables without changing paths, index bytes or author groups.
+  size_t heading = 0;
+  for (size_t row = 0; row < winItems.size(); ++row) {
+    auto& item = winItems[row];
+    library::composeDisplayText(winTitles[row]);
+    item.label = winTitles[row].c_str();
+    if (item.subtitle) {
+      library::composeDisplayText(winAuthors[row]);
+      item.subtitle = winAuthors[row].c_str();
+    }
+    if (item.sectionHeading) {
+      library::composeDisplayText(winHeaders[heading]);
+      item.sectionHeading = winHeaders[heading++].c_str();
+    }
+  }
+
   props.items = winItems.data();
   props.itemsWindowFirst = static_cast<uint16_t>(windowStart);
   props.itemsWindowCount = static_cast<uint16_t>(winItems.size());
   screen.list(props);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (PocketDaily::DevCapture::libraryPreparing() && trialRowSelected) {
+    trialWindow = windowStart;
+    trialDrawn = nav.drawnRows;
+    trialOffset = selectedEntry() - windowStart;
+    trialItem =
+        trialOffset >= 0 && trialOffset < static_cast<int>(winItems.size()) ? winItems[trialOffset].actionValue : -1;
+  }
+#endif
   const int next = nav.drawnRows;
   const auto body = screen.body();
   LOG_DBG("LIB", "page tab=%d top=%d full=%d loaded=%d body=%d..%d next=%d title=%s", activeTabIndex, windowStart,
@@ -1022,7 +1081,86 @@ void LibraryListActivity::drawHoldHelp() const {
 void LibraryListActivity::render(RenderLock&& lock) {
   if (optionPopup.processRender(renderer, mappedInput)) return;
   UiTabListActivity::render(std::move(lock));
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (PocketDaily::DevCapture::libraryPreparing() && trialRowSelected)
+    PocketDaily::DevCapture::libraryFrameDrawn(selectedEntry(), trialWindow, trialDrawn, trialOffset, trialItem);
+#endif
 }
+
+#ifdef ENABLE_DEV_REMOTE_FLASH
+bool LibraryListActivity::preventAutoSleep() { return PocketDaily::DevCapture::libraryTrialActive(); }
+
+// One record fits a separate bounded frame; do not combine it with the
+// three cold strings needed for title/path matching in selectTrialRow.
+__attribute__((noinline)) bool LibraryListActivity::trialPathAt(int entry, std::string& path) {
+  if (entry < pinnedCount()) {
+    const auto& books = RECENT_BOOKS.getBooks();
+    if (entry < 0 || entry >= static_cast<int>(books.size())) return false;
+    path = books[entry].path;
+    return true;
+  }
+  library::ClixRecord record{};
+  const auto ordinal = index.ordinalForRow(sortOrder, static_cast<uint16_t>(rowFor(entry)));
+  if (ordinal == UINT16_MAX || !index.readRecord(ordinal, record) || !index.readPath(record, path)) return false;
+  if (record.fileSize != PocketDaily::DevCapture::libraryTargetBytes()) path.clear();
+  return true;
+}
+
+bool LibraryListActivity::selectTrialRow() {
+  namespace Trial = PocketDaily::DevCapture;
+  if (!index.isOpen() || !query.empty() || groupsCollapsed || activeTabIndex != RECENT_TAB) return false;
+  // Cold one-shot search through the same pinned/index row mapping used by
+  // openSelectedBook. Reuse three bounded strings instead of retaining rows.
+  std::string path;
+  path.reserve(256);
+  int found = -1;
+  const int count = listCount();
+  if (count < 0 || count > library::CLIX_MAX_RECORDS + RecentBooksStore::MAX_RECENT_BOOKS) return false;
+  const uint32_t began = millis();
+  for (int entry = 0; entry < count; ++entry) {
+    if (millis() - began > 45000) return false;
+    if (!trialPathAt(entry, path)) return false;
+    if (path == Trial::libraryTargetPath()) {
+      if (found >= 0) return false;
+      found = entry;
+    }
+    if ((entry & 31) == 0) delay(1);
+  }
+  std::string title, author;
+  title.reserve(256);
+  author.reserve(256);
+  if (found < 0 || !rowTextFor(found, title, author) || !Trial::libraryRowLocated(found, title)) return false;
+  trialRowSelected = true;
+  moveRingTo(found + 1);
+  return true;
+}
+
+void LibraryListActivity::loop() {
+  namespace Trial = PocketDaily::DevCapture;
+  if (!Trial::libraryTrialActive()) {
+    UiTabListActivity::loop();
+    return;
+  }
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock() || !Trial::libraryPreparing()) return;
+  if (!trialRowSelected) {
+    if (!selectTrialRow())
+      Trial::libraryFailed(Trial::libraryPhase() == Trial::LibraryPhase::Original ? Trial::LibraryError::OriginalMissing
+                                                                                  : Trial::LibraryError::OwnedMissing);
+    return;
+  }
+  if (!Trial::libraryFrameReady()) return;
+  if (Trial::libraryPhase() == Trial::LibraryPhase::Original) {
+    if (!Trial::libraryNextTarget()) {
+      Trial::libraryFailed(Trial::LibraryError::Persistence);
+      return;
+    }
+    trialRowSelected = false;
+    return;
+  }
+  openSelectedBook();
+}
+#endif
 
 void LibraryListActivity::drawFooter() {
   drawPositionReadout();

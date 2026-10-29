@@ -7,6 +7,7 @@
 #include "activities/UiListActivity.h"
 
 class EpubReaderChapterSelectionActivity final : public UiListActivity {
+  uint32_t readerUiFontOwner = 0;
   std::shared_ptr<Epub> epub;
   int currentSpineIndex = 0;
 
@@ -39,4 +40,5 @@ class EpubReaderChapterSelectionActivity final : public UiListActivity {
   explicit EpubReaderChapterSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                               const std::shared_ptr<Epub>& epub, int currentSpineIndex);
   void onEnter() override;
+  void onExit() override;
 };

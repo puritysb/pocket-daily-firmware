@@ -35,6 +35,10 @@ class LibraryListActivity final : public UiTabListActivity {
 
   void onEnter() override;
   void onExit() override;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  void loop() override;
+  bool preventAutoSleep() override;
+#endif
 
  protected:
   // --- UiListActivity / UiTabListActivity contract ---------------------------
@@ -71,6 +75,12 @@ class LibraryListActivity final : public UiTabListActivity {
 
   // Input
   void openSelectedBook();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  bool selectTrialRow();
+  bool trialPathAt(int entry, std::string& path);
+  bool trialRowSelected = false;
+  int trialWindow = -1, trialDrawn = 0, trialOffset = -1, trialItem = -1;
+#endif
   void openSearch();
   // Shared tail of row activation and the options menu's Open entry.
   void openBookByPath(const std::string& path);

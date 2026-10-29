@@ -19,6 +19,7 @@
 #include "activities/util/BmpViewerActivity.h"
 #include "activities/util/FullScreenMessageActivity.h"
 #include "components/UITheme.h"
+#include "pocket_daily/boot/TrialReader.h"
 #include "pocket_daily/dev/ScreenCapture.h"
 
 ReaderActivity::ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -61,6 +62,7 @@ void ReaderActivity::onEnter() {
 
   if (!Storage.exists(bookPath.c_str())) {
     LOG_ERR("READER", "File does not exist: %s", bookPath.c_str());
+    PocketDaily::TrialReader::loadFailed(bookPath);
     finish();
     return;
   }
@@ -75,6 +77,7 @@ void ReaderActivity::onEnter() {
   applyInitialOrientation();
 
   if (!loadBook()) {
+    PocketDaily::TrialReader::loadFailed(bookPath);
     finish();
     return;
   }
@@ -91,6 +94,10 @@ void ReaderActivity::rememberBookOnceRendered() {
   RECENT_BOOKS.addBook(bookPath, getBookTitle(), getBookAuthor(), getBookThumbBmpPath());
 }
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+bool ReaderActivity::preventAutoSleep() { return PocketDaily::DevCapture::readerWalkActive(); }
+#endif
+
 void ReaderActivity::onExit() {
   Activity::onExit();
 
@@ -102,8 +109,14 @@ void ReaderActivity::onExit() {
   LOG_INF("MEM", "reader exit: free=%u max_block=%u", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
-  APP_STATE.readerActivityLoadCount = 0;
-  APP_STATE.saveToFile();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (!PocketDaily::DevCapture::readerWalkActive()) {
+#endif
+    APP_STATE.readerActivityLoadCount = 0;
+    APP_STATE.saveToFile();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  }
+#endif
 
   endOfBookOptions.reset();
   endOfBookOptionsReady.store(false, std::memory_order_release);

@@ -1,6 +1,7 @@
 #include <HalStorage.h>
 #include <SdCardFont.h>
 
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -58,6 +59,35 @@ int main(int argc, char** argv) {
             a->getLigature(left, right) != b->getLigature(left, right))
           return 1;
       }
+    }
+  }
+  // Repeat bounds measurement through the production font API. This counts
+  // HAL traffic on a fake SD, not elapsed physical SD or app Apply latency.
+  // Cached and BoundedUI must agree even after glyph/metadata ring eviction.
+  static constexpr std::array samples = {
+      "Choose one small thing to finish. Keep the next step simple and start there.",
+      "오늘 읽은 내용에서 기억할 한 문장을 골라 보세요. 내 말로 다시 설명해 보세요.",
+      "すみません。駅はどこですか。Could you say that again, please? AV To ffi fi fl"};
+  for (size_t sampleIndex = 0; sampleIndex < samples.size(); ++sampleIndex) {
+    const char* sample = samples[sampleIndex];
+    for (unsigned style = 0; style < 2; ++style) {
+      if (!cached.hasStyle(style) || !bounded.hasStyle(style)) continue;
+      if (cached.prewarm(sample, 1U << style) != 0) return 1;
+      int expectedW = 0, expectedH = 0;
+      cached.getEpdFont(style)->getTextDimensions(sample, &expectedW, &expectedH);
+      bounded.clearCache();
+      const auto opens = fontStorage.readOpens;
+      const auto reads = FakeFontIO::reads;
+      const auto seeks = FakeFontIO::seeks;
+      const auto bytesRead = FakeSD::bytesRead;
+      for (unsigned pass = 0; pass < 12; ++pass) {
+        int width = 0, height = 0;
+        bounded.getEpdFont(style)->getTextDimensions(sample, &width, &height);
+        if (width != expectedW || height != expectedH || bounded.boundedReadFailed()) return 1;
+      }
+      std::printf("sample=%zu style=%u passes=12 opens=%u reads=%zu seeks=%zu bytes=%zu dimensions=%dx%d\n",
+                  sampleIndex, style, fontStorage.readOpens - opens, FakeFontIO::reads - reads,
+                  FakeFontIO::seeks - seeks, FakeSD::bytesRead - bytesRead, expectedW, expectedH);
     }
   }
   std::printf(

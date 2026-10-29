@@ -2,8 +2,10 @@
 
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <LibraryText.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <SdCardFontSystem.h>
 
 #include <algorithm>
 
@@ -27,11 +29,13 @@ EpubReaderBookmarksActivity::EpubReaderBookmarksActivity(GfxRenderer& renderer, 
       epubPath(epubPath) {}
 
 void EpubReaderBookmarksActivity::onEnter() {
+  RenderLock lock(*this);
   UiListActivity::onEnter();
 
   if (!epub) {
     return;
   }
+  if (!readerUiFontOwner) readerUiFontOwner = sdFontSystem.beginReaderOverlayUiFont(renderer);
 
   if (!BookmarkFile::load(epubPath, bookmarks)) {
     bookmarks.shrink_to_fit();
@@ -61,6 +65,7 @@ void EpubReaderBookmarksActivity::rebuildBookmarkRowItems() {
                   std::to_string(bookmark.computedChapterPageCount) + " - ";
     }
     subtitle += tocTitle;
+    library::composeDisplayText(subtitle);
     bookmarkSubtitles.push_back(std::move(subtitle));
 
     fui::ListItem item;
@@ -304,4 +309,12 @@ void EpubReaderBookmarksActivity::render(RenderLock&&) {
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();
+}
+
+void EpubReaderBookmarksActivity::onExit() {
+  if (readerUiFontOwner) {
+    sdFontSystem.endReaderOverlayUiFont(readerUiFontOwner);
+    readerUiFontOwner = 0;
+  }
+  UiListActivity::onExit();
 }

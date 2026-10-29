@@ -3,10 +3,18 @@
 #include <BoardConfig.h>
 #include <esp_rom_sys.h>
 
+#include <atomic>
 #include <string>
 
 #define MAX_ENTRY_LEN 256
 #define MAX_LOG_LINES 16
+
+// USB may stay enumerated while no host consumes CDC output. Diagnostic
+// traffic must not wait for that consumer (glyph traces can fill it rapidly).
+// Serialize only the capacity check/write, without waiting or allocating.
+#if FREEINK_LOG_TRANSPORT != FREEINK_LOG_TRANSPORT_ROM_PRINTF
+static std::atomic_flag serialLogWriter = ATOMIC_FLAG_INIT;
+#endif
 
 // Simple ring buffer log, useful for error reporting when we encounter a crash
 RTC_NOINIT_ATTR char logMessages[MAX_LOG_LINES][MAX_ENTRY_LEN];
@@ -66,8 +74,12 @@ void logPrintf(const char* level, const char* origin, const char* format, ...) {
   // Sticky's USB serial bridge uses UART0; ROM output also works before Serial0.begin().
   esp_rom_printf("%s", buf);
 #else
-  if (logSerial) {
-    logSerial.print(buf);
+  if (!serialLogWriter.test_and_set(std::memory_order_acquire)) {
+    const size_t length = strnlen(buf, sizeof(buf));
+    if (logSerial && logSerial.availableForWrite() >= static_cast<int>(length)) {
+      logSerial.write(reinterpret_cast<const uint8_t*>(buf), length);
+    }
+    serialLogWriter.clear(std::memory_order_release);
   }
 #endif
   addToLogRingBuffer(buf);

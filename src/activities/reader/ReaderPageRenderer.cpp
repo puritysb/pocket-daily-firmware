@@ -108,14 +108,29 @@ uint32_t prewarmedGlyphs(const GfxRenderer& renderer) {
 // lifetime from the render locals bounds both C3 frames without a heap/global buffer.
 __attribute__((noinline)) static void renderPage(GfxRenderer& renderer, const Page& page, const Options& options,
                                                  int& pagesUntilFullRefresh, InkRows& ink, Timings* timings) {
+  // The activity normally starts the turn before layout. Standalone callers
+  // still need a fresh render sample when they did not supply an input event.
+  if (!Perf::turnActive()) Perf::beginTurn(0, 0);
   StageClock clock(timings);
   const int fontId = options.fontId;
   const int left = options.marginLeft;
   const int top = options.marginTop;
 
+  auto* fcm = renderer.getFontCacheManager();
+  if (page.hasImagesNeedingDecode()) {
+    // Decode cold images before page glyphs fragment the decoder's contiguous
+    // allocation. Keep layout advances: an incremental chapter may still use them.
+    ImageBlock::releaseRenderCache();
+    fcm->clearCache();
+    for (const auto& element : page.elements) {
+      if (element->getTag() == TAG_PageImage && static_cast<const PageImage&>(*element).getImageBlock().needsDecode()) {
+        element->render(renderer, fontId, left, top);
+      }
+    }
+  }
+
   // Font prewarm: a scan pass records the page's text, then its glyphs load in
   // one sorted batch and stay pinned for every remaining pass of this page.
-  auto* fcm = renderer.getFontCacheManager();
   auto scope = fcm->createPrewarmScope();
   page.render(renderer, fontId, left, top);  // scan pass
   if (options.statusText && *options.statusText) fcm->recordExtraText(options.statusText, options.statusFontId);

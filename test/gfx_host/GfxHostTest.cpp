@@ -6,6 +6,7 @@
 #include <climits>
 #include <vector>
 
+#include "FontScale.h"
 #include "components/themes/StatusBarTitle.h"
 #include "pocket_daily/ContentCard.h"
 #include "pocket_daily/ContentPageRenderer.h"
@@ -106,6 +107,66 @@ class ContentPageHost : public testing::Test {
   PocketDaily::Content::ContentCard card{};
   PocketDaily::Content::ContentPageOptions options{1, 12, 8, 4, "Pocket", "No cards", {"Back", "", "Prev", "Next"}};
 };
+
+TEST_F(ContentPageHost, ReaderFontScaleChangesRasterAndEveryLayoutMetricWithoutAScratchBuffer) {
+  // Nonuniform, asymmetric 4x4 glyph: 1001 / 0100 / 0010 / 0000.
+  pixels[0] = 0x94;
+  pixels[1] = 0x20;
+  EXPECT_EQ(fontScale::ratio(18, 12), 384);
+  EXPECT_EQ(fontScale::ratio(14, 12), 299);
+  for (const auto orientation : {GfxRenderer::Portrait, GfxRenderer::LandscapeClockwise, GfxRenderer::PortraitInverted,
+                                 GfxRenderer::LandscapeCounterClockwise}) {
+    renderer.setOrientation(orientation);
+    renderer.registerSdCardFontScale(1, 384);
+    EXPECT_EQ(renderer.getTextWidth(1, "A"), 6);
+    EXPECT_EQ(renderer.getTextAdvanceX(1, "A", EpdFontFamily::REGULAR), 6);
+    EXPECT_EQ(renderer.getSpaceWidth(1), 6);
+    EXPECT_EQ(renderer.getSpaceAdvance(1, 'A', 'V', EpdFontFamily::REGULAR), 6);
+    EXPECT_EQ(renderer.getLineHeight(1), 12);
+    EXPECT_EQ(renderer.getFontAscenderSize(1), 6);
+    EXPECT_EQ(renderer.getTextHeight(1), 6);
+    renderer.clearScreen();
+    renderer.drawText(1, 10, 20, "A");
+    const std::vector<uint8_t> actual(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize());
+    renderer.clearScreen();
+    for (int y = 0; y < 6; ++y) {
+      for (int x = 0; x < 6; ++x) {
+        const int sx = x * 2 / 3, sy = y * 2 / 3;
+        if ((sy == 0 && (sx == 0 || sx == 3)) || (sy == 1 && sx == 1) || (sy == 2 && sx == 2))
+          renderer.drawPixel(10 + x, 20 + y);
+      }
+    }
+    EXPECT_EQ(std::memcmp(actual.data(), panel.getFrameBuffer(), actual.size()), 0);
+    EXPECT_TRUE(panel.guardsIntact());
+  }
+  renderer.clearSdCardFontScales();
+  EXPECT_EQ(renderer.getTextAdvanceX(1, "A", EpdFontFamily::REGULAR), 4);
+  renderer.registerSdCardFontScale(1, 1024);
+  EXPECT_EQ(renderer.getSdCardFontScale(1), 256);
+  renderer.registerSdCardFontScale(1, 384);
+  renderer.removeFont(1);
+  EXPECT_EQ(renderer.getSdCardFontScale(1), 256);
+}
+
+TEST_F(ContentPageHost, ReaderScaleAliasKeepsUiNativeAndChangesTheSectionLayoutKey) {
+  EXPECT_EQ(renderer.readerFontAtScale(1, 0), 0);
+  EXPECT_EQ(renderer.readerFontAtScale(1, 1024), 0);
+  const int large = renderer.readerFontAtScale(1, 384);
+  ASSERT_NE(large, 0);
+  EXPECT_NE(large, 1);
+  EXPECT_EQ(renderer.getTextAdvanceX(large, "A", EpdFontFamily::REGULAR), 6);
+  EXPECT_EQ(renderer.getTextAdvanceX(1, "A", EpdFontFamily::REGULAR), 4);
+  EXPECT_EQ(renderer.readerFontAtScale(1, 384), large);
+  const int medium = renderer.readerFontAtScale(1, 299);
+  EXPECT_NE(medium, large);
+  EXPECT_EQ(renderer.getFontMap().count(large), 0U);
+  EXPECT_EQ(renderer.readerFontAtScale(1, 256), 1);
+  EXPECT_EQ(renderer.getFontMap().count(medium), 0U);
+  const int alias = renderer.readerFontAtScale(1, 384);
+  renderer.removeFont(1);
+  EXPECT_EQ(renderer.getFontMap().count(alias), 0U);
+  EXPECT_EQ(renderer.getSdCardFontScale(alias), 256);
+}
 
 TEST_F(ContentPageHost, CompletePageUsesRealRasterizerWithoutDisplaying) {
   ASSERT_TRUE(PocketDaily::Content::renderContentPage(renderer, &card, options));

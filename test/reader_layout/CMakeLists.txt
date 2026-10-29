@@ -88,3 +88,41 @@ gtest_discover_tests(reading_position_layout_test)
 foreach(target reader_layout_test reading_position_layout_test)
   target_sources(${target} PRIVATE stubs/HalMemory.cpp)
 endforeach()
+
+# Inject allocation failures only into the real ZIP/miniz streaming code. The
+# Section/parser/cache pipeline remains the same as the reader-layout target.
+set(SECTION_RETRY_FIRMWARE ${READER_LAYOUT_FIRMWARE})
+list(REMOVE_ITEM SECTION_RETRY_FIRMWARE ${REPO_ROOT}/lib/ZipFile/ZipFile.cpp)
+add_executable(section_inflate_retry_test SectionInflateRetryTest.cpp ZipSmallEntryTest.cpp ZipInflateFaults.cpp
+  stubs/ImageStubs.cpp stubs/HalMemory.cpp ${REPO_ROOT}/host/HostChecksums.cpp
+  ${SECTION_RETRY_FIRMWARE}
+  ${REPO_ROOT}/freeink-sdk/libs/font/FreeInkFont/src/FontAlloc.c
+  ${REPO_ROOT}/lib/Memory/BuildScratch.cpp ${REPO_ROOT}/lib/miniz/src/miniz_impl.c)
+get_target_property(READER_LAYOUT_INCLUDES reader_layout_test INCLUDE_DIRECTORIES)
+get_target_property(READER_LAYOUT_DEFINITIONS reader_layout_test COMPILE_DEFINITIONS)
+target_include_directories(section_inflate_retry_test BEFORE PRIVATE ${READER_LAYOUT_INCLUDES}
+  ${REPO_ROOT}/lib/miniz/src ${REPO_ROOT}/lib/miniz/third_party)
+target_compile_definitions(section_inflate_retry_test PRIVATE ${READER_LAYOUT_DEFINITIONS})
+# Included production implementations have their existing warning baseline.
+set_source_files_properties(ZipInflateFaults.cpp PROPERTIES COMPILE_OPTIONS "-w")
+target_link_libraries(section_inflate_retry_test PRIVATE crosspoint_test_common ZLIB::ZLIB GTest::gtest_main)
+gtest_discover_tests(section_inflate_retry_test)
+
+add_executable(image_diagnostics_test ImageDiagnosticsTest.cpp ImagePaintDiagnosticsTest.cpp)
+target_include_directories(image_diagnostics_test PRIVATE ${REPO_ROOT}/lib/Epub)
+target_link_libraries(image_diagnostics_test PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(image_diagnostics_test)
+
+# Real page/image/font/cache rendering with a deterministic memory-pressure codec.
+add_executable(reader_image_memory_test ReaderImageMemoryTest.cpp stubs/HalMemory.cpp
+  ${REPO_ROOT}/host/HostChecksums.cpp ${READER_LAYOUT_FIRMWARE}
+  ${REPO_ROOT}/freeink-sdk/libs/font/FreeInkFont/src/FontAlloc.c
+  ${REPO_ROOT}/lib/Memory/BuildScratch.cpp ${REPO_ROOT}/lib/miniz/src/InflateStream.cpp
+  ${REPO_ROOT}/lib/miniz/src/miniz_impl.c)
+get_target_property(READER_IMAGE_INCLUDES reader_layout_test INCLUDE_DIRECTORIES)
+target_include_directories(reader_image_memory_test BEFORE PRIVATE ${READER_IMAGE_INCLUDES}
+  ${REPO_ROOT}/lib/miniz/src ${REPO_ROOT}/lib/miniz/third_party)
+get_target_property(READER_IMAGE_DEFINITIONS reader_layout_test COMPILE_DEFINITIONS)
+target_compile_definitions(reader_image_memory_test PRIVATE ${READER_IMAGE_DEFINITIONS})
+target_link_libraries(reader_image_memory_test PRIVATE crosspoint_test_common ZLIB::ZLIB GTest::gtest_main)
+gtest_discover_tests(reader_image_memory_test)

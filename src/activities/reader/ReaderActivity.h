@@ -58,6 +58,9 @@ class ReaderActivity : public Activity {
   void loop() override;
   void render(RenderLock&& lock) override;
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  bool preventAutoSleep() override;
+#endif
   bool isReaderActivity() const final { return true; }
   bool handleForcedRefresh() final;
 };

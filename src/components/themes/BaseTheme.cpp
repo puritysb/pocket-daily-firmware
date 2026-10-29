@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <new>
 #include <string>
 
 #include "I18n.h"
@@ -375,68 +376,92 @@ void BaseTheme::applyHeaderStatus(const GfxRenderer& renderer, freeink::ui::Head
   }
 }
 
+static void captureHeaderStatus(const GfxRenderer& renderer, HeaderPainter::Inputs& out) {
+  const auto& m = UITheme::getInstance().getMetrics();
+  out = {};
+  out.height = m.headerHeight;
+  out.sidePadding = m.headerSidePadding;
+  out.underline = m.headerUnderlineSize;
+  out.titleAlign = m.headerTitleAlign;
+  out.batteryWidth = m.batteryWidth;
+  out.batteryHeight = m.batteryHeight;
+  out.stripHeight = m.batteryBarHeight;
+  out.edgeInset = BaseTheme::headerStatusInset();
+  out.batteryLeft = m.headerBatterySide == 1;
+  out.clockCentered = m.headerClockCentered;
+  const auto percentage = powerManager.getBatteryPercentage();
+  out.batteryPercent = static_cast<uint8_t>(std::min<uint16_t>(percentage, 100));
+  out.charging = gpio.isUsbConnected();
+  if (SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS)
+    snprintf(out.batteryLabel, sizeof(out.batteryLabel), "%u%%", static_cast<unsigned>(percentage));
+  const int titleFont = uiScaleSpec().titleFontId;
+  const int opticalDrop = (renderer.getLineHeight(titleFont) - renderer.getTextHeight(titleFont)) / 2;
+  out.actionOffsetY = m.batteryBarHeight + (m.headerHeight - m.batteryBarHeight - 48) / 2 - 4 + opticalDrop;
+  if (m.headerShowsClock && SETTINGS.clockShowInHeader && halClock.isAvailable())
+    halClock.formatTime(out.clock, sizeof(out.clock), SETTINGS.clockFormat == 1);
+  out.showBack = gpio.hasTouch();
+}
+
+namespace {
+void captureHeaderStyle(HeaderPainter::Inputs& inputs, const freeink::ui::ThemeTokens& tokens) {
+  const auto spec = uiScaleSpec();
+  inputs.fonts[0] = SMALL_FONT_ID;  // original passive header's FONT_SMALL override
+  inputs.fonts[1] = spec.bodyFontId;
+  inputs.fonts[2] = spec.titleFontId;
+  inputs.fonts[3] = SMALL_FONT_ID;  // fixed status chrome
+  inputs.titleText = tokens.titleText;
+  inputs.titleText.align = tokens.headerTitleAlign;
+  inputs.subtitleText = tokens.smallText;
+  inputs.normalStyle = tokens.popup.normal;
+  inputs.sidePadding = tokens.headerSidePadding;
+  inputs.underline = tokens.headerUnderline;
+}
+}  // namespace
+
+bool BaseTheme::captureHeaderInputs(const GfxRenderer& renderer, HeaderPainter::Inputs& out) {
+  const auto spec = uiScaleSpec();
+  freeink::ui::GfxRendererTarget target(renderer);
+  target.setFont(freeink::ui::GfxRendererTarget::FONT_SMALL, spec.smallFontId);
+  target.setFont(freeink::ui::GfxRendererTarget::FONT_BODY, spec.bodyFontId);
+  target.setFont(freeink::ui::GfxRendererTarget::FONT_TITLE, spec.titleFontId);
+  // Cold query only: exact active tokens without publishing/changing the shared
+  // theme cell. ~2 KB is too large for the task stack; direct prvalue construction
+  // into this nothrow allocation elides the temporary (C++17 guaranteed elision).
+  const std::unique_ptr<freeink::ui::ThemeTokens> tokens(new (std::nothrow)
+                                                             freeink::ui::ThemeTokens(uiThemeTokens(target)));
+  if (!tokens) {
+    LOG_ERR("GUI", "OOM describing header theme");
+    return false;
+  }
+  captureHeaderStatus(renderer, out);
+  captureHeaderStyle(out, *tokens);
+  return true;
+}
+
 void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
                            const bool backButton) const {
-  // Every activity header renders through the FreeInkUI header + battery
-  // indicator components, styled by the active theme's tokens (padding,
-  // centering, underline). Non-interactive frame: no hit rects registered.
+  HeaderPainter::Inputs inputs;
+  drawHeaderAndDescribe(renderer, rect, title, subtitle, backButton, inputs);
+}
+
+void BaseTheme::drawHeaderAndDescribe(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
+                                      const bool backButton, HeaderPainter::Inputs& inputs) const {
   namespace fui = freeink::ui;
   const auto spec = uiScaleSpec();
-  fui::GfxRendererFrame<1> ui(renderer, spec.smallFontId, spec.bodyFontId, spec.titleFontId);
-  // Refresh the app-wide shared tokens instead of copying ~1.5KB of
-  // ThemeTokens onto this render-path stack frame; the values derived here
-  // are identical to what every FreeInkApp screen derives. Goes through the
-  // same publish-a-fresh-slot path applySharedUiTheme() uses (see
-  // UiAppHelpers.h) rather than overwriting the previously-published
-  // instance in place, since some other FreeInkApp could be mid-read of it.
-  const fui::ThemeTokens& tokens = refreshSharedUiThemeTokens(ui.target);
-  // Header status text (battery percent, right label) stays at the fixed
-  // small font like the legacy headers; the uiScale small font is for list
-  // subtitles.
-  ui.target.setFont(fui::GfxRendererTarget::FONT_SMALL, SMALL_FONT_ID);
-  ui.target.setFont(fui::GfxRendererTarget::FONT_LABEL, SMALL_FONT_ID);
-  const fui::Rect band{static_cast<int16_t>(rect.x), static_cast<int16_t>(rect.y), static_cast<int16_t>(rect.width),
-                       static_cast<int16_t>(rect.height)};
-
-  fui::HeaderProps props;
-  props.title = title;
-  props.rightLabel = subtitle;  // firmware headers right-align the secondary text
-  // Battery + clock chrome and their title reserves live in the FreeInkUI
-  // header component; this only fills the values from settings and metrics.
-  applyHeaderStatus(renderer, props);
-  if (rect.height < UITheme::getInstance().getMetrics().headerHeight) {
-    // Short bands (home) are not split into strip + content row: the title
-    // centers on the band, clear of the band's bottom edge.
-    props.titleOffsetY = 0;
-  }
-  // Tappable back button leading the band on touch boards, so every pushed
-  // screen offers a visible way out beside the edge-swipe gesture. This frame
-  // registers no hit rects, so the rect is recorded in HeaderBackTapTarget and
-  // MappedInputManager folds taps on it into Button::Back. Same geometry as
-  // the FUI header's leading slot (applyHeaderStatus set the size/offset) so
-  // the recorded rect matches the drawn button.
-  const int16_t backBtnSize = props.leadingSize;
-  const bool showBackButton = backButton && title != nullptr && gpio.hasTouch();
-  if (showBackButton) {
-    props.leadingIcon = fui::bitmapFromIcon(icon_header_back_32);
-    props.leadingAction = 1;  // any non-NO_ACTION id: paints the button, routing is via HeaderBackTapTarget
-    HeaderBackTapTarget::set(band.x + 4, band.y + 4 + props.actionOffsetY, backBtnSize, backBtnSize);
-  } else {
+  fui::GfxRendererTarget target(renderer);
+  target.setFont(fui::GfxRendererTarget::FONT_SMALL, spec.smallFontId);
+  target.setFont(fui::GfxRendererTarget::FONT_BODY, spec.bodyFontId);
+  target.setFont(fui::GfxRendererTarget::FONT_TITLE, spec.titleFontId);
+  // Preserve the original theme refresh/font bindings and all resolved styles.
+  const auto& tokens = refreshSharedUiThemeTokens(target);
+  captureHeaderStatus(renderer, inputs);
+  captureHeaderStyle(inputs, tokens);
+  inputs.showBack = inputs.showBack && backButton && title;
+  if (inputs.showBack)
+    HeaderBackTapTarget::set(rect.x + 4, rect.y + 4 + inputs.actionOffsetY, 48, 48);
+  else
     HeaderBackTapTarget::clear();
-  }
-  props.borderEdges = fui::EdgeBottom;
-  props.titleText = tokens.titleText;
-  props.titleText.align = tokens.headerTitleAlign;
-  props.subtitleText = tokens.smallText;
-  props.styles = tokens.popup;
-  props.sidePadding = tokens.headerSidePadding;
-  // Underline only under a titled header: an untitled band (Lyra home screen)
-  // historically drew no rule, and the old themes keyed the line on the title.
-  if (title != nullptr && props.styles.normal.border.kind == fui::PaintKind::None && tokens.headerUnderline > 0) {
-    props.styles.normal.border = fui::Paint::solid(fui::Color::Black);
-    props.styles.normal.borderWidth = tokens.headerUnderline;
-  }
-  fui::header(ui.frame, band, props);
+  HeaderPainter::paintHeader(renderer, inputs, rect.x, rect.y, rect.width, rect.height, title, subtitle);
 }
 
 void BaseTheme::drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label, const char* rightLabel) const {

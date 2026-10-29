@@ -9,6 +9,8 @@
 #include "components/OptionPopup.h"
 
 class EpubReaderMenuActivity final : public UiListActivity {
+  uint32_t readerUiFontOwner = 0;
+
  public:
   // Menu actions available from the reader menu.
   enum class MenuAction {
@@ -41,6 +43,8 @@ class EpubReaderMenuActivity final : public UiListActivity {
                                   const int currentPage, const int totalPages, const int bookProgressPercent,
                                   const uint8_t currentOrientation, const bool hasFootnotes, bool hasBookmarks);
 
+  void onEnter() override;
+  void onExit() override;
   void render(RenderLock&&) override;
   bool handleHomeGesture() override;
 

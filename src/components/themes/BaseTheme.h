@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "HeaderPainter.h"
+
 class Bitmap;
 class GfxRenderer;
 struct RecentBook;
@@ -257,6 +259,10 @@ class BaseTheme {
   // screens that own their stack bottom pass backButton = false.
   virtual void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle = nullptr,
                           bool backButton = true) const;
+  // Same paint with its exact resolved inputs returned to an explicit owner.
+  // No global observer or retained screen data in the theme.
+  void drawHeaderAndDescribe(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
+                             bool backButton, HeaderPainter::Inputs& described) const;
   // Fill the battery/clock status chrome (settings + theme metrics) into
   // header props, so FUI-native screens drawing their own interactive header
   // carry the same band as drawHeader. Status text is styled with the
@@ -267,6 +273,7 @@ class BaseTheme {
   // Edge inset drawHeader uses for the clock/battery status line (detached
   // layouts hug the corner with a legacy 12px inset instead of the padding).
   static int headerStatusInset();
+  static bool captureHeaderInputs(const GfxRenderer& renderer, HeaderPainter::Inputs& out);
   virtual void drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label,
                              const char* rightLabel = nullptr) const;
   virtual void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,

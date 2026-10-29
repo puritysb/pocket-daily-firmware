@@ -41,6 +41,10 @@ inline constexpr size_t AUTHOR_KEY_MAX_BYTES = 12;
 // reconstruct "//book.epub", which hashes differently and may not open.
 std::string joinLibraryPath(std::string_view folder, std::string_view name);
 
+// Compose an already-copied UI label in place, without growing its storage.
+// Never apply this to paths, persisted index records, sort keys or identity hashes.
+void composeDisplayText(std::string& display);
+
 // Casefold and strip diacritics for matching and sorting.
 //
 // Maps a handful of Latin letters that have no canonical decomposition,

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "FontScale.h"
+
 // Glyph rasterizer that resolves orientation, clipping and framebuffer
 // addressing once per glyph instead of once per pixel. It has no dependency
 // on GfxRenderer so it can be unit-tested on the host.
@@ -148,6 +150,36 @@ inline void draw(const uint8_t* bitmap, int width, int height, bool twoBit, Plan
       paint(target.buffer, destination, ink, levels, clearBits);
       ++source;
       destination += stepX;
+    }
+  }
+}
+
+// Same plane, polarity, clip and orthogonal-frame contract as draw(). Scaled
+// glyphs need no scratch raster or allocation; the unscaled fast path is intact.
+inline void drawScaled(const uint8_t* bitmap, int width, int height, bool twoBit, Plane plane, bool state,
+                       const Target& target, Clip clip, uint16_t scale) {
+  if (scale == 256) {
+    draw(bitmap, width, height, twoBit, plane, state, target, clip);
+    return;
+  }
+  if (!bitmap || width <= 0 || height <= 0 || scale < 128 || scale > 768) return;
+  const int outWidth = fontScale::extent(width, scale), outHeight = fontScale::extent(height, scale);
+  clip.left = std::max(clip.left, 0);
+  clip.top = std::max(clip.top, 0);
+  clip.right = std::min(clip.right, outWidth);
+  clip.bottom = std::min(clip.bottom, outHeight);
+  clipToRect(target.frame, 0, target.originY, target.width, target.originY + target.rows, clip);
+  const uint8_t levels = !twoBit ? 0x02 : plane == Plane::BW ? 0x0e : plane == Plane::GrayMSB ? 0x06 : 0x04;
+  const bool clearBits = twoBit && plane != Plane::BW ? false : state;
+  for (int y = clip.top; y < clip.bottom; ++y) {
+    const int sy = std::min(height - 1, y * 256 / scale);
+    for (int x = clip.left; x < clip.right; ++x) {
+      const int sx = std::min(width - 1, x * 256 / scale), source = sy * width + sx;
+      const uint8_t ink = twoBit ? ((bitmap[source >> 2] >> (6 - (source & 3) * 2)) & 3)
+                                 : ((bitmap[source >> 3] >> (7 - (source & 7))) & 1);
+      const int px = target.frame.x + x * target.frame.dxX + y * target.frame.dyX;
+      const int py = target.frame.y + x * target.frame.dxY + y * target.frame.dyY;
+      paint(target.buffer, (py - target.originY) * target.stride * 8 + px, ink, levels, clearBits);
     }
   }
 }

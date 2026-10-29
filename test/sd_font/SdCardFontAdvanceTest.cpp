@@ -216,14 +216,16 @@ TEST_F(SdFontAdvance, BoundedModeRemembersRecentMisses) {
   SdCardFont font;
   ASSERT_TRUE(font.load("/big.cpfont", SdCardFont::LoadMode::BoundedUI));
   fontStorage.readOpens = 0;
+  const auto readsBefore = FakeFontIO::reads;
   EXPECT_EQ(font.getEpdFont()->getGlyph(0x1F4BB), nullptr);
-  const unsigned afterFirst = fontStorage.readOpens;
-  EXPECT_GT(afterFirst, 0u);
+  const auto afterFirst = FakeFontIO::reads;
+  EXPECT_GT(afterFirst, readsBefore);
   for (int i = 0; i < 20; ++i) {
     EXPECT_EQ(font.getEpdFont()->getGlyph(0x1F4BB), nullptr);
     EXPECT_FALSE(font.hasGlyph(0x1F4BB, 0));
   }
-  EXPECT_EQ(fontStorage.readOpens, afterFirst);
+  EXPECT_EQ(FakeFontIO::reads, afterFirst);
+  EXPECT_EQ(fontStorage.readOpens, 0u);
   EXPECT_FALSE(font.boundedReadFailed());
   ASSERT_NE(font.getEpdFont()->getGlyph('A'), nullptr);  // present glyphs are unaffected
 }

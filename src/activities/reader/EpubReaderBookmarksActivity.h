@@ -10,6 +10,7 @@
 #include "components/OptionPopup.h"
 
 class EpubReaderBookmarksActivity final : public UiListActivity {
+  uint32_t readerUiFontOwner = 0;
   // The list rides the UiListActivity scaffold (themed rows, touch routing);
   // the title keeps its legacy draw, and OptionPopup keeps its legacy overlay
   // rendering for the delete confirmation.
@@ -30,6 +31,7 @@ class EpubReaderBookmarksActivity final : public UiListActivity {
   explicit EpubReaderBookmarksActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                        const std::shared_ptr<Epub>& epub, const std::string& epubPath);
   void onEnter() override;
+  void onExit() override;
   void render(RenderLock&&) override;
 
  private:

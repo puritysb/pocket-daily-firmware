@@ -3,8 +3,14 @@
 #include <Utf8.h>
 
 #include <algorithm>
+#include <cstring>
 
 namespace library {
+
+void composeDisplayText(std::string& display) {
+  utf8ComposeNfcInPlace(display.data());
+  display.resize(std::strlen(display.c_str()));
+}
 
 std::string joinLibraryPath(const std::string_view folder, const std::string_view name) {
   std::string path;

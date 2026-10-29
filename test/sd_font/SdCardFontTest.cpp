@@ -38,12 +38,68 @@ Bytes fontFile() {
   }
   return bytes;
 }
+// Two styles with distinct metrics, pixels and shaping spanning several 32B
+// pages. Glyph records and packed kern entries deliberately cross page edges.
+Bytes pagedFont() {
+  Bytes bytes(96, 0);
+  memcpy(bytes.data(), "CPFONT", 6);
+  bytes[8] = 4;
+  bytes[12] = 2;
+  for (unsigned style = 0; style < 2; ++style) {
+    const size_t toc = 32 + style * 32;
+    const size_t base = bytes.size();
+    bytes[toc] = style;
+    put32(bytes, toc + 4, 1);
+    put32(bytes, toc + 8, 96);
+    bytes[toc + 12] = 14;
+    bytes[toc + 13] = 12;
+    bytes[toc + 17] = bytes[toc + 19] = 96;
+    bytes[toc + 21] = bytes[toc + 22] = 16;
+    bytes[toc + 23] = 3;
+    put32(bytes, toc + 24, base);
+    const size_t glyphs = base + 12;
+    const size_t left = glyphs + 96 * 16;
+    const size_t right = left + 96 * 3;
+    const size_t matrix = right + 96 * 3;
+    const size_t ligatures = matrix + 256;
+    const size_t bitmap = ligatures + 24;
+    bytes.resize(bitmap);
+    put32(bytes, base, 32);
+    put32(bytes, base + 4, 127);
+    for (unsigned i = 0; i < 96; ++i) {
+      EpdGlyph glyph{};
+      glyph.width = 2 + (i + style) % 7;
+      glyph.height = 1 + i % 9;
+      glyph.left = i % 3;
+      glyph.top = glyph.height + style;
+      glyph.advanceX = (glyph.width + 1) * 16 + i % 5;
+      glyph.dataLength = (glyph.width * glyph.height + 7) / 8;
+      glyph.dataOffset = bytes.size() - bitmap;
+      memcpy(bytes.data() + glyphs + i * 16, &glyph, sizeof(glyph));
+      for (unsigned j = 0; j < glyph.dataLength; ++j) bytes.push_back((i * 7 + j * 11 + style * 53) & 255);
+      bytes[left + i * 3] = bytes[right + i * 3] = 32 + i;
+      bytes[left + i * 3 + 2] = 1 + (i + style) % 16;
+      bytes[right + i * 3 + 2] = 1 + (i * 3 + style) % 16;
+    }
+    for (unsigned i = 0; i < 256; ++i) bytes[matrix + i] = (i * 13 + style * 17) % 61 - 30;
+    for (unsigned i = 0; i < 3; ++i) {
+      put32(bytes, ligatures + i * 8, (('A' + i * 9) << 16) | ('B' + i));
+      put32(bytes, ligatures + i * 8 + 4, 'z' - i - style);
+    }
+  }
+  return bytes;
+}
+
 class SdFont : public testing::Test {
  protected:
   void SetUp() override {
     FakeSD::reset();
     FakeFontMemory::fail = false;
     FakeFontMemory::maxRequest = 0;
+    fontStorage.readOpens = 0;
+    FakeFontIO::reads = FakeFontIO::seeks = 0;
+    FakeFontIO::failSeek = SIZE_MAX;
+    FakeFontIO::failOpenAttempt = 0;
     FakeSD::files["/test.cpfont"] = fontFile();
   }
 };
@@ -170,13 +226,17 @@ TEST_F(SdFont, DiskBackedKerningAndLigaturesMatchCachedShaping) {
   EXPECT_EQ(small->applyLigatures('A', remainder), 'C');
   EXPECT_STREQ(remainder, "J");
   // A corrupt class cannot index outside the matrix, nor may a corrupt
-  // ligature emit an invalid scalar. No reads mutate the file.
+  // ligature emit an invalid scalar. Files are immutable during a load;
+  // clearCache explicitly invalidates metadata before each injected defect.
   bytes[266] = 2;
+  bounded.clearCache();
   EXPECT_EQ(small->getKerning('A', 'B'), 0);
   EXPECT_TRUE(bounded.boundedReadFailed());
   put32(bytes, 275, UINT32_MAX);
+  bounded.clearCache();
   EXPECT_EQ(small->getLigature('A', 'B'), 0u);
   FakeSD::readBudget = 0;
+  bounded.clearCache();
   EXPECT_EQ(small->getKerning('A', 'B'), 0);
   EXPECT_EQ(small->getLigature('A', 'B'), 0u);
 }
@@ -195,6 +255,107 @@ TEST_F(SdFont, BoundedGlyphAllocationFailurePreservesCacheAndCanRetry) {
   EXPECT_TRUE(font.boundedReadFailed());  // retry does not certify the old frame
   ASSERT_TRUE(font.load("/test.cpfont", SdCardFont::LoadMode::BoundedUI));
   EXPECT_FALSE(font.boundedReadFailed());
-  EXPECT_LE(FakeFontMemory::maxRequest, SdCardFont::UI_GLYPH_BYTES);
+  EXPECT_LE(FakeFontMemory::maxRequest, SdCardFont::UI_READ_STATE_BUDGET);
+  RecordProperty("boundedReaderAllocationBytes", FakeFontMemory::maxRequest);
 }
+TEST_F(SdFont, BoundedReaderReusesTwoHandlesAndMetadataWithoutBitmapPollution) {
+  SdCardFont font;
+  ASSERT_TRUE(font.load("/test.cpfont", SdCardFont::LoadMode::BoundedUI));
+  EXPECT_EQ(fontStorage.readOpens, 2u);
+  EXPECT_EQ(FakeFontIO::liveFiles, 2u);
+  const auto reads = FakeFontIO::reads;
+  for (unsigned pass = 0; pass < 10; ++pass) {
+    for (uint32_t cp = 'A'; cp <= 'J'; ++cp) {
+      const auto* glyph = font.getEpdFont()->getGlyph(cp);
+      ASSERT_NE(glyph, nullptr);
+      EXPECT_EQ(font.getOverflowBitmap(glyph)[0], 0x80 + cp - 'A');
+    }
+  }
+  // Six cached metadata blocks plus 100 individual bitmap reads. The ten-glyph
+  // working set deliberately exceeds the existing eight-glyph bitmap ring.
+  EXPECT_EQ(FakeFontIO::reads - reads, 106u);
+  EXPECT_EQ(fontStorage.readOpens, 2u);
+  EXPECT_LE(FakeFontMemory::maxRequest, SdCardFont::UI_READ_STATE_BUDGET);
+  ASSERT_TRUE(font.load("/test.cpfont", SdCardFont::LoadMode::Cached));
+  EXPECT_EQ(FakeFontIO::liveFiles, 0u);
+}
+
+TEST_F(SdFont, BoundedPagedReadsMatchAllStyleMetricsBitmapsAndShapingAfterEviction) {
+  FakeSD::files["/test.cpfont"] = pagedFont();
+  SdCardFont cached, bounded;
+  ASSERT_TRUE(cached.load("/test.cpfont"));
+  ASSERT_TRUE(bounded.load("/test.cpfont", SdCardFont::LoadMode::BoundedUI));
+  // Reverse/interleaved styles force replacement and exercise non-aligned
+  // records across boundaries, not a uniform byte fixture.
+  for (int cp = 127; cp >= 32; --cp) {
+    for (unsigned style = 0; style < 2; ++style) {
+      const auto* a = cached.getEpdFont(style)->getGlyph(cp);
+      const auto* b = bounded.getEpdFont(style)->getGlyph(cp);
+      ASSERT_NE(a, nullptr);
+      ASSERT_NE(b, nullptr);
+      EXPECT_EQ(memcmp(a, b, sizeof(*a)), 0) << cp << "/" << style;
+      EXPECT_EQ(memcmp(cached.getOverflowBitmap(a), bounded.getOverflowBitmap(b), a->dataLength), 0);
+    }
+  }
+  std::string alphabet;
+  for (char cp = 32; cp < 127; ++cp) alphabet += cp;
+  alphabet += char(127);
+  ASSERT_EQ(cached.prewarm(alphabet.c_str(), 3), 2);  // one absent replacement glyph per style
+  for (unsigned style = 0; style < 2; ++style) {
+    for (uint32_t left = 32; left < 128; ++left) {
+      for (uint32_t right = 32; right < 128; ++right) {
+        EXPECT_EQ(bounded.getEpdFont(style)->getKerning(left, right),
+                  cached.getEpdFont(style)->getKerning(left, right));
+        EXPECT_EQ(bounded.getEpdFont(style)->getLigature(left, right),
+                  cached.getEpdFont(style)->getLigature(left, right));
+      }
+    }
+  }
+  EXPECT_FALSE(bounded.boundedReadFailed());
+}
+
+TEST_F(SdFont, BoundedFailedRefillCannotBecomeAHitAndReloadDropsOldBytes) {
+  SdCardFont font;
+  ASSERT_TRUE(font.load("/test.cpfont", SdCardFont::LoadMode::BoundedUI));
+  FakeSD::readBudget = 9;  // a partially filled cache page
+  EXPECT_EQ(font.getEpdFont()->getGlyph('A'), nullptr);
+  EXPECT_TRUE(font.boundedReadFailed());
+  FakeSD::readBudget = SIZE_MAX;
+  const auto reads = FakeFontIO::reads;
+  ASSERT_NE(font.getEpdFont()->getGlyph('A'), nullptr);
+  EXPECT_GT(FakeFontIO::reads, reads);
+  EXPECT_TRUE(font.boundedReadFailed());  // retry never certifies the old frame
+  auto& bytes = FakeSD::files["/test.cpfont"];
+  bytes[90] = 91;  // changed advance, same filename and size
+  bytes[264] = 0x55;
+  ASSERT_TRUE(font.load("/test.cpfont", SdCardFont::LoadMode::BoundedUI));
+  const auto* glyph = font.getEpdFont()->getGlyph('A');
+  ASSERT_NE(glyph, nullptr);
+  EXPECT_EQ(glyph->advanceX, 91);
+  EXPECT_EQ(font.getOverflowBitmap(glyph)[0], 0x55);
+  EXPECT_FALSE(font.boundedReadFailed());
+}
+
+TEST_F(SdFont, BoundedReaderFailureReleasesHandlesAndAllowsRetry) {
+  SdCardFont font;
+  FakeFontMemory::fail = true;
+  EXPECT_FALSE(font.load("/test.cpfont", SdCardFont::LoadMode::BoundedUI));
+  EXPECT_EQ(FakeFontIO::liveFiles, 0u);
+  FakeFontMemory::fail = false;
+  FakeFontIO::failOpenAttempt = fontStorage.readOpens + 2;
+  EXPECT_FALSE(font.load("/test.cpfont", SdCardFont::LoadMode::BoundedUI));
+  EXPECT_EQ(FakeFontIO::liveFiles, 0u);
+  FakeFontIO::failOpenAttempt = 0;
+  ASSERT_TRUE(font.load("/test.cpfont", SdCardFont::LoadMode::BoundedUI));
+  FakeFontIO::failSeek = 64;
+  EXPECT_EQ(font.getEpdFont()->getGlyph('A'), nullptr);
+  EXPECT_TRUE(font.boundedReadFailed());
+  FakeFontIO::failSeek = SIZE_MAX;
+  ASSERT_TRUE(font.load("/test.cpfont", SdCardFont::LoadMode::BoundedUI));
+  EXPECT_FALSE(font.boundedReadFailed());
+  EXPECT_EQ(FakeFontIO::liveFiles, 2u);
+  EXPECT_FALSE(font.load(nullptr));
+  EXPECT_EQ(FakeFontIO::liveFiles, 0u);
+}
+
 }  // namespace

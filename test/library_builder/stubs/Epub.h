@@ -21,6 +21,7 @@ class Epub {
 
   bool loadMetadata(std::string& title, std::string& author) {
     ++fake::parses;
+    fake::clockMs += fake::metadataDelayMs;
     const auto& metadata = bookMetadata[path];
     if (!metadata.success) return false;
     title = metadata.title;

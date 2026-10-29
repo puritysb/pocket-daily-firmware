@@ -510,8 +510,12 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
     ctx.readBuf = fileReadBuffer;
     ctx.readBufSize = chunkSize;
 
+    // A small entry fits entirely in the existing output chunk. Keep one byte
+    // of slack for the end marker; exact-sized and larger entries still need
+    // the streaming ring because their destination buffer is reused.
+    const bool streaming = static_cast<size_t>(inflatedDataSize) >= chunkSize;
     InflateStream inflate;
-    if (!inflate.init(true)) {
+    if (!inflate.init(streaming)) {
       LOG_ERR("ZIP", "Failed to init inflate stream for %s", filename);
       free(outputBuffer);
       free(fileReadBuffer);
@@ -526,6 +530,14 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
     while (true) {
       size_t produced;
       const InflateStream::Status status = inflate.readAtMost(outputBuffer, chunkSize, &produced);
+
+      // Non-wrapping output must never reuse the buffer start for another call.
+      // Validate the whole small entry before a header probe can short-write:
+      // malformed/truncated input is not a successful early stop.
+      if (!streaming && (status != InflateStream::Status::Done || produced != static_cast<size_t>(inflatedDataSize))) {
+        LOG_ERR("ZIP", "Small entry did not finish at its declared size");
+        break;
+      }
 
       totalProduced += produced;
       if (totalProduced > static_cast<size_t>(inflatedDataSize)) {
@@ -566,7 +578,7 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
 
     free(outputBuffer);
     free(fileReadBuffer);
-    // ctx.reader's destructor frees the window.
+    // The inflater destructor releases its state and optional streaming ring.
     if (!success) return streamFailed(error);
     return true;
   }

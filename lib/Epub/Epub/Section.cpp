@@ -39,7 +39,9 @@ namespace {
 // 750 (bounded word-buffer allocations), which can move line breaks inside them.
 // v133: every page record starts with a u32 chapter text offset (Page::textOffset), the
 // exact position reading-progress XPointers are computed from and mapped back to.
-constexpr uint8_t SECTION_FILE_VERSION = 134;
+// v135: automatic bitmap reader fonts honor requested point size in raster and layout.
+// v136: rebuild cached ALT layouts after small-entry ZIP inflater memory correction.
+constexpr uint8_t SECTION_FILE_VERSION = 136;
 
 // Written into the version field while a build is in progress and replaced only after
 // every table has been committed. A crash-interrupted .part file is therefore rejected.
@@ -350,12 +352,17 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
 
       HalFile tmpHtml;
       if (!Storage.openFileForWrite("SCT", tmpHtmlPath, tmpHtml)) {
+        streamError = ZipFile::StreamError::Write;
         continue;
       }
       // Larger chunks mean far fewer SD writes inflating the HTML; a 1KB chunk turned a 584KB
       // single-spine novel into ~570 tiny writes (multi-second). 8KB keeps the transient buffers
       // small while cutting the write count 8x.
-      streamed = epub->readItemContentsToStream(localPath, tmpHtml, 8192);
+      // If inflater initialization ran out of memory, release 14KB of transient input/output
+      // buffers on the next attempt. Keep the fast path (and other retries) at 8KB; the decoder
+      // still needs its contiguous 32KB window, and the existing three-attempt bound is unchanged.
+      const size_t chunkBytes = attempt > 0 && streamError == ZipFile::StreamError::Window ? 1024 : 8192;
+      streamed = epub->readItemContentsToStream(localPath, tmpHtml, chunkBytes);
       streamError = ZipFile::lastStreamError();
       fileSize = tmpHtml.size();
       // Explicitly close() file before calling Storage.remove()
@@ -506,10 +513,16 @@ bool Section::buildSomeMore(const int maxPages) {
     if (status == ChapterHtmlSlimParser::ParseStatus::Done) {
       return finalizeBuild();
     }
-    // ParseStatus::More: yield once we've laid out the requested number of pages.
+    // A nearly finished chapter must not keep its XML/CSS/layout state alive
+    // through page glyph prewarm and grayscale scratch allocation. Drain at most
+    // two input buffers before yielding; larger chapters remain incremental.
     if (maxPages > 0 && (builtPageCount_ - startCount) >= maxPages) {
       build_->bytesConsumed = build_->parser->parseBytesConsumed();
-      return true;
+      constexpr uint32_t FINISH_TAIL_BYTES = 2048;
+      if (build_->totalBytes > build_->bytesConsumed &&
+          build_->totalBytes - build_->bytesConsumed > FINISH_TAIL_BYTES) {
+        return true;
+      }
     }
   }
 }

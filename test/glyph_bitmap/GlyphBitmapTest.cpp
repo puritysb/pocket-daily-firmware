@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cmath>
 #include <utility>
 #include <vector>
 
@@ -39,7 +40,7 @@ struct Rect {
 };
 
 void compare(int orientation, int rotation, bool twoBit, Plane plane, bool state, int width, int height, int x, int y,
-             int originY, int rows, Rect clip) {
+             int originY, int rows, Rect clip, uint16_t scale = 256) {
   SCOPED_TRACE(::testing::Message() << orientation << ',' << rotation << ',' << twoBit << ',' << static_cast<int>(plane)
                                     << ',' << state << " size=" << width << 'x' << height << " at=" << x << ',' << y
                                     << " band=" << originY << ',' << rows);
@@ -51,14 +52,17 @@ void compare(int orientation, int rotation, bool twoBit, Plane plane, bool state
   std::vector<uint8_t> expected(rows * STRIDE + 32);
   for (size_t i = 0; i < expected.size(); ++i) expected[i] = static_cast<uint8_t>(i * 53 + 0xa5);
   auto actual = expected;
-  for (int gy = 0; gy < height; ++gy) {
-    for (int gx = 0; gx < width; ++gx) {
+  const int outWidth = static_cast<int>(std::ceil(width * (scale / 256.0)));
+  const int outHeight = static_cast<int>(std::ceil(height * (scale / 256.0)));
+  for (int gy = 0; gy < outHeight; ++gy) {
+    for (int gx = 0; gx < outWidth; ++gx) {
       const int lx = x + gx * dxX + gy * dyX;
       const int ly = y + gx * dxY + gy * dyY;
       if (lx < clip.left || ly < clip.top || lx >= clip.right || ly >= clip.bottom) continue;
       const auto [px, py] = physical(orientation, lx, ly);
       if (px < 0 || px >= PANEL_WIDTH || py < originY || py >= originY + rows) continue;
-      const int source = gy * width + gx;
+      const int source = std::min(height - 1, static_cast<int>(std::floor(gy / (scale / 256.0)))) * width +
+                         std::min(width - 1, static_cast<int>(std::floor(gx / (scale / 256.0))));
       bool draw = false;
       bool black = state;
       if (twoBit) {
@@ -79,7 +83,7 @@ void compare(int orientation, int rotation, bool twoBit, Plane plane, bool state
     }
   }
 
-  glyphBitmap::Clip local{0, 0, width, height};
+  glyphBitmap::Clip local{0, 0, outWidth, outHeight};
   glyphBitmap::clipToRect(logical, clip.left, clip.top, clip.right, clip.bottom, local);
 
   const auto [px, py] = physical(orientation, x, y);
@@ -87,7 +91,7 @@ void compare(int orientation, int rotation, bool twoBit, Plane plane, bool state
   const auto [yx, yy] = physical(orientation, x + dyX, y + dyY);
   const glyphBitmap::Target target{
       actual.data() + 16, PANEL_WIDTH, STRIDE, originY, rows, {px, py, xx - px, xy - py, yx - px, yy - py}};
-  glyphBitmap::draw(bitmap.data(), width, height, twoBit, plane, state, target, local);
+  glyphBitmap::drawScaled(bitmap.data(), width, height, twoBit, plane, state, target, local, scale);
   EXPECT_EQ(expected, actual);
 }
 }  // namespace
@@ -123,4 +127,17 @@ TEST(GlyphBitmap, EmptyAndFullyClippedGlyphsDoNotWrite) {
       compare(orientation, rotation, true, Plane::BW, true, 11, 9, 0, 0, 0, 32, {12, 10, 15, 20});
     }
   }
+}
+
+TEST(GlyphBitmap, ScaledGlyphsMatchIndependentReferenceIncludingGrayPlanesAndStripClipping) {
+  for (uint16_t scale : {128, 299, 384, 512})
+    for (int orientation = 0; orientation < 4; ++orientation)
+      for (int rotation = 0; rotation < 2; ++rotation)
+        for (bool twoBit : {false, true})
+          for (Plane plane : {Plane::BW, Plane::GrayLSB, Plane::GrayMSB})
+            for (bool state : {false, true})
+              for (const auto [origin, rows] : {std::pair{0, 32}, std::pair{7, 11}}) {
+                compare(orientation, rotation, twoBit, plane, state, 7, 13, -2, 4, origin, rows, {0, 0, 30, 30}, scale);
+                compare(orientation, rotation, twoBit, plane, state, 7, 13, 12, 9, origin, rows, {2, 3, 18, 20}, scale);
+              }
 }

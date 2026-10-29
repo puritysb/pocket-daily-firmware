@@ -3,6 +3,8 @@
 #include <GfxRenderer.h>
 #include <HalFrontlight.h>
 #include <I18n.h>
+#include <LibraryText.h>
+#include <SdCardFontSystem.h>
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
@@ -21,8 +23,15 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
       currentPage(currentPage),
       totalPages(totalPages),
       bookProgressPercent(bookProgressPercent) {
+  library::composeDisplayText(this->title);
   buildMenuItems(menuItems, hasFootnotes, hasBookmarks);
   buildMenuRowItems();
+}
+
+void EpubReaderMenuActivity::onEnter() {
+  RenderLock lock(*this);
+  UiListActivity::onEnter();
+  if (!readerUiFontOwner) readerUiFontOwner = sdFontSystem.beginReaderOverlayUiFont(renderer);
 }
 
 // Populates menuRowItems's labels/actionValue from menuItems. Called once
@@ -218,4 +227,12 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
 
   drawFooter();
   renderer.displayBuffer();
+}
+
+void EpubReaderMenuActivity::onExit() {
+  if (readerUiFontOwner) {
+    sdFontSystem.endReaderOverlayUiFont(readerUiFontOwner);
+    readerUiFontOwner = 0;
+  }
+  UiListActivity::onExit();
 }

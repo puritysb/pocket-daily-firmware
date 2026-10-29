@@ -46,6 +46,19 @@ class SdCardFontSystem {
   /// saved reader selection. Returns the loaded font ID, or 0 if unavailable.
   int ensureUiFamilyLoaded(GfxRenderer& renderer, const char* familyName,
                            SdCardFont::LoadMode mode = SdCardFont::LoadMode::Cached, void (*progress)() = nullptr);
+
+  /// Library-only missing-glyph provider. Reuses the single family slot in
+  /// BoundedUI mode, preserving the built-in Latin UI face and reader settings.
+  /// Call under the render lock on entry, and releaseLoaded() on exit.
+  bool ensureLibraryUiFont(GfxRenderer& renderer);
+
+  /// Reader-child metadata UI only. Borrow the existing fallback slot for a
+  /// bounded World12 face without unloading the resident reader family.
+  /// Calls require the render lock; each successful begin owns exactly one end.
+  /// Nested owners share one face and nonzero token. Zero means no ownership.
+  /// Failed begins leave Symbols mode restored; stale tokens cannot close a new scope.
+  uint32_t beginReaderOverlayUiFont(GfxRenderer& renderer);
+  void endReaderOverlayUiFont(uint32_t owner);
   bool boundedUiFontReady(int fontId) const {
     return fontId != 0 && fontId == currentLoadedFontId() && manager_.loadMode() == SdCardFont::LoadMode::BoundedUI &&
            !manager_.boundedReadFailed();
@@ -128,13 +141,18 @@ class SdCardFontSystem {
   // Glyph fallback (symbols/emoji). Loaded lazily in Cached mode the first time
   // a reader or Cached UI font lacks a visible glyph, and only while enabled:
   // reader and Cached UI paths enable it; releaseLoaded() and BoundedUI loads
-  // (network-mode live views) disable and free it. A missing or unloadable
-  // file is remembered so repeated misses cost no SD access.
+  // (network-mode live views) disable and free it. Library alone opts in to
+  // borrowing the manager's bounded World face instead, without a second font.
+  // A missing or unloadable symbols file is remembered so repeated misses
+  // cost no SD access.
   GfxRenderer* renderer_ = nullptr;  // set by begin(); receives the fallback provider and layout key
   SdCardFont* fallback_ = nullptr;   // owned
   uint8_t fallbackPointSize_ = 0;
-  bool fallbackEnabled_ = false;
+  enum class FallbackMode : uint8_t { Disabled, Symbols, UiFamily, ReaderOverlay };
+  FallbackMode fallbackMode_ = FallbackMode::Disabled;
   bool fallbackUnavailable_ = false;
+  uint8_t readerOverlayOwners_ = 0;
+  uint32_t readerOverlayGeneration_ = 0;
   static SdCardFont* provideFallback(void* context, bool load);
   SdCardFont* fallbackFont(bool load);
   void setFallbackEnabled(bool enabled);

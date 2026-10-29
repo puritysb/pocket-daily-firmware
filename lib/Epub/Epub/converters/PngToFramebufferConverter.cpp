@@ -6,6 +6,11 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <PNGdec.h>
+#ifdef ENABLE_DEV_REMOTE_FLASH
+#include <HalMemory.h>
+
+#include "Epub/ImagePaintDiagnostics.h"
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -17,6 +22,12 @@
 #include "PixelCache.h"
 
 namespace {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+void notePngFailure(epub_paint_diagnostics::Stage stage, int32_t code = 0) {
+  const auto heap = HalMemory::getDefaultHeap();
+  epub_paint_diagnostics::active.pngFailed(stage, code, heap.freeBytes, heap.largestBlockBytes);
+}
+#endif
 
 // Context struct passed through PNGdec callbacks to avoid global mutable state.
 // The draw callback receives this via pDraw->pUser (set by png.decode()).
@@ -79,12 +90,55 @@ int32_t pngSeekWithHandle(PNGFILE* pFile, int32_t pos) {
   return f->seek(pos);
 }
 
-// The PNG decoder (PNGdec) is ~42 KB due to internal zlib decompression buffers.
-// We heap-allocate it on demand rather than using a static instance, so this memory
-// is only consumed while actually decoding/querying PNG images. This is critical on
-// the ESP32-C3 where total RAM is ~320 KB.
-constexpr size_t PNG_DECODER_APPROX_SIZE = 44 * 1024;                          // ~42 KB + overhead
-constexpr size_t MIN_FREE_HEAP_FOR_PNG = PNG_DECODER_APPROX_SIZE + 16 * 1024;  // decoder + 16 KB headroom
+// Keep the existing admission gate for comparison. The pinned decoder now owns
+// only metadata/palette/file I/O state; its transient dictionary, inflate state
+// and two scanlines are caller-owned separate allocations, never one 59 KiB block.
+constexpr size_t MIN_FREE_HEAP_FOR_PNG = 60 * 1024;
+static_assert(PNG_EXTERNAL_WORKSPACE_VERSION == 1, "Apply the reviewed PNGdec workspace patch");
+
+enum class PngAllocationPart : int32_t { Object = 1, Window, State, Rows, Binding };
+
+bool pngAllocationFailed(const PngAllocationPart part) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  notePngFailure(epub_paint_diagnostics::Stage::PngAllocation, static_cast<int32_t>(part));
+#endif
+  LOG_ERR("PNG", "Decoder workspace allocation/binding failed (component %d)", static_cast<int>(part));
+  return false;
+}
+
+// Declared before PNG so close/destruction happens before the borrowed buffers
+// are freed. Each buffer exists only for this decode; the largest is the 32 KiB
+// dictionary. ESP malloc is only 4-byte aligned while inflate_state needs 8 on
+// RISC-V. Own byte-array storage for the trivial implicit-lifetime state and
+// align its borrowed view before typed decoder access; never delete that view.
+// State/row storage add at most alignof(inflate_state)-1 / 15 bytes respectively.
+struct PngWorkspace {
+  std::unique_ptr<uint8_t[]> window;
+  std::unique_ptr<uint8_t[]> state;
+  std::unique_ptr<uint8_t[]> rows;
+
+  bool allocateAndBind(PNG& png, const size_t rowBytes) {
+    window = makeUniqueNoThrow<uint8_t[]>(PNG_DECODE_WINDOW_BYTES);
+    if (!window) return pngAllocationFailed(PngAllocationPart::Window);
+    // Transient decoder state cannot fit the task stack or survive this decode.
+    // ESP size is 7128 + 7 bytes; the largest allocation remains the dictionary.
+    constexpr size_t stateAlignment = alignof(inflate_state);
+    static_assert(sizeof(inflate_state) <= SIZE_MAX - (stateAlignment - 1));
+    state = makeUniqueNoThrow<uint8_t[]>(sizeof(inflate_state) + stateAlignment - 1);
+    if (!state) return pngAllocationFailed(PngAllocationPart::State);
+    const uintptr_t alignedState =
+        (reinterpret_cast<uintptr_t>(state.get()) + stateAlignment - 1) & ~static_cast<uintptr_t>(stateAlignment - 1);
+    rows = makeUniqueNoThrow<uint8_t[]>(rowBytes + PNG_DECODE_ROWS_ALIGNMENT - 1);
+    if (!rows) return pngAllocationFailed(PngAllocationPart::Rows);
+    const uintptr_t aligned = (reinterpret_cast<uintptr_t>(rows.get()) + PNG_DECODE_ROWS_ALIGNMENT - 1) &
+                              ~static_cast<uintptr_t>(PNG_DECODE_ROWS_ALIGNMENT - 1);
+    if (!png.setDecodeWorkspace(reinterpret_cast<void*>(alignedState), sizeof(inflate_state), window.get(),
+                                PNG_DECODE_WINDOW_BYTES, reinterpret_cast<uint8_t*>(aligned), rowBytes)) {
+      return pngAllocationFailed(PngAllocationPart::Binding);
+    }
+    return true;
+  }
+};
 
 // PNGdec keeps TWO scanlines in its internal ucPixels buffer (current + previous)
 // and each scanline includes a leading filter byte.
@@ -319,7 +373,7 @@ bool PngToFramebufferConverter::getDimensionsStatic(const std::string& imagePath
     return false;
   }
 
-  std::unique_ptr<PNG> png(new (std::nothrow) PNG());
+  auto png = makeUniqueNoThrow<PNG>();
   if (!png) {
     LOG_ERR("PNG", "Failed to allocate PNG decoder for dimensions");
     return false;
@@ -342,17 +396,21 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   LOG_DBG("PNG", "Decoding PNG: %s", imagePath.c_str());
 
   size_t freeHeap = ESP.getFreeHeap();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  const auto entryHeap = HalMemory::getDefaultHeap();
+  epub_paint_diagnostics::active.pngStarted(freeHeap, entryHeap.largestBlockBytes, sizeof(PNG), MIN_FREE_HEAP_FOR_PNG);
+#endif
   if (freeHeap < MIN_FREE_HEAP_FOR_PNG) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    notePngFailure(epub_paint_diagnostics::Stage::PngHeapGate);
+#endif
     LOG_ERR("PNG", "Not enough heap for PNG decoder (%u free, need %u)", freeHeap, MIN_FREE_HEAP_FOR_PNG);
     return false;
   }
 
-  // Heap-allocate PNG decoder (~42 KB) - freed at end of function
-  std::unique_ptr<PNG> png(new (std::nothrow) PNG());
-  if (!png) {
-    LOG_ERR("PNG", "Failed to allocate PNG decoder");
-    return false;
-  }
+  PngWorkspace workspace;
+  auto png = makeUniqueNoThrow<PNG>();
+  if (!png) return pngAllocationFailed(PngAllocationPart::Object);
 
   PngContext ctx;
   ctx.decoder = png.get();
@@ -365,12 +423,20 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
                      pngDrawCallback);
   const ScopedCleanup cleanup{[&png]() { png->close(); }};
   if (rc != PNG_SUCCESS) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    notePngFailure(epub_paint_diagnostics::Stage::PngOpen, rc);
+#endif
     LOG_ERR("PNG", "Failed to open PNG: %d", rc);
     return false;
   }
 
   ImageDimensions sourceDimensions;
-  if (!validateAndStoreDimensions(png->getWidth(), png->getHeight(), sourceDimensions, "PNG")) return false;
+  if (!validateAndStoreDimensions(png->getWidth(), png->getHeight(), sourceDimensions, "PNG")) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    notePngFailure(epub_paint_diagnostics::Stage::PngDimensions);
+#endif
+    return false;
+  }
 
   // Calculate output dimensions
   ctx.srcWidth = sourceDimensions.width;
@@ -380,6 +446,9 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   ctx.visibleWidth = ctx.srcWidth - 2 * ctx.cropLeft;
   ctx.visibleHeight = ctx.srcHeight - 2 * ctx.cropTop;
   if (ctx.visibleWidth <= 0 || ctx.visibleHeight <= 0) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    notePngFailure(epub_paint_diagnostics::Stage::PngCrop);
+#endif
     LOG_ERR("PNG", "PNG crop leaves no visible pixels");
     return false;
   }
@@ -408,6 +477,9 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
 
   const int requiredInternal = requiredPngInternalBufferBytes(ctx.srcWidth, pixelType, bitsPerSample);
   if (requiredInternal > PNG_MAX_BUFFERED_PIXELS) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    notePngFailure(epub_paint_diagnostics::Stage::PngInternalRow);
+#endif
     LOG_ERR(
         "PNG",
         "PNG row buffer too small: need %d bytes for width=%d type=%d bpp=%d, configured PNG_MAX_BUFFERED_PIXELS=%d",
@@ -417,6 +489,9 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   }
 
   if (!isSupportedBitDepth(pixelType, bitsPerSample)) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    notePngFailure(epub_paint_diagnostics::Stage::PngBitDepth);
+#endif
     warnUnsupportedFeature(
         "bit depth (" + std::to_string(bitsPerSample) + "bpp) for pixel type " + std::to_string(pixelType), imagePath);
     return false;
@@ -428,10 +503,17 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   constexpr size_t MAX_GRAY_LINE_BUFFER_BYTES = PNG_MAX_BUFFERED_PIXELS / 2;
   const size_t grayBufSize = static_cast<size_t>(ctx.srcWidth);
   if (grayBufSize > MAX_GRAY_LINE_BUFFER_BYTES) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    notePngFailure(epub_paint_diagnostics::Stage::PngGrayRow);
+#endif
     LOG_ERR("PNG", "Expanded gray row too wide: need %u bytes for width=%d, max=%u", static_cast<unsigned>(grayBufSize),
             ctx.srcWidth, static_cast<unsigned>(MAX_GRAY_LINE_BUFFER_BYTES));
     return false;
   }
+
+  // The header and existing support limits have been validated before choosing
+  // exact row capacity. Binding follows open(), which resets all borrowed views.
+  if (!workspace.allocateAndBind(*png, static_cast<size_t>(requiredInternal))) return false;
 
   // tRNS chunks are parsed during decode(), so hasAlpha() is not reliable yet
   // for color-key and indexed transparency. Reserve the alpha line whenever
@@ -440,6 +522,9 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   const size_t lineBufferBytes = grayBufSize * (retainAlpha ? 2u : 1u);
   auto lineBuffers = makeUniqueNoThrow<uint8_t[]>(lineBufferBytes);
   if (!lineBuffers) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    notePngFailure(epub_paint_diagnostics::Stage::PngLineAllocation);
+#endif
     LOG_ERR("PNG", "Failed to allocate PNG line buffers (%u bytes)", static_cast<unsigned>(lineBufferBytes));
     return false;
   }
@@ -449,7 +534,7 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   // Stream the pixel cache to disk. PNGdec delivers source scanlines top to
   // bottom and we emit at most one (downscaled) output row per callback, so the
   // band only needs a single row. Streaming keeps the working set tiny, so
-  // unlike the old full-image buffer it neither competes with the ~44KB decoder
+  // unlike the old full-image buffer it neither competes with the transient decoder workspace
   // nor forces larger images to skip caching - which previously meant a full
   // re-decode on every one of an image page's ~14 render passes.
   ctx.caching = !config.preserveAlpha && !config.cachePath.empty();
@@ -469,6 +554,9 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   ctx.alphaLineBuffer = nullptr;
 
   if (rc != PNG_SUCCESS) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    notePngFailure(epub_paint_diagnostics::Stage::PngDecode, rc);
+#endif
     LOG_ERR("PNG", "Decode failed: %d", rc);
     if (ctx.caching) ctx.cache.abort();
     return false;

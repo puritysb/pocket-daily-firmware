@@ -3,6 +3,7 @@
 #include <HalStorage.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -29,8 +30,10 @@ class SdCardFont {
   // BoundedUI is for small UI fonts, not general book typography. Interval
   // tables stay on SD; the existing eight-slot glyph cache is byte-capped.
   static constexpr uint16_t UI_GLYPH_BYTES = 256;
+  static constexpr size_t UI_READ_CACHE_BYTES = 2048;
+  static constexpr size_t UI_READ_STATE_BUDGET = 2816;  // excludes HAL-owned handle implementations
 
-  SdCardFont() = default;
+  SdCardFont();
   ~SdCardFont();
   // Owns raw buffers freed in dtor — no shallow-copy semantics. Make any
   // accidental pass-by-value or move a compile-time error.
@@ -347,6 +350,10 @@ class SdCardFont {
   void (*progress_)() = nullptr;
   uint32_t loadedFileSize_ = 0;
   mutable bool boundedReadFailed_ = false;
+  struct BoundedReadState;
+  std::unique_ptr<BoundedReadState> boundedReader_;
+  bool readBounded(uint32_t offset, void* output, size_t length, bool bitmap = false) const;
+  uint8_t readBoundedKernClass(uint32_t offset, uint16_t count, uint32_t cp) const;
   int checkBoundedText(const char* text, uint8_t styleMask);
   static int8_t lookupBoundedKerning(void* context, uint32_t left, uint32_t right);
   static uint32_t lookupBoundedLigature(void* context, uint32_t left, uint32_t right);

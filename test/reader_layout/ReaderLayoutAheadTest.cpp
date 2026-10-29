@@ -24,6 +24,8 @@
 
 #include "activities/reader/ReaderLayoutAhead.h"
 #include "activities/reader/ReaderPageRenderer.h"
+#include "activities/reader/ReaderProgressCodec.h"
+#include "pocket_daily/ReaderPerf.h"
 
 // Largest single allocation while `trackAllocations` is set: the X3 only builds a
 // section while its largest free heap block is at least 12 KB, so no build step may
@@ -348,6 +350,141 @@ TEST_F(ReaderLayout, IdleOnAFirstPageLaysOutThePreviousChapter) {
   EXPECT_EQ(busy.adoptedTurns, 0U);
 }
 
+// A short chapter can emit the requested page with only one input buffer left.
+// Retaining its parser/CSS/unfinished page through glyph prewarm wastes heap.
+TEST_F(ReaderLayout, FinishesShortTailBeforePageRenderWithoutChangingPageBytes) {
+  for (const int paragraphs : {16, 22, 28}) {
+    const auto htmlDir = epub->getCachePath() + "/html";
+    Storage.mkdir(htmlDir.c_str());
+    std::string html = "<html><body>";
+    for (int i = 0; i < paragraphs; ++i) {
+      html += "<p id='p" + std::to_string(i) + "'>Chapter " + std::to_string(i) +
+              " has distinct words: north east south west, amber blue green.</p>";
+    }
+    html += "</body></html>";
+    ASSERT_GT(html.size(), 1024U);
+    ASSERT_LE(html.size(), 3072U);
+    {
+      std::ofstream out(TestFs::root + htmlDir + "/0.html");
+      out << html;
+    }
+    const auto pages = [](Section& section) {
+      std::vector<std::string> bytes;
+      for (unsigned i = 0; i < section.pageCount; ++i) {
+        auto page = section.loadPage(i);
+        if (!page) return std::vector<std::string>{};
+        HalFile file;
+        if (!Storage.openFileForWrite("TEST", "/page.bin", file) || !page->serialize(file))
+          return std::vector<std::string>{};
+        file.close();
+        std::ifstream in(TestFs::map("/page.bin"), std::ios::binary);
+        bytes.emplace_back(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+      }
+      return bytes;
+    };
+    Section reference(epub, 0, renderer);
+    ASSERT_TRUE(layout.startBuild(reference));
+    ASSERT_TRUE(reference.buildSomeMore(0));
+    const auto expected = pages(reference);
+    ASSERT_GT(expected.size(), 1U);
+    reference.clearCache();
+    Section incremental(epub, 0, renderer);
+    ASSERT_TRUE(layout.startBuild(incremental));
+    ASSERT_TRUE(incremental.buildSomeMore(1));
+    EXPECT_TRUE(incremental.isBuildComplete());
+    EXPECT_FALSE(incremental.isBuilding());
+    EXPECT_EQ(pages(incremental), expected);
+  }
+}
+
+TEST_F(ReaderLayout, LargeChapterStillYieldsAndCanResumeFromPartial) {
+  std::ifstream in(LONG_PARAGRAPH_EPUB, std::ios::binary);
+  std::ofstream out(TestFs::root + "/long.epub", std::ios::binary);
+  out << in.rdbuf();
+  out.close();
+  auto book = std::make_shared<Epub>("/long.epub", "/.crosspoint");
+  ASSERT_TRUE(book->load(true, false));
+  Section section(book, 2, renderer);
+  ASSERT_TRUE(layout.startBuild(section));
+  ASSERT_TRUE(section.buildSomeMore(1));
+  EXPECT_TRUE(section.isBuilding());
+  EXPECT_FALSE(section.isBuildComplete());
+  const auto count = section.pageCount;
+  ASSERT_GT(count, 0U);
+  section.suspendBuild();
+  EXPECT_TRUE(section.isPartial());
+  EXPECT_EQ(section.pageCount, count);
+  ASSERT_NE(section.loadPage(0), nullptr);
+  ASSERT_TRUE(layout.startBuild(section));
+  ASSERT_TRUE(section.buildSomeMore(0));
+  EXPECT_TRUE(section.isBuildComplete());
+  EXPECT_GT(section.pageCount, count);
+}
+
+TEST_F(ReaderLayout, InvalidShortTailFailsRatherThanCommittingIncompletePages) {
+  const auto htmlDir = epub->getCachePath() + "/html";
+  Storage.mkdir(htmlDir.c_str());
+  std::string html = "<html><body>";
+  for (int i = 0; i < 16; ++i) {
+    html += "<p>Distinct paragraph " + std::to_string(i) + " north east south west amber blue green.</p>";
+  }
+  html += "</invalid></body></html>";
+  ASSERT_GT(html.size(), 1024U);
+  ASSERT_LT(html.size(), 2048U);
+  {
+    std::ofstream out(TestFs::root + htmlDir + "/0.html");
+    out << html;
+  }
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(layout.startBuild(section));
+  EXPECT_FALSE(section.buildSomeMore(1));
+  EXPECT_FALSE(section.isBuilding());
+  EXPECT_FALSE(section.isBuildComplete());
+  EXPECT_EQ(section.pageCount, 0U);
+}
+
+TEST_F(ReaderLayout, EveryUnmarkedPageRenderHasFreshMemoryEvidenceAndDuplicatesAreRejected) {
+  namespace Perf = PocketDaily::ReaderPerf;
+  Perf::open();
+  struct ClosePerf {
+    ~ClosePerf() { Perf::close(); }
+  } closePerf;
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(layout.startBuild(section));
+  ASSERT_TRUE(section.buildSomeMore(0));
+  ASSERT_GT(section.pageCount, 0U);
+  ReaderPageRenderer::Options options;
+  options.fontId = FONT_ID;
+  options.textAntiAliasing = true;
+  options.refreshFrequency = 3;
+  int refresh = 0;
+  uint32_t cursor = 0;
+  Perf::TurnRecord record;
+  EXPECT_FALSE(Perf::copyNewestAfter(cursor, record));
+  for (unsigned i = 0; i < 20; ++i) {
+    auto page = section.loadPage(i % section.pageCount);
+    ASSERT_NE(page, nullptr);
+    if (i == 0) {
+      Perf::beginTurn(0, Perf::FLAG_OPEN);
+      EXPECT_FALSE(Perf::copyNewestAfter(cursor, record));
+    }
+    // Later automatic/native turns deliberately have no explicit beginTurn.
+    ReaderPageRenderer::render(renderer, *page, options, refresh);
+    Perf::endTurn();
+    ASSERT_TRUE(Perf::copyNewestAfter(cursor, record)) << i;
+    EXPECT_EQ((record.flags & Perf::FLAG_OPEN) != 0, i == 0);
+    EXPECT_EQ((record.flags & Perf::FLAG_HALF) != 0, i % 3 == 0);
+    EXPECT_GT(record.freeHeap, 0U);
+    EXPECT_GT(record.largestBlock, 0U);
+    const auto observed = cursor;
+    EXPECT_FALSE(Perf::copyNewestAfter(cursor, record));
+    EXPECT_EQ(cursor, observed);
+  }
+  Perf::TurnRecord oldest;
+  EXPECT_TRUE(Perf::copyRecent(15, oldest));
+  EXPECT_FALSE(Perf::copyRecent(16, oldest));
+}
+
 // A 30,000-character single paragraph (the reading-progress fixture's chapter 3) is laid
 // out in bounded chunks. With 750-word chunks the word buffers grew to 1024 entries, a
 // ~24 KB contiguous reserve that aborted an X3 build resumed with a 12 KB free block.
@@ -443,9 +580,9 @@ TEST_F(ReaderLayout, UpgradedSectionRejectsOldVersionAndChangedSpacing) {
   {
     std::fstream cache(path, std::ios::binary | std::ios::in | std::ios::out);
     ASSERT_TRUE(cache.good());
-    EXPECT_EQ(cache.get(), 134);
+    EXPECT_EQ(cache.get(), 136);
     cache.seekp(0);
-    cache.put(static_cast<char>(133));
+    cache.put(static_cast<char>(135));
   }
   {
     Section stale(epub, 0, renderer);
@@ -462,5 +599,71 @@ TEST_F(ReaderLayout, UpgradedSectionRejectsOldVersionAndChangedSpacing) {
       changed.characterSpacing = 1;
     Section reopened(epub, 0, renderer);
     EXPECT_FALSE(changed.load(reopened));
+  }
+}
+
+TEST_F(ReaderLayout, Version135RebuildPreservesProgressMetadataAndOffers) {
+  std::ifstream fixture(LONG_PARAGRAPH_EPUB, std::ios::binary);
+  std::ofstream copied(TestFs::root + "/long.epub", std::ios::binary);
+  copied << fixture.rdbuf();
+  copied.close();
+  auto book = std::make_shared<Epub>("/long.epub", "/.crosspoint");
+  ASSERT_TRUE(book->load(true, false));
+  const std::string cache = TestFs::root + book->getCachePath();
+  const std::string sectionPath = cache + "/sections/2.bin";
+  auto contents = [](const std::string& path) {
+    std::ifstream file(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(file), {});
+  };
+  const ReaderProgressCodec::Position saved{2, 1, 42, 33, 1234};
+  uint8_t progress[ReaderProgressCodec::EXTENDED_SIZE];
+  ASSERT_EQ(ReaderProgressCodec::encode(saved, progress), sizeof(progress));
+  {
+    std::ofstream file(cache + "/progress.bin", std::ios::binary);
+    file.write(reinterpret_cast<const char*>(progress), sizeof(progress));
+  }
+  // Opaque existing records are outside section invalidation's ownership.
+  std::ofstream(cache + "/pocket-reading.bin", std::ios::binary) << "existing reading record";
+  std::ofstream(cache + "/pocket-reading-offer.bin", std::ios::binary) << "existing pending offer";
+  const auto metadata = contents(cache + "/book.bin");
+  ASSERT_FALSE(metadata.empty());
+  for (bool partial : {false, true}) {
+    {
+      Section built(book, 2, renderer);
+      ASSERT_TRUE(layout.startBuild(built));
+      ASSERT_TRUE(built.buildSomeMore(partial ? 3 : 0));
+      if (partial) built.suspendBuild();
+    }
+    const auto html = contents(cache + "/html/2.html");
+    ASSERT_FALSE(html.empty());
+    auto old = contents(sectionPath);
+    ASSERT_GT(old.size(), 12U);
+    if (partial) {
+      ASSERT_EQ(static_cast<uint8_t>(old[0]), 0xFF);
+      ASSERT_EQ(static_cast<uint8_t>(old[old.size() - 4]), 136);
+      old[old.size() - 4] = static_cast<char>(135);
+    } else {
+      ASSERT_EQ(static_cast<uint8_t>(old[0]), 136);
+      old[0] = static_cast<char>(135);
+    }
+    {
+      std::ofstream file(sectionPath, std::ios::binary | std::ios::trunc);
+      file.write(old.data(), static_cast<std::streamsize>(old.size()));
+    }
+    Section stale(book, 2, renderer);
+    EXPECT_FALSE(layout.load(stale));
+    EXPECT_FALSE(std::ifstream(sectionPath).good());
+    Section rebuilt(book, 2, renderer);
+    ASSERT_TRUE(layout.startBuild(rebuilt));
+    ASSERT_TRUE(rebuilt.buildSomeMore(0));
+    Section reopened(book, 2, renderer);
+    ASSERT_TRUE(layout.load(reopened));
+    ASSERT_NE(reopened.loadPage(saved.page), nullptr);
+    EXPECT_EQ(contents(cache + "/book.bin"), metadata);
+    EXPECT_EQ(contents(cache + "/html/2.html"), html);
+    EXPECT_EQ(contents(cache + "/progress.bin"),
+              std::string(reinterpret_cast<const char*>(progress), sizeof(progress)));
+    EXPECT_EQ(contents(cache + "/pocket-reading.bin"), "existing reading record");
+    EXPECT_EQ(contents(cache + "/pocket-reading-offer.bin"), "existing pending offer");
   }
 }

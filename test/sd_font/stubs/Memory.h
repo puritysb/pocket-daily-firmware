@@ -7,6 +7,13 @@ inline bool fail = false;
 inline size_t maxRequest = 0;
 }  // namespace FakeFontMemory
 template <typename T>
+  requires(!std::is_array_v<T>)
+std::unique_ptr<T> makeUniqueNoThrow() {
+  if (sizeof(T) > FakeFontMemory::maxRequest) FakeFontMemory::maxRequest = sizeof(T);
+  if (FakeFontMemory::fail) return {};
+  return std::unique_ptr<T>(new (std::nothrow) T());
+}
+template <typename T>
   requires std::is_unbounded_array_v<T>
 std::unique_ptr<T> makeUniqueNoThrow(size_t count) {
   using Element = std::remove_extent_t<T>;

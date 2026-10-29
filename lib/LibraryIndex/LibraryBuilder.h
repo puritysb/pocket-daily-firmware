@@ -67,6 +67,22 @@ struct BuildStats {
 // without building the reader's spine, TOC, CSS, or section caches.
 bool buildLibraryIndex(const char* rootPath, BuildStats& stats, bool readMetadata = false);
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+// Cooperative trial limits, checked between normal builder operations. A single
+// SD/metadata/sort call is not preempted. No heap or shipping state is added.
+struct DevBuildBudgetSnapshot {
+  uint32_t entries = 0;
+  uint32_t workUnits = 0;
+  uint32_t elapsedMs = 0;
+  bool active = false;
+  bool exhausted = false;
+};
+bool beginDevBuildBudget(uint32_t maxEntries, uint32_t maxWorkUnits, uint32_t durationMs);
+DevBuildBudgetSnapshot endDevBuildBudget();
+DevBuildBudgetSnapshot devBuildBudgetSnapshot();
+bool devBuildBudgetExhausted();
+#endif
+
 // Live index path, shared by the builder and activity.
 const char* libraryIndexPath();
 

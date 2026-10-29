@@ -4,10 +4,7 @@
 
 #include "HalStorage.h"
 
-inline uint32_t millis() {
-  static uint32_t clock = 0;
-  return ++clock;
-}
+inline uint32_t millis() { return ++fake::clockMs; }
 
 inline void delay(unsigned) { fake::delays++; }
 

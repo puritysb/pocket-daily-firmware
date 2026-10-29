@@ -50,6 +50,7 @@
 #include "pocket_daily/BuildFailureLog.h"
 #include "pocket_daily/ReaderPerf.h"
 #include "pocket_daily/ReadingProgressReader.h"
+#include "pocket_daily/boot/TrialReader.h"
 #include "pocket_daily/dev/ScreenCapture.h"
 #include "util/BookmarkUtil.h"
 #include "util/ButtonNavigator.h"
@@ -168,6 +169,9 @@ EpubReaderActivity::~EpubReaderActivity() {
   // taking another here self-deadlocks (renderingMutex is non-recursive).
   settleOverlayRefresh();
   discardOverlayPage();  // free the overlay's page snapshot if one is held
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (PocketDaily::DevCapture::readerWalkActive()) return;
+#endif
 
   if (footnoteDepth > 0 && epub) {
     const SavedPosition& origin = savedPositions[0];
@@ -251,6 +255,15 @@ bool EpubReaderActivity::loadBook() {
   }
 
   readingOfferPending = PocketDaily::ReadingProgress::hasPendingOffer(*epub);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (PocketDaily::DevCapture::readerWalkActive()) {
+    // An owned path with unchanged bytes may share the user's document digest.
+    // Never consume an offer or resume/publish that document's reading state.
+    currentSpineIndex = nextPageNumber = cachedSpineIndex = cachedChapterTotalPageCount = 0;
+    cachedVisibleTextOffset.reset();
+    readingOfferPending = false;
+  }
+#endif
   layoutAhead = makeUniqueNoThrow<ReaderLayoutAhead>(epub, renderer);
   PocketDaily::ReaderPerf::open();
   queuePerfTurn(PocketDaily::ReaderPerf::FLAG_OPEN, 0);
@@ -483,6 +496,21 @@ void EpubReaderActivity::loop() {
       PocketDaily::ReaderPerf::save();
     }
   }
+
+  PocketDaily::TrialReader::observe(*this, bookPath);
+
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (PocketDaily::DevCapture::readerWalkActive()) {
+    // Reuse the real turn path after ordinary background layout work. Keep all
+    // user menus, end-of-book side effects and offer handling out of this trial.
+    if (section && !RenderLock::peek() && PocketDaily::DevCapture::turnPage()) {
+      const bool moved = pageTurn(true) && currentSpineIndex < epub->getSpineItemsCount();
+      PocketDaily::DevCapture::readerTurnResult(moved);
+      if (moved) requestUpdate();
+    }
+    return;
+  }
+#endif
 
   // End-of-Book screen reached (currentSpineIndex == spine count) means the book is
   // finished. Two independent finished-book features key off this same condition.
@@ -1291,6 +1319,13 @@ void EpubReaderActivity::recordBuildFailure() const {
   LOG_ERR("ERS", "Section build failed: spine %d step %s (%u), free %u, largest block %u", currentSpineIndex,
           BuildLog::stepName(entry.step), static_cast<unsigned>(entry.detail), static_cast<unsigned>(entry.freeHeap),
           static_cast<unsigned>(entry.largestBlock));
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (PocketDaily::DevCapture::readerWalkActive()) {
+    entry.count = 1;
+    PocketDaily::DevCapture::readerBuildFailed(entry);
+    return;
+  }
+#endif
   if (!BuildLog::record(entry)) LOG_ERR("ERS", "Could not store the build failure record");
 }
 
@@ -1808,6 +1843,13 @@ void EpubReaderActivity::renderBook() {
     LOG_DBG("ERS", "Rendered page in %dms", millis() - start);
     lastRenderCompleteMs = millis();
     markPageRendered();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    const int total = section->estimatedTotalPages();
+    const float fraction = total > 0 ? static_cast<float>(section->currentPage) / total : 0.0f;
+    PocketDaily::DevCapture::readerPageRendered(
+        currentSpineIndex, section->currentPage + 1,
+        clampPercent(static_cast<int>(currentSpineInfo().bookProgress(fraction) * 100.0f + 0.5f)));
+#endif
   }
 
   // Only persist when the position actually changed. render() also runs on menu,
@@ -1915,6 +1957,9 @@ bool EpubReaderActivity::applyDeferredReposition() {
 }
 
 bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageCount) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (PocketDaily::DevCapture::readerWalkActive()) return true;
+#endif
   // Whole-book percent for the AgentDeck glance strip (7th byte). Same math as
   // the status bar, from the chapter's cached spine sizes when it is the current one.
   const float frac = (pageCount > 0) ? (float)currentPage / (float)pageCount : 0.0f;
@@ -1931,6 +1976,9 @@ bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
 }
 
 void EpubReaderActivity::flushPendingProgress(const bool fromLoop) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (PocketDaily::DevCapture::readerWalkActive()) return;
+#endif
   int spine = 0, page = 0, pageCount = 0, bookPercent = -1;
   std::optional<uint32_t> visibleOffset;
   {
