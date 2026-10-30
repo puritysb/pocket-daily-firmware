@@ -92,6 +92,14 @@ sampled free heap/largest block, and free heap above 50,000 bytes. Both sides
 must have matching render-mode flags/strip counts and final BW capture/page.
 This is a conservative engineering screen, not a statistical confidence claim.
 
+Reports also expose `bwWorkP50Ms`/`bwWorkP95Ms`: for each forward turn, sum the
+recorded stages from input through BW refresh, then take the percentile. Never
+sum stage medians. This separates preparation/BW work from the later grayscale
+and synchronization work; it is not an optical first-ink or physical-button
+measurement and does not replace the total-time acceptance screen. `counterP50`
+reports per-turn SD opens/reads/KiB and glyphs, so fewer I/O calls cannot be
+mistaken for faster page turns.
+
 Use stage durations and SD/glyph counters to choose a mechanism: reduce repeated
 storage work if prewarm/page loading dominates, reduce layout work if section
 construction dominates, or examine the display path if refresh dominates. Keep
@@ -108,7 +116,7 @@ rapid/backward turns, all four orientations and normal progress-save costs
 not continuously measured peak use. Validate those gates before adopting a
 change that could affect them; retain the existing X3/X4 release requirements.
 
-## Current implementation evidence (2026-10-28)
+## Initial implementation evidence (2026-10-28)
 
 Evidence is in ignored `build/reader-performance-loop-20261028/`. Host tests,
 strict cppcheck and default firmware compilation are software evidence only.
@@ -122,3 +130,19 @@ unregistered includes in the pre-existing trial/OTA changes; this work does not
 suppress or expand those exceptions. Both enrolled readers' saved Wi-Fi
 addresses were unreachable with Python and system curl. No new device trial,
 measured speedup, optical acceptance or firmware installation is claimed.
+
+The subsequent [2026-10-29 physical experiment](reader-performance-experiment-2026-10-29.md)
+completed eight X3/X4 walks, rejected the first raster candidate below the gain
+threshold, and restored the original readers. Its diagnostic GET retry fix is
+retained; it does not relax mutation replay or acceptance rules.
+
+The [second investigation](reader-performance-second-perspective-2026-10-29.md)
+tested allocation-free font-read batching on X3. It reduced English SD calls
+without reducing latency; the patch was rejected. The report distinguishes
+small work reductions from moving preparation ahead of the button press.
+
+The [prepared-font investigation](reader-prepared-font-experiment-2026-10-29.md)
+then tested reuse of idle work within and across chapters. Six fresh X3 walks
+(96 pages) found 2.7% English and 1.0% Korean/image gains for the second prototype,
+with sampled heap regression. Both prototypes were reverted. The report also
+clarifies that the existing prewarm stage includes cold-image preparation.

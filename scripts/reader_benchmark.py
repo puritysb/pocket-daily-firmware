@@ -10,6 +10,7 @@ import struct
 
 STAGES = ('input', 'section', 'page', 'prewarm', 'bwRender', 'status',
           'bwRefresh', 'grayRender', 'grayRefresh', 'graySync', 'save', 'total')
+BW_STAGES = STAGES[:7]
 COUNTERS = ('sdOpens', 'sdReads', 'sdKB', 'glyphs')
 MAX_PAGES = 16
 MAX_BYTES = 32 + MAX_PAGES * 48
@@ -58,11 +59,17 @@ def percentile(values, fraction):
 def summary(records):
     turns = records[1:]
     require(bool(turns), 'At least two pages are required for a turn benchmark')
+    # Recorded work through BW refresh, not optical first-ink latency. Sum each
+    # turn before taking percentiles: stage medians do not describe one turn.
+    bw_work = [sum(x['ms'][key] for key in BW_STAGES) for x in turns]
     return {'pages': len(records), 'openMs': records[0]['ms']['total'],
             'turnP50Ms': statistics.median(x['ms']['total'] for x in turns),
             'turnP95Ms': percentile([x['ms']['total'] for x in turns], .95),
+            'bwWorkP50Ms': statistics.median(bw_work),
+            'bwWorkP95Ms': percentile(bw_work, .95),
             'minFreeHeap': min(x['freeHeap'] for x in records),
             'minLargestBlock': min(x['largestBlock'] for x in records),
+            'counterP50': {key: statistics.median(x['counters'][key] for x in turns) for key in COUNTERS},
             'stageP50Ms': {key: statistics.median(x['ms'][key] for x in turns) for key in STAGES}}
 
 

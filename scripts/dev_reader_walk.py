@@ -39,6 +39,7 @@ SAFE_HTTP_PATHS = frozenset(['/api/status'] + [API + p for p in (
     'content/state', 'dev/build-failure', 'dev/reader-capture', 'dev/screen-capture')])
 DRAWING_GET_MESSAGES = {
     API + 'dev/reader-capture': b'Reader is drawing',
+    API + 'dev/build-failure': b'Reader is drawing',
     API + 'files/content': b'Reader is drawing; retry the download',
 }
 SAFE_HTTP_BODIES = frozenset(DRAWING_GET_MESSAGES.values()) | frozenset(x.encode() for x in (
