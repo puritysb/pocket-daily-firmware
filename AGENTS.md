@@ -205,6 +205,11 @@ only content source. Being far ahead of `upstream/master` is expected.
   version before changing any binary layout.** The fork's
   `SECTION_FILE_VERSION` stays in the reserved 128–255 range; details and the
   next free number are in `lib/Epub/AGENTS.md`.
+- Run output under `build/<topic>-<date>/` holds evidence (logs, JSON, BINs,
+  receipts), not extra toolchain or derived trees. Reuse `.pio/` and the shared
+  host-test folders. Before a hand-off, run the companion checkout's
+  `scripts/prune_local_artifacts.py`: it prunes folders here that no tracked
+  file or local memory names and clones identical reader SD backups.
 - `platformio.local.ini` holds per-machine settings and is never committed;
   never put serial ports or credentials in `platformio.ini`. Extend flags with
   `${base.build_flags}`.
