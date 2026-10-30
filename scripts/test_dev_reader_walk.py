@@ -605,7 +605,8 @@ class DiagnosticHTTPTests(unittest.TestCase):
                  ('GET', reader, 200, 409, b'Reader is drawing; retry the download'),
                  ('GET', content, 200, 409, b'Reader is drawing'),
                  ('GET', reader, 200, 503, b'Reader is drawing'),
-                 ('GET', walk.API + 'dev/build-failure', 200, 409, b'Reader is drawing'),
+                 ('GET', walk.API + 'dev/build-failure', 200, 409, b'Reader is drawing\n'),
+                 ('POST', walk.API + 'dev/build-failure', 200, 409, b'Reader is drawing'),
                  ('GET', walk.API + 'dev/screen-capture', 200, 409, b'Reader is drawing'),
                  ('GET', '/api/status', 200, 409, b'Reader is drawing'),
                  ('POST', reader, 202, 409, b'Reader is drawing'),
@@ -624,6 +625,18 @@ class DiagnosticHTTPTests(unittest.TestCase):
                 self.assertEqual(len(self.calls), 1)
                 self.assertEqual(self.pauses, [])
                 self.assertTrue(stream.closed)
+
+    def test_build_failure_get_survives_drawing_without_replaying_a_mutation(self):
+        busy, stream = self.error()
+        response = self.Response(data=b'run-bound diagnostic')
+        client = self.client([busy, response])
+        body, _ = client.request('GET', walk.API + 'dev/build-failure', {'run': 321}, limit=96)
+        self.assertEqual(body, b'run-bound diagnostic')
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.pauses, [1])
+        self.assertTrue(stream.closed and response.closed)
+        self.assertTrue(all(request.get_method() == 'GET' and request is self.calls[0][0]
+                            and 'run=321' in request.full_url for request, _ in self.calls))
 
     def test_attempt_bound_is_six_and_does_not_read_seventh_response(self):
         errors = [self.error()[0] for _ in range(6)]

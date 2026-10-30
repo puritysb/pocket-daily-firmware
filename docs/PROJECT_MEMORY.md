@@ -28,8 +28,9 @@ Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
   develop `40a633e7` adds 177 ancestry commits, 74 merge-conflict paths. No RC
   firmware imported; `--check` reports development separately. Candidates,
   exclusions and existing seam failures: `docs/upstream-audit-2026-10-28.md`.
-- Reader A/B loop: `docs/reader-benchmark.md`; bounded dev traces and paired
-  trials, no automatic adoption. Devices unreachable on 2026-10-28; gains unmeasured.
+- Reader A/B loop: `docs/reader-benchmark.md`; raster (0.9–6.0%) and font-I/O
+  (107→57 reads, no speedup), and idle-font reuse (2.7% English/1.0% Korean-image,
+  heap regression) pilots rejected; source reverted. Evidence/recovery linked there.
 - Base: CrossPoint 1.6.5 (`93e98bb7`) integrated on `main` at `ee188fe7`
   (PR #4), FreeInk SDK `111fdcc7`. wolfSSL intentionally excluded.
   `docs/upstream-integration-1.6.5.md`.

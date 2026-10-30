@@ -26,6 +26,21 @@ def trace(run=123, pages=3, total=400):
 
 
 class CodecTests(unittest.TestCase):
+    def test_bw_work_sums_each_turn_before_percentiles_and_excludes_open_and_gray(self):
+        rows = perf.decode(trace(pages=4), 123, 4)
+        for row in rows:
+            row['ms'] = dict.fromkeys(perf.STAGES, 0)
+            row['ms'].update(grayRender=700, grayRefresh=800, graySync=900, save=500, total=3000)
+        rows[0]['ms']['input'] = 60000
+        rows[1]['ms']['prewarm'] = 100
+        rows[2]['ms']['bwRefresh'] = 100
+        rows[3]['ms']['input'] = 1
+        result = perf.summary(rows)
+        self.assertEqual(result['bwWorkP50Ms'], 100)
+        self.assertEqual(result['bwWorkP95Ms'], 100)
+        self.assertEqual(result['turnP50Ms'], 3000)
+        self.assertEqual(result['counterP50'], dict(sdOpens=9, sdReads=93, sdKB=7, glyphs=103))
+
     def test_nonuniform_fields_and_order(self):
         rows = perf.decode(trace(), 123, 3)
         self.assertEqual(rows[2]['ms']['input'], 3)
