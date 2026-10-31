@@ -182,7 +182,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     }
   }
 
-  // Long-press numbering from fork builds that inserted Bilingual Toggle mid-enum.
+  // Long-press values from fork builds that carried the retired Bilingual Toggle.
   {
     const uint8_t migrated = PocketDaily::SettingsMigration::longPressFromFile(
         longPressMenuFunction, !doc["startupApp"].isNull(),
@@ -314,7 +314,6 @@ ReaderRenderSpec CrossPointSettings::readerRenderSpec(const uint16_t viewportWid
   spec.hyphenationEnabled = hyphenationEnabled != 0;
   spec.embeddedStyle = embeddedStyle != 0;
   spec.imageRendering = imageRendering;
-  spec.bilingualViewMode = bilingualViewMode;
   spec.focusReadingEnabled = focusReadingEnabled != 0;
   return spec;
 }

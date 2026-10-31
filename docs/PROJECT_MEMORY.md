@@ -55,6 +55,10 @@ Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
   stock; themes are stock except per-label `UiCjkFont`, `StatusBarTitle` and
   Home paging. Home menu is stock plus one entry; Articles opens from Pocket
   Daily Home's Left button.
+- Owner decision 2026-10-31: stock defaults for new installs — power-on opens
+  Home (Pocket Daily via `startupApp`) and Long-press Menu is Disabled. Saved
+  settings keep their values. The bilingual view mode was removed the same day:
+  translated books ship as one standard EPUB per language.
 - Removed features (do not resurrect without a product decision): AgentDeck
   daemon and its settings/OTA paths (2026-09-25), games (2026-09-24), UI packs,
   live frame capture and saved screen preview (2026-10-01). The WebSocket
@@ -190,9 +194,9 @@ Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
 
 ## Reader engine facts
 
-- Section cache v136 (`lib/Epub/Epub/Section.cpp`), rebuilding prior ALT image layouts; cache formats, version
+- Section cache v137 (`lib/Epub/Epub/Section.cpp`, bilingual header byte removed); cache formats, version
   bytes and invalidation rules are in `lib/Epub/AGENTS.md`. Partials carry a
-  format tag; a parse before any bilingual marker is tagged mode-agnostic.
+  format tag.
 - `ReaderLayoutAhead` lays out ahead on the render task after each page and
   yields to buttons; next chapter pre-builds while idle on the last page.
 - Advance cache is a bounded LRU with batched reads; the page glyph set is

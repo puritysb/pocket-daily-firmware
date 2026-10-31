@@ -16,8 +16,7 @@ ReaderRenderSpec SectionLayout::renderSpec() const {
           .hyphenationEnabled = hyphenationEnabled,
           .embeddedStyle = embeddedStyle,
           .imageRendering = imageRendering,
-          .focusReadingEnabled = focusReadingEnabled,
-          .bilingualViewMode = bilingualViewMode};
+          .focusReadingEnabled = focusReadingEnabled};
 }
 bool SectionLayout::load(Section& section) const { return section.loadSectionFile(renderSpec()); }
 bool SectionLayout::startBuild(Section& section) const { return section.startBuild(renderSpec()); }

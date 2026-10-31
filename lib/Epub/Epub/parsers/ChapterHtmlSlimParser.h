@@ -61,11 +61,6 @@ class ChapterHtmlSlimParser {
   const CssParser* cssParser;
   bool embeddedStyle;
   uint8_t imageRendering;
-  uint8_t bilingualViewMode;
-  // Set during parsing when any element carries a bilingual role marker (cp-* class or a
-  // content-level xml:lang). When false, the layout is identical in every bilingual view
-  // mode, so the section cache can be reused across mode toggles (see Section.cpp).
-  bool bilingualMarkersSeen = false;
   std::string contentBase;
   std::string imageBasePath;
   int imageCounter = 0;
@@ -217,8 +212,7 @@ class ChapterHtmlSlimParser {
       const std::function<void(std::unique_ptr<Page>, uint16_t, uint16_t, uint32_t)>& completePageFn,
       const bool embeddedStyle, const std::string& contentBase, const std::string& imageBasePath,
       const uint8_t imageRendering = 0, std::vector<std::string> tocAnchors = {},
-      const std::function<void()>& popupFn = nullptr, const CssParser* cssParser = nullptr,
-      const uint8_t bilingualViewMode = 0)
+      const std::function<void()>& popupFn = nullptr, const CssParser* cssParser = nullptr)
 
       : epub(epub),
         filepath(filepath),
@@ -236,7 +230,6 @@ class ChapterHtmlSlimParser {
         cssParser(cssParser),
         embeddedStyle(embeddedStyle),
         imageRendering(imageRendering),
-        bilingualViewMode(bilingualViewMode),
         contentBase(contentBase),
         imageBasePath(imageBasePath),
         tocAnchors(std::move(tocAnchors)) {}
@@ -249,7 +242,6 @@ class ChapterHtmlSlimParser {
 
   // One-shot parse: builds every page before returning (begin + step* + finish).
   bool parseAndBuildPages();
-  bool sawBilingualMarkers() const { return bilingualMarkersSeen; }
 
   // Resumable parse, for the incremental section builder. Drive as:
   //   if (!beginParse()) fail;

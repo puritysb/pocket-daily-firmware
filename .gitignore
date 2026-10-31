@@ -42,7 +42,6 @@ firmware/
 !assets/fonts/PocketJP/PocketSansJP_12.cpfont
 # Reader glyph-fallback font (symbols and monochrome emoji; see its README)
 !assets/fonts/PocketSymbols/PocketSymbols_12.cpfont
-bilingual-sample.epub
 /managed_components
 /.dummy
 /CMakeLists.txt

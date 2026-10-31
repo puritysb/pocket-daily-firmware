@@ -626,11 +626,6 @@ void EpubReaderActivity::loop() {
   }
   const bool endOfBookMenuOpen = endOfBookMenuActive();
 
-  if (showBilingualMessage && (millis() - bilingualMessageTime) >= ReaderUtils::BOOKMARK_MESSAGE_DURATION_MS) {
-    showBilingualMessage = false;
-    requestUpdate();
-  }
-
   // Pocket Daily reading-progress v1: once the page is laid out, ask about a further
   // position another device offered for this book.
   if (readingOfferPending && section && !RenderLock::peek()) {
@@ -664,9 +659,6 @@ void EpubReaderActivity::loop() {
         if (launchKOReaderSync()) {
           return;
         }
-        break;
-      case CrossPointSettings::LP_MENU_BILINGUAL_TOGGLE:
-        cycleBilingualMode();
         break;
       case CrossPointSettings::LP_MENU_DICTIONARY:
         openDictionaryWordSelect();
@@ -1254,36 +1246,6 @@ void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption
     }
     section.reset();
   }
-}
-
-void EpubReaderActivity::cycleBilingualMode() {
-  SETTINGS.bilingualViewMode = (SETTINGS.bilingualViewMode + 1) % CrossPointSettings::BILINGUAL_VIEW_MODE_COUNT;
-  SETTINGS.saveToFile();
-  showBilingualMessage = true;
-  bilingualMessageTime = millis();
-  {
-    RenderLock lock(*this);
-    if (section && section->currentlyModeAgnostic()) {
-      // No bilingual marker in this chapter so far (finalized cache tagged
-      // BILINGUAL_MODE_ANY, or an in-progress parse that has not met one): its layout is
-      // identical in every mode, so keep the section (and the reading position) and only
-      // show the mode popup. Dropping it here forced a full re-parse of a monolingual chapter
-      // on every accidental long press, with the parser state then held across the next
-      // render. Marker-bearing chapters still rebuild lazily via the header mode check.
-    } else {
-      // Drop the current section so the next render re-parses with the new mode; the
-      // header mode check invalidates the on-disk cache. Preserve the reading position
-      // the same way updateStatusBarSetting does: re-layout changes pagination, so the
-      // render path restores proportionally via cachedChapterTotalPageCount.
-      if (section) {
-        cachedSpineIndex = currentSpineIndex;
-        cachedChapterTotalPageCount = section->pageCount;
-        nextPageNumber = section->currentPage;
-      }
-      section.reset();
-    }
-  }
-  requestUpdate();
 }
 
 namespace {
@@ -1887,14 +1849,6 @@ void EpubReaderActivity::renderBook() {
     GUI.drawPopup(renderer, bookmarkRemoved ? tr(STR_BOOKMARK_REMOVED) : tr(STR_BOOKMARK_ADDED));
   }
 
-  if (showBilingualMessage) {
-    // Index matches CrossPointSettings::BILINGUAL_VIEW_MODE enum order (Both/Original/Translation).
-    static constexpr StrId bilingualModeLabels[CrossPointSettings::BILINGUAL_VIEW_MODE_COUNT] = {
-        StrId::STR_BILINGUAL_BOTH, StrId::STR_BILINGUAL_ORIGINAL_ONLY, StrId::STR_BILINGUAL_TRANSLATION_ONLY};
-    const uint8_t mode = SETTINGS.bilingualViewMode;
-    GUI.drawPopup(renderer, I18N.get(bilingualModeLabels[mode]));
-  }
-
   if (showDictionaryMessage) {
     GUI.drawPopup(renderer, tr(STR_DICT_NO_DICT_SET));
   }
@@ -2029,7 +1983,6 @@ SectionLayout EpubReaderActivity::layoutParams(const uint16_t viewportWidth, con
   params.embeddedStyle = SETTINGS.embeddedStyle;
   params.imageRendering = SETTINGS.imageRendering;
   params.focusReadingEnabled = SETTINGS.focusReadingEnabled;
-  params.bilingualViewMode = SETTINGS.bilingualViewMode;
   return params;
 }
 

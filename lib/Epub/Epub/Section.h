@@ -52,7 +52,6 @@ class Section {
     std::string tmpHtmlPath;
     bool reusedHtml = false;
     CssParser* cssParser = nullptr;
-    uint8_t bilingualViewMode = 0;
     // HTML byte progress, for estimating the section's total page count while it's still building.
     uint32_t bytesConsumed = 0;
     uint32_t totalBytes = 0;
@@ -106,10 +105,6 @@ class Section {
 
   uint16_t pageCount = 0;
   int currentPage = 0;
-  // True when this chapter contains no bilingual role markers, i.e. it renders identically
-  // in every bilingual view mode. Set by loadSectionFile/createSectionFile; the reader uses
-  // it to skip the section reset (and full re-parse) when the user cycles the view mode.
-  bool bilingualModeAgnostic = false;
 
   // Constructor and destructor are out-of-line: BuildContext holds a unique_ptr to the
   // forward-declared ChapterHtmlSlimParser, whose full definition is only visible in the .cpp.
@@ -157,10 +152,6 @@ class Section {
     if (build_) return true;
     return partial_ && partialBytesConsumed_ < partialTotalBytes_;
   }
-  // True when a bilingual view-mode change cannot alter this section's layout: either the
-  // committed cache is mode-agnostic, or the in-progress parse has not met a bilingual marker
-  // yet (every page laid out so far is identical in every mode).
-  bool currentlyModeAgnostic() const;
 
   // Unified page read: from the active build if it has reached the page, otherwise from
   // the on-disk file (finalized section, or a partial the rebuild hasn't caught up to).

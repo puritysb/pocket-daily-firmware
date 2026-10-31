@@ -358,6 +358,15 @@ void CrossPointWebServer::begin() {
     server->on("/api/wifi/delete", HTTP_POST, [this] { handleDeleteWifiNetwork(); });
   }
 
+  // The companion app manages reader fonts through the stock handlers. The
+  // private AP keeps its minimal route set.
+  if (profile == CrossPointWebServerProfile::COMPANION) {
+    server->on("/api/fonts", HTTP_GET, [this] { handleCompanionFontList(); });
+    server->on("/api/fonts/delete", HTTP_POST, [this] { handleCompanionFontDelete(); });
+    server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
+    server->on("/api/settings", HTTP_POST, [this] { handleCompanionFontSettings(); });
+  }
+
   // Every Pocket-owned route (session/end, diagnostics, verified commit,
   // private-AP preferences, Live Studio fetch/pack, dev evidence endpoints)
   // registers through the endpoints module (SEAM.md).
@@ -2448,6 +2457,44 @@ void CrossPointWebServer::handleFontUpload() {
   } else {
     server->send(400, "application/json", "{\"error\":\"Invalid .cpfont file\"}");
   }
+}
+
+void CrossPointWebServer::handleCompanionFontList() {
+  noteClientActivity();
+  // Fonts the app sent through the Pocket upload stream are not announced to
+  // the registry; rescan so the list matches the card.
+  sdFontSystem.markRegistryDirty();
+  handleFontList();
+}
+
+void CrossPointWebServer::handleCompanionFontDelete() {
+  noteClientActivity();
+  if (fileMutationBusy()) {
+    server->send(409, "application/json", "{\"error\":\"Reader is busy\"}");
+    return;
+  }
+  handleFontDelete();
+}
+
+void CrossPointWebServer::handleCompanionFontSettings() {
+  noteClientActivity();
+  if (fileMutationBusy()) {
+    server->send(409, "text/plain", "Reader is busy");
+    return;
+  }
+  JsonDocument doc;
+  if (deserializeJson(doc, server->arg("plain")) || !doc.is<JsonObject>() || doc.as<JsonObject>().size() == 0) {
+    server->send(400, "text/plain", "Invalid JSON");
+    return;
+  }
+  for (const JsonPair entry : doc.as<JsonObject>()) {
+    const char* key = entry.key().c_str();
+    if (strcmp(key, "fontFamily") != 0 && strcmp(key, "fontSize") != 0) {
+      server->send(400, "text/plain", "Only reader font settings");
+      return;
+    }
+  }
+  handlePostSettings();
 }
 
 void CrossPointWebServer::handleFontDelete() {

@@ -8,6 +8,7 @@
 #include <TtfEpdFont.h>
 #include <esp_heap_caps.h>
 
+#include <cstring>
 #include <iterator>
 
 #include "CrossPointSettings.h"
@@ -630,8 +631,11 @@ int SdCardFontSystem::ensureAutomaticReaderFontLoaded(GfxRenderer& renderer) {
 
   refreshIfDirty();
   setFallbackEnabled(true);
+  // An SD family the user chose (an Arabic or Thai face, a Korean serif) wins,
+  // as in stock. The world face only stands in for the Latin-only built-ins.
+  const char* chosen = SETTINGS.sdFontFamilyName;
   const auto* family = registry_.findFamily(automaticFamily);
-  if (!family) {
+  if (!family || (chosen[0] != '\0' && std::strcmp(chosen, automaticFamily) != 0 && registry_.findFamily(chosen))) {
     ensureLoaded(renderer);
     return SETTINGS.getReaderFontId();
   }

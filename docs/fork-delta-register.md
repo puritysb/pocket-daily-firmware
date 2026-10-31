@@ -186,7 +186,7 @@ direct PR:
 |---|---|---|---|
 | R-1 | Deferred progress save never ran: upstream's synchronous save in `renderBook()` updated `lastSaved*` before the fork's deferral compared against them | **Fixed**: synchronous block removed; idle `flushPendingProgress` and `onExit` write | `scripts/test_sync_routes.py` `test_page_turns_defer_the_progress_write` (fails on the old code). Device: turn pages, confirm `progress.bin` updates ~1.5 s after the last turn and on exit |
 | R-2 | Line-break gap cache lost in the 1.6.5 merge | **Fixed** (U-EPUB-1 re-port). The re-port's `std::vector<int>` (PR #8) fragmented the heap on device (upstream review); replaced by a stack window with no allocation | Layout golden identical; allocation trace equals the pre-change baseline; −15 % host layout |
-| R-3 | Long-press enum: Bilingual inserted at 3, shifting Dictionary/Reader Menu; stock files misread | **Fixed**: stock values 0–4 restored, Bilingual appended as 5; fork files without the `longPressMenuOrder` marker are remapped (`src/pocket_daily/SettingsMigration.h`); Reader Menu is listed on X3/X4 too because Bilingual follows it; home-key legacy table restored. Default stays Bilingual Toggle (product) | `test/pocket_daily_settings` (stock, pre-fix fork, marked files) |
+| R-3 | Long-press enum: Bilingual inserted at 3, shifting Dictionary/Reader Menu; stock files misread | **Fixed**: stock values 0–4 restored, Bilingual appended as 5; fork files without the `longPressMenuOrder` marker are remapped (`src/pocket_daily/SettingsMigration.h`); Reader Menu is listed on X3/X4 too because Bilingual follows it; home-key legacy table restored. Bilingual Toggle removed 2026-10-31 (stored 5 → Disabled); default is stock Disabled | `test/pocket_daily_settings` (stock, pre-fix fork, marked files) |
 | R-4 | Wake-refresh inputs dropped; OK-held resume bypassed the boot-loop guard | **Fixed**: Home routes get `needsWakeRefresh`; reader resume (OK held, or waking from the book's Quick Resume page) uses stock's `readerActivityLoadCount` guard and `allowFastInitialReaderRefresh`; unused `rebootedFromPanic` removed | Device: Quick Resume sleep from a book, wake → same page; crash-loop book is not reopened |
 | R-5 | Duplicate page-load retry counters | **Fixed**: upstream's `pageLoadRetryCount`/`MAX_PAGE_LOAD_RETRIES` only | Host build |
 | R-6 | Crash report lost logs on brownout / no-marker watchdog | **Fixed**: `begin()` keeps diagnostics for every `isRebootFromCrash()` reset; message/stack cleared when no panic hook ran; retained strings terminated | Device only (reset reasons are not host-testable) |
@@ -217,16 +217,19 @@ packs and live frame capture leave the firmware and the themes return to stock.
   congestion while retaining the RTC record. No driver/global SDK edits,
   allocation or timeout reduction. Generic robustness candidate, not an
   upstream submission; hardware evidence is in the sibling X4 acceptance doc.
-- **Boot and wake routing** (`main.cpp`): Pocket Daily is the default shell
-  (`startupApp`); Back held opens Home; OK held or waking from a book's Quick
+- **Boot and wake routing** (`main.cpp`): Home is the default shell as in stock
+  since 2026-10-31; Pocket Daily is opt-in (`startupApp`); Back held opens Home; OK held or waking from a book's Quick
   Resume page reopens the book with stock's boot-loop guard. Documented in
   `USER_GUIDE.md`.
 - **Sleep screen** (`SleepActivity.cpp`): restored to stock for the default page
   (CrossPoint logo), Blank mode and the Home-with-open-book case (no forced
   cover). Kept (product): the WAKE cue setting (`sleepWakeIndicator`) and the
   Pocket Daily Brief sleep frame.
-- **Automatic reader font** (`SdCardFontSystem.cpp:573`): PocketSansWorld on the
-  SD card overrides the chosen reader family. Open: decide or make it opt-in.
+- **Automatic reader font** (`SdCardFontSystem::ensureAutomaticReaderFontLoaded`):
+  PocketSansWorld on the SD card replaces only the built-in reader fonts (and is
+  used when chosen itself). **Done** 2026-10-31: a chosen SD family wins, as in
+  stock, so Arabic, Thai or other faces from Manage Fonts take effect
+  (`LibraryFontSystem.ChosenSdFamilyWinsOverAutomaticWorldFace`).
 - **Network**: X3 manual File Transfer uses the `FILE_TRANSFER` profile (no
   WebDAV, UDP discovery or WebSocket upload); upload buffer 4 KiB → 1 KiB;
   KOSync TLS heap floor 55,000 B vs upstream 35,000 B; `HttpDownloader` drops
@@ -295,7 +298,7 @@ Documented by their own contracts; the seam mechanics are in `docs/SEAM.md`.
 | Pocket Daily shell, Articles, daily word | `docs/product-architecture.md`, `docs/articles-v1.md` | Home entry, `ActivityManager::goToPocketDaily/goToArticles`, boot routing |
 | BLE Nearby Sync and Reading Sync windows | `docs/nearby-sync-v1.md`, `docs/reading-sync-ble-v1.md` | `main.cpp` sleep/wake, `ActivityManager` window arm/close, `allowsExchangeWindow()` |
 | Reading-progress offer, exact positions | `docs/reading-progress-v1.md` | `EpubReaderActivity` offer and exit record |
-| Bilingual EPUB | `docs/bilingual-epub.md` | Parser filter, reader cycle, long-press value |
+| Companion reader-font management | `docs/reader-fonts-v1.md` | Stock font/settings handlers registered in the companion profile |
 | Companion web routes, port-82 upload, private AP | `docs/webserver-endpoints.md`, `docs/transfer-control-v1.md`, `docs/SEAM.md` | Web server hooks E1–E5 |
 | Live Studio (WebSocket status/prefs push; UI packs and frame capture removed 2026-10-01) | `docs/live-studio-v1.md` | `wireLiveStudioHost()` thunks in `CrossPointWebServer.cpp`; no theme or render-task hooks |
 | Glance, profile, content cards | `docs/pocket-glance-v1.md`, `docs/pocket-profile-v1.md`, `docs/content-*.md` | Sync activity presentation thunks; its loop yields transfer feedback to queued navigation as well as deferred preparation (2026-10-18) |

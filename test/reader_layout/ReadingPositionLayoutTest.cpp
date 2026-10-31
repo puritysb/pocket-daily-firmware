@@ -478,7 +478,7 @@ TEST_F(ReadingPositionLayout, SectionFilesMatchTheLayoutGolden) {
         ASSERT_TRUE(in) << path;
         std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         ASSERT_FALSE(bytes.empty());
-        ASSERT_EQ(static_cast<uint8_t>(bytes[0]), 136);
+        ASSERT_EQ(static_cast<uint8_t>(bytes[0]), 137);
         // Normalize only the semantic version byte to retain the independent
         // v135 layout golden; any other serialized byte change still fails.
         bytes[0] = static_cast<char>(135);
@@ -490,8 +490,10 @@ TEST_F(ReadingPositionLayout, SectionFilesMatchTheLayoutGolden) {
   }
   std::printf("[layout golden] digest=0x%016llx section_bytes=%zu build_ms=%.1f\n",
               static_cast<unsigned long long>(digest), sectionBytes, buildMs);
-  // v136 changes the semantic header version, not native-scale layout bytes.
-  EXPECT_EQ(digest, 0xf9328d7f0dc95833ULL);
+  // v137 drops the bilingual header byte: each file is one byte shorter (6,771,584 →
+  // 6,771,455 bytes over 129 sections) and its absolute offsets move with it; page
+  // records are unchanged.
+  EXPECT_EQ(digest, 0x78e919b17b70b5e3ULL);
 }
 
 // While a section is still building, a character past the pages laid out so far needs more
