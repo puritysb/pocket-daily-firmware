@@ -22,6 +22,9 @@ class CrossPointState : public PersistableStore<CrossPointState> {
   uint8_t recentOverlaySleepFill = 0;
   uint8_t readerActivityLoadCount = 0;
   bool lastSleepFromReader = false;
+  // Shell the device slept in (Pocket Daily or Home; a book counts as the shell
+  // that opened it). Waking returns there; only a cold boot uses startupApp.
+  bool lastSleepInPocketDaily = false;
   bool showBootScreen = true;
 
   static const char* getFilePath() { return "/.crosspoint/state.json"; }

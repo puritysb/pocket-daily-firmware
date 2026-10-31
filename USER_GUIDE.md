@@ -99,7 +99,8 @@ To reboot the device (for example after a firmware update or if it's frozen), pr
 Upon turning the device on for the first time, you will be placed on the **[Home](#31-home-screen)** screen.
 
 > [!NOTE]
-> Like stock CrossPoint, this build opens **Home** on power-on. To open **Pocket Daily** instead, choose it under **Settings → System → Start on power-on**.
+> Like stock CrossPoint, this build opens **Home** when it starts from off. To open **Pocket Daily** instead, choose it under **Settings → System → Start on power-on**.
+> Waking from sleep returns to where you were: the open book, Pocket Daily or Home.
 > Waking from a **Quick Resume** sleep page reopens that book. Hold **OK** while powering on to reopen the last book,
 > or **Back** to open the Home screen.
 

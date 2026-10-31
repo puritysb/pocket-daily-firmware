@@ -115,6 +115,9 @@ class ActivityManager {
   void resumeReader(std::string path);
   // Back from a screen both shells open (Library): Pocket Daily or Home.
   void goToShell();
+  // Whether the current screen belongs to Pocket Daily (a book: the shell that
+  // opened it). Saved at sleep so waking returns to the same shell.
+  bool inPocketDailyShell() const;
   // Leave the book by Back or the end-of-book exit: the opening shell, else Home.
   void leaveReader();
   void goToSleep(bool fromTimeout = false);

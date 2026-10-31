@@ -292,6 +292,10 @@ bool ActivityManager::goToPocketDaily() {
   return true;
 }
 
+bool ActivityManager::inPocketDailyShell() const {
+  return (isReaderActivity() ? readerReturn : shell) != ReaderReturn::Home;
+}
+
 void ActivityManager::goToShell() {
   if (shell == ReaderReturn::PocketDaily && goToPocketDaily()) return;
   goHome();

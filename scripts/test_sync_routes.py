@@ -62,6 +62,10 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertIn("shell = ReaderReturn::Home;", go_home[:go_home.index("\n}")])
         library = (root / "src/activities/library/LibraryListActivity.cpp").read_text()
         self.assertIn("activityManager.goToShell();", library)
+        # Waking returns to the shell the device slept in; a cold boot uses startupApp.
+        main = (root / "src/main.cpp").read_text()
+        self.assertIn("APP_STATE.lastSleepInPocketDaily = activityManager.inPocketDailyShell();", main)
+        self.assertIn("isSleepWake ? APP_STATE.lastSleepInPocketDaily", main)
         self.assertIn("activityManager.resumeReader(openPath)", reader)
         sync = (root / "src/activities/reader/KOReaderSyncActivity.cpp").read_text()
         self.assertIn("activityManager.resumeReader(epubPath)", sync)
