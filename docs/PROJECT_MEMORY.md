@@ -55,6 +55,9 @@ Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
   stock; themes are stock except per-label `UiCjkFont`, `StatusBarTitle` and
   Home paging. Home menu is stock plus one entry; Articles opens from Pocket
   Daily Home's Left button.
+- Owner decision 2026-10-31: stock defaults for new installs — power-on opens
+  Home (Pocket Daily via `startupApp`) and Long-press Menu is Disabled (Bilingual
+  Toggle opt-in). Saved settings keep their values.
 - Removed features (do not resurrect without a product decision): AgentDeck
   daemon and its settings/OTA paths (2026-09-25), games (2026-09-24), UI packs,
   live frame capture and saved screen preview (2026-10-01). The WebSocket

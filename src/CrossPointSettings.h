@@ -313,9 +313,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Auto-sleep timeout setting (default 10 minutes). Legacy sleepTimeout enum values are migration-only.
   uint8_t sleepTimeoutMinutes = 10;
   // Boot destination (STARTUP_APP). Persisted via SettingsList key "startupApp".
-  // This fork is a Pocket reader product. The legacy setting remains readable
-  // for file compatibility, but new installs start on the Pocket surface.
-  uint8_t startupApp = STARTUP_AGENTDECK;
+  // New installs start on Home, as in stock; Pocket Daily is an opt-in
+  // (Settings → System). Saved files keep their value.
+  uint8_t startupApp = STARTUP_HOME;
   // The retired AgentDeck keys (agentDeckCompanionEnabled, agentPullSyncEnabled)
   // are no longer read or written: settings.json is keyed, so an old file
   // still loads and the next save simply omits them.
@@ -349,10 +349,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Long-press page turn button behavior
   uint8_t longPressButtonBehavior = OFF;
   // Long-press Confirm function in EPUB reader (cycles through LONG_PRESS_MENU_FUNCTION values).
-  // Defaults to Bilingual Toggle so the cycle-Both/Original/Translation shortcut works out of
-  // the box on bilingual EPUBs. Users who prefer KOReader Sync or Bookmark on long-press can
-  // switch in Settings → Controls → Long-press Menu.
-  uint8_t longPressMenuFunction = LP_MENU_BILINGUAL_TOGGLE;
+  // Stock default (Disabled). Bilingual Toggle is opt-in under Settings → Controls →
+  // Long-press Menu; saved files keep their value.
+  uint8_t longPressMenuFunction = LP_MENU_DISABLED;
   // Bilingual EPUB view mode. Default BOTH so non-bilingual books are unaffected.
   uint8_t bilingualViewMode = BILINGUAL_BOTH;
   // UI Theme

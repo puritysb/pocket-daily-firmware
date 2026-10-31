@@ -99,7 +99,7 @@ To reboot the device (for example after a firmware update or if it's frozen), pr
 Upon turning the device on for the first time, you will be placed on the **[Home](#31-home-screen)** screen.
 
 > [!NOTE]
-> This build opens **Pocket Daily** on power-on (choose Home instead under **Settings → System → Start on power-on**).
+> Like stock CrossPoint, this build opens **Home** on power-on. To open **Pocket Daily** instead, choose it under **Settings → System → Start on power-on**.
 > Waking from a **Quick Resume** sleep page reopens that book. Hold **OK** while powering on to reopen the last book,
 > or **Back** to open the Home screen.
 
@@ -353,10 +353,11 @@ The Settings screen allows you to configure the device's behavior. There are a f
   - "Chapter Skip" (default) - Long-pressing skips to next/previous chapter
   - "Page Scroll" - Long-pressing scrolls a page up/down
 - **Long-press Menu**: Selects the function bound to holding the menu button (Confirm) while reading an EPUB. **Cycles through the available functions** each time the setting is selected — additional functions may be added in future releases, so this is not a binary on/off toggle. A short press of Confirm always opens the reader menu as normal:
-  - "Bookmark" (default) - Hold Confirm (~0.4 second) to drop a bookmark at the current page.
+  - "Disabled" (default) - Long-press is ignored; only short-press opens the reader menu.
+  - "Bookmark" - Hold Confirm (~0.4 second) to drop a bookmark at the current page.
   - "KOSync" - Hold Confirm (~1 second) to launch KOReader sync directly.
   - "Dictionary" - Hold Confirm (~0.4 second) to start dictionary word selection on the current page (see [docs/dictionary.md](docs/dictionary.md)).
-  - "Disabled" - Long-press is ignored; only short-press opens the reader menu.
+  - "Bilingual Toggle" - Hold Confirm to cycle a bilingual EPUB between both languages, the original only and the translation only (see [docs/bilingual-epub.md](docs/bilingual-epub.md)).
 
 - **Short Power Button Click**: Controls the effect of a short click of the power button:
   
@@ -677,7 +678,7 @@ See [docs/dictionary.md](docs/dictionary.md) for supported formats, setup, and w
 * **Return to Home:** Press the **Back** button to close the book and return to the **[Home](#31-home-screen)** screen.
 * **Return to Browse Files:** Press and hold the **Back** button to close the book and return to the **[Browse Files](#33-browse-files-screen)** screen.
 * **Reader Menu:** Press **Confirm** to open the **[Reader Menu](#5-reader-menu)**, which includes chapter navigation, reading options, and more.
-* **Long-press Confirm (configurable):** Holding **Confirm** runs the function chosen by the **Long-press Menu** setting in **[Controls Settings](#363-controls)** — "Bookmark" (default) drops a bookmark, "KOSync" launches KOReader Sync, "Dictionary" starts a word lookup, "Disabled" does nothing. A short press always opens the Reader Menu.
+* **Long-press Confirm (configurable):** Holding **Confirm** runs the function chosen by the **Long-press Menu** setting in **[Controls Settings](#363-controls)** — "Disabled" (default) does nothing, "Bookmark" drops a bookmark, "KOSync" launches KOReader Sync, "Dictionary" starts a word lookup, and "Bilingual Toggle" cycles a bilingual EPUB between both languages, the original only and the translation only. A short press always opens the Reader Menu.
 
 ### Supported Languages
 

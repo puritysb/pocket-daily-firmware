@@ -186,7 +186,7 @@ direct PR:
 |---|---|---|---|
 | R-1 | Deferred progress save never ran: upstream's synchronous save in `renderBook()` updated `lastSaved*` before the fork's deferral compared against them | **Fixed**: synchronous block removed; idle `flushPendingProgress` and `onExit` write | `scripts/test_sync_routes.py` `test_page_turns_defer_the_progress_write` (fails on the old code). Device: turn pages, confirm `progress.bin` updates ~1.5 s after the last turn and on exit |
 | R-2 | Line-break gap cache lost in the 1.6.5 merge | **Fixed** (U-EPUB-1 re-port). The re-port's `std::vector<int>` (PR #8) fragmented the heap on device (upstream review); replaced by a stack window with no allocation | Layout golden identical; allocation trace equals the pre-change baseline; −15 % host layout |
-| R-3 | Long-press enum: Bilingual inserted at 3, shifting Dictionary/Reader Menu; stock files misread | **Fixed**: stock values 0–4 restored, Bilingual appended as 5; fork files without the `longPressMenuOrder` marker are remapped (`src/pocket_daily/SettingsMigration.h`); Reader Menu is listed on X3/X4 too because Bilingual follows it; home-key legacy table restored. Default stays Bilingual Toggle (product) | `test/pocket_daily_settings` (stock, pre-fix fork, marked files) |
+| R-3 | Long-press enum: Bilingual inserted at 3, shifting Dictionary/Reader Menu; stock files misread | **Fixed**: stock values 0–4 restored, Bilingual appended as 5; fork files without the `longPressMenuOrder` marker are remapped (`src/pocket_daily/SettingsMigration.h`); Reader Menu is listed on X3/X4 too because Bilingual follows it; home-key legacy table restored. Default is stock Disabled since 2026-10-31; Bilingual Toggle is opt-in | `test/pocket_daily_settings` (stock, pre-fix fork, marked files) |
 | R-4 | Wake-refresh inputs dropped; OK-held resume bypassed the boot-loop guard | **Fixed**: Home routes get `needsWakeRefresh`; reader resume (OK held, or waking from the book's Quick Resume page) uses stock's `readerActivityLoadCount` guard and `allowFastInitialReaderRefresh`; unused `rebootedFromPanic` removed | Device: Quick Resume sleep from a book, wake → same page; crash-loop book is not reopened |
 | R-5 | Duplicate page-load retry counters | **Fixed**: upstream's `pageLoadRetryCount`/`MAX_PAGE_LOAD_RETRIES` only | Host build |
 | R-6 | Crash report lost logs on brownout / no-marker watchdog | **Fixed**: `begin()` keeps diagnostics for every `isRebootFromCrash()` reset; message/stack cleared when no panic hook ran; retained strings terminated | Device only (reset reasons are not host-testable) |
@@ -217,8 +217,8 @@ packs and live frame capture leave the firmware and the themes return to stock.
   congestion while retaining the RTC record. No driver/global SDK edits,
   allocation or timeout reduction. Generic robustness candidate, not an
   upstream submission; hardware evidence is in the sibling X4 acceptance doc.
-- **Boot and wake routing** (`main.cpp`): Pocket Daily is the default shell
-  (`startupApp`); Back held opens Home; OK held or waking from a book's Quick
+- **Boot and wake routing** (`main.cpp`): Home is the default shell as in stock
+  since 2026-10-31; Pocket Daily is opt-in (`startupApp`); Back held opens Home; OK held or waking from a book's Quick
   Resume page reopens the book with stock's boot-loop guard. Documented in
   `USER_GUIDE.md`.
 - **Sleep screen** (`SleepActivity.cpp`): restored to stock for the default page
