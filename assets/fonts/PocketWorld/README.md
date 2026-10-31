@@ -7,8 +7,10 @@ Noto Sans and Noto Sans Hebrew. The glyphs are flattened into one `.cpfont`,
 so the device does not need to switch font families while rendering
 mixed-language books.
 
-The device loads this family automatically when a book or UI string contains
-CJK text. Users do not need to change the Reader Font setting. Only the glyphs
+The reader uses this family for books while Reader Font Family is a built-in
+font (or this family). A different SD family the user chooses wins, as in
+stock; that face then needs its own coverage of the book's scripts. UI strings
+with CJK text use it automatically. Only the glyphs
 needed by the current page are paged from SD, preserving the X3 heap budget.
 
 - Sources: Noto Sans KR and SC, Google Fonts commit

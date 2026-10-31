@@ -151,6 +151,28 @@ TEST_F(LibraryFontSystem, ReaderTransitionUsesCachedFamilyAndOriginalSymbolsProv
   EXPECT_EQ(loaded()->loadMode(), SdCardFont::LoadMode::BoundedUI);
 }
 
+TEST_F(LibraryFontSystem, ChosenSdFamilyWinsOverAutomaticWorldFace) {
+  ASSERT_NE(system.ensureAutomaticReaderFontLoaded(renderer), 0);
+  const int worldId = system.currentLoadedFontId();
+  ASSERT_NE(worldId, 0);
+
+  std::strncpy(SETTINGS.sdFontFamilyName, "SavedReader", sizeof(SETTINGS.sdFontFamilyName) - 1);
+  system.ensureAutomaticReaderFontLoaded(renderer);
+  EXPECT_NE(system.currentLoadedFontId(), 0);
+  EXPECT_NE(system.currentLoadedFontId(), worldId);
+
+  // Choosing the world family itself keeps the automatic, scaled path.
+  std::strncpy(SETTINGS.sdFontFamilyName, "PocketSansWorld", sizeof(SETTINGS.sdFontFamilyName) - 1);
+  system.ensureAutomaticReaderFontLoaded(renderer);
+  EXPECT_EQ(system.currentLoadedFontId(), worldId);
+
+  // A chosen family that is no longer on the card falls back to the world face.
+  std::strncpy(SETTINGS.sdFontFamilyName, "Removed", sizeof(SETTINGS.sdFontFamilyName) - 1);
+  system.ensureAutomaticReaderFontLoaded(renderer);
+  EXPECT_EQ(system.currentLoadedFontId(), worldId);
+  std::memset(SETTINGS.sdFontFamilyName, 0, sizeof(SETTINGS.sdFontFamilyName));
+}
+
 TEST_F(LibraryFontSystem, MissingFamilyFailsClosedAndCanRecoverOnNextDiscovery) {
   const Bytes missing = draw("한");
   ASSERT_TRUE(system.ensureLibraryUiFont(renderer));

@@ -264,6 +264,10 @@ Applied 2 setting(s)
 
 ## Font Management API
 
+Pocket Daily also serves `GET /api/fonts`, `POST /api/fonts/delete` and
+font-only `/api/settings` in the Same Wi-Fi companion profile; see
+[reader-fonts-v1.md](reader-fonts-v1.md).
+
 ### `GET /api/fonts`
 
 Lists installed SD-card font families. On devices that load TTF/OTF/TTC files,

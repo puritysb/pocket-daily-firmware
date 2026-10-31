@@ -83,6 +83,19 @@ tab in File Transfer accepts `.cpfont` files only. Copy direct fonts to the SD
 card instead. To remove a loose font file, delete that file from the SD card.
 The Fonts page can delete families stored in subfolders.
 
+## Pocket Daily's automatic world font
+
+Pocket Daily stages `/.fonts/PocketSansWorld/PocketSansWorld_12.cpfont`. While
+**Reader Font Family** is a built-in font, books use it automatically (scaled to
+the selected size). It covers Latin, Greek, Cyrillic, Vietnamese, Hebrew,
+Japanese kana, CJK Unified Ideographs (Japanese, Simplified and Traditional
+Chinese) and Hangul. It does not cover Arabic/Persian, Thai, Indic scripts,
+Georgian, Armenian, Bopomofo or CJK Extension A/B. For those, choose an SD
+family that covers them (for example Amiri or NotoNaskhArabicUI, and
+NotoSansExtended for Georgian/Armenian, from **Manage Fonts**); a chosen SD
+family always wins over the automatic font. The Manage Fonts catalog has no
+Thai or Indic family, and Indic scripts need shaping the renderer does not do.
+
 ## CJK in the User Interface
 
 The built-in UI fonts are Latin-only, so by default the interface (book titles

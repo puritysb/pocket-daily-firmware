@@ -93,6 +93,9 @@ String buildStatusJson(const StatusInputs& in) {
   if (isSyncProfile(in.profile)) doc["readerFiles"] = 2;
   // GET/POST /api/pocket/v1/reading (docs/reading-progress-v1.md), Sync profiles only.
   if (isSyncProfile(in.profile)) doc["readingProgress"] = 1;
+  // GET /api/fonts, POST /api/fonts/delete and font-only /api/settings
+  // (docs/reader-fonts-v1.md), Same Wi-Fi companion only.
+  if (in.profile == Profile::COMPANION) doc["readerFonts"] = 1;
   doc["uptime"] = millis() / 1000;
   doc["device"] = gpio.deviceIsX3() ? "X3" : "X4";
   // Diagnoses a silent reboot during private-AP startup: the last runtime

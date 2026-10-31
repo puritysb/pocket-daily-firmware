@@ -172,6 +172,11 @@ class CrossPointWebServer {
   void handleFontUpload();
   void handleFontUploadData();
   void handleFontDelete();
+  // Same Wi-Fi companion: the stock font handlers above, plus reader-font-only
+  // settings writes (docs/reader-fonts-v1.md).
+  void handleCompanionFontList();
+  void handleCompanionFontDelete();
+  void handleCompanionFontSettings();
 
   // Font upload state
   struct FontUploadState {

@@ -225,8 +225,11 @@ packs and live frame capture leave the firmware and the themes return to stock.
   (CrossPoint logo), Blank mode and the Home-with-open-book case (no forced
   cover). Kept (product): the WAKE cue setting (`sleepWakeIndicator`) and the
   Pocket Daily Brief sleep frame.
-- **Automatic reader font** (`SdCardFontSystem.cpp:573`): PocketSansWorld on the
-  SD card overrides the chosen reader family. Open: decide or make it opt-in.
+- **Automatic reader font** (`SdCardFontSystem::ensureAutomaticReaderFontLoaded`):
+  PocketSansWorld on the SD card replaces only the built-in reader fonts (and is
+  used when chosen itself). **Done** 2026-10-31: a chosen SD family wins, as in
+  stock, so Arabic, Thai or other faces from Manage Fonts take effect
+  (`LibraryFontSystem.ChosenSdFamilyWinsOverAutomaticWorldFace`).
 - **Network**: X3 manual File Transfer uses the `FILE_TRANSFER` profile (no
   WebDAV, UDP discovery or WebSocket upload); upload buffer 4 KiB → 1 KiB;
   KOSync TLS heap floor 55,000 B vs upstream 35,000 B; `HttpDownloader` drops
@@ -295,6 +298,7 @@ Documented by their own contracts; the seam mechanics are in `docs/SEAM.md`.
 | Pocket Daily shell, Articles, daily word | `docs/product-architecture.md`, `docs/articles-v1.md` | Home entry, `ActivityManager::goToPocketDaily/goToArticles`, boot routing |
 | BLE Nearby Sync and Reading Sync windows | `docs/nearby-sync-v1.md`, `docs/reading-sync-ble-v1.md` | `main.cpp` sleep/wake, `ActivityManager` window arm/close, `allowsExchangeWindow()` |
 | Reading-progress offer, exact positions | `docs/reading-progress-v1.md` | `EpubReaderActivity` offer and exit record |
+| Companion reader-font management | `docs/reader-fonts-v1.md` | Stock font/settings handlers registered in the companion profile |
 | Bilingual EPUB | `docs/bilingual-epub.md` | Parser filter, reader cycle, long-press value |
 | Companion web routes, port-82 upload, private AP | `docs/webserver-endpoints.md`, `docs/transfer-control-v1.md`, `docs/SEAM.md` | Web server hooks E1–E5 |
 | Live Studio (WebSocket status/prefs push; UI packs and frame capture removed 2026-10-01) | `docs/live-studio-v1.md` | `wireLiveStudioHost()` thunks in `CrossPointWebServer.cpp`; no theme or render-task hooks |
