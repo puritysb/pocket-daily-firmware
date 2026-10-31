@@ -350,9 +350,9 @@ void ActivityManager::goToBrowser() {
 }
 
 void ActivityManager::goToReader(std::string path, const bool allowFastInitialRefresh) {
-  // A book returns to the shell the user came from (a book opened from Library
-  // entered from Pocket Daily returns there) unless the caller says otherwise
-  // (goToReaderFrom, resumeReader). The file browser is reached only from Home.
+  // A book returns to the shell the user came from (one opened from Library or
+  // the file browser reached from Pocket Daily returns there) unless the caller
+  // says otherwise (goToReaderFrom, resumeReader).
   readerReturn = shell;
   if (path.empty()) {
     goToFileBrowser("/");
