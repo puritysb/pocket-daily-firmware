@@ -223,7 +223,8 @@ packs and live frame capture leave the firmware and the themes return to stock.
   `USER_GUIDE.md`.
 - **Sleep screen** (`SleepActivity.cpp`): restored to stock for the default page
   (CrossPoint logo), Blank mode and the Home-with-open-book case (no forced
-  cover). Kept (product): the WAKE cue setting (`sleepWakeIndicator`) and the
+  cover). Default mode is Cover since 2026-11-01 (stock: Dark); in Cover mode a
+  book without cover art shows its typeset title and author instead of the logo. Kept (product): the WAKE cue setting (`sleepWakeIndicator`) and the
   Pocket Daily Brief sleep frame.
 - **Automatic reader font** (`SdCardFontSystem::ensureAutomaticReaderFontLoaded`):
   PocketSansWorld on the SD card replaces only the built-in reader fonts (and is

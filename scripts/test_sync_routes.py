@@ -67,7 +67,10 @@ class SyncRoutesTest(unittest.TestCase):
         # Waking returns to the shell the device slept in; a cold boot uses startupApp.
         main = (root / "src/main.cpp").read_text()
         self.assertIn("APP_STATE.lastSleepInPocketDaily = activityManager.inPocketDailyShell();", main)
-        self.assertIn("isSleepWake ? APP_STATE.lastSleepInPocketDaily", main)
+        self.assertIn("APP_STATE.sleptCleanly = true;", main)
+        self.assertIn("wokeFromSleep ? APP_STATE.lastSleepInPocketDaily", main)
+        # The startup setting is read only after SETTINGS is loaded.
+        self.assertLess(main.index("SETTINGS.loadFromFile();"), main.index("const bool startInPocketDaily"))
         self.assertIn("activityManager.resumeReader(openPath)", reader)
         sync = (root / "src/activities/reader/KOReaderSyncActivity.cpp").read_text()
         self.assertIn("activityManager.resumeReader(epubPath)", sync)
