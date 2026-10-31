@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <string>
+
 #include "src/pocket_daily/FirmwareIdentity.h"
 #include "src/pocket_daily/product_identity.h"
 
@@ -8,19 +10,17 @@ TEST(PocketDailyIdentity, PublishesCanonicalProductIdentity) {
   EXPECT_STREQ(PocketDaily::PRODUCT_NAME, "Pocket Daily");
 }
 
-TEST(PocketDailyIdentity, CompactVersionKeepsReleaseAndShortensDeveloperNames) {
+TEST(PocketDailyIdentity, DisplayVersionSeparatesReleaseBetaCandidateAndDeveloperImages) {
   char out[48];
-  PocketDaily::FirmwareIdentity::compactVersion("0.1.0", out, sizeof(out));
-  EXPECT_STREQ(out, "0.1.0");
-  PocketDaily::FirmwareIdentity::compactVersion("0.1.0-dev-fix-honor-chosen-reader-font-db0bf443-w9f0bb73a", out,
-                                                sizeof(out));
-  EXPECT_STREQ(out, "0.1.0-dev db0bf443");
-  PocketDaily::FirmwareIdentity::compactVersion("0.1.0-dev-main-99f844c2", out, sizeof(out));
-  EXPECT_STREQ(out, "0.1.0-dev 99f844c2");
-  PocketDaily::FirmwareIdentity::compactVersion("1.6.5-rc+abc", out, sizeof(out));
-  EXPECT_STREQ(out, "1.6.5-rc+abc");
-  PocketDaily::FirmwareIdentity::compactVersion("0.1.0-dev-", out, sizeof(out));
-  EXPECT_STREQ(out, "0.1.0-dev-");
-  PocketDaily::FirmwareIdentity::compactVersion("0.1.0-dev-main-99f844c2", out, 4);
-  EXPECT_STREQ(out, "0.1");
+  const auto show = [&](const char* full, size_t cap = sizeof(out)) {
+    PocketDaily::FirmwareIdentity::displayVersion(full, out, cap);
+    return std::string(out);
+  };
+  EXPECT_EQ(show("0.1.0"), "0.1.0");
+  EXPECT_EQ(show("0.1.0-beta.3"), "0.1.0 beta 3");
+  EXPECT_EQ(show("0.1.0-rc+4f2a91c"), "0.1.0 RC");
+  EXPECT_EQ(show("0.1.0-dev-fix-reader-ui-polish-e7da898d-w9f0bb73a"), "0.1.0 dev e7da898d");
+  EXPECT_EQ(show("0.1.0-dev-main-99f844c2"), "0.1.0 dev 99f844c2");
+  EXPECT_EQ(show("0.1.0-dev-"), "0.1.0 dev");
+  EXPECT_EQ(show("0.1.0-dev-main-99f844c2", 4), "0.1");
 }

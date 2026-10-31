@@ -13,6 +13,23 @@ describe the Pocket Daily release and never claim to be a CrossPoint release
 number. `/api/status` reports `firmwareLineage` and `crossPointBase: "1.6.5"`;
 About shows the CrossPoint base.
 
+## Display
+
+Screens never show the raw embedded string. Settings and About use
+`FirmwareIdentity::displayVersion`, so the kind of image is obvious:
+
+| Image | Embedded version (`/api/status`, updater, tag check) | Shown |
+| --- | --- | --- |
+| Release | `0.1.0` | `0.1.0` |
+| Beta pre-release | `0.1.0-beta.3` | `0.1.0 beta 3` |
+| Release candidate | `0.1.0-rc+<hash>` | `0.1.0 RC` |
+| Developer build | `0.1.0-dev-<branch>-<commit>[-w<worktree>]` | `0.1.0 dev <commit>` |
+
+A production image therefore reads exactly like its release tag
+(`pocket-v0.1.0` → `0.1.0`), the same way the app shows its marketing
+version. Each published image gets a new version; one version is never
+reused for a different image.
+
 ## Lineage
 
 Version numbers alone do not order the series, so the firmware reports a

@@ -99,7 +99,9 @@ void AboutActivity::onEnter() {
   // profile and applyXteinkDisplayController() may have promoted the display
   // controller to the panel actually found on the bus.
   rowValues_[ITEM_DEVICE] = BoardConfig::ACTIVE.name;
-  rowValues_[ITEM_FIRMWARE] = CROSSPOINT_VERSION;
+  char version[40];
+  PocketDaily::FirmwareIdentity::displayVersion(CROSSPOINT_VERSION, version, sizeof(version));
+  rowValues_[ITEM_FIRMWARE] = version;
   rowValues_[ITEM_CROSSPOINT_BASE] = PocketDaily::FirmwareIdentity::CROSSPOINT_BASE;
   snprintf(buf, sizeof(buf), "%s rev %u", ESP.getChipModel(), static_cast<unsigned>(ESP.getChipRevision()));
   rowValues_[ITEM_CHIP] = buf;
