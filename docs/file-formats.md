@@ -123,9 +123,9 @@ changing their cached word-style flags and page layout.
 
 ### Version 44
 
-> Pocket Daily writes finalized sections as fork-private **v136**, incorporating
-> CrossPoint 1.6.5 (upstream v44) with these additions:
-> - `bilingualViewMode` follows `characterSpacing` and `wordSpacingPercent`, before `pageCount`.
+> Pocket Daily writes finalized sections as fork-private **v137**, incorporating
+> CrossPoint 1.6.5 (upstream v44) with these additions (v137 removed the former
+> `bilingualViewMode` byte that sat before `pageCount`):
 > - Five header LUT pointers cover pages, anchors, paragraphs, list items and visible text offsets.
 > - Every page record retains the `u32 textOffset` prefix used by the app's raw DOM coordinates.
 > - Packed text blocks and page links use the upstream layout; visible offsets count rendered text

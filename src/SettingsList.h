@@ -181,12 +181,10 @@ inline SettingInfo buildDictionarySetting(const std::vector<DictionaryEntry>& di
 }
 
 inline std::vector<StrId> buildLongPressMenuValues() {
-  // Stored by position. Stock hides the trailing Reader Menu on boards without
-  // a Home key; Bilingual Toggle is appended after it, so every position stays
-  // listed (Reader Menu opens the reader menu on long press here).
-  static constexpr StrId VALUES[] = {StrId::STR_KOSYNC,     StrId::STR_DISABLED,    StrId::STR_BOOKMARK_OPTION,
-                                     StrId::STR_DICTIONARY, StrId::STR_READER_MENU, StrId::STR_BILINGUAL_TOGGLE};
-  return {VALUES, VALUES + std::size(VALUES)};
+  static constexpr StrId VALUES[] = {StrId::STR_KOSYNC, StrId::STR_DISABLED, StrId::STR_BOOKMARK_OPTION,
+                                     StrId::STR_DICTIONARY, StrId::STR_READER_MENU};
+  const size_t count = BoardConfig::hasHomeKey() ? std::size(VALUES) : std::size(VALUES) - 1;
+  return {VALUES, VALUES + count};
 }
 
 inline std::vector<StrId> homeThemeValues() {
@@ -315,10 +313,6 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
                           {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},
                           "imageRendering", StrId::STR_CAT_READER),
-        SettingInfo::Enum(
-            StrId::STR_BILINGUAL_VIEW_MODE, &CrossPointSettings::bilingualViewMode,
-            {StrId::STR_BILINGUAL_BOTH, StrId::STR_BILINGUAL_ORIGINAL_ONLY, StrId::STR_BILINGUAL_TRANSLATION_ONLY},
-            "bilingualViewMode", StrId::STR_CAT_READER),
         SettingInfo::Enum(StrId::STR_READER_MENU_STYLE, &CrossPointSettings::readerMenuStyle,
                           {StrId::STR_MENU_STYLE_LIST, StrId::STR_MENU_STYLE_TOOLBAR}, "readerMenuStyle",
                           StrId::STR_CAT_READER),

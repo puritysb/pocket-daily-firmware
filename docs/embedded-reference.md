@@ -450,10 +450,9 @@ Correctness rests entirely on a version byte per file format.
 same-numbered-but-different-layout header defeats the `version != SECTION_FILE_VERSION` check
 and silently feeds stale caches to the reader — it does not fail loudly.
 
-**Fork rule**: keep this fork's `SECTION_FILE_VERSION` (currently **130**) in the reserved
-**128–255** range, bumping within it — never onto upstream's line (currently 27, still
-incrementing). The upstream-contribution branch (`bilingual-toggle-upstream`) uses
-`upstream + 1` instead.
+**Fork rule**: keep this fork's `SECTION_FILE_VERSION` (currently **137**) in the reserved
+**128–255** range, bumping within it — never onto upstream's line. Upstream-contribution
+branches use `upstream + 1` instead.
 
 Cache layout, the full invalidation triggers, and how to clear by hand:
 **`lib/Epub/AGENTS.md`**. Format documentation: `docs/file-formats.md`.

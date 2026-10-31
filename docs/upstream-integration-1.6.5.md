@@ -26,7 +26,7 @@ release checklist and explicit publication authorization.
 | Boundary | Resolution |
 | --- | --- |
 | SDK / hardware | Replace open-x4-sdk with pinned FreeInk SDK, retain the HAL and X3/X4-only product profiles, single framebuffer, tuned C3 core and bounded NimBLE configuration. |
-| EPUB layout | Adopt packed word storage, visible-text LUT, links, spacing and RTL changes; retain bounded incremental pagination, low-heap suspension, layout ahead, bilingual mode and exact raw text positions. |
+| EPUB layout | Adopt packed word storage, visible-text LUT, links, spacing and RTL changes; retain bounded incremental pagination, low-heap suspension, layout ahead and exact raw text positions. |
 | Cache | Reserve section version **134** for the combined layout, including raw page offset prefix and five LUTs. Partial caches include the version tag. Version 133 and changed spacing must rebuild. |
 | Reading sync | Raw DOM character offsets remain the companion v1 contract. Upstream visible offsets are separate layout coordinates. Both resolver paths have regression coverage against the same 430-position golden data. |
 | Saved progress | Keep the seven-byte product prefix. Read historical 4/6/7-byte and upstream 10-byte records; write seven bytes or a tagged 12-byte extension containing the visible offset. Reject malformed lengths/tags. |

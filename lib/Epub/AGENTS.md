@@ -21,23 +21,18 @@ hash, a new cache, and **lost reading progress**. That is expected behaviour, no
 |---|---|
 | `book.bin` | **7** (metadata structure) |
 | `section.bin` — incremental upstream baseline | **44** (CrossPoint 1.6.5) |
-| `section.bin` — **this fork** | **136** |
+| `section.bin` — **this fork** | **137** |
 
-The fork adds a `bilingualViewMode` header field and numbers itself in the **reserved 128–255
+The fork's section format differs from upstream's (incremental trailer, page text offsets); it numbers itself in the **reserved 128–255
 range** rather than `upstream + 1`. Upstream keeps incrementing 27→28→…; a
 same-numbered-but-different-layout header would defeat the `version != SECTION_FILE_VERSION`
 check and feed stale caches to the reader. See the `SECTION_FILE_VERSION` comment in
 `Section.cpp`.
 
-v129 stores a `BILINGUAL_MODE_ANY` sentinel for chapters with no bilingual markers, so
-cycling view modes reuses their cache instead of forcing a full re-parse
-(`Section::bilingualModeAgnostic`).
-
 v130 adds incremental layout generation. A build writes to `sections/<index>.bin.part`,
 commits completed sections atomically, and persists an interrupted build as a fork-private
 partial section (version `0xFF`) with its parse watermark. Inflated chapter HTML is retained
-under `html/` so reopening or repagination does not repeat ZIP inflation. Partial bilingual
-sections retain the requested view mode; only a completed parse may be marked mode-agnostic.
+under `html/` so reopening or repagination does not repeat ZIP inflation.
 
 **Rules**:
 1. **ALWAYS increment the version BEFORE changing binary structure.** Not after, not in the
@@ -45,8 +40,8 @@ sections retain the requested view mode; only a completed parse may be marked mo
 2. Version mismatch → cache auto-invalidated and regenerated. That is the intended mechanism.
 3. Document format changes in `docs/file-formats.md`.
 4. **Fork rule**: keep the fork's `SECTION_FILE_VERSION` in the **128+ range** (bump within
-   it), never onto upstream's line. The upstream-contribution branch
-   (`bilingual-toggle-upstream`) uses `upstream + 1` instead. See the `fork-sync` skill.
+   it), never onto upstream's line. Upstream-contribution branches use `upstream + 1`
+   instead. See the `fork-sync` skill.
 
 v131 keeps the v130 byte layout but changes measurement: invisible codepoints are zero
 width, emoji clusters measure once, uncovered glyphs come from the glyph-fallback font or a

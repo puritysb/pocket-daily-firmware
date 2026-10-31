@@ -580,7 +580,7 @@ TEST_F(ReaderLayout, UpgradedSectionRejectsOldVersionAndChangedSpacing) {
   {
     std::fstream cache(path, std::ios::binary | std::ios::in | std::ios::out);
     ASSERT_TRUE(cache.good());
-    EXPECT_EQ(cache.get(), 136);
+    EXPECT_EQ(cache.get(), 137);
     cache.seekp(0);
     cache.put(static_cast<char>(135));
   }
@@ -640,10 +640,10 @@ TEST_F(ReaderLayout, Version135RebuildPreservesProgressMetadataAndOffers) {
     ASSERT_GT(old.size(), 12U);
     if (partial) {
       ASSERT_EQ(static_cast<uint8_t>(old[0]), 0xFF);
-      ASSERT_EQ(static_cast<uint8_t>(old[old.size() - 4]), 136);
+      ASSERT_EQ(static_cast<uint8_t>(old[old.size() - 4]), 137);
       old[old.size() - 4] = static_cast<char>(135);
     } else {
-      ASSERT_EQ(static_cast<uint8_t>(old[0]), 136);
+      ASSERT_EQ(static_cast<uint8_t>(old[0]), 137);
       old[0] = static_cast<char>(135);
     }
     {

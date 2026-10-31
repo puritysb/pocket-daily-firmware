@@ -357,7 +357,6 @@ The Settings screen allows you to configure the device's behavior. There are a f
   - "Bookmark" - Hold Confirm (~0.4 second) to drop a bookmark at the current page.
   - "KOSync" - Hold Confirm (~1 second) to launch KOReader sync directly.
   - "Dictionary" - Hold Confirm (~0.4 second) to start dictionary word selection on the current page (see [docs/dictionary.md](docs/dictionary.md)).
-  - "Bilingual Toggle" - Hold Confirm to cycle a bilingual EPUB between both languages, the original only and the translation only (see [docs/bilingual-epub.md](docs/bilingual-epub.md)).
 
 - **Short Power Button Click**: Controls the effect of a short click of the power button:
   
@@ -678,7 +677,7 @@ See [docs/dictionary.md](docs/dictionary.md) for supported formats, setup, and w
 * **Return to Home:** Press the **Back** button to close the book and return to the **[Home](#31-home-screen)** screen.
 * **Return to Browse Files:** Press and hold the **Back** button to close the book and return to the **[Browse Files](#33-browse-files-screen)** screen.
 * **Reader Menu:** Press **Confirm** to open the **[Reader Menu](#5-reader-menu)**, which includes chapter navigation, reading options, and more.
-* **Long-press Confirm (configurable):** Holding **Confirm** runs the function chosen by the **Long-press Menu** setting in **[Controls Settings](#363-controls)** — "Disabled" (default) does nothing, "Bookmark" drops a bookmark, "KOSync" launches KOReader Sync, "Dictionary" starts a word lookup, and "Bilingual Toggle" cycles a bilingual EPUB between both languages, the original only and the translation only. A short press always opens the Reader Menu.
+* **Long-press Confirm (configurable):** Holding **Confirm** runs the function chosen by the **Long-press Menu** setting in **[Controls Settings](#363-controls)** — "Disabled" (default) does nothing, "Bookmark" drops a bookmark, "KOSync" launches KOReader Sync, and "Dictionary" starts a word lookup. A short press always opens the Reader Menu.
 
 ### Supported Languages
 

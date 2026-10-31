@@ -51,12 +51,6 @@ class EpubReaderActivity final : public ReaderActivity {
   unsigned long dictionaryMessageTime = 0UL;
   bool currentPageBookmarked = false;
   bool bookmarkRemoved = false;  // true when last toggle removed (controls popup text)
-  // Bilingual view mode popup feedback. Set when the user cycles the mode with the
-  // front Left button (or Long-press Confirm → Bilingual Toggle). Auto-clears after
-  // BOOKMARK_MESSAGE_DURATION_MS so the same transient-popup pattern as bookmark
-  // feedback is reused.
-  bool showBilingualMessage = false;
-  unsigned long bilingualMessageTime = 0UL;
   int idlePrewarmSpine = -1;
   int idlePrewarmPage = -1;
   unsigned long lastRenderCompleteMs = 0;
@@ -292,11 +286,6 @@ class EpubReaderActivity final : public ReaderActivity {
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
   // Stores the current section's failed build step and heap state (BuildFailureLog).
   void recordBuildFailure() const;
-  // Cycle bilingual view mode (Both → Original → Translation → Both), persist the new
-  // value, drop the current section so it re-parses on next render, and surface a
-  // transient popup naming the new mode. No-op on EPUBs without cp-original /
-  // cp-translation markers (those just keep rendering everything regardless of mode).
-  void cycleBilingualMode();
   void loadCachedBookmarks();
   void addBookmark();
   void updateBookmarkFlag();

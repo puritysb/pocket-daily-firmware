@@ -167,20 +167,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     LP_MENU_BOOKMARK = 2,
     LP_MENU_DICTIONARY = 3,
     LP_MENU_READER_MENU = 4,
-    // Pocket Daily: appended so stock files keep their meaning (SettingsMigration.h).
-    LP_MENU_BILINGUAL_TOGGLE = 5,
     LONG_PRESS_MENU_FUNCTION_COUNT
-  };
-
-  // Bilingual EPUB view modes. Affects rendering of EPUBs whose paragraphs carry
-  // class="cp-original" / class="cp-translation" markers (or the xml:lang fallback).
-  // Both: render every paragraph (default). OriginalOnly: drop cp-translation.
-  // TranslationOnly: drop cp-original. Books without the markers are unaffected.
-  enum BILINGUAL_VIEW_MODE {
-    BILINGUAL_BOTH = 0,
-    BILINGUAL_ORIGINAL_ONLY = 1,
-    BILINGUAL_TRANSLATION_ONLY = 2,
-    BILINGUAL_VIEW_MODE_COUNT
   };
 
   // Hide battery percentage
@@ -349,11 +336,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Long-press page turn button behavior
   uint8_t longPressButtonBehavior = OFF;
   // Long-press Confirm function in EPUB reader (cycles through LONG_PRESS_MENU_FUNCTION values).
-  // Stock default (Disabled). Bilingual Toggle is opt-in under Settings → Controls →
-  // Long-press Menu; saved files keep their value.
+  // Stock default (Disabled); saved files keep their value.
   uint8_t longPressMenuFunction = LP_MENU_DISABLED;
-  // Bilingual EPUB view mode. Default BOTH so non-bilingual books are unaffected.
-  uint8_t bilingualViewMode = BILINGUAL_BOTH;
   // UI Theme
   uint8_t uiTheme = LYRA;
   // Sunlight fading compensation

@@ -19,15 +19,12 @@
 
 namespace {
 // Fork-private section cache version (reserved range 128-255, high bit = fork-modified).
-// This fork layers the bilingualViewMode header field on top of upstream's incremental
-// section format. Upstream's finalized version remains on its own low-numbered line and
-// keeps incrementing; numbering the fork build in the 128+ range guarantees a future
-// upstream bump can never collide with ours -- a same-number/different-layout header
-// would defeat the `version != SECTION_FILE_VERSION` invalidation check below and
-// silently feed stale caches to the reader.
-// v129: xml:lang fallback no longer classifies <html>/<body> (v128 caches built in
-// Original/Translation-only mode could be blank), and marker-free chapters store
-// BILINGUAL_MODE_ANY so mode toggles reuse them.
+// The fork's format carries the incremental-build trailer and page text offsets. Upstream's
+// finalized version remains on its own low-numbered line and keeps incrementing; numbering the
+// fork build in the 128+ range guarantees a future upstream bump can never collide with ours --
+// a same-number/different-layout header would defeat the `version != SECTION_FILE_VERSION`
+// invalidation check below and silently feed stale caches to the reader.
+// v129: the former bilingual mode byte no longer classified <html>/<body>.
 // v130: incremental/partial section builds, persistent inflated HTML, and atomic
 // finalization. The binary layout is unchanged except for the partial-build trailer.
 // v131: same binary layout. Invisible codepoints (ZWJ, variation selectors, ...) now
@@ -41,13 +38,14 @@ namespace {
 // exact position reading-progress XPointers are computed from and mapped back to.
 // v135: automatic bitmap reader fonts honor requested point size in raster and layout.
 // v136: rebuild cached ALT layouts after small-entry ZIP inflater memory correction.
-constexpr uint8_t SECTION_FILE_VERSION = 136;
+// v137: the bilingual view-mode header byte is removed (the header is one byte shorter).
+constexpr uint8_t SECTION_FILE_VERSION = 137;
 
 // Written into the version field while a build is in progress and replaced only after
 // every table has been committed. A crash-interrupted .part file is therefore rejected.
 constexpr uint8_t SECTION_FILE_INCOMPLETE_VERSION = 0;
-// Fork-private partial marker. Upstream uses 0xFE for a header without bilingualViewMode,
-// so use a distinct reserved value to make cross-firmware downgrade fail closed.
+// Fork-private partial marker, distinct from upstream's 0xFE so a partial written by one
+// firmware is never read as the other's layout.
 constexpr uint8_t SECTION_FILE_PARTIAL_VERSION = 0xFF;
 // Last u32 of a partial's trailer: 'P','D' plus the finalized version whose page records the
 // partial holds. The partial sentinel above is the same for every format, so without this a
@@ -55,15 +53,11 @@ constexpr uint8_t SECTION_FILE_PARTIAL_VERSION = 0xFF;
 // as the current format. Partials without the tag (8-byte trailer) are rebuilt.
 constexpr uint32_t PARTIAL_FORMAT_TAG = 0x50440000u | SECTION_FILE_VERSION;
 
-// Sentinel patched into the header's bilingualViewMode field when the chapter contains no
-// bilingual role markers: its layout is identical in every view mode, so loadSectionFile
-// accepts the cache regardless of the currently requested mode.
-constexpr uint8_t BILINGUAL_MODE_ANY = 0xFF;
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
                                  sizeof(uint8_t) + sizeof(bool) + sizeof(uint32_t) + sizeof(uint32_t) +
                                  sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(int8_t) +
-                                 sizeof(uint8_t) + sizeof(uint8_t);
+                                 sizeof(uint8_t);
 }  // namespace
 
 // Identity of the fonts that shape this section's layout: the reader font and
@@ -122,9 +116,8 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
                                    sizeof(spec.viewportWidth) + sizeof(spec.viewportHeight) + sizeof(pageCount) +
                                    sizeof(spec.hyphenationEnabled) + sizeof(spec.embeddedStyle) +
                                    sizeof(spec.imageRendering) + sizeof(spec.focusReadingEnabled) +
-                                   sizeof(spec.characterSpacing) + sizeof(spec.wordSpacingPercent) +
-                                   sizeof(spec.bilingualViewMode) + sizeof(uint32_t) + sizeof(uint32_t) +
-                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t),
+                                   sizeof(spec.characterSpacing) + sizeof(spec.wordSpacingPercent) + sizeof(uint32_t) +
+                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t),
                 "Header size mismatch");
   // Written as the incomplete sentinel; finalizeBuild() patches it to
   // SECTION_FILE_VERSION as the last step, committing the file.
@@ -141,7 +134,6 @@ void Section::writeSectionFileHeader(const ReaderRenderSpec& spec) {
   serialization::writePod(file, spec.focusReadingEnabled);
   serialization::writePod(file, spec.characterSpacing);
   serialization::writePod(file, spec.wordSpacingPercent);
-  serialization::writePod(file, spec.bilingualViewMode);
   serialization::writePod(file, pageCount);  // Placeholder for page count (will be initially 0, patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for LUT offset (patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for anchor map offset (patched later)
@@ -178,7 +170,6 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
     bool fileEmbeddedStyle;
     uint8_t fileImageRendering;
     bool fileFocusReadingEnabled;
-    uint8_t fileBilingualViewMode;
     int8_t fileCharacterSpacing;
     uint8_t fileWordSpacingPercent;
     serialization::readPod(file, fileFontId);
@@ -194,18 +185,12 @@ bool Section::loadSectionFile(const ReaderRenderSpec& spec) {
     serialization::readPod(file, fileCharacterSpacing);
     serialization::readPod(file, fileWordSpacingPercent);
 
-    serialization::readPod(file, fileBilingualViewMode);
-    // BILINGUAL_MODE_ANY marks a chapter with no bilingual markers: every view mode lays
-    // out identically, so the cache stays valid across mode toggles.
-    bilingualModeAgnostic = (fileBilingualViewMode == BILINGUAL_MODE_ANY);
-
     if (layoutFontKey(spec.fontId) != fileFontId || spec.lineCompression != fileLineCompression ||
         spec.extraParagraphSpacing != fileExtraParagraphSpacing || spec.paragraphAlignment != fileParagraphAlignment ||
         spec.viewportWidth != fileViewportWidth || spec.viewportHeight != fileViewportHeight ||
         spec.hyphenationEnabled != fileHyphenationEnabled || spec.embeddedStyle != fileEmbeddedStyle ||
         spec.imageRendering != fileImageRendering || spec.focusReadingEnabled != fileFocusReadingEnabled ||
-        spec.characterSpacing != fileCharacterSpacing || spec.wordSpacingPercent != fileWordSpacingPercent ||
-        (!bilingualModeAgnostic && spec.bilingualViewMode != fileBilingualViewMode)) {
+        spec.characterSpacing != fileCharacterSpacing || spec.wordSpacingPercent != fileWordSpacingPercent) {
       closeFile();
       LOG_ERR("SCT", "Deserialization failed: Parameters do not match");
       clearCache();
@@ -417,7 +402,6 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
   ctx->htmlPath = htmlPath;
   ctx->tmpHtmlPath = tmpHtmlPath;
   ctx->parsePath = htmlCached ? htmlPath : tmpHtmlPath;
-  ctx->bilingualViewMode = spec.bilingualViewMode;
 
   // Derive the content base directory and image cache path prefix for the parser
   const size_t lastSlash = localPath.find_last_of('/');
@@ -470,7 +454,7 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
             {this->onPageComplete(std::move(page)), paragraphIndex, listItemIndex, visibleTextOffset});
       },
       spec.embeddedStyle, ctxPtr->contentBase, ctxPtr->imageBasePath, spec.imageRendering, std::move(tocAnchors),
-      popupFn, ctxPtr->cssParser, spec.bilingualViewMode);
+      popupFn, ctxPtr->cssParser);
   if (!ctx->parser) {
     LOG_ERR("SCT", "OOM: ChapterHtmlSlimParser");
     if (ctx->cssParser) ctx->cssParser->clear();
@@ -525,13 +509,6 @@ bool Section::buildSomeMore(const int maxPages) {
       }
     }
   }
-}
-
-bool Section::currentlyModeAgnostic() const {
-  if (build_ && build_->parser) {
-    return !build_->parser->sawBilingualMarkers();
-  }
-  return bilingualModeAgnostic;
 }
 
 bool Section::hasHtmlCache() const {
@@ -661,18 +638,8 @@ bool Section::commitBuildFile(const uint8_t version, const uint32_t bytesConsume
     serialization::writePod(file, PARTIAL_FORMAT_TAG);
   }
 
-  // Pages laid out before the first bilingual marker are identical in every view mode, so a
-  // parse that has not met a marker yet -- finalized or suspended as a partial -- is
-  // mode-agnostic. A partial tagged this way stays valid across a mode toggle: the rebuild
-  // over it re-parses from the top in the new mode and reproduces the same marker-free
-  // prefix, then continues in the requested mode. Once a marker has been seen the cache
-  // retains the mode it was built in.
-  bilingualModeAgnostic = !build_->parser->sawBilingualMarkers();
-  const uint8_t effectiveBilingualMode = bilingualModeAgnostic ? BILINGUAL_MODE_ANY : build_->bilingualViewMode;
-
-  // Patch the effective bilingual mode, built page count, and section offsets.
-  file.seek(HEADER_SIZE - sizeof(uint32_t) * 5 - sizeof(builtPageCount_) - sizeof(effectiveBilingualMode));
-  serialization::writePod(file, effectiveBilingualMode);
+  // Patch the built page count and section offsets.
+  file.seek(HEADER_SIZE - sizeof(uint32_t) * 5 - sizeof(builtPageCount_));
   serialization::writePod(file, builtPageCount_);
   serialization::writePod(file, lutOffset);
   serialization::writePod(file, anchorMapOffset);

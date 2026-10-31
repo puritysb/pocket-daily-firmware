@@ -543,7 +543,7 @@ Host render tests do not sign off panel or radio behavior.
       page turning and resuming do not reset the accepted reading position.
 - [ ] Reading-position round trips between the companion and reader land on
       the same text, including entities, long paragraphs, hyphenation and CJK.
-- [ ] Built-in and SD fonts, character/word spacing, bilingual pages, footnotes,
+- [ ] Built-in and SD fonts, character/word spacing, footnotes,
       RTL and grayscale images work in all four orientations.
 - [ ] Classic, Lyra, Lyra 3 Covers and RoundedRaff draw stock CrossPoint menus
       and button hints (two-line labels), Korean labels render, and an
