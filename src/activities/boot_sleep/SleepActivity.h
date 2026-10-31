@@ -15,6 +15,8 @@ class SleepActivity final : public Activity {
 
  private:
   void renderDefaultSleepScreen() const;
+  // Cover mode for a book without cover art: its title and author, typeset.
+  void renderTitleSleepScreen(const std::string& title, const std::string& author) const;
   void renderCustomSleepScreen() const;
   void renderCoverSleepScreen() const;
   void renderBitmapSleepScreen(const Bitmap& bitmap, bool preserveBackground = false) const;

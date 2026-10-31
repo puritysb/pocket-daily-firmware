@@ -1007,7 +1007,8 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::GO_HOME: {
-      onGoHome();
+      // Leave to the shell that opened the book (Pocket Daily or Home).
+      activityManager.leaveReader();
       return;
     }
     case EpubReaderMenuActivity::MenuAction::DELETE_CACHE: {
@@ -1025,7 +1026,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           }
         }
       }
-      onGoHome();
+      activityManager.leaveReader();
       return;
     }
     case EpubReaderMenuActivity::MenuAction::SCREENSHOT: {

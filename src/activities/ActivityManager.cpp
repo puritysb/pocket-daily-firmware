@@ -327,8 +327,6 @@ void ActivityManager::goToUsbDrive() {
 void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToFileBrowser(std::string path) {
-  // The file browser is a stock screen: books opened there return Home.
-  shell = ReaderReturn::Home;
   replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));
 }
 

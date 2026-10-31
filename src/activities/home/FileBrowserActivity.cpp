@@ -587,7 +587,7 @@ bool FileBrowserActivity::handleButtons() {
         setResult(std::move(res));
         finish();
       } else {
-        onGoHome();
+        activityManager.goToShell();
       }
     }
     return true;
