@@ -45,7 +45,8 @@
 namespace {
 // Folders/files to hide from the web interface file browser
 // Note: Items starting with "." are automatically hidden
-constexpr const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
+// pocket-daily holds the firmware's Home cards, their staging area and the learning pack.
+constexpr const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache", "pocket-daily"};
 
 // Separate the per-entry formatting frame from the request's file/client owners.
 __attribute__((noinline)) bool writeListingEntry(bounded_http::JsonWriter& writer, HalFile& entry,

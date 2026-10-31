@@ -67,9 +67,7 @@ bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::Layou
       r.drawRect(ax, ay, dw, dh, 2, true);
       return true;
     }
-    r.drawRect(x, y, w, h, 2, true);
-    HomeDraw::drawCoverPlaceholder(r, x, y, w, h);
-    return false;
+    return false;  // the shared renderer draws the title card
   };
   env.drawCardImage = [](void* value, GfxRenderer& r, const char* id, int x, int y, int w, int h) {
     auto& d = *static_cast<DrawContext*>(value);

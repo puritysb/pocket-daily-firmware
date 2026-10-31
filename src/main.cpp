@@ -318,6 +318,8 @@ void enterDeepSleep(bool fromTimeout = false) {
   Pocket::NearbySync::Window::close(Pocket::NearbySync::Window::CloseReason::SLEEP_FRAME);
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+  APP_STATE.lastSleepInPocketDaily = activityManager.inPocketDailyShell();
+  APP_STATE.sleptCleanly = true;
 
   // An information surface keeps informing while it sleeps: give the current
   // activity the chance to own the retained frame instead of the sleep screen.
@@ -629,6 +631,16 @@ void setup() {
   const bool firstPocketSetup = gpio.deviceIsX3() && !isSilentReboot && !isSleepWake &&
                                 !Storage.exists(CrossPointSettings::getFilePath()) && APP_STATE.openEpubPath.empty();
   SETTINGS.loadFromFile();
+  // Waking returns to the shell the device slept in (stock returns to its only
+  // shell, Home, or the open book); a boot without a clean sleep (reset, update,
+  // power loss) follows the startupApp setting, read only now that it is loaded.
+  const bool wokeFromSleep = isSleepWake || APP_STATE.sleptCleanly;
+  const bool startInPocketDaily =
+      wokeFromSleep ? APP_STATE.lastSleepInPocketDaily : SETTINGS.startupApp != CrossPointSettings::STARTUP_HOME;
+  if (APP_STATE.sleptCleanly) {
+    APP_STATE.sleptCleanly = false;
+    APP_STATE.saveToFile();
+  }
   // Push the saved timezone's POSIX rule into the clock (migrating the legacy
   // UTC-offset setting on first boot after the update).
   timezones::applyToClock();
@@ -893,12 +905,9 @@ void setup() {
     APP_STATE.openEpubPath = "";
     APP_STATE.readerActivityLoadCount++;
     APP_STATE.saveToFile();
-    const ReaderReturn origin =
-        SETTINGS.startupApp == CrossPointSettings::STARTUP_HOME ? ReaderReturn::Home : ReaderReturn::PocketDaily;
+    const ReaderReturn origin = startInPocketDaily ? ReaderReturn::PocketDaily : ReaderReturn::Home;
     activityManager.goToReaderFrom(origin, path, allowFastInitialReaderRefresh);
-  } else if (SETTINGS.startupApp == CrossPointSettings::STARTUP_HOME) {
-    // Pocket is the default product shell, but keep the persisted startup
-    // choice honest: users who explicitly chose Home are not routed to Pocket.
+  } else if (!startInPocketDaily) {
     activityManager.goHome(HomeMenuItem::NONE, needsWakeRefresh);
   } else {
     activityManager.goToPocketDaily();

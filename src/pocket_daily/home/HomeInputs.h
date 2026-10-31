@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 #include <ctime>
+#include <string>
 
 #include "pocket_daily/PocketGlance.h"
 #include "pocket_daily/home/HomeRenderer.h"
@@ -48,6 +49,9 @@ struct OpenBook {
   }
 };
 // Fills `out` (cleared first); returns the RECENT_BOOKS entry, or nullptr.
+// The book Continue Reading resumes: the open book, otherwise the most recent
+// book still on the card (what stock Home shows first). Empty when none.
+std::string continueReadingPath();
 const RecentBook* readOpenBook(OpenBook& out);
 
 // Draws the PBM image of one of the active companion cards fitted into the box

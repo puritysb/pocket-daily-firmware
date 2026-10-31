@@ -30,6 +30,7 @@
 #include "images/Logo120.h"
 #include "images/MoonIcon.h"
 #include "util/PowerWakeCue.h"
+#include "util/UiCjkFont.h"
 
 namespace {
 
@@ -862,6 +863,9 @@ void SleepActivity::renderCoverSleepScreen() const {
     }
 
     if (!lastEpub.generateCoverBmp(cropped, originalThresholds)) {
+      // A book without cover art sleeps on its typeset title, not the logo.
+      if (SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::COVER)
+        return renderTitleSleepScreen(lastEpub.getTitle(), lastEpub.getAuthor());
       LOG_ERR("SLP", "Failed to generate cover bmp");
       return (this->*renderNoCoverSleepScreen)();
     }
@@ -896,6 +900,34 @@ void SleepActivity::renderLastScreenSleepScreen() const {
   } else {
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
   }
+}
+
+void SleepActivity::renderTitleSleepScreen(const std::string& title, const std::string& author) const {
+  const int w = renderer.getScreenWidth();
+  const int h = renderer.getScreenHeight();
+  renderer.clearScreen();
+  constexpr int inset = 28;
+  renderer.drawRect(inset, inset, w - inset * 2, h - inset * 2, 2, true);
+  renderer.drawLine(inset + 9, inset, inset + 9, h - inset, 3, true);
+  const int textX = inset + 32;
+  const int textW = w - inset * 2 - 52;
+  const int titleFont = UiCjkFont::fontForText(renderer, title.c_str(), UI_12_FONT_ID);
+  const int titleAdvance = renderer.getLineHeight(titleFont) + 4;
+  const auto lines = renderer.wrappedText(titleFont, title.c_str(), textW, 8, EpdFontFamily::BOLD);
+  const int authorFont = UiCjkFont::fontForText(renderer, author.c_str(), UI_10_FONT_ID);
+  const int authorH = author.empty() ? 0 : renderer.getLineHeight(authorFont) + 20;
+  int y = std::max(inset + 40, (h - static_cast<int>(lines.size()) * titleAdvance - authorH) / 2);
+  for (const auto& line : lines) {
+    renderer.drawText(titleFont, textX, y, line.c_str(), true, EpdFontFamily::BOLD);
+    y += titleAdvance;
+  }
+  if (!author.empty()) {
+    renderer.drawLine(textX, y + 6, textX + 56, y + 6, 2, true);
+    renderer.drawText(authorFont, textX, y + 20, renderer.truncatedText(authorFont, author.c_str(), textW).c_str(),
+                      true);
+  }
+  if (SETTINGS.sleepWakeIndicator) PowerWakeCue::draw(renderer, gpio.deviceIsX3(), tr(STR_POCKET_WAKE_READ));
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 
 void SleepActivity::renderBlankSleepScreen() const {

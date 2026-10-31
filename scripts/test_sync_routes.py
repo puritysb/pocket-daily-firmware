@@ -49,12 +49,28 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertEqual(reader.count("activityManager.leaveReader()"), 3)
         go_home = manager[manager.index("void ActivityManager::goHome("):]
         self.assertIn("readerReturn = ReaderReturn::Home;", go_home[:go_home.index("\n}")])
-        # A plain open (Home, Library, file browser) resets the origin, so a book
-        # opened there after leaving a Pocket book by Back-to-files returns Home.
-        # Only the reader's own re-opens keep it.
+        # A plain open returns to the shell the user is in (2026-11-01): books from
+        # Library or the file browser entered from Pocket Daily return there, and
+        # both screens' Back and the reader menu's Home go there too. Only the
+        # reader's own re-opens keep the origin.
         open_book = manager[manager.index("void ActivityManager::goToReader("):]
         open_book = open_book[:open_book.index("\n}")]
-        self.assertLess(open_book.index("readerReturn = ReaderReturn::Home;"), open_book.index("if (path.empty())"))
+        self.assertLess(open_book.index("readerReturn = shell;"), open_book.index("if (path.empty())"))
+        browser = (root / "src/activities/home/FileBrowserActivity.cpp").read_text()
+        self.assertIn("activityManager.goToShell();", browser)
+        epub = (root / "src/activities/reader/EpubReaderActivity.cpp").read_text()
+        go_home_menu = epub[epub.index("MenuAction::GO_HOME: {"):]
+        self.assertIn("activityManager.leaveReader();", go_home_menu[:go_home_menu.index("return;")])
+        self.assertIn("shell = ReaderReturn::Home;", go_home[:go_home.index("\n}")])
+        library = (root / "src/activities/library/LibraryListActivity.cpp").read_text()
+        self.assertIn("activityManager.goToShell();", library)
+        # Waking returns to the shell the device slept in; a cold boot uses startupApp.
+        main = (root / "src/main.cpp").read_text()
+        self.assertIn("APP_STATE.lastSleepInPocketDaily = activityManager.inPocketDailyShell();", main)
+        self.assertIn("APP_STATE.sleptCleanly = true;", main)
+        self.assertIn("wokeFromSleep ? APP_STATE.lastSleepInPocketDaily", main)
+        # The startup setting is read only after SETTINGS is loaded.
+        self.assertLess(main.index("SETTINGS.loadFromFile();"), main.index("const bool startInPocketDaily"))
         self.assertIn("activityManager.resumeReader(openPath)", reader)
         sync = (root / "src/activities/reader/KOReaderSyncActivity.cpp").read_text()
         self.assertIn("activityManager.resumeReader(epubPath)", sync)

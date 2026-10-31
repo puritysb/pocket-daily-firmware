@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdio>
+#include <cstring>
+
 namespace PocketDaily::FirmwareIdentity {
 
 // Product releases use pocket-v tags. The lineage lets the companion tell
@@ -11,5 +14,34 @@ namespace PocketDaily::FirmwareIdentity {
 inline constexpr int LINEAGE = 2;
 inline constexpr char CROSSPOINT_BASE[] = "1.6.5";
 inline constexpr char CROSSPOINT_COMMIT[] = "93e98bb78702e29868a16a13b80c40e6b36ccdff";
+
+// What screens show (docs/product-versioning.md "Display"): only a release and
+// a developer image are told apart, both marked as Pocket Daily so they never
+// read as a stock CrossPoint version. The embedded version (updater comparison,
+// /api/status, tag checks) is unchanged:
+//   release   1.0.0                                          -> "Pocket 1.0.0"
+//   developer 1.0.0-dev-<branch>-<commit>[-w<worktree>]       -> "Pocket 1.0.0 dev <commit>"
+inline void displayVersion(const char* full, char* out, size_t cap) {
+  if (!out || cap == 0) return;
+  out[0] = '\0';
+  if (!full) return;
+  const char* dev = strstr(full, "-dev-");
+  if (!dev) {
+    snprintf(out, cap, "Pocket %s", full);
+    return;
+  }
+  const char* end = full + strlen(full);
+  const char* last = strrchr(full, '-');
+  // Drop the worktree fingerprint ("-w" + 8 hex) when present.
+  if (last && last > dev + 4 && last[1] == 'w' && end - last == 10) end = last;
+  const char* commit = end;
+  while (commit > dev + 5 && commit[-1] != '-') --commit;
+  if (commit <= dev + 5 || end - commit < 7) {
+    snprintf(out, cap, "Pocket %.*s dev", static_cast<int>(dev - full), full);
+    return;
+  }
+  snprintf(out, cap, "Pocket %.*s dev %.*s", static_cast<int>(dev - full), full, static_cast<int>(end - commit),
+           commit);
+}
 
 }  // namespace PocketDaily::FirmwareIdentity

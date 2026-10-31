@@ -224,7 +224,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   enum STARTUP_APP { STARTUP_HOME = 0, STARTUP_AGENTDECK = 1, STARTUP_APP_COUNT };
 
   // Sleep screen settings
-  uint8_t sleepScreen = DARK;
+  // Pocket Daily default: the book's cover (or its typeset title) while asleep.
+  // Stock defaults to DARK; saved settings keep their value.
+  uint8_t sleepScreen = COVER;
   // Night mode: inverted output polarity, applied to every activity per
   // render by ActivityManager. The sleep screen opts out itself.
   uint8_t screenInverted = 0;

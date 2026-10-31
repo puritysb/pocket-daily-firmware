@@ -287,15 +287,8 @@ bool drawFrame(GfxRenderer& renderer, const Frame& frame, const int cjkFont, Hea
     else
       GUI.drawHeader(r, Rect{x, y, width, height}, title, subtitle);
   };
-  // Covers are never decoded: the device's own no-art placeholder. Env's
-  // drawCover type takes a mutable renderer (the device decodes bitmaps).
-  // cppcheck-suppress constParameterReference
-  env.drawCover = [](void*, GfxRenderer& r, int x, int y, int width, int height) {
-    if (width <= 12 || height <= 18) return false;
-    r.drawRect(x, y, width, height, 2, true);
-    HomeDraw::drawCoverPlaceholder(r, x, y, width, height);
-    return false;
-  };
+  // Covers are never decoded here: the shared renderer draws the title card.
+  env.drawCover = [](void*, GfxRenderer&, int, int, int, int) { return false; };
   env.drawCardImage = [](void* self, GfxRenderer& r, const char* cardId, int x, int y, int width, int height) {
     auto& d = *static_cast<DrawContext*>(self);
     const int drawn = Home::drawContentCardImage(r, d.frame->cards, cardId, x, y, width, height);

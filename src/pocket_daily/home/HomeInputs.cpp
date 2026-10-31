@@ -69,21 +69,29 @@ void rollGlanceToToday(PocketDaily::AppGlance::Snapshot& snapshot, const time_t 
     GlanceFormat::rollToLocalDay(snapshot.glance, savedIso, todayIso);
 }
 
+std::string continueReadingPath() {
+  if (!APP_STATE.openEpubPath.empty() && Storage.exists(APP_STATE.openEpubPath.c_str())) return APP_STATE.openEpubPath;
+  for (const auto& book : RECENT_BOOKS.getBooks())
+    if (!book.path.empty() && Storage.exists(book.path.c_str())) return book.path;
+  return {};
+}
+
 const RecentBook* readOpenBook(OpenBook& out) {
   out.clear();
-  if (APP_STATE.openEpubPath.empty()) return nullptr;
+  const std::string openPath = continueReadingPath();
+  if (openPath.empty()) return nullptr;
 
   out.valid = true;
   const RecentBook* found = nullptr;
   for (const auto& book : RECENT_BOOKS.getBooks()) {
-    if (book.path != APP_STATE.openEpubPath) continue;
+    if (book.path != openPath) continue;
     copyBookText(out.title, book.title.c_str());
     copyBookText(out.author, book.author.c_str());
     found = &book;
     break;
   }
   if (!out.title[0]) {
-    const char* path = APP_STATE.openEpubPath.c_str();
+    const char* path = openPath.c_str();
     const char* slash = strrchr(path, '/');
     copyBookText(out.title, slash ? slash + 1 : path);
   }
@@ -91,10 +99,10 @@ const RecentBook* readOpenBook(OpenBook& out) {
   // The seventh progress byte is a backwards-compatible whole-book percent.
   // Read it once per paint through HalStorage; older six-byte files simply keep
   // percent=-1 and still resume at their exact local spine/page position.
-  if (!FsHelpers::hasEpubExtension(APP_STATE.openEpubPath)) return found;
+  if (!FsHelpers::hasEpubExtension(openPath)) return found;
   char progressPath[64];
   snprintf(progressPath, sizeof(progressPath), "/.crosspoint/epub_%u/progress.bin",
-           (unsigned)std::hash<std::string>{}(APP_STATE.openEpubPath));
+           (unsigned)std::hash<std::string>{}(openPath));
   HalFile progressFile;
   if (!Storage.openFileForRead("POCKET", progressPath, progressFile)) return found;
   uint8_t progressData[7];

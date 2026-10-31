@@ -96,7 +96,7 @@ Pocket Daily releases are published at
 [github.com/puritysb/pocket-daily-firmware/releases](https://github.com/puritysb/pocket-daily-firmware/releases).
 One `firmware.bin` serves the supported ESP32-C3 X3 and X4 models.
 
-As checked on 2026-10-25, the current product release `pocket-v0.1.0` has not
+As checked on 2026-10-25, the first product release `pocket-v1.0.0` has not
 been published. GitHub's latest release is the historical `v1.6.6`; the current
 app excludes it and the retired pre-reset betas. The update instructions below
 require a supported `pocket-v…` release. Local-image selection belongs to the
@@ -177,7 +177,7 @@ developer hardware procedures are in
 Set `version` in `platformio.ini` and complete
 [the release checklist](docs/release-checklist.md) for the exact production
 commit and image on X3 and X4. Only after owner authorization, publish a
-`pocket-v<version>` tag (for example `pocket-v0.1.0`). The workflow builds
+`pocket-v<version>` tag (for example `pocket-v1.0.0`). The workflow builds
 `gh_release`, verifies its embedded version and publishes a normal GitHub
 release marked latest. The old `vX.Y.Z` tags do not trigger this workflow.
 

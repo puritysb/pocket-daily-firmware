@@ -287,8 +287,18 @@ bool ActivityManager::goToPocketDaily() {
     LOG_ERR("ACT", "OOM: PocketDailyActivity");
     return false;
   }
+  shell = ReaderReturn::PocketDaily;
   replaceActivity(std::move(pocketDaily));
   return true;
+}
+
+bool ActivityManager::inPocketDailyShell() const {
+  return (isReaderActivity() ? readerReturn : shell) != ReaderReturn::Home;
+}
+
+void ActivityManager::goToShell() {
+  if (shell == ReaderReturn::PocketDaily && goToPocketDaily()) return;
+  goHome();
 }
 
 void ActivityManager::goToPocketNearbySync(const bool autoJoinSavedNetwork, const bool firstSetup) {
@@ -340,10 +350,10 @@ void ActivityManager::goToBrowser() {
 }
 
 void ActivityManager::goToReader(std::string path, const bool allowFastInitialRefresh) {
-  // Opening a book returns Home unless the caller says otherwise
-  // (goToReaderFrom, resumeReader): an origin left over from an earlier book
-  // must not send a book opened from the file browser back to Pocket Daily.
-  readerReturn = ReaderReturn::Home;
+  // A book returns to the shell the user came from (one opened from Library or
+  // the file browser reached from Pocket Daily returns there) unless the caller
+  // says otherwise (goToReaderFrom, resumeReader).
+  readerReturn = shell;
   if (path.empty()) {
     goToFileBrowser("/");
     return;
@@ -406,6 +416,7 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
 
 void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefresh) {
   readerReturn = ReaderReturn::Home;
+  shell = ReaderReturn::Home;
   if (initialMenuItem == HomeMenuItem::NONE && currentActivity) {
     const auto& activityName = currentActivity->name;
     if (activityName == "FileBrowser") {

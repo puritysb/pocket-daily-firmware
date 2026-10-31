@@ -11,6 +11,7 @@
 // render lock (RenderLock) guards the few members both touch after onEnter.
 //
 #include <cstring>
+#include <string>
 
 #include "activities/Activity.h"
 #include "pocket_daily/ContentViewState.h"
@@ -34,6 +35,10 @@ class PocketDailyActivity final : public Activity {
   bool paintSleepFrame() override;
 
  private:
+  // The book Continue Reading resumes (PocketDaily::Home::continueReadingPath),
+  // resolved on entry; empty when no book on the card has been read.
+  std::string continuePath;
+
   // Compact row for the local book, one of the companion's cards or the daily
   // word. Fixed buffers keep the render-task stack bounded on the no-PSRAM C3.
   struct OverviewRow {

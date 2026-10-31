@@ -66,13 +66,12 @@ Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
 
 ## Versions and releases
 
-- Product version 0.1.0, `firmwareLineage` 2 (lineage 1 = `1.0.0-beta.*` and
-  `1.0.0-dev-*`). `/api/status` reports lineage and CrossPoint base. Contract:
-  `docs/product-versioning.md`.
-- 0.x releases are published as normal (latest) GitHub releases tagged
-  `pocket-v<version>`; `1.0.0` is the first stabilized release. Reason:
-  `/releases/latest` must not resolve to historical `v1.6.6` while every product
-  release is a prerelease. Checked 2026-10-25: `pocket-v0.1.0` is unpublished;
+- Owner decision 2026-11-01: the first release is 1.0.0 (0.x never published);
+  only release (`1.0.0`, shown "Pocket 1.0.0") and developer builds
+  (`1.0.0-dev-…`, shown "Pocket 1.0.0 dev <commit>") exist. `firmwareLineage` 2
+  (lineage 1 = old `1.0.0-beta.*`, never reused). Contract: `docs/product-versioning.md`.
+- Releases are normal (latest) GitHub releases tagged `pocket-v<version>`, so
+  `/releases/latest` never resolves to historical `v1.6.6`. Checked 2026-10-25: no `pocket-v` release is published;
   latest is `v1.6.6`, excluded by current product update parsing. No current
   app channel offers a supported image; old betas remain historical.
   Tagging needs the owner's direct confirmation and exact-image device pass.
