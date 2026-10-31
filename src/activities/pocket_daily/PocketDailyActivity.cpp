@@ -108,6 +108,13 @@ void PocketDailyActivity::onEnter() {
   // when the preceding reader page used a rotated orientation.
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
+  // A book deleted from the card (from a computer or the companion) is no longer
+  // the open book: Home then offers Library instead of a title it cannot open.
+  if (!APP_STATE.openEpubPath.empty() && !Storage.exists(APP_STATE.openEpubPath.c_str())) {
+    APP_STATE.openEpubPath.clear();
+    APP_STATE.saveToFile();
+  }
+
   exitToNearbySync = false;
   viewMode = ViewMode::Overview;
   glanceReason = GlanceReason::Ambient;
@@ -464,11 +471,7 @@ bool PocketDailyActivity::drawReadingCover(int x, int y, int width, int height) 
       coverFile.close();
     }
   }
-
-  if (!coverDrawn) {
-    renderer.drawRect(x, y, width, height, 2, true);
-    PocketDaily::HomeDraw::drawCoverPlaceholder(renderer, x, y, width, height);
-  }
+  // Without art the shared renderer draws a title card instead.
   return coverDrawn;
 }
 

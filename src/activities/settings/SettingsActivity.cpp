@@ -38,6 +38,7 @@
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
+#include "pocket_daily/FirmwareIdentity.h"
 
 namespace fui = freeink::ui;
 
@@ -579,8 +580,11 @@ void SettingsActivity::drawChrome() {
   // indicator; the rest of the screen renders through the app.
   // Version rides in the header's trailing label slot: the footer position
   // conflicts with button hints on non-touch devices.
+  // Developer image names are long; About keeps the full version.
+  char version[40];
+  PocketDaily::FirmwareIdentity::compactVersion(CROSSPOINT_VERSION, version, sizeof(version));
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_SETTINGS_TITLE),
-                 CROSSPOINT_VERSION);
+                 version);
 }
 
 void SettingsActivity::drawFooter() {

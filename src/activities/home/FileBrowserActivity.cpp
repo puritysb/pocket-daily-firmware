@@ -14,6 +14,7 @@
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "SdCardFontSystem.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
@@ -119,8 +120,11 @@ void FileBrowserActivity::loadFiles() {
   for (auto file = root.openNextFile(); file; file = root.openNextFile()) {
     file.getName(fileNameBuffer.get(), NAME_BUFFER_SIZE);
     const bool isDirectory = file.isDirectory();
+    // pocket-daily holds the firmware's Home cards, their staging area and the
+    // learning pack: product data, not reading files.
     if ((!SETTINGS.showHiddenFiles && fileNameBuffer[0] == '.') ||
-        strcmp(fileNameBuffer.get(), "System Volume Information") == 0) {
+        strcmp(fileNameBuffer.get(), "System Volume Information") == 0 ||
+        (basepath == "/" && strcmp(fileNameBuffer.get(), "pocket-daily") == 0)) {
       continue;
     }
 
@@ -203,6 +207,12 @@ void FileBrowserActivity::prewarmRowGlyphs(const int start) {
 }
 
 void FileBrowserActivity::onEnter() {
+  {
+    // File names can hold scripts the built-in UI faces lack (Korean, Japanese,
+    // Chinese). Borrow the Library's single bounded glyph provider until exit.
+    RenderLock lock(*this);
+    sdFontSystem.ensureLibraryUiFont(renderer);
+  }
   UiListActivity::onEnter();
 
   fileNameBuffer = makeUniqueNoThrow<char[]>(NAME_BUFFER_SIZE);
@@ -230,6 +240,7 @@ void FileBrowserActivity::onEnter() {
 }
 
 void FileBrowserActivity::onExit() {
+  sdFontSystem.releaseLoaded(renderer);
   Activity::onExit();
   files.clear();
   fileNameBuffer.reset();

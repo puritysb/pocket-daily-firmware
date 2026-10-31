@@ -122,3 +122,5 @@ STR_READING_OFFER_FORMAT: "%s: %d%% · 이동할까요?"
 STR_SLEEP_WAKE_INDICATOR: "절전 화면 WAKE 표시"
 
 STR_POCKET_NO_EVENTS: "저장된 일정이 없습니다"
+STR_POCKET_READING_EMPTY: "열린 책이 없습니다"
+STR_POCKET_READING_START: "Library에서 책을 고르세요"

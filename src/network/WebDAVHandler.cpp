@@ -9,7 +9,8 @@
 #include "util/TaskWatchdog.h"
 
 namespace {
-constexpr const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
+// pocket-daily holds the firmware's Home cards, their staging area and the learning pack.
+constexpr const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache", "pocket-daily"};
 
 // RFC 1123 date format helper: "Sun, 06 Nov 1994 08:49:37 GMT"
 // ESP32 doesn't have real-time clock set by default, so we use a fixed epoch date

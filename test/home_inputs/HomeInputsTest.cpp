@@ -37,6 +37,7 @@ class HomeInputsTest : public testing::Test {
   }
   void open(const std::string& title, const std::string& author) {
     APP_STATE.openEpubPath = "/Books/reading.epub";
+    FakeSD::files[APP_STATE.openEpubPath] = {'P', 'K'};
     RECENT_BOOKS.books.push_back({APP_STATE.openEpubPath, title, author, ""});
   }
   static void expectText(const char* actual, const std::string& expected) {
@@ -88,6 +89,7 @@ TEST_F(HomeInputsTest, LongTitlesKeepTheirMeaningfulPrefixIncludingMixedWidthTex
 
 TEST_F(HomeInputsTest, KoreanFilenameFallbackAlsoStopsAtACompleteSyllable) {
   APP_STATE.openEpubPath = "/Books/" + titlePrefix + "요.epub";
+  FakeSD::files[APP_STATE.openEpubPath] = {'P', 'K'};
   OpenBook book{};
   EXPECT_EQ(readOpenBook(book), nullptr);
   expectText(book.title, titlePrefix);
@@ -119,3 +121,12 @@ TEST_F(HomeInputsTest, EmptyReadingStateClearsBothFields) {
   EXPECT_EQ(book.percent, -1);
 }
 }  // namespace
+
+TEST_F(HomeInputsTest, OpenBookDeletedFromTheCardIsNoLongerShown) {
+  open("Pride and Prejudice", "Jane Austen");
+  FakeSD::files.erase(APP_STATE.openEpubPath);
+  OpenBook book{};
+  EXPECT_EQ(readOpenBook(book), nullptr);
+  EXPECT_FALSE(book.valid);
+  EXPECT_STREQ(book.title, "");
+}

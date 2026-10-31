@@ -71,7 +71,7 @@ void rollGlanceToToday(PocketDaily::AppGlance::Snapshot& snapshot, const time_t 
 
 const RecentBook* readOpenBook(OpenBook& out) {
   out.clear();
-  if (APP_STATE.openEpubPath.empty()) return nullptr;
+  if (APP_STATE.openEpubPath.empty() || !Storage.exists(APP_STATE.openEpubPath.c_str())) return nullptr;
 
   out.valid = true;
   const RecentBook* found = nullptr;

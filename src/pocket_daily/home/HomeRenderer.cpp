@@ -75,6 +75,33 @@ void briefWeatherLabel(char* out, const size_t cap, const PocketDaily::Weather& 
     snprintf(out + strlen(out), cap - strlen(out), " \xC2\xB7 %s%s", snapshotDate, stale ? " SAVED" : "");
 }
 
+// A typeset stand-in for a book without cover art: the title and author on a
+// framed card with a spine. Real artwork is never invented.
+void drawTitleCover(const GfxRenderer& renderer, const Env& env, const Reading& reading, const int x, const int y,
+                    const int width, const int height) {
+  if (width <= 24 || height <= 36) return;
+  renderer.drawRect(x, y, width, height, 2, true);
+  renderer.drawLine(x + 7, y, x + 7, y + height, 3, true);
+  const int innerX = x + 20;
+  const int innerW = width - 32;
+  const int titleFont = env.text.resolve(reading.title, UI_12_FONT_ID);
+  const int titleAdvance = renderer.getLineHeight(titleFont) + 3;
+  const int authorFont = env.text.resolve(reading.author, SMALL_FONT_ID);
+  const int authorH = reading.author[0] ? renderer.getLineHeight(authorFont) + 12 : 0;
+  const int maxLines = std::max(1, std::min(6, (height - 32 - authorH) / titleAdvance));
+  const auto lines = renderer.wrappedText(titleFont, reading.title, innerW, maxLines, EpdFontFamily::BOLD);
+  int ty = y + std::max(16, (height - static_cast<int>(lines.size()) * titleAdvance - authorH) / 2);
+  for (const auto& line : lines) {
+    renderer.drawText(titleFont, innerX, ty, line.c_str(), true, EpdFontFamily::BOLD);
+    ty += titleAdvance;
+  }
+  if (reading.author[0]) {
+    renderer.drawLine(innerX, ty + 4, innerX + std::min(innerW, 48), ty + 4, 2, true);
+    renderer.drawText(authorFont, innerX, ty + 12, renderer.truncatedText(authorFont, reading.author, innerW).c_str(),
+                      true);
+  }
+}
+
 void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   const auto& m = env.metrics;
   const auto& s = view.strings;
@@ -94,7 +121,9 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   const Reading& renderReadingSnapshot = view.reading;
   auto fontForText = [&](int uiFontId, const char* text) { return env.text.resolve(text, uiFontId); };
   auto drawReadingCover = [&](int x, int y, int width, int height) {
-    return env.drawCover && env.drawCover(env.context, renderer, x, y, width, height);
+    if (env.drawCover && env.drawCover(env.context, renderer, x, y, width, height)) return true;
+    drawTitleCover(renderer, env, renderReadingSnapshot, x, y, width, height);
+    return false;
   };
   using HomeDraw::drawForecastGrid;
   using HomeDraw::drawWeatherPlaceholder;
@@ -134,30 +163,93 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     return y + headerH + 7;
   };
 
+  auto centeredIn = [&](int font, int x, int cw, int y, const char* text, EpdFontFamily::Style style) {
+    const std::string fitted = renderer.truncatedText(font, text, cw, style);
+    renderer.drawText(font, x + std::max(0, (cw - renderer.getTextWidth(font, fitted.c_str(), style)) / 2), y,
+                      fitted.c_str(), true, style);
+  };
+
   auto drawReading = [&](int x, int y, int cw, int ch) {
-    // Keep title, artwork and progress together when the Daily panel is off.
-    const int readingH = std::min(ch, cw * 3 / 4 + 24);
-    y += (ch - readingH) / 2;
-    ch = readingH;
     const int panelBottom = y + ch;
     renderer.drawRect(x, y, cw, ch, 2, true);
-    const bool hasBook = renderReadingSnapshot.valid;
-    if (!hasBook) {
+    if (!renderReadingSnapshot.valid) {
+      // The whole panel says what is missing and names the control below that fixes it.
       y = sectionHeader(x + 12, y + 10, cw - 24, s.continueReading, carouselPosition);
-      renderer.drawCenteredText(UI_10_FONT_ID, y + (panelBottom - y) / 2 - line10, s.noOpenBook, true,
-                                EpdFontFamily::BOLD);
-      renderer.drawCenteredText(SMALL_FONT_ID, y + (panelBottom - y) / 2 + 6, s.startReading, true);
+      const int emptyFont = fontForText(UI_12_FONT_ID, s.noOpenBook);
+      const int hintFont = fontForText(UI_10_FONT_ID, s.startReading);
+      const int mid = y + (panelBottom - y) / 2;
+      centeredIn(emptyFont, x + 12, cw - 24, mid - renderer.getLineHeight(emptyFont) - 4, s.noOpenBook,
+                 EpdFontFamily::BOLD);
+      centeredIn(hintFont, x + 12, cw - 24, mid + 8, s.startReading, EpdFontFamily::REGULAR);
       return;
     }
 
-    // A portrait book sits inside a stable column. Turning the Daily panel
-    // off adds breathing room, never a taller/stretched book frame.
+    auto drawProgress = [&](int textX, int textW, int bottom) {
+      if (renderReadingSnapshot.percent < 0) return;
+      char pct[8];
+      snprintf(pct, sizeof(pct), "%d%%", renderReadingSnapshot.percent);
+      const int progressY = bottom - line12 - 24;
+      renderer.drawText(UI_12_FONT_ID, textX, progressY, pct, true, EpdFontFamily::BOLD);
+      const char* resume = "RESUME";
+      const int resumeW = renderer.getTextWidth(SMALL_FONT_ID, resume, EpdFontFamily::BOLD);
+      renderer.drawText(SMALL_FONT_ID, textX + textW - resumeW, progressY + line12 - line10, resume, true,
+                        EpdFontFamily::BOLD);
+      const int barY = bottom - 10;
+      renderer.drawLine(textX, barY, textX + textW, barY);
+      const int fillW = textW * renderReadingSnapshot.percent / 100;
+      if (fillW > 0) renderer.drawLine(textX, barY - 2, textX + fillW, barY - 2, 4, true);
+    };
+
+    if (ch > cw) {
+      // A tall panel (portrait with the Daily panel off): the cover takes the
+      // height above a full-width title, author and progress block.
+      const int textX = x + 14;
+      const int textW = cw - 28;
+      const int labelFont = fontForText(SMALL_FONT_ID, s.continueReading);
+      int ty = y + 12;
+      renderer.drawText(labelFont, textX, ty, s.continueReading, true, EpdFontFamily::BOLD);
+      if (carouselPosition[0]) {
+        const int posW = renderer.getTextWidth(SMALL_FONT_ID, carouselPosition);
+        renderer.drawText(SMALL_FONT_ID, x + cw - 14 - posW, ty, carouselPosition, true);
+      }
+      ty += renderer.getLineHeight(labelFont) + 12;
+      const int titleFont = fontForText(UI_12_FONT_ID, renderReadingSnapshot.title);
+      const int titleAdvance = renderer.getLineHeight(titleFont) + 2;
+      const int authorH = renderReadingSnapshot.author[0] ? renderer.getLineHeight(SMALL_FONT_ID) + 6 : 0;
+      const int progressH = renderReadingSnapshot.percent >= 0 ? line12 + 34 : 0;
+      const int textBlock = titleAdvance * 2 + authorH + progressH + 16;
+      const int coverH = std::max(0, std::min(panelBottom - ty - textBlock, (textW - 40) * 3 / 2));
+      const int coverW = coverH * 2 / 3;
+      if (coverW >= 60) {
+        drawReadingCover(x + (cw - coverW) / 2, ty, coverW, coverH);
+        ty += coverH + 14;
+      }
+      const auto titleLines =
+          renderer.wrappedText(titleFont, renderReadingSnapshot.title, textW, 2, EpdFontFamily::BOLD);
+      for (const auto& line : titleLines) {
+        renderer.drawText(titleFont, textX, ty, line.c_str(), true, EpdFontFamily::BOLD);
+        ty += titleAdvance;
+      }
+      if (renderReadingSnapshot.author[0]) {
+        const int authorFont = fontForText(SMALL_FONT_ID, renderReadingSnapshot.author);
+        renderer.drawText(authorFont, textX, ty + 4,
+                          renderer.truncatedText(authorFont, renderReadingSnapshot.author, textW).c_str(), true);
+      }
+      drawProgress(textX, textW, panelBottom);
+      return;
+    }
+
+    // A wide panel: cover column beside the title, author and progress.
+    const int readingH = std::min(ch, cw * 3 / 4 + 24);
+    y += (ch - readingH) / 2;
+    ch = readingH;
+    const int wideBottom = y + ch;
     const int coverColumn = cw * 47 / 100;
     const int coverH = std::min(ch - 24, (coverColumn - 24) * 3 / 2);
     const int coverW = coverH * 2 / 3;
     drawReadingCover(x + (coverColumn - coverW) / 2, y + (ch - coverH) / 2, coverW, coverH);
     const int metaX = x + coverColumn;
-    renderer.drawLine(metaX, y, metaX, panelBottom, 2, true);
+    renderer.drawLine(metaX, y, metaX, wideBottom, 2, true);
     const int textX = metaX + 14;
     const int textW = x + cw - textX - 13;
     const char* readingLabel = s.continueReading;
@@ -182,20 +274,7 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
       renderer.drawText(authorFont, textX, ty,
                         renderer.truncatedText(authorFont, renderReadingSnapshot.author, textW).c_str(), true);
     }
-    if (renderReadingSnapshot.percent >= 0) {
-      char pct[8];
-      snprintf(pct, sizeof(pct), "%d%%", renderReadingSnapshot.percent);
-      const int progressY = panelBottom - line12 - 24;
-      renderer.drawText(UI_12_FONT_ID, textX, progressY, pct, true, EpdFontFamily::BOLD);
-      const char* resume = "RESUME";
-      const int resumeW = renderer.getTextWidth(SMALL_FONT_ID, resume, EpdFontFamily::BOLD);
-      renderer.drawText(SMALL_FONT_ID, textX + textW - resumeW, progressY + line12 - line10, resume, true,
-                        EpdFontFamily::BOLD);
-      const int barY = panelBottom - 10;
-      renderer.drawLine(textX, barY, textX + textW, barY);
-      const int fillW = textW * renderReadingSnapshot.percent / 100;
-      if (fillW > 0) renderer.drawLine(textX, barY - 2, textX + fillW, barY - 2, 4, true);
-    }
+    drawProgress(textX, textW, wideBottom);
   };
 
   auto drawStudy = [&](int x, int y, int cw, int ch) {
@@ -342,7 +421,9 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   const PocketDaily::Card& renderPocketSnapshot = *view.pocketCard;
   auto fontForText = [&](int uiFontId, const char* text) { return env.text.resolve(text, uiFontId); };
   auto drawReadingCover = [&](int x, int y, int width, int height) {
-    return env.drawCover && env.drawCover(env.context, renderer, x, y, width, height);
+    if (env.drawCover && env.drawCover(env.context, renderer, x, y, width, height)) return true;
+    drawTitleCover(renderer, env, renderReadingSnapshot, x, y, width, height);
+    return false;
   };
   using HomeDraw::drawForecastGrid;
   using HomeDraw::drawWeatherPoster;

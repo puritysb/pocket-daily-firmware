@@ -639,8 +639,8 @@ STR_SLEEP_WAKE_INDICATOR: "Sleep WAKE indicator"
 
 STR_POCKET_NO_EVENTS: "No saved events"
 
-STR_POCKET_READING_EMPTY: "Your next book starts here"
-STR_POCKET_READING_START: "Open Library to choose a book"
+STR_POCKET_READING_EMPTY: "No book open"
+STR_POCKET_READING_START: "Choose a book in Library"
 
 STR_POCKET_ASLEEP: "Sleeping"
 

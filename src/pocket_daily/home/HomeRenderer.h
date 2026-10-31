@@ -67,8 +67,8 @@ struct Reading {
 struct Strings {
   const char* pocketDaily = "Pocket Daily";
   const char* continueReading = "Continue Reading";
-  const char* noOpenBook = "Your next book starts here";
-  const char* startReading = "Open Library to choose a book";
+  const char* noOpenBook = "No book open";
+  const char* startReading = "Choose a book in Library";
   const char* study = "Today's Study";
   const char* myCards = "My Cards";
   const char* word = "Daily Word";

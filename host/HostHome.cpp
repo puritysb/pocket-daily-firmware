@@ -99,13 +99,9 @@ PocketDaily::Home::Env hostEnv(GfxRenderer& renderer, const UserCards& cards) {
     }
     r.drawLine(x + 20, y + height - 2, x + width - 20, y + height - 2, 2, true);
   };
-  env.drawCover = [](void*, GfxRenderer& r, int x, int y, int width, int height) {
-    // Use the device's no-art book illustration, inside the shared portrait
-    // frame. A sample is not a decoded cover or a connected-reader mirror.
-    r.drawRect(x, y, width, height, 2, true);
-    PocketDaily::HomeDraw::drawCoverPlaceholder(r, x, y, width, height);
-    return true;
-  };
+  // A sample has no decoded cover: the shared renderer draws its title card,
+  // as the device does for a book without cover art.
+  env.drawCover = [](void*, GfxRenderer&, int, int, int, int) { return false; };
   return env;
 }
 
