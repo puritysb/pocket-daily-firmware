@@ -287,8 +287,14 @@ bool ActivityManager::goToPocketDaily() {
     LOG_ERR("ACT", "OOM: PocketDailyActivity");
     return false;
   }
+  shell = ReaderReturn::PocketDaily;
   replaceActivity(std::move(pocketDaily));
   return true;
+}
+
+void ActivityManager::goToShell() {
+  if (shell == ReaderReturn::PocketDaily && goToPocketDaily()) return;
+  goHome();
 }
 
 void ActivityManager::goToPocketNearbySync(const bool autoJoinSavedNetwork, const bool firstSetup) {
@@ -317,6 +323,8 @@ void ActivityManager::goToUsbDrive() {
 void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToFileBrowser(std::string path) {
+  // The file browser is a stock screen: books opened there return Home.
+  shell = ReaderReturn::Home;
   replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));
 }
 
@@ -340,10 +348,10 @@ void ActivityManager::goToBrowser() {
 }
 
 void ActivityManager::goToReader(std::string path, const bool allowFastInitialRefresh) {
-  // Opening a book returns Home unless the caller says otherwise
-  // (goToReaderFrom, resumeReader): an origin left over from an earlier book
-  // must not send a book opened from the file browser back to Pocket Daily.
-  readerReturn = ReaderReturn::Home;
+  // A book returns to the shell the user came from (a book opened from Library
+  // entered from Pocket Daily returns there) unless the caller says otherwise
+  // (goToReaderFrom, resumeReader). The file browser is reached only from Home.
+  readerReturn = shell;
   if (path.empty()) {
     goToFileBrowser("/");
     return;
@@ -406,6 +414,7 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
 
 void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefresh) {
   readerReturn = ReaderReturn::Home;
+  shell = ReaderReturn::Home;
   if (initialMenuItem == HomeMenuItem::NONE && currentActivity) {
     const auto& activityName = currentActivity->name;
     if (activityName == "FileBrowser") {

@@ -15,27 +15,19 @@ inline constexpr int LINEAGE = 2;
 inline constexpr char CROSSPOINT_BASE[] = "1.6.5";
 inline constexpr char CROSSPOINT_COMMIT[] = "93e98bb78702e29868a16a13b80c40e6b36ccdff";
 
-// What screens show (docs/product-versioning.md "Display"). The embedded
-// version (updater comparison, /api/status, tag checks) is unchanged:
-//   release   0.1.0                    -> "0.1.0"
-//   beta      0.1.0-beta.3             -> "0.1.0 beta 3"
-//   candidate 0.1.0-rc+<hash>          -> "0.1.0 RC"
-//   developer 0.1.0-dev-<branch>-<commit>[-w<worktree>] -> "0.1.0 dev <commit>"
+// What screens show (docs/product-versioning.md "Display"): only a release and
+// a developer image are told apart, both marked as Pocket Daily so they never
+// read as a stock CrossPoint version. The embedded version (updater comparison,
+// /api/status, tag checks) is unchanged:
+//   release   1.0.0                                          -> "Pocket 1.0.0"
+//   developer 1.0.0-dev-<branch>-<commit>[-w<worktree>]       -> "Pocket 1.0.0 dev <commit>"
 inline void displayVersion(const char* full, char* out, size_t cap) {
   if (!out || cap == 0) return;
   out[0] = '\0';
   if (!full) return;
-  if (const char* beta = strstr(full, "-beta.")) {
-    snprintf(out, cap, "%.*s beta %s", static_cast<int>(beta - full), full, beta + 6);
-    return;
-  }
-  if (const char* rc = strstr(full, "-rc+")) {
-    snprintf(out, cap, "%.*s RC", static_cast<int>(rc - full), full);
-    return;
-  }
   const char* dev = strstr(full, "-dev-");
   if (!dev) {
-    snprintf(out, cap, "%s", full);
+    snprintf(out, cap, "Pocket %s", full);
     return;
   }
   const char* end = full + strlen(full);
@@ -45,10 +37,11 @@ inline void displayVersion(const char* full, char* out, size_t cap) {
   const char* commit = end;
   while (commit > dev + 5 && commit[-1] != '-') --commit;
   if (commit <= dev + 5 || end - commit < 7) {
-    snprintf(out, cap, "%.*s dev", static_cast<int>(dev - full), full);
+    snprintf(out, cap, "Pocket %.*s dev", static_cast<int>(dev - full), full);
     return;
   }
-  snprintf(out, cap, "%.*s dev %.*s", static_cast<int>(dev - full), full, static_cast<int>(end - commit), commit);
+  snprintf(out, cap, "Pocket %.*s dev %.*s", static_cast<int>(dev - full), full, static_cast<int>(end - commit),
+           commit);
 }
 
 }  // namespace PocketDaily::FirmwareIdentity

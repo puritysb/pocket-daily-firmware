@@ -58,6 +58,9 @@ class ActivityManager {
 
   // Product shell that opened the current book; leaving the book returns there.
   ReaderReturn readerReturn = ReaderReturn::Home;
+  // Shell the user last entered (Home or Pocket Daily). Library and books opened
+  // from it return there.
+  ReaderReturn shell = ReaderReturn::Home;
 
   // Task to render and display the activity
   TaskHandle_t renderTaskHandle = nullptr;
@@ -110,6 +113,8 @@ class ActivityManager {
   // Reopen a book from inside the reader flow (after KOReader sync, the next
   // book from the end-of-book menu): the origin of the current book is kept.
   void resumeReader(std::string path);
+  // Back from a screen both shells open (Library): Pocket Daily or Home.
+  void goToShell();
   // Leave the book by Back or the end-of-book exit: the opening shell, else Home.
   void leaveReader();
   void goToSleep(bool fromTimeout = false);

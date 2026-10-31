@@ -130,3 +130,15 @@ TEST_F(HomeInputsTest, OpenBookDeletedFromTheCardIsNoLongerShown) {
   EXPECT_FALSE(book.valid);
   EXPECT_STREQ(book.title, "");
 }
+
+TEST_F(HomeInputsTest, WithoutAnOpenBookContinueReadingFallsBackToTheMostRecentBookOnTheCard) {
+  // Stock Home shows the first recent book; Pocket Daily must show the same one.
+  RECENT_BOOKS.books.push_back({"/Books/gone.epub", "Gone", "", ""});
+  RECENT_BOOKS.books.push_back({"/Books/neko.epub", "吾輩は猫である", "夏目漱石", ""});
+  FakeSD::files["/Books/neko.epub"] = {'P', 'K'};
+  EXPECT_EQ(PocketDaily::Home::continueReadingPath(), "/Books/neko.epub");
+  OpenBook book{};
+  ASSERT_NE(readOpenBook(book), nullptr);
+  EXPECT_TRUE(book.valid);
+  expectText(book.title, "吾輩は猫である");
+}

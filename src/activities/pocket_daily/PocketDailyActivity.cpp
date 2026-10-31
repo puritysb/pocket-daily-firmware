@@ -108,12 +108,9 @@ void PocketDailyActivity::onEnter() {
   // when the preceding reader page used a rotated orientation.
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
-  // A book deleted from the card (from a computer or the companion) is no longer
-  // the open book: Home then offers Library instead of a title it cannot open.
-  if (!APP_STATE.openEpubPath.empty() && !Storage.exists(APP_STATE.openEpubPath.c_str())) {
-    APP_STATE.openEpubPath.clear();
-    APP_STATE.saveToFile();
-  }
+  // Same book as stock Home's first recent entry when no book is open; a book
+  // deleted from the card drops out instead of offering a title it cannot open.
+  continuePath = PocketDaily::Home::continueReadingPath();
 
   exitToNearbySync = false;
   viewMode = ViewMode::Overview;
@@ -147,8 +144,7 @@ void PocketDailyActivity::loop() { handleButtons(); }
 
 void PocketDailyActivity::resumeReading() {
   // Leaving the book returns here (ActivityManager::leaveReader).
-  if (!APP_STATE.openEpubPath.empty())
-    activityManager.goToReaderFrom(ReaderReturn::PocketDaily, APP_STATE.openEpubPath);
+  if (!continuePath.empty()) activityManager.goToReaderFrom(ReaderReturn::PocketDaily, continuePath);
 }
 
 void PocketDailyActivity::onExit() {
@@ -213,14 +209,14 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
     const char* title = nullptr;
     const char* author = nullptr;
     for (const auto& book : RECENT_BOOKS.getBooks()) {
-      if (book.path == APP_STATE.openEpubPath) {
+      if (book.path == continuePath) {
         title = book.title.c_str();
         author = book.author.c_str();
         break;
       }
     }
     if (!title || !title[0]) {
-      const char* path = APP_STATE.openEpubPath.c_str();
+      const char* path = continuePath.c_str();
       const char* slash = strrchr(path, '/');
       title = slash ? slash + 1 : path;
     }
@@ -251,7 +247,7 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
   // Pocket Daily profile (docs/pocket-profile-v1.md). Retired provider and
   // monitoring items still parse but never produce a row.
   PocketDaily::Home::RowAvailability available;
-  available.book = !APP_STATE.openEpubPath.empty();
+  available.book = !continuePath.empty();
   available.appCards = appCards && appCards->count;
   PocketDaily::Home::RowSource sources[PocketDaily::DailyProfile::HOME_ITEM_CAP];
   const int count = PocketDaily::Home::homeRowSources(PocketDaily::DailyProfile::current(), available, sources);
@@ -360,7 +356,7 @@ void PocketDailyActivity::handleButtons() {
   }
   if (gpio.wasReleased(HalGPIO::BTN_CONFIRM) && n > 0) {
     if (rows[selected].reading) {
-      if (APP_STATE.openEpubPath.empty())
+      if (continuePath.empty())
         activityManager.goToLibrary();
       else
         resumeReading();
@@ -386,7 +382,7 @@ void PocketDailyActivity::handleButtons() {
   }
   // With neither a book nor a card row the ambient Daily Brief is the face;
   // Confirm there resumes the open book.
-  if (ambientGlanceShown && gpio.wasReleased(HalGPIO::BTN_CONFIRM) && !APP_STATE.openEpubPath.empty()) {
+  if (ambientGlanceShown && gpio.wasReleased(HalGPIO::BTN_CONFIRM) && !continuePath.empty()) {
     resumeReading();
     return;
   }
@@ -662,8 +658,7 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
     // Confirm resumes the open book — label it only when there is one. Left
     // and Right are physical positions here (handleButtons reads raw gpio), so
     // they bypass the front-button remap the mapped labels follow.
-    auto labels =
-        mappedInput.mapLabels(tr(STR_POCKET_HOME), APP_STATE.openEpubPath.empty() ? "" : tr(STR_POCKET_READ), "", "");
+    auto labels = mappedInput.mapLabels(tr(STR_POCKET_HOME), continuePath.empty() ? "" : tr(STR_POCKET_READ), "", "");
     labels.btn3 = tr(STR_ARTICLES);
     labels.btn4 = tr(STR_POCKET_SYNC);
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -717,7 +712,7 @@ void PocketDailyActivity::render(RenderLock&&) {
   // With neither a book nor a card row, the personal glance remains useful as
   // an offline face (weather/today). It never outranks items that can be
   // opened.
-  if (n == 0 && (glanceSnapshot.glance.valid || !APP_STATE.openEpubPath.empty())) {
+  if (n == 0 && (glanceSnapshot.glance.valid || !continuePath.empty())) {
     renderGlance(GlanceReason::Ambient);
     ambientGlanceShown = true;
     return;

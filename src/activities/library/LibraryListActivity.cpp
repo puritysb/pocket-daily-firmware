@@ -696,7 +696,7 @@ void LibraryListActivity::handleBackAction() {
     nav.selected = 0;
     requestUpdate();
   } else {
-    onGoHome();
+    activityManager.goToShell();
   }
 }
 
