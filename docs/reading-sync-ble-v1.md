@@ -56,8 +56,9 @@ connection-stage timeout separately from command acknowledgement failure and
 explains the opt-in requirement instead of attributing it to charging.
 Mac UI Connect from ordinary Home passed on X3/X4 developer w8112bfb3:
 `home-connect → app-wifi`, minimum free/block 67,884/61,428 B (X3) and
-68,132/61,428 B (X4). No sleep-cycle endpoint was used. Final held-input guard
-validation and physical button restoration are tracked in the latest app handoff.
+68,132/61,428 B (X4). No sleep-cycle endpoint was used. Final held-input guard w2edaaddd also passed X3/X4: minimum free/block
+71,156/61,428 B and 67,904/61,428 B respectively. Physical button restoration
+remains awaiting the owner; see the latest app handoff.
 Private local evidence: `build/home-connect-20261102/`. No battery-current or
 overnight claim follows from these functional samples.
 
