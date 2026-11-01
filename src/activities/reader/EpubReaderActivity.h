@@ -1,5 +1,4 @@
 #pragma once
-
 #include <Epub.h>
 #include <Epub/FootnoteEntry.h>
 #include <Epub/PageLink.h>
@@ -19,6 +18,7 @@
 #include "ReaderToolbarUi.h"
 #include "activities/Activity.h"
 #include "components/OptionPopup.h"
+#include "pocket_daily/nearby_sync/KeyboardRemote.h"
 
 class EpubReaderActivity final : public ReaderActivity {
   std::shared_ptr<Epub> epub;
@@ -36,6 +36,8 @@ class EpubReaderActivity final : public ReaderActivity {
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
   int8_t pendingManualTurn = 0;
+  Pocket::KeyboardRemote::Failure remoteFailure = Pocket::KeyboardRemote::Failure::None;
+  uint32_t remoteMessageAt = 0;
   bool pendingPercentJump = false;
   float pendingSpineProgress = 0.0f;
   bool pendingScreenshot = false;
@@ -196,7 +198,7 @@ class EpubReaderActivity final : public ReaderActivity {
   // font (CJK titles, see UiCjkFont): such text is prewarmed with the page's glyphs.
   std::string statusBarTitle();
 
-  void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
+  bool renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);
   void renderStatusBar();
   // Pages laid out per incremental-build pump: on the render path (catching up to the page

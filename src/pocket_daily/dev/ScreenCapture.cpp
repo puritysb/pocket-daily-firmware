@@ -6,6 +6,8 @@
 #include <Epub.h>
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
+#include <HalGPIO.h>
+#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <LibraryBuilder.h>
 #include <LibraryIndexFile.h>
@@ -20,6 +22,7 @@
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/RenderLock.h"
+#include "pocket_daily/nearby_sync/KeyboardRemote.h"
 #include "pocket_daily/preview/LayoutInputsDevice.h"
 #include "pocket_daily/product_identity.h"
 #include "util/ScreenshotUtil.h"
@@ -317,6 +320,7 @@ bool requestReader(uint32_t run, ReaderAction action, uint32_t pages) {
     HalFile book = Storage.open(path);
     if (!book || book.isDirectory() || !validBookSize(book.size())) return false;
   }
+  if (action == ReaderAction::KeyboardRemote && Storage.exists("/.pocket/dev-remote.jsonl")) return false;
   if (action == ReaderAction::Walk) {
     if (!validWalkPages(pages) || Storage.exists(FIXTURE) || Storage.exists(WALK_RESULT) ||
         Storage.exists(WALK_IMAGES_RUN) || Storage.exists(WALK_IMAGES) || !writeTicket(WALK_PAINT_RUN, run) ||
@@ -355,7 +359,7 @@ bool beginReader() {
   const uint32_t run = readTicket(REQUEST);
   if (!run || !armBoot('S')) return false;  // recovery route before book parsing
   const uint32_t action = readTicket(ACTION);
-  if (action > LIBRARY_ACTION_TICKET) return false;
+  if (action > LIBRARY_ACTION_TICKET && action != static_cast<uint32_t>(ReaderAction::KeyboardRemote)) return false;
   if (hasLibraryArtifacts() || action == LIBRARY_ACTION_TICKET) {
     if (action != LIBRARY_ACTION_TICKET || !loadLibrary(run) || libraryEvidence.phase != LibraryPhase::Admitted ||
         libraryEvidence.pages != readTicket(WALK_PAGES))
@@ -452,6 +456,7 @@ bool loadImageDiagnostics(uint32_t run, epub_image_diagnostics::Snapshot& out) {
          epub_image_diagnostics::decode(bytes, sizeof(bytes), run, out);
 }
 bool readerActive() { return activeRun != 0; }
+bool keyboardRemoteTrialActive() { return activeRun && readerAction == ReaderAction::KeyboardRemote; }
 bool readerWalkActive() { return activeRun && readerAction == ReaderAction::Walk; }
 size_t readWalkPerformance(uint32_t run, uint8_t* out, size_t capacity) {
   WalkEvidence evidence;
@@ -503,8 +508,64 @@ bool loadWalkFailure(uint32_t run, BuildFailureLog::Entry& entry) {
   return file && file.size() == sizeof(bytes) && file.read(bytes, sizeof(bytes)) == sizeof(bytes) &&
          BuildFailureLog::decode(bytes, sizeof(bytes), entry);
 }
+namespace {
+void remoteTrialLoop() {
+  static uint32_t lastSample = 0;
+  static bool attempted = false;
+  static bool stopped = false;
+  const uint32_t elapsed = millis() - started;
+  if (!attempted && elapsed >= 30000) {
+    Pocket::KeyboardRemote::arm();
+    attempted = true;
+  }
+  if (!stopped && elapsed >= 450000) {
+    Pocket::KeyboardRemote::stop();
+    stopped = true;
+  }
+  if (elapsed - lastSample >= 5000) {
+    RenderLock lock(RenderLock::Mode::Try);
+    if (!lock.ownsLock()) return;
+    lastSample = elapsed;
+    int16_t current = 0;
+    const bool hasCurrent = gpio.readBatteryCurrentMA(current);
+    // Developer-only main-loop JSON scratch. Static so the stack frame stays
+    // below 256 B; never allocated in a shipping build or shared with a task.
+    static char line[320];
+    const int bytes = snprintf(
+        line, sizeof(line),
+        "{\"run\":%lu,\"ms\":%lu,\"remote\":%u,\"free\":%lu,\"block\":%lu,\"battery\":%u,\"currentMA\":%d,"
+        "\"hasCurrent\":%u,\"remoteFailure\":%u,\"preparing\":%u,\"minFree\":%lu,\"minBlock\":%lu,\"streamed\":%lu}\n",
+        static_cast<unsigned long>(activeRun), static_cast<unsigned long>(elapsed),
+        Pocket::KeyboardRemote::active() ? 1u : 0u, static_cast<unsigned long>(ESP.getFreeHeap()),
+        static_cast<unsigned long>(ESP.getMaxAllocHeap()), powerManager.getBatteryPercentage(), current,
+        hasCurrent ? 1u : 0u, static_cast<unsigned>(Pocket::KeyboardRemote::lastFailure()),
+        Pocket::KeyboardRemote::preparing() ? 1u : 0u,
+        static_cast<unsigned long>(Pocket::KeyboardRemote::minimumFree()),
+        static_cast<unsigned long>(Pocket::KeyboardRemote::minimumBlock()),
+        static_cast<unsigned long>(Pocket::KeyboardRemote::streamingTurns()));
+    HalFile file = Storage.open("/.pocket/dev-remote.jsonl", O_WRONLY | O_CREAT | O_APPEND);
+    if (!file || bytes <= 0 || static_cast<size_t>(bytes) >= sizeof(line) ||
+        file.write(reinterpret_cast<const uint8_t*>(line), bytes) != static_cast<size_t>(bytes)) {
+      LOG_ERR("REMOTE", "Could not save trial power sample");
+    }
+  }
+  if (elapsed < 480000) return;
+  {
+    RenderLock lock;
+    save(activeRun);
+    writeTicket(SUCCESS, activeRun);
+    Storage.remove(REQUEST);
+    Storage.prepareForDeepSleep();
+  }
+  ESP.restart();  // owned fixture: do not publish synthetic reading progress
+}
+}  // namespace
 void readerLoop() {
   if (!activeRun) return;
+  if (keyboardRemoteTrialActive()) {
+    remoteTrialLoop();
+    return;
+  }
   if (activeLibrary && libraryEvidence.phase != LibraryPhase::Reading) {
     RenderLock lock(RenderLock::Mode::Try);
     if (!lock.ownsLock()) return;

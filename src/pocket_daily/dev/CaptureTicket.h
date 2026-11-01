@@ -6,7 +6,7 @@
 namespace PocketDaily::DevCapture {
 // On-SD admission bound; the EPUB parser streams bytes, never allocates this size.
 inline constexpr bool validBookSize(size_t size) { return size > 0 && size <= 4 * 1024 * 1024; }
-enum class ReaderAction : uint8_t { Capture, Seed, Accept, Advance, Walk };
+enum class ReaderAction : uint8_t { Capture, Seed, Accept, Advance, Walk, KeyboardRemote = 7 };
 // Persisted action5 requires paint evidence even if both paint files are missing.
 // Public action=walk and the in-memory ReaderAction remain unchanged.
 inline constexpr uint32_t PAINT_WALK_ACTION = 5;
@@ -34,6 +34,7 @@ inline constexpr bool readyToCapture(ReaderAction action, ReaderPhase phase) {
       return phase == ReaderPhase::Accepted;
     case ReaderAction::Advance:
       return phase == ReaderPhase::Turned;
+    case ReaderAction::KeyboardRemote:
     case ReaderAction::Walk:
       return false;  // Walk completion uses actual rendered-page evidence.
   }

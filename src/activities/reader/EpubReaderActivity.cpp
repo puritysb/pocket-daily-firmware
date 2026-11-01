@@ -52,6 +52,7 @@
 #include "pocket_daily/ReadingProgressReader.h"
 #include "pocket_daily/boot/TrialReader.h"
 #include "pocket_daily/dev/ScreenCapture.h"
+#include "pocket_daily/nearby_sync/KeyboardRemote.h"
 #include "util/BookmarkUtil.h"
 #include "util/ButtonNavigator.h"
 #include "util/CjkScript.h"
@@ -161,6 +162,7 @@ void moveFinishedBookToReadFolder(const std::string& srcPath, const std::string&
 }  // namespace
 
 EpubReaderActivity::~EpubReaderActivity() {
+  Pocket::KeyboardRemote::stop();
   flushPendingProgress(/*fromLoop=*/false);
   layoutAhead.reset();
   PocketDaily::ReaderPerf::close();
@@ -170,7 +172,7 @@ EpubReaderActivity::~EpubReaderActivity() {
   settleOverlayRefresh();
   discardOverlayPage();  // free the overlay's page snapshot if one is held
 #ifdef ENABLE_DEV_REMOTE_FLASH
-  if (PocketDaily::DevCapture::readerWalkActive()) return;
+  if ((PocketDaily::DevCapture::readerWalkActive() || PocketDaily::DevCapture::keyboardRemoteTrialActive())) return;
 #endif
 
   if (footnoteDepth > 0 && epub) {
@@ -256,7 +258,7 @@ bool EpubReaderActivity::loadBook() {
 
   readingOfferPending = PocketDaily::ReadingProgress::hasPendingOffer(*epub);
 #ifdef ENABLE_DEV_REMOTE_FLASH
-  if (PocketDaily::DevCapture::readerWalkActive()) {
+  if (PocketDaily::DevCapture::readerWalkActive() || PocketDaily::DevCapture::keyboardRemoteTrialActive()) {
     // An owned path with unchanged bytes may share the user's document digest.
     // Never consume an offer or resume/publish that document's reading state.
     currentSpineIndex = nextPageNumber = cachedSpineIndex = cachedChapterTotalPageCount = 0;
@@ -285,6 +287,7 @@ int EpubReaderActivity::bookPercentFor(const ChapterPosition& position) const {
 }
 
 void EpubReaderActivity::openReaderMenu() {
+  Pocket::KeyboardRemote::stop();
   pendingManualTurn = 0;
   if (usesToolbarMenu()) {
     // Reached from a child activity's result handler (footnotes, bookmarks,
@@ -404,6 +407,41 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  if (Pocket::KeyboardRemote::active() && (mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased())) {
+    Pocket::KeyboardRemote::stop();  // physical controls reclaim the renderer
+  }
+  if (Pocket::KeyboardRemote::active() || Pocket::KeyboardRemote::preparing()) automaticPageTurnActive = false;
+  const bool preparingRemote = Pocket::KeyboardRemote::preparing();
+  if (preparingRemote && section && !RenderLock::peek()) {
+    RenderLock lock;
+    // Finish this chapter without a radio: the incremental parser and its LUT
+    // consume the headroom NimBLE needs. Only rebuildable neighbour work is
+    // dropped; current content/progress and completed SD pages are preserved.
+    if (layoutAhead) layoutAhead->clear();
+    if (section->isPartial() && !section->isBuilding() && shownLayoutValid && !shownLayout.startBuild(*section)) {
+      Pocket::KeyboardRemote::stop();
+      recordBuildFailure();
+    }
+  }
+  {
+    RenderLock lock(RenderLock::Mode::Try);
+    if (lock.ownsLock())
+      Pocket::KeyboardRemote::loop(renderer, section && !section->isBuilding() && !section->isPartial() &&
+                                                 pageRendered.load(std::memory_order_acquire) &&
+                                                 overlay == Overlay::None);
+  }
+  if (Pocket::KeyboardRemote::takeRepaint()) requestUpdate();
+
+  const auto remoteProblem = Pocket::KeyboardRemote::takeFailure();
+  if (remoteProblem != Pocket::KeyboardRemote::Failure::None) {
+    remoteFailure = remoteProblem;
+    remoteMessageAt = millis();
+    requestUpdate();
+  } else if (remoteFailure != Pocket::KeyboardRemote::Failure::None && millis() - remoteMessageAt >= 4000) {
+    remoteFailure = Pocket::KeyboardRemote::Failure::None;
+    requestUpdate();
+  }
+
   // Any button makes layout running on the render task after a page (layOutAhead) yield.
   if (mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased()) inputQueued.store(true);
 
@@ -419,7 +457,8 @@ void EpubReaderActivity::loop() {
   // synchronously on the next turn (several seconds of no response on a 60-page prefix). Keep
   // ticking until the rebuild has passed the watermark, then fall back to the window.
   if (section && section->isBuilding() && !RenderLock::peek() && !turnQueued.load() &&
-      (section->isCatchingUp() || static_cast<int>(section->pageCount) < section->currentPage + BUILD_WINDOW_AHEAD)) {
+      (Pocket::KeyboardRemote::preparing() || section->isCatchingUp() ||
+       static_cast<int>(section->pageCount) < section->currentPage + BUILD_WINDOW_AHEAD)) {
     RenderLock lock;
     // Re-check under the lock: render() (which also holds the RenderLock) may have finalized the
     // build between the outer isBuilding() check and acquiring the lock here, in which case
@@ -760,6 +799,37 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  if (!turnGuardActive) {
+    const int8_t remote = Pocket::KeyboardRemote::takeTurn();
+    if (remote != 0) {
+      const bool atFirstPage = remote < 0 && section && section->currentPage == 0 && currentSpineIndex == 0;
+      const bool atLastPage = remote > 0 && section && !section->mayHaveMorePages() &&
+                              section->currentPage >= section->pageCount - 1 &&
+                              currentSpineIndex + 1 >= epub->getSpineItemsCount();
+      if (atLastPage || atFirstPage) {
+        Pocket::KeyboardRemote::turnAccepted(false);
+        return;
+      }
+      bool stream = false;
+      {
+        RenderLock lock;
+        const int next = section->currentPage + remote;
+        if (next >= 0 && next < static_cast<int>(section->pageCount) && !section->isPartial() &&
+            !section->isBuilding()) {
+          const auto caps = renderer.grayscaleCapabilities(HalDisplay::GrayscaleMode::Direct);
+          if (caps.supported() && caps.stripUploads && caps.base == HalDisplay::GrayscaleBase::Combined) {
+            const auto preview = section->loadPage(next);
+            stream = preview && !preview->hasImages();
+          }
+        }
+      }
+      if (!stream) Pocket::KeyboardRemote::pauseForLayout();
+      Pocket::KeyboardRemote::turnAccepted(pageTurn(remote > 0));
+      requestUpdate();
+      return;
+    }
+  }
+
   auto [prevTriggered, nextTriggered, fromTilt] = ReaderUtils::detectPageTurn(mappedInput);
   prevTriggered = prevTriggered || touch.prev;
   nextTriggered = nextTriggered || touch.next;
@@ -912,6 +982,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
   };
 
   switch (action) {
+    case EpubReaderMenuActivity::MenuAction::KEYBOARD_REMOTE:
+      Pocket::KeyboardRemote::arm();
+      requestUpdate();
+      break;
     case EpubReaderMenuActivity::MenuAction::SELECT_CHAPTER: {
       const int spineIdx = currentSpineIndex;
       // Release the section while the chapter list is up (mirrors the
@@ -1304,6 +1378,7 @@ bool EpubReaderActivity::pageTurn(bool isForwardTurn) {
       lastPageTurnTime = millis();
       return true;
     } else if (currentSpineIndex + 1 < epub->getSpineItemsCount()) {
+      if (Pocket::KeyboardRemote::active()) Pocket::KeyboardRemote::pauseForLayout();
       RenderLock lock;
       nextPageNumber = 0;
       currentSpineIndex++;
@@ -1311,6 +1386,7 @@ bool EpubReaderActivity::pageTurn(bool isForwardTurn) {
       lastPageTurnTime = millis();
       return true;
     } else {
+      Pocket::KeyboardRemote::stop();
       currentSpineIndex = epub->getSpineItemsCount();
       lastPageTurnTime = millis();
       return true;
@@ -1329,6 +1405,9 @@ bool EpubReaderActivity::pageTurn(bool isForwardTurn) {
         currentSpineIndex--;
         section.reset();
       }
+      // Changing chapter is an accepted turn, even though its page is built
+      // asynchronously. REMOTE1 must retain this pending ID through reconnect.
+      return true;
     }
   }
   return false;
@@ -1347,6 +1426,7 @@ bool EpubReaderActivity::skipPages(int amount) {
       section->currentPage = 0;
       return true;
     } else if (currentSpineIndex > 0) {
+      Pocket::KeyboardRemote::stop();
       RenderLock lock;
       nextPageNumber = 0;
       currentSpineIndex--;
@@ -1374,10 +1454,18 @@ bool EpubReaderActivity::backgroundBuildWanted() const {
 
 bool EpubReaderActivity::skipLoopDelay() {
   // The main loop holds the render lock while querying this hint.
-  return !buildHeapPaused && backgroundBuildWanted();
+  return !buildHeapPaused &&
+         (backgroundBuildWanted() || (Pocket::KeyboardRemote::preparing() && section && section->isBuilding()));
 }
 
 void EpubReaderActivity::renderBook() {
+  if (!renderer.hasFrameBuffer() &&
+      (!section || section->isBuilding() || section->isPartial() || section->currentPage < 0 ||
+       section->currentPage >= static_cast<int>(section->pageCount) || pendingSyncSaveError || pendingScreenshot ||
+       showBookmarkMessage || showDictionaryMessage || overlay != Overlay::None)) {
+    Pocket::KeyboardRemote::requestSlowRender();
+    return;
+  }
   currentPageLinks.clear();
   if (!epub) return;
   // Runs under the render task's RenderLock; catches every requestUpdate()
@@ -1761,6 +1849,12 @@ void EpubReaderActivity::renderBook() {
     // otherwise the on-disk file (finalized section, or a partial from a previous session).
     auto p = section->loadPage(section->currentPage);
     if (!p) {
+      // Cache recovery may parse or draw errors: first recover the normal
+      // framebuffer/radio-off budget, preserving this one pending turn.
+      if (!renderer.hasFrameBuffer()) {
+        Pocket::KeyboardRemote::requestSlowRender();
+        return;
+      }
       // A load can fail on a corrupt/partial SD cache. Normally we clear the cache and
       // requestUpdate() to re-parse and retry, but bound the retries: if the page keeps
       // failing, requestUpdate() would re-enter render() forever and trip the watchdog.
@@ -1802,7 +1896,11 @@ void EpubReaderActivity::renderBook() {
     discardOverlayPage();
 
     const auto start = millis();
-    renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
+    if (!renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom,
+                        orientedMarginLeft)) {
+      Pocket::KeyboardRemote::requestSlowRender();
+      return;
+    }
     LOG_DBG("ERS", "Rendered page in %dms", millis() - start);
     lastRenderCompleteMs = millis();
     markPageRendered();
@@ -1838,6 +1936,7 @@ void EpubReaderActivity::renderBook() {
   Perf::mark(Perf::STAGE_SAVE);
   Perf::endTurn();
   lastRenderDoneMs = millis();
+  Pocket::KeyboardRemote::renderFinished();
 
   showPendingSyncSaveError();
 
@@ -1850,6 +1949,26 @@ void EpubReaderActivity::renderBook() {
     GUI.drawPopup(renderer, bookmarkRemoved ? tr(STR_BOOKMARK_REMOVED) : tr(STR_BOOKMARK_ADDED));
   }
 
+  if (remoteFailure != Pocket::KeyboardRemote::Failure::None) {
+    using F = Pocket::KeyboardRemote::Failure;
+    StrId label = StrId::STR_REMOTE_UNAVAILABLE;
+    switch (remoteFailure) {
+      case F::Memory:
+        label = StrId::STR_REMOTE_LOW_MEMORY;
+        break;
+      case F::Battery:
+        label = StrId::STR_REMOTE_LOW_BATTERY;
+        break;
+      case F::Pairing:
+        label = StrId::STR_REMOTE_PAIR_FIRST;
+        break;
+      case F::None:
+      case F::Busy:
+      case F::Startup:
+        break;
+    }
+    GUI.drawPopup(renderer, I18N.get(label));
+  }
   if (showDictionaryMessage) {
     GUI.drawPopup(renderer, tr(STR_DICT_NO_DICT_SET));
   }
@@ -1913,7 +2032,8 @@ bool EpubReaderActivity::applyDeferredReposition() {
 
 bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageCount) {
 #ifdef ENABLE_DEV_REMOTE_FLASH
-  if (PocketDaily::DevCapture::readerWalkActive()) return true;
+  if ((PocketDaily::DevCapture::readerWalkActive() || PocketDaily::DevCapture::keyboardRemoteTrialActive()))
+    return true;
 #endif
   // Whole-book percent for the AgentDeck glance strip (7th byte). Same math as
   // the status bar, from the chapter's cached spine sizes when it is the current one.
@@ -1932,7 +2052,7 @@ bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
 
 void EpubReaderActivity::flushPendingProgress(const bool fromLoop) {
 #ifdef ENABLE_DEV_REMOTE_FLASH
-  if (PocketDaily::DevCapture::readerWalkActive()) return;
+  if ((PocketDaily::DevCapture::readerWalkActive() || PocketDaily::DevCapture::keyboardRemoteTrialActive())) return;
 #endif
   int spine = 0, page = 0, pageCount = 0, bookPercent = -1;
   std::optional<uint32_t> visibleOffset;
@@ -1988,6 +2108,10 @@ SectionLayout EpubReaderActivity::layoutParams(const uint16_t viewportWidth, con
 }
 
 void EpubReaderActivity::layOutAhead() {
+  // Optional neighbour parsing must never compete with the bonded radio or
+  // borrow the framebuffer while it is released for strip rendering. The
+  // current chapter is prepared radio-off through the explicit LAYOUT path.
+  if (Pocket::KeyboardRemote::active() || Pocket::KeyboardRemote::preparing()) return;
   if (!layoutAhead || !section || !shownLayoutValid || automaticPageTurnActive) return;
   // Runs on the render task after a complete page, holding the render lock; any button seen
   // by loop() (inputQueued) or a queued turn makes it stop after the page in progress.
@@ -2048,7 +2172,7 @@ std::string EpubReaderActivity::statusBarTitle() {
   return {};
 }
 
-void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
+bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft) {
   (void)orientedMarginRight;
@@ -2070,7 +2194,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     options.statusText = title.c_str();
     options.statusFontId = loadedFontId;
   }
+  if (Pocket::KeyboardRemote::streaming())
+    return ReaderPageRenderer::renderStreaming(renderer, *page, options, Pocket::KeyboardRemote::streamBuffer(),
+                                               Pocket::KeyboardRemote::STREAM_BYTES);
   ReaderPageRenderer::render(renderer, *page, options, pagesUntilFullRefresh);
+  return true;
 }
 
 void EpubReaderActivity::renderStatusBar() {
@@ -2244,6 +2372,7 @@ void EpubReaderActivity::settleOverlayRefresh() {
 }
 
 void EpubReaderActivity::openOverlay(Overlay target) {
+  Pocket::KeyboardRemote::stop();
   mappedInput.resetHomeButtonInput();
   const Overlay previous = overlay;
   overlay = target;

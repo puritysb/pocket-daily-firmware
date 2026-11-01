@@ -407,6 +407,22 @@ bool GfxRenderer::releaseFrameBufferForSleep() {
   return true;
 }
 
+bool GfxRenderer::releaseFrameBufferForRemote() {
+  if (!frameBuffer || _stripActive ||
+      std::any_of(bwBufferChunks.begin(), bwBufferChunks.end(), [](const uint8_t* chunk) { return chunk != nullptr; }))
+    return false;
+  if (!display.releaseFrameBufferForRemote()) return false;
+  frameBuffer = nullptr;
+  return true;
+}
+
+bool GfxRenderer::restoreFrameBufferAfterRemote() {
+  if (frameBuffer) return true;
+  if (!display.restoreFrameBufferAfterRemote()) return false;
+  frameBuffer = display.getFrameBuffer();
+  return frameBuffer != nullptr;
+}
+
 bool GfxRenderer::restoreFrameBufferAfterBuild() {
   buildscratch::reclaim();
   display.returnFrameBufferStorage();  // cannot fail: the allocation was never freed
@@ -742,7 +758,7 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
                            uint16_t scale = 256) {
   const EpdGlyph* glyph = ref.glyph;
   if (!glyph) return;
-  if (renderer.grayPlanesAreAbsolute()) renderMode = GfxRenderer::BW;
+  if (renderer.grayPlanesAreAbsolute() && !renderer.absoluteTextAntialiasing()) renderMode = GfxRenderer::BW;
 
   const EpdFontData* fontData = ref.data;
   const bool is2Bit = fontData->is2Bit;
@@ -771,7 +787,10 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   }
 
   const uint8_t* bitmap = renderer.getGlyphBitmap(fontData, glyph);
-  if (bitmap == nullptr) return;
+  if (bitmap == nullptr) {
+    if (width && height) renderer.noteGlyphRasterFailure();
+    return;
+  }
 
   // Logical placement of glyph pixel (0, 0) and the logical step for one move
   // along each glyph axis. Rotated text runs glyph x up the screen and glyph
@@ -815,7 +834,11 @@ void GfxRenderer::drawGlyphBitmap(const uint8_t* bitmap, const int width, const 
   const glyphBitmap::Plane plane = mode == BW              ? glyphBitmap::Plane::BW
                                    : mode == GRAYSCALE_MSB ? glyphBitmap::Plane::GrayMSB
                                                            : glyphBitmap::Plane::GrayLSB;
-  glyphBitmap::drawScaled(bitmap, width, height, twoBit, plane, state, target, clip, scale);
+  if (!target.buffer) return;
+  const auto encoded = absoluteGrayPlanes && absoluteTextAA && mode != BW
+                           ? (mode == GRAYSCALE_MSB ? glyphBitmap::Plane::AbsoluteMSB : glyphBitmap::Plane::AbsoluteLSB)
+                           : plane;
+  glyphBitmap::drawScaled(bitmap, width, height, twoBit, encoded, state, target, clip, scale);
 }
 
 // Mark for a grapheme cluster that neither the font nor the fallback font
@@ -826,7 +849,7 @@ template <TextRotation rotation = TextRotation::None>
 static void renderMissingMark(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
                               const EpdFontData* fontData, int cursorX, int cursorY, const bool pixelState,
                               const bool halfScale, uint16_t scale = 256) {
-  if (renderMode != GfxRenderer::BW || !fontData) return;
+  if ((renderMode != GfxRenderer::BW && !renderer.grayPlanesAreAbsolute()) || !fontData) return;
   int advance = fp4::toPixel(fontScale::metric(GfxRenderer::missingGlyphAdvanceFP(fontData), scale));
   if (halfScale) advance = (advance + 1) / 2;
   const int pad = std::max(1, advance / 5);
@@ -884,6 +907,8 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
     target = _stripBuf;
     rowY = static_cast<uint32_t>(phyY - _stripY0);
   }
+
+  if (!target) return;
 
   // Calculate byte position and bit position
   const uint32_t byteIndex = rowY * panelWidthBytes + (phyX / 8);
@@ -1436,6 +1461,7 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
 
   // Strip mode: clip Y range to the active band and redirect writes.
   uint8_t* target = getWriteTarget();
+  if (!target) return;
   const int originY = getWriteOriginY();
   const int writeRows = getWriteRows();
   phyY0 = std::max(phyY0, originY);
@@ -2074,7 +2100,7 @@ void GfxRenderer::clearScreen(const uint8_t color) const {
     memset(_stripBuf, color, static_cast<size_t>(panelWidthBytes) * _stripRows);
     return;
   }
-  display.clearScreen(color);
+  if (frameBuffer) display.clearScreen(color);
 }
 
 void GfxRenderer::beginStripTarget(uint8_t* scratch, int stripY0, int stripRows) const {
@@ -2124,6 +2150,7 @@ bool GfxRenderer::glyphIntersectsStrip(int x0, int y0, int x1, int y1) const {
 }
 
 void GfxRenderer::invertScreen() const {
+  if (!frameBuffer) return;
   for (uint32_t i = 0; i < frameBufferSize; i++) {
     frameBuffer[i] = ~frameBuffer[i];
   }
@@ -2136,6 +2163,7 @@ HalDisplay::RefreshMode GfxRenderer::applyPromotedRefresh(const HalDisplay::Refr
 }
 
 void GfxRenderer::displayBuffer(HalDisplay::RefreshMode refreshMode) const {
+  if (!frameBuffer) return;
   auto elapsed = millis() - start_ms;
   LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
   refreshMode = applyPromotedRefresh(refreshMode);
@@ -2143,6 +2171,7 @@ void GfxRenderer::displayBuffer(HalDisplay::RefreshMode refreshMode) const {
 }
 
 void GfxRenderer::displayBufferAsync(HalDisplay::RefreshMode refreshMode) const {
+  if (!frameBuffer) return;
   refreshMode = applyPromotedRefresh(refreshMode);
   // The async path has no turn-off-screen hook, which the sunlight fading fix
   // relies on; keep those users on the blocking path.
@@ -2166,7 +2195,7 @@ HalDisplay::GrayscaleCapabilities GfxRenderer::grayscaleCapabilities(HalDisplay:
 bool GfxRenderer::supportsAsyncGrayscaleBase() const { return grayscaleCapabilities().asyncBase; }
 
 size_t GfxRenderer::readFramebufferRegion(int x, int y, int w, int h, uint8_t* dst, size_t dstCapacity) const {
-  if (dst == nullptr || w <= 0 || h <= 0) return 0;
+  if (!frameBuffer || dst == nullptr || w <= 0 || h <= 0) return 0;
 
   const AlignedMemRect mem = screenRectToAlignedMemRect(orientation, x, y, w, h, panelWidth, panelHeight);
   if (!mem.valid) return 0;
@@ -2184,7 +2213,7 @@ size_t GfxRenderer::readFramebufferRegion(int x, int y, int w, int h, uint8_t* d
 }
 
 void GfxRenderer::writeFramebufferRegion(int x, int y, int w, int h, const uint8_t* src) {
-  if (src == nullptr || w <= 0 || h <= 0) return;
+  if (!frameBuffer || src == nullptr || w <= 0 || h <= 0) return;
 
   const AlignedMemRect mem = screenRectToAlignedMemRect(orientation, x, y, w, h, panelWidth, panelHeight);
   if (!mem.valid) return;
@@ -2769,8 +2798,10 @@ void GfxRenderer::copyGrayscaleLsbBuffers() const { display.copyGrayscaleLsbBuff
 
 void GfxRenderer::copyGrayscaleMsbBuffers() const { display.copyGrayscaleMsbBuffers(frameBuffer); }
 
-void GfxRenderer::displayGrayBuffer() const {
-  display.displayGrayBuffer(fadingFix);
+void GfxRenderer::displayGrayBuffer() const { displayGrayBuffer(fadingFix); }
+
+void GfxRenderer::displayGrayBuffer(bool turnOffScreen) const {
+  display.displayGrayBuffer(turnOffScreen);
   absoluteGrayPlanes = false;
 }
 
@@ -2810,6 +2841,7 @@ void GfxRenderer::freeBwBufferChunks() {
  * Returns true if buffer was stored successfully, false if allocation failed.
  */
 bool GfxRenderer::storeBwBuffer() {
+  if (!frameBuffer) return false;
   // Allocate and copy each chunk
   for (size_t i = 0; i < bwBufferChunks.size(); i++) {
     // Check if any chunks are already allocated

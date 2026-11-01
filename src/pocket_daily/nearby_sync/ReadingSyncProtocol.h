@@ -18,7 +18,20 @@ inline constexpr size_t MAX_DATA_CHUNK = 180;
 inline constexpr size_t MAX_OFFER_TOTAL = 1024;
 inline constexpr size_t REQUEST_ID_LENGTH = 8;
 
-enum class Verb : uint8_t { NONE, PING, START_AP, CANCEL, READ_LIST, OFFER, WRITE, START_WIFI, WIFI_JOIN };
+enum class Verb : uint8_t {
+  NONE,
+  PING,
+  START_AP,
+  CANCEL,
+  READ_LIST,
+  OFFER,
+  WRITE,
+  START_WIFI,
+  WIFI_JOIN,
+  PAGE_NEXT,
+  PAGE_PREV,
+  REMOTE_READY
+};
 
 enum class ParseResult : uint8_t {
   OK,

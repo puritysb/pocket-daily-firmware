@@ -47,6 +47,11 @@ struct Timings {
   void* context = nullptr;
 };
 
+// Full absolute planes from one reusable band, with no framebuffer. Only
+// finalized text pages are admitted; false requests the existing slow path.
+bool renderStreaming(GfxRenderer& renderer, const Page& page, const Options& options, uint8_t* scratch,
+                     uint32_t capacity);
+
 // `pagesUntilFullRefresh` is the reader's HALF-refresh countdown.
 void render(GfxRenderer& renderer, const Page& page, const Options& options, int& pagesUntilFullRefresh,
             Timings* timings = nullptr);

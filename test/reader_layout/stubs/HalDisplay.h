@@ -21,6 +21,8 @@ class HalDisplay {
   using GrayscaleBase = freeink::GrayscaleBase;
   using GrayscaleEncoding = freeink::GrayscaleEncoding;
   GrayscaleCapabilities grayscaleCapabilities(GrayscaleMode mode = GrayscaleMode::Overlay) const {
+    if (mode == GrayscaleMode::Direct && direct && !inverted_)
+      return {GrayscaleEncoding::AbsolutePlanes, GrayscaleBase::Combined, strips, false, false};
     if (mode != GrayscaleMode::Overlay) return {};
     return {GrayscaleEncoding::OverlayMasks, GrayscaleBase::Separate, supportsStripGrayscale(), false, false};
   }
@@ -38,6 +40,13 @@ class HalDisplay {
   bool releaseFrameBufferForSleep() {
     if (fb_.empty()) return false;
     std::vector<uint8_t>().swap(fb_);
+    return true;
+  }
+  bool failRemoteRestore = false;
+  bool releaseFrameBufferForRemote() { return releaseFrameBufferForSleep(); }
+  bool restoreFrameBufferAfterRemote() {
+    if (failRemoteRestore) return false;
+    fb_.assign(BUFFER_SIZE, 0xFF);
     return true;
   }
   static constexpr uint16_t DISPLAY_WIDTH = 792, DISPLAY_HEIGHT = 528, DISPLAY_WIDTH_BYTES = 99;
@@ -99,6 +108,7 @@ class HalDisplay {
   uint64_t bwHash = 0, lsbHash = 0, msbHash = 0;
   unsigned bwFrames = 0;
   bool strips = true;
+  bool direct = false;
   bool grayShown = false;
   // Hashes of the frame and planes as displayed (taken after the turn, outside timed stages).
   void snapshotHashes() {
@@ -116,6 +126,7 @@ class HalDisplay {
 };
 
 inline bool HalDisplay::displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback, bool off) {
+  if (mode == GrayscaleMode::Direct) return direct && strips && !inverted_;
   if (mode != GrayscaleMode::Overlay) return false;
   displayGrayscaleBase(fallback, off);
   return true;

@@ -63,6 +63,8 @@ class HalGPIO {
   inline bool deviceIsX3() const { return _deviceType == DeviceType::X3; }
   inline bool deviceIsX4() const { return _deviceType == DeviceType::X4; }
   bool isXteinkDevice() const;
+  // X3 fuel gauge: signed mA, negative means discharging. X4 has no such gauge.
+  bool readBatteryCurrentMA(int16_t& current);
 
   // True when the board's page buttons sit on the left/right screen edges
   // (X3, X4 Pro) rather than an off-screen vertical rocker. Drives side-hint

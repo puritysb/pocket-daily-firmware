@@ -1720,7 +1720,9 @@ void handleDevReaderCapture(WebServer& server, const RouteDeps& d) {
     return;
   }
   DevCapture::ReaderAction selected = DevCapture::ReaderAction::Capture;
-  if (action == "seed")
+  if (action == "keyboard-remote")
+    selected = DevCapture::ReaderAction::KeyboardRemote;
+  else if (action == "seed")
     selected = DevCapture::ReaderAction::Seed;
   else if (action == "accept")
     selected = DevCapture::ReaderAction::Accept;

@@ -116,6 +116,19 @@ bool HalDisplay::releaseFrameBufferForSleep() {
   return !einkDisplay.framebufferReady();
 }
 
+bool HalDisplay::releaseFrameBufferForRemote() {
+  if (!einkDisplay.framebufferReady()) return false;
+  einkDisplay.waitRefreshComplete();
+  einkDisplay.releaseBuffers();
+  return !einkDisplay.framebufferReady();
+}
+
+bool HalDisplay::restoreFrameBufferAfterRemote() {
+  if (!einkDisplay.reallocBuffers()) return false;
+  einkDisplay.requestResync();  // old differential baseline is gone
+  return true;
+}
+
 bool HalDisplay::displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback, bool turnOffScreen) {
   if (gpio.deviceIsX3() && fallback == HALF_REFRESH) einkDisplay.requestResync();
   return einkDisplay.displayGrayscaleBase(mode, static_cast<EInkDisplay::RefreshMode>(fallback), turnOffScreen);

@@ -14,7 +14,7 @@ namespace Pocket::NearbySync {
 namespace {
 Service* activeService = nullptr;
 
-bool windowMode() { return activeService && activeService->mode() == Mode::WINDOW; }
+bool windowMode() { return activeService && activeService->mode() != Mode::SCREEN; }
 
 // Window admission: the peer's identity address (the controller resolves the
 // private address of a bonded phone through the IRKs NimBLE restores at sync)
@@ -28,6 +28,10 @@ bool admitToWindow(NimBLEConnInfo& info) {
 
 class ServerCallbacks final : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* server, NimBLEConnInfo& info) override {
+    if (activeService && activeService->mode() == Mode::REMOTE && activeService->isConnected()) {
+      server->disconnect(info.getConnHandle());
+      return;
+    }
     if (windowMode() && !admitToWindow(info)) {
       HalSystem::setCrashBreadcrumb("readsync:reject-unbonded");
       server->disconnect(info.getConnHandle());
@@ -44,6 +48,9 @@ class ServerCallbacks final : public NimBLEServerCallbacks {
   }
 
   void onDisconnect(NimBLEServer*, NimBLEConnInfo& info, int) override {
+    if (activeService && activeService->mode() == Mode::REMOTE &&
+        info.getConnHandle() != activeService->connectionHandle())
+      return;
     HalSystem::setCrashBreadcrumb(windowMode() ? "readsync:disconnected" : "nearby:disconnected");
     if (activeService) {
       activeService->onConnected(false, false, info.getConnHandle(), millis());
@@ -58,6 +65,9 @@ class ServerCallbacks final : public NimBLEServerCallbacks {
   }
 
   void onAuthenticationComplete(NimBLEConnInfo& info) override {
+    if (activeService && activeService->mode() == Mode::REMOTE &&
+        info.getConnHandle() != activeService->connectionHandle())
+      return;
     const bool accepted = info.isAuthenticated() && info.isEncrypted() && (!windowMode() || info.isBonded());
     if (windowMode()) {
       HalSystem::setCrashBreadcrumb(accepted ? "readsync:encrypted-bonded" : "readsync:authentication-rejected");
@@ -72,6 +82,7 @@ class ServerCallbacks final : public NimBLEServerCallbacks {
 class CommandCallbacks final : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* characteristic, NimBLEConnInfo& info) override {
     if (!activeService || !info.isAuthenticated() || !info.isEncrypted()) return;
+    if (activeService->mode() == Mode::REMOTE && info.getConnHandle() != activeService->connectionHandle()) return;
     if (windowMode() && !info.isBonded()) return;
     const std::string& value = characteristic->getValue();
     activeService->onCommandRecord(value.data(), value.size());
@@ -84,11 +95,11 @@ CommandCallbacks commandCallbacks;
 }  // namespace
 
 bool Service::begin(const char* model, const char* firmware, const Mode requestedMode, const uint32_t advertiseMs,
-                    const bool appWake) {
+                    const bool appWake, const uint32_t remoteSession) {
   if (running_) return true;
 
   mode_ = requestedMode;
-  const bool window = requestedMode == Mode::WINDOW;
+  const bool window = requestedMode != Mode::SCREEN;
   const uint64_t chipId = ESP.getEfuseMac();
   snprintf(deviceId_, sizeof(deviceId_), "%08lX", static_cast<unsigned long>(chipId & 0xFFFFFFFFUL));
   snprintf(advertisedName_, sizeof(advertisedName_), "Pocket-%.4s", deviceId_ + 4);
@@ -151,8 +162,11 @@ bool Service::begin(const char* model, const char* firmware, const Mode requeste
 
   char statusRecord[MAX_RECORD_BYTES + 1];
   const size_t statusLength =
-      formatStatus(model, deviceId_, firmware, window, statusRecord, sizeof(statusRecord), appWake);
-  if (statusLength == 0) {
+      requestedMode == Mode::REMOTE
+          ? snprintf(statusRecord, sizeof(statusRecord), "V=1;MODEL=%s;ID=%s;FW=%s;CAP=REMOTE1;WIN=1;RS=%08lX", model,
+                     deviceId_, firmware, static_cast<unsigned long>(remoteSession))
+          : formatStatus(model, deviceId_, firmware, window, statusRecord, sizeof(statusRecord), appWake);
+  if (statusLength == 0 || statusLength >= sizeof(statusRecord)) {
     end();
     return false;
   }

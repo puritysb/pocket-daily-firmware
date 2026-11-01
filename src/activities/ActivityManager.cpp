@@ -27,6 +27,7 @@
 #include "pocket_daily/PocketDailyActivity.h"
 #include "pocket_daily/live_studio/DevTrace.h"
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
+#include "pocket_daily/nearby_sync/KeyboardRemote.h"
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
@@ -75,7 +76,7 @@ void ActivityManager::renderTaskLoop() {
     RenderLock lock;
     // A terminal sleep transition can return the framebuffer to the radio.
     // Test under the same lock as its release, including queued notifications.
-    if (currentActivity && renderer.hasFrameBuffer()) {
+    if (currentActivity && (renderer.hasFrameBuffer() || Pocket::KeyboardRemote::streaming())) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
       DEV_TRACE(PocketDaily::DevTrace::RENDER_START);
       // Night mode is a global output polarity applied to every activity.
@@ -587,4 +588,8 @@ bool ActivityManager::goToArticles() {
   }
   replaceActivity(std::move(activity));
   return true;
+}
+
+bool RenderLock::heldByCurrentTask() {
+  return xSemaphoreGetMutexHolder(activityManager.renderingMutex) == xTaskGetCurrentTaskHandle();
 }

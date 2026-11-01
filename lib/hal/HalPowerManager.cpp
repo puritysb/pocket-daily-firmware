@@ -83,7 +83,7 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 #ifdef ENABLE_BLE_STANDBY
   if (!frequencyLock) return;
   xSemaphoreTake(modeMutex, portMAX_DELAY);
-  const bool needsMaximum = !enabled || currentLockMode != None;
+  const bool needsMaximum = !enabled || currentLockMode != None || bleClockRequired.load(std::memory_order_acquire);
   if (needsMaximum != frequencyLocked) {
     const esp_err_t result = needsMaximum ? esp_pm_lock_acquire(frequencyLock) : esp_pm_lock_release(frequencyLock);
     if (result == ESP_OK) frequencyLocked = needsMaximum;
@@ -93,10 +93,11 @@ void HalPowerManager::setPowerSaving(bool enabled) {
   // The legacy backend tolerates a stale mode read; the PM lock backend above
   // serializes changes because acquiring/releasing is reference-counted.
   const LockMode mode = currentLockMode;
-  if (mode == None && enabled && !isLowPower) {
+  const int idleFreq = bleClockRequired.load(std::memory_order_acquire) ? 80 : LOW_POWER_FREQ;
+  if (mode == None && enabled && (!isLowPower || getCpuFrequencyMhz() != idleFreq)) {
     LOG_DBG("PWR", "Going to low-power mode");
-    if (!setCpuFrequencyMhz(LOW_POWER_FREQ)) {
-      LOG_DBG("PWR", "Failed to set CPU frequency = %d MHz", LOW_POWER_FREQ);
+    if (!setCpuFrequencyMhz(idleFreq)) {
+      LOG_DBG("PWR", "Failed to set CPU frequency = %d MHz", idleFreq);
       return;
     }
     isLowPower = true;

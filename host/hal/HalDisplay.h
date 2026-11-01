@@ -35,6 +35,9 @@ class HalDisplay {
     std::vector<uint8_t>().swap(bytes_);
     return true;
   }
+  // Offline renderer has no BLE owner or panel-retention lifecycle.
+  bool releaseFrameBufferForRemote() { return false; }
+  bool restoreFrameBufferAfterRemote() { return false; }
   static constexpr uint16_t DISPLAY_WIDTH = 800, DISPLAY_HEIGHT = 480, DISPLAY_WIDTH_BYTES = 100;
   static constexpr uint32_t BUFFER_SIZE = 48000;
   explicit HalDisplay(uint16_t width = DISPLAY_WIDTH, uint16_t height = DISPLAY_HEIGHT)

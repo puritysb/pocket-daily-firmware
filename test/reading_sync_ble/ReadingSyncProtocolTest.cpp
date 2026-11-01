@@ -239,3 +239,50 @@ TEST(ReadingSyncProtocol, AppWakeRequiresAnExplicitCapabilityAndBoundedCommand) 
   ASSERT_GT(formatStatus("X3", "AABBCCDD", "dev", true, record, sizeof(record)), 0u);
   EXPECT_EQ(std::string(record).find("WAKE1"), std::string::npos);
 }
+
+#include "pocket_daily/nearby_sync/KeyboardRemotePolicy.h"
+
+TEST(KeyboardRemote, StrictCommandGrammarAndMonotonicDeduplication) {
+  using namespace Pocket::NearbySync;
+  using namespace Pocket::KeyboardRemote;
+  ParsedCommand command;
+  EXPECT_EQ(parseCommand("NEXT 00000001", 13, command), ParseResult::OK);
+  EXPECT_EQ(command.verb, Verb::PAGE_NEXT);
+  EXPECT_EQ(parseCommand("PREV 00000002", 13, command), ParseResult::OK);
+  EXPECT_EQ(command.verb, Verb::PAGE_PREV);
+  EXPECT_EQ(parseCommand("REMOTE_READY 00000000", 21, command), ParseResult::OK);
+  EXPECT_EQ(command.verb, Verb::REMOTE_READY);
+  EXPECT_EQ(parseCommand("REMOTE_READY 00000000 1", 23, command), ParseResult::BAD_FIELDS);
+  EXPECT_EQ(parseCommand("NEXT 00000001 1", 15, command), ParseResult::BAD_FIELDS);
+  EXPECT_EQ(parseCommand("NEXT abcdef01", 13, command), ParseResult::MALFORMED);
+  EXPECT_EQ(admit(1, 0, false, true, false), Admission::Accept);
+  EXPECT_EQ(admit(2, 1, true, true, false), Admission::Busy);
+  EXPECT_EQ(admit(1, 1, false, true, true), Admission::Replay);
+  EXPECT_EQ(admit(1, 7, false, true, true), Admission::Stale);
+  EXPECT_EQ(admit(0, 0, false, true, false), Admission::Stale);
+  EXPECT_EQ(admit(8, 7, false, false, true), Admission::Busy);
+}
+
+TEST(KeyboardRemote, ReadingMemoryFloorAndWrapSafeSessionLimits) {
+  using namespace Pocket::KeyboardRemote;
+  EXPECT_TRUE(memoryAllowed(START_FREE, 40960, true));
+  EXPECT_FALSE(memoryAllowed(START_FREE - 1, 40960, true));
+  EXPECT_FALSE(memoryAllowed(START_FREE, 40959, true));
+  EXPECT_TRUE(memoryAllowed(MIN_FREE, MIN_BLOCK, false));
+  EXPECT_FALSE(memoryAllowed(MIN_FREE - 1, MIN_BLOCK, false));
+  EXPECT_FALSE(memoryAllowed(MIN_FREE, MIN_BLOCK - 1, false));
+  EXPECT_FALSE(expired(100, 50, 0));
+  EXPECT_TRUE(expired(IDLE_MS, 0, 0));
+  EXPECT_TRUE(expired(SESSION_MS, SESSION_MS - 1, 0));
+  EXPECT_FALSE(expired(30, UINT32_MAX - 20, UINT32_MAX - 20));
+}
+
+TEST(KeyboardRemote, ANewControllerCannotReplayAPreviousControllersTurn) {
+  using namespace Pocket::KeyboardRemote;
+  EXPECT_TRUE(readyAllowed(0, 0, false));
+  EXPECT_TRUE(readyAllowed(8, 8, true));
+  EXPECT_FALSE(readyAllowed(0, 8, true));
+  EXPECT_FALSE(readyAllowed(0, 8, false));
+  EXPECT_FALSE(readyAllowed(7, 8, true));
+  EXPECT_FALSE(readyAllowed(8, 8, false));
+}

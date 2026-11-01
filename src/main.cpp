@@ -48,6 +48,7 @@
 #include "pocket_daily/nearby_sync/DevSleepCycle.h"
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
 #include "pocket_daily/nearby_sync/ExchangeWindowMemory.h"
+#include "pocket_daily/nearby_sync/KeyboardRemote.h"
 #include "pocket_daily/nearby_sync/WifiSetup.h"
 #include "pocket_daily/staged_firmware.h"
 #include "util/ButtonNavigator.h"
@@ -1229,6 +1230,8 @@ void loop() {
   Pocket::NearbySync::Window::loop(activityManager.allowsExchangeWindow() && WiFi.getMode() == WIFI_MODE_NULL,
                                    activityManager.renderCount(), renderer);
 
+  if (Pocket::KeyboardRemote::takeActivity()) lastActivityTime = millis();
+
   const unsigned long loopDuration = millis() - loopStartTime;
   if (loopDuration > maxLoopDuration) {
     maxLoopDuration = loopDuration;
@@ -1254,6 +1257,9 @@ void loop() {
   if (skipLoopDelay) {
     powerManager.setPowerSaving(false);  // Make sure we're at full performance when skipLoopDelay is requested
     yield();                             // Give FreeRTOS a chance to run tasks, but return immediately
+  } else if (Pocket::KeyboardRemote::active()) {
+    powerManager.setPowerSaving(Pocket::KeyboardRemote::idle());
+    delay(10);
   } else if (Pocket::NearbySync::Window::active()) {
     // The BLE controller needs the normal CPU clock; keep the short delay so
     // notifications are paced one per pass without spinning.

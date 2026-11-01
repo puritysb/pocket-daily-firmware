@@ -10,10 +10,24 @@
 #include <cstdint>
 
 #include "pocket_daily/ReaderPerf.h"
+#include "pocket_daily/nearby_sync/KeyboardRemotePolicy.h"
+#ifdef ESP_PLATFORM
+#include "pocket_daily/nearby_sync/KeyboardRemote.h"
+#endif
 
 namespace ReaderPageRenderer {
 namespace {
 namespace Perf = PocketDaily::ReaderPerf;
+bool streamMemoryAllowed(bool warming = false) {
+#ifdef ESP_PLATFORM
+  using namespace Pocket::KeyboardRemote;
+  recordMemory();
+  return ESP.getFreeHeap() >= MIN_FREE + (warming ? 16384U : 0U) && ESP.getMaxAllocHeap() >= MIN_BLOCK;
+#else
+  (void)warming;
+  return true;  // host validates pixels; device enforces the actual heap ledger
+#endif
+}
 
 // Grayscale strips: at most 80 physical rows each, as few as that allows, and
 // no taller than needed for that count (X3: 7 x 76 rows, 7,524 B scratch; X4:
@@ -277,6 +291,52 @@ __attribute__((noinline)) static void renderPage(GfxRenderer& renderer, const Pa
   renderer.restoreBwBuffer();
   Perf::mark(Perf::STAGE_GRAY_SYNC);
   clock.close(&Timings::cleanupUs);
+}
+
+bool renderStreaming(GfxRenderer& renderer, const Page& page, const Options& options, uint8_t* scratch,
+                     uint32_t capacity) {
+  using namespace Pocket::KeyboardRemote;
+  const auto caps = renderer.grayscaleCapabilities(HalDisplay::GrayscaleMode::Direct);
+  const int stride = (renderer.getDisplayWidth() + 7) / 8;
+  const int height = renderer.getDisplayHeight();
+  if (!scratch || stride <= 0 || capacity < static_cast<uint32_t>(stride) || page.hasImages() || !caps.supported() ||
+      !caps.stripUploads || caps.base != HalDisplay::GrayscaleBase::Combined || !streamMemoryAllowed(true))
+    return false;
+  auto* fonts = renderer.getFontCacheManager();
+  if (!fonts) return false;
+  auto scope = fonts->createPrewarmScope();
+  page.render(renderer, options.fontId, options.marginLeft, options.marginTop);
+  if (options.statusText && *options.statusText) fonts->recordExtraText(options.statusText, options.statusFontId);
+  scope.endScanAndPrewarm();
+  if (!streamMemoryAllowed()) return false;
+  if (!renderer.displayGrayscaleBase(HalDisplay::GrayscaleMode::Direct)) return false;
+  renderer.resetGlyphRasterFailure();
+  renderer.setAbsoluteTextAntialiasing(options.textAntiAliasing);
+  const int stripRows = capacity / stride;
+  for (const bool lsb : {true, false}) {
+    renderer.setRenderMode(lsb ? GfxRenderer::GRAYSCALE_LSB : GfxRenderer::GRAYSCALE_MSB);
+    for (int y = 0; y < height; y += stripRows) {
+      const int rows = std::min(stripRows, height - y);
+      renderer.beginStripTarget(scratch, y, rows);
+      renderer.clearScreen(0xff);
+      page.render(renderer, options.fontId, options.marginLeft, options.marginTop);
+      if (options.drawStatusBar) options.drawStatusBar(options.context);
+      renderer.endStripTarget();
+      if (!streamMemoryAllowed() || renderer.glyphRasterFailed()) {
+        renderer.setRenderMode(GfxRenderer::BW);  // cancel incomplete planes, never refresh them
+        renderer.setAbsoluteTextAntialiasing(false);
+        return false;
+      }
+      renderer.writeGrayscalePlaneStrip(lsb, scratch, y, rows);
+    }
+  }
+  renderer.displayGrayBuffer(true);  // rails off between keys, controller RAM is retained
+#ifdef ESP_PLATFORM
+  Pocket::KeyboardRemote::recordStreamingTurn();
+#endif
+  renderer.setRenderMode(GfxRenderer::BW);
+  renderer.setAbsoluteTextAntialiasing(false);
+  return true;
 }
 
 void render(GfxRenderer& renderer, const Page& page, const Options& options, int& pagesUntilFullRefresh,

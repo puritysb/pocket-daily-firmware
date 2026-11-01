@@ -6,6 +6,7 @@
 #include <Logging.h>
 #include <freertos/semphr.h>
 
+#include <atomic>
 #include <cassert>
 
 #include "HalGPIO.h"
@@ -19,6 +20,7 @@ extern HalPowerManager powerManager;  // Singleton
 class HalPowerManager {
   int normalFreq = 0;  // MHz
   bool isLowPower = false;
+  std::atomic<bool> bleClockRequired{false};
 
   mutable int _batteryCachedPercent = 0;         // Last read battery percentage (0-100)
   mutable unsigned long _batteryLastPollMs = 0;  // Timestamp of last battery read in milliseconds
@@ -44,6 +46,9 @@ class HalPowerManager {
 
   // Control CPU frequency for power saving
   void setPowerSaving(bool enabled);
+  // Retain an 80 MHz APB-safe floor while a foreground BLE session owns radio.
+  // The existing PM-lock backend conservatively retains its maximum lock.
+  void setBleClockRequired(bool required) { bleClockRequired.store(required, std::memory_order_release); }
 
   // Setup wake up GPIO and enter deep sleep
   // Should be called inside main loop() to handle the currentLockMode

@@ -40,6 +40,7 @@ uint32_t savedRun();
 bool remove(uint32_t run);
 bool requestReader(uint32_t run, ReaderAction action = ReaderAction::Capture, uint32_t pages = 0);
 bool readerWalkActive();
+bool keyboardRemoteTrialActive();
 inline constexpr const char* LIBRARY_ORIGINAL_PATH = "/.pocket/dev-library-original.bmp";
 inline constexpr const char* LIBRARY_OWNED_PATH = "/.pocket/dev-library-owned.bmp";
 struct LibraryBackupInfo {
