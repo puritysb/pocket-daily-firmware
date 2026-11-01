@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "fontIds.h"
+#include "host/HostHome.h"
 #include "pocket_daily/ContentChecksum.h"
 #include "pocket_daily/home/HomeRenderer.h"
 #include "util/PowerWakeCue.h"
@@ -441,6 +443,122 @@ TEST(HomeCoverLayout, PortraitFrameSurvivesDailyPanelChangesAndRotations) {
       }
     }
   }
+}
+
+TEST(HomeCoverLayout, PortraitCoverUsesSpaceReleasedByShortMetadataAndCompactHeader) {
+  HalDisplay panel(792, 528);
+  GfxRenderer renderer(panel);
+  renderer.begin();
+  PocketUIHost::registerUiFonts(renderer);
+  renderer.setOrientation(GfxRenderer::Portrait);
+  struct Layout {
+    int header = 0, x = 0, y = 0, w = 0, h = 0;
+  } layout;
+  PocketDaily::Glance glance{};
+  PocketDaily::Home::Row row{};
+  row.reading = true;
+  PocketDaily::Home::HomeView view{};
+  view.rows = &row;
+  view.count = 1;
+  view.glance = &glance;
+  view.profile.weather = PocketDaily::DailyProfile::WeatherPanel::Off;
+  PocketDaily::Home::Env env{};
+  env.metrics = {5, 84, 10, 20, 30};
+  env.context = &layout;
+  env.drawHeader = [](void* context, const GfxRenderer&, int, int, int, int height, const char*, const char*) {
+    static_cast<Layout*>(context)->header = height;
+  };
+  env.drawCover = [](void* context, GfxRenderer&, int x, int y, int width, int height) {
+    auto& out = *static_cast<Layout*>(context);
+    out.x = x;
+    out.y = y;
+    out.w = width;
+    out.h = height;
+    return true;
+  };
+  view.reading = {true, "Quiet", "An author with a longer name", 35};
+  PocketDaily::Home::renderHome(renderer, view, env);
+  const auto shortTitle = layout;
+  EXPECT_LT(layout.header, env.metrics.headerHeight);
+  EXPECT_GT(layout.w, 300);
+  view.reading = {true, "A thoughtful journey through distant cities, quiet libraries and the stories we carry home",
+                  "An author with a longer name", 35};
+  PocketDaily::Home::renderHome(renderer, view, env);
+  EXPECT_LT(layout.h, shortTitle.h);
+  EXPECT_LT(layout.w, shortTitle.w);
+  EXPECT_EQ(layout.y, shortTitle.y);
+  EXPECT_LT(layout.y + layout.h, renderer.getScreenHeight() - 100);
+  EXPECT_TRUE(panel.guardsIntact());
+}
+
+TEST(HomeCoverLayout, FixedWrapMeasurementMatchesDrawingWithoutPaintingTheMeasurement) {
+  HalDisplay panel(792, 528);
+  GfxRenderer renderer(panel);
+  renderer.begin();
+  PocketUIHost::registerUiFonts(renderer);
+  renderer.clearScreen();
+  for (const char* text :
+       {"", "Short", "First line\nSecond line\nThird line", "Words with a long unbrokenabcdefghijklmnop suffix"}) {
+    const int count =
+        PocketDaily::HomeDraw::measureWrappedFixed(renderer, UI_12_FONT_ID, text, 160, 3, EpdFontFamily::BOLD);
+    EXPECT_TRUE(std::all_of(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize(),
+                            [](uint8_t byte) { return byte == 0xff; }));
+    EXPECT_EQ(
+        PocketDaily::HomeDraw::drawWrappedFixed(renderer, UI_12_FONT_ID, 20, 20, text, 160, 3, 32, EpdFontFamily::BOLD),
+        count);
+    renderer.clearScreen();
+  }
+}
+
+TEST(HomeCoverLayout, WideLongMetadataKeepsTheProgressBandClear) {
+  HalDisplay panel(800, 480);
+  GfxRenderer renderer(panel);
+  renderer.begin();
+  renderer.setOrientation(GfxRenderer::LandscapeCounterClockwise);
+  PocketUIHost::registerUiFonts(renderer);
+  uint8_t bitmap[156];
+  std::fill(std::begin(bitmap), std::end(bitmap), 0xff);
+  EpdGlyph glyph{12, 52, fp4::fromPixel(16), 0, 44, sizeof(bitmap), 0};
+  EpdUnicodeInterval interval{'M', 'M', 0};
+  EpdFontData data{bitmap, &glyph, &interval, 1, 64, 48, -16, true};
+  EpdFont font(&data);
+  renderer.insertFont(1234, EpdFontFamily(&font));
+  ASSERT_EQ(renderer.getLineHeight(1234), 64);
+  ASSERT_GE(renderer.getTextWidth(1234, "MMMM"), 60);
+  PocketDaily::Glance glance{};
+  PocketDaily::Home::Row row{};
+  row.reading = true;
+  PocketDaily::Home::HomeView view{};
+  view.isX3 = false;
+  view.rows = &row;
+  view.count = 1;
+  view.glance = &glance;
+  view.profile.weather = PocketDaily::DailyProfile::WeatherPanel::Off;
+  PocketDaily::Home::Env env{};
+  env.metrics = {5, 84, 10, 20, 30};
+  env.text.pick = [](void*, const char* text, int fallback, EpdFontFamily::Style) {
+    return text && text[0] == 'M' ? 1234 : fallback;
+  };
+  view.reading = {true, "", "", 35};
+  PocketDaily::Home::renderHome(renderer, view, env);
+  const int width = renderer.getScreenWidth();
+  const int bottom = renderer.getScreenHeight() - renderer.getLineHeight(SMALL_FONT_ID) - 16;
+  const int progressTop = bottom - renderer.getLineHeight(UI_12_FONT_ID) - 24;
+  auto band = [&]() {
+    std::vector<bool> pixels;
+    pixels.reserve(width * (bottom - progressTop));
+    for (int y = progressTop; y < bottom; ++y)
+      for (int x = width / 2; x < width - 20; ++x)
+        pixels.push_back((panel.getFrameBuffer()[y * panel.getDisplayWidthBytes() + x / 8] & (0x80 >> (x % 8))) == 0);
+    return pixels;
+  };
+  const auto baseline = band();
+  view.reading = {true,
+                  "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+                  "MMMMMMMMMM", 35};
+  PocketDaily::Home::renderHome(renderer, view, env);
+  EXPECT_EQ(band(), baseline);
+  EXPECT_TRUE(panel.guardsIntact());
 }
 
 TEST_P(HomePreview, SleepWakeAndCoverOptionsAreIndependentAndReversible) {

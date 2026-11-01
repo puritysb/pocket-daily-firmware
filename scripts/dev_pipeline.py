@@ -269,13 +269,23 @@ def hardware_evidence(log, run, version, standby, platform, interface=False, wif
     if screens:
         visual = record.get('screenValidation', {})
         captures = visual.get('captures', [])
+        previews = visual.get('connectedPreviews', [])
         expected_names = ['01-home-reading', '02-home-word', '03-home-reading-restored',
                           '04-home-weather-bottom', '05-home-weather-top', '06-brief-weather',
                           '07-brief-today', '08-brief-weather-restored', '09-card-image-a',
-                          '10-card-image-b', '11-card-image-restored', '12-reader-body', '13-actual-sleep', '14-wake-transition']
+                          '10-card-image-b', '11-card-image-restored', '12-reader-body', '13-actual-sleep', '14-wake-transition', '15-actual-home']
+        actual_home = visual.get('actualHomePreview', {})
+        actual_sleep = visual.get('actualSleepPreview', {})
         if (visual.get('passed') is not True or visual.get('restored') is not True
                 or visual.get('staleCaptureRejected') is not True
-                or [c.get('name') for c in captures] != expected_names):
+                or [c.get('name') for c in captures] != expected_names
+                or [p.get('name') for p in previews] != expected_names[:8]
+                or any(p.get('pixelDifferences') != 0 or p.get('source') != 'reader'
+                       or p.get('syncPresentation') is not True for p in previews)
+                or actual_home.get('pixelDifferences') != 0 or actual_home.get('source') != 'reader'
+                or actual_home.get('syncPresentation') is not False
+                or actual_sleep.get('pixelDifferences') != 0 or actual_sleep.get('source') != 'reader'
+                or actual_sleep.get('syncPresentation') is not False):
             raise RuntimeError('missing or failed physical screen validation')
         sleep = visual.get('sleepCycle', {})
         if (visual.get('cardsRestored') is not True or visual.get('readingPreserved') is not True

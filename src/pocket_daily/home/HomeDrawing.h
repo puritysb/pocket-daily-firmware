@@ -47,4 +47,7 @@ bool hasVisibleText(const char* p);
 // Bounded UTF-8 wrapping without heap allocation; returns lines drawn.
 int drawWrappedFixed(const GfxRenderer& renderer, int fontId, int x, int y, const char* text, int maxWidth,
                      int maxLines, int lineAdvance, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
+// The same bounded wrapping pass without drawing, for content-sized layouts.
+int measureWrappedFixed(const GfxRenderer& renderer, int fontId, const char* text, int maxWidth, int maxLines,
+                        EpdFontFamily::Style style = EpdFontFamily::REGULAR);
 }  // namespace PocketDaily::HomeDraw

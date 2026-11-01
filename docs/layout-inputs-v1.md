@@ -50,6 +50,13 @@ This is point-in-time rendering from reader inputs, not streaming its screen.
 Actual-frame acceptance uses developer-only inputs captured at the same paint;
 a later ordinary Refresh can observe a newer clock, battery or book state.
 
+The 2026-11-01 Home painter uses a compact header and sizes its portrait cover
+from the actual bounded title line count, author and progress block. Short
+metadata returns space to the cover. This is shared rendering code, not a PDLI
+schema or C ABI change; rebuild/reimport the companion's host renderer together
+with the firmware. The app defaults to the Sync face and labels ordinary
+Home/powered-off Brief as the separate After Sync preview.
+
 ## Frozen additive C ABI (ABI version remains 1)
 
 ```c
