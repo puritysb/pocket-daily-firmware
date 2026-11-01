@@ -68,7 +68,11 @@ void EpubReaderMenuActivity::buildMenuItems(std::vector<MenuItem>& items, bool h
   items.push_back({MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT});
   items.push_back({MenuAction::SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON});
   items.push_back({MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR});
-  items.push_back({MenuAction::GO_HOME, StrId::STR_GO_HOME_BUTTON});
+  const auto origin = activityManager.readerNavigation().reader;
+  const auto exitLabel = origin == ReaderReturn::PocketDaily ? StrId::STR_POCKET_DAILY_APP
+                         : origin == ReaderReturn::Articles  ? StrId::STR_ARTICLES
+                                                             : StrId::STR_GO_HOME_BUTTON;
+  items.push_back({MenuAction::GO_HOME, exitLabel});
   items.push_back({MenuAction::SYNC, StrId::STR_SYNC_PROGRESS});
   items.push_back({MenuAction::DELETE_CACHE, StrId::STR_DELETE_CACHE});
   items.push_back({MenuAction::TEXT_SETTINGS, StrId::STR_TEXT_SETTINGS});

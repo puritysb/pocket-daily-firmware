@@ -2,7 +2,6 @@
 
 #include <BoardConfig.h>
 #include <FontCacheManager.h>
-#include <FsHelpers.h>
 #include <HalDisplay.h>
 #include <HalPowerManager.h>
 #include <Memory.h>
@@ -31,7 +30,6 @@
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
-#include "util/BmpViewerActivity.h"
 #include "util/FrontlightPanelActivity.h"
 #include "util/FullScreenMessageActivity.h"
 
@@ -350,48 +348,10 @@ void ActivityManager::goToBrowser() {
   }
 }
 
-void ActivityManager::goToReader(std::string path, const bool allowFastInitialRefresh) {
-  // A book returns to the shell the user came from (one opened from Library or
-  // the file browser reached from Pocket Daily returns there) unless the caller
-  // says otherwise (goToReaderFrom, resumeReader).
-  readerReturn = shell;
-  if (path.empty()) {
-    goToFileBrowser("/");
-    return;
-  }
-
-  if (FsHelpers::hasBmpExtension(path) || FsHelpers::hasPngExtension(path)) {
-    auto activity = makeUniqueNoThrow<BmpViewerActivity>(renderer, mappedInput, std::move(path));
-    if (!activity) {
-      LOG_ERR("ACT", "OOM: bitmap viewer activity");
-      return;
-    }
-    replaceActivity(std::move(activity));
-    return;
-  }
-
-  auto activity = ReaderActivity::create(renderer, mappedInput, std::move(path), allowFastInitialRefresh);
-  if (activity) {
-    replaceActivity(std::move(activity));
-  }
-}
-
-void ActivityManager::goToReaderFrom(const ReaderReturn origin, std::string path, const bool allowFastInitialRefresh) {
-  goToReader(std::move(path), allowFastInitialRefresh);
-  // Only a queued book records the origin; a failed open leaves no stale return.
-  if (pendingActivity && pendingActivity->isReaderActivity()) readerReturn = origin;
-}
-
-void ActivityManager::resumeReader(std::string path) {
-  const ReaderReturn origin = readerReturn;
-  goToReader(std::move(path));
-  readerReturn = origin;
-}
-
 void ActivityManager::leaveReader() {
   // The shell is constructed while the book is still alive; if that allocation
   // fails, Home (smaller) is the fallback rather than staying in the book.
-  switch (std::exchange(readerReturn, ReaderReturn::Home)) {
+  switch (readerReturn.exchange(ReaderReturn::Home)) {
     case ReaderReturn::PocketDaily:
       if (goToPocketDaily()) return;
       break;

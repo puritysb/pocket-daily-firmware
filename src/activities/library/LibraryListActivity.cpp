@@ -1166,8 +1166,8 @@ void LibraryListActivity::drawFooter() {
   drawPositionReadout();
   drawHoldHelp();
 
-  const bool backGoesHome = tabsFocused() && !groupsCollapsed && query.empty();
-  const char* backLabel = backGoesHome ? tr(STR_HOME) : tr(STR_BACK);
+  const bool exitsToShell = (tabsFocused() || degraded) && !groupsCollapsed && query.empty();
+  const char* backLabel = exitsToShell ? activityManager.shellReturnLabel() : tr(STR_BACK);
   const char* confirmLabel = groupsCollapsed ? tr(STR_SELECT) : tr(STR_OPEN);
   const bool canSearch = tabsFocused() && !degraded;
   const auto labels = mappedInput.mapLabels(backLabel, tabsFocused() ? tr(STR_TOGGLE) : confirmLabel,

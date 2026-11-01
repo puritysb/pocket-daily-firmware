@@ -218,6 +218,10 @@ static void armSilentReboot(const uint32_t target) {
 // running in that case.
 static void silentRestartTo(const uint32_t target, const char* targetName) {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
+  if (target == SILENT_REBOOT_TARGET_READER) {
+    APP_STATE.savedReaderNavigation = activityManager.readerNavigation();
+    APP_STATE.saveToFile();
+  }
   armSilentReboot(target);
   LOG_DBG("MAIN", "Silent restart (target=%s)", targetName);
   // E-ink retains the previous frame until the target's first paint lands
@@ -320,6 +324,7 @@ void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
   APP_STATE.lastSleepInPocketDaily = activityManager.inPocketDailyShell();
+  APP_STATE.savedReaderNavigation = activityManager.readerNavigation();
   APP_STATE.sleptCleanly = true;
 
   // An information surface keeps informing while it sleeps: give the current
@@ -615,7 +620,8 @@ void setup() {
   const bool isSleepWake = PocketDaily::TrialReader::resuming() || devTimerWake ||
                            wakeupReason == HalGPIO::WakeupReason::PowerButton ||
                            standbyReturn != PocketDaily::Boot::StandbyReturn::None;
-  const bool isPersistedSleepWake = isSleepWake && !APP_STATE.showBootScreen;
+  const bool wokeFromSavedSleep = hasSleepNavigation(APP_STATE.sleptCleanly, isSleepWake, APP_STATE.showBootScreen);
+  const bool isPersistedSleepWake = wokeFromSavedSleep && !APP_STATE.showBootScreen;
 
   if (recoveryFirmwareMode) {
     LOG_INF("MAIN", "Recovery firmware mode (%s + POWER held at boot)",
@@ -635,9 +641,13 @@ void setup() {
   // Waking returns to the shell the device slept in (stock returns to its only
   // shell, Home, or the open book); a boot without a clean sleep (reset, update,
   // power loss) follows the startupApp setting, read only now that it is loaded.
-  const bool wokeFromSleep = isSleepWake || APP_STATE.sleptCleanly;
-  const bool startInPocketDaily =
-      wokeFromSleep ? APP_STATE.lastSleepInPocketDaily : SETTINGS.startupApp != CrossPointSettings::STARTUP_HOME;
+  const bool restoringReader = isSilentReboot && snapshotTarget == SILENT_REBOOT_TARGET_READER;
+  const ReaderNavigation restoredNavigation =
+      (wokeFromSavedSleep || restoringReader)
+          ? APP_STATE.savedReaderNavigation.value_or(legacyReaderNavigation(APP_STATE.lastSleepInPocketDaily))
+          : legacyReaderNavigation(SETTINGS.startupApp != CrossPointSettings::STARTUP_HOME);
+  activityManager.restoreReaderNavigation(restoredNavigation);
+  const bool startInPocketDaily = restoredNavigation.shell == ReaderReturn::PocketDaily;
   if (APP_STATE.sleptCleanly) {
     APP_STATE.sleptCleanly = false;
     APP_STATE.saveToFile();
@@ -870,7 +880,7 @@ void setup() {
       activityManager.goToFileTransfer(devBootReturn == DevBootReturn::FileTransferSta);
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
              !APP_STATE.openEpubPath.empty()) {
-    activityManager.goToReader(APP_STATE.openEpubPath);
+    activityManager.goToReaderFrom(restoredNavigation.reader, APP_STATE.openEpubPath);
   } else if (resume == BootResume::Silent && snapshotTarget == PocketDaily::Boot::kRebootTargetPocketDaily) {
     activityManager.goToPocketDaily();
     landsOnShell = true;
@@ -906,8 +916,8 @@ void setup() {
     APP_STATE.openEpubPath = "";
     APP_STATE.readerActivityLoadCount++;
     APP_STATE.saveToFile();
-    const ReaderReturn origin = startInPocketDaily ? ReaderReturn::PocketDaily : ReaderReturn::Home;
-    activityManager.goToReaderFrom(origin, path, allowFastInitialReaderRefresh);
+    activityManager.goToReaderFrom(wakeReaderOrigin(restoredNavigation, APP_STATE.lastSleepFromReader), path,
+                                   allowFastInitialReaderRefresh);
   } else if (!startInPocketDaily) {
     activityManager.goHome(HomeMenuItem::NONE, needsWakeRefresh);
   } else {
