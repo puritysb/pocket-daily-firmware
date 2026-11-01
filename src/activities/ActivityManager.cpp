@@ -431,6 +431,10 @@ bool ActivityManager::allowsExchangeWindow() const {
          !isReaderActivity();
 }
 
+bool ActivityManager::allowsAppConnection() const {
+  return allowsExchangeWindow() && currentActivity->allowsAppConnection();
+}
+
 void ActivityManager::closeExchangeWindowFor(const Activity& next) {
   if (next.allowsExchangeWindow()) return;
   using Pocket::NearbySync::Window::CloseReason;

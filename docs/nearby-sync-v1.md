@@ -341,6 +341,7 @@ integers:
 | `startupApp` | integer 0..1 | 0 Home, 1 Pocket Daily |
 | `pocketDailySleepCover` | boolean, or integer (non-zero = on) | Pocket Daily sleep cover |
 | `sleepWakeIndicator` | boolean, or integer (non-zero = on) | show WAKE at the physical power switch on sleep screens; default on |
+| `pocketAppConnection` | boolean or integer 0..1 only | optional on supported power-management developer images; default OFF; allow bonded BLE app connection while Pocket Daily Home is idle |
 | `sleepTimeoutMinutes` | integer 1..31 | 31 means never |
 | `fontSize` | integer 0..3 | legacy 12/14/16/18-point buckets; an unchanged bucket preserves a precise on-device size |
 | `orientation` | integer 0..3 | portrait, landscape clockwise, inverted portrait, landscape counter-clockwise |
@@ -354,12 +355,20 @@ setting changes: one invalid value (out of range, wrong JSON type, or a string)
 returns `400 text/plain` with a short reason such as `Invalid sideButtonLayout`
 and applies nothing. Unknown keys are ignored. Success saves `settings.json` only when values change and returns
 `200 {"saved":true}`; changed values emit the Live Studio `prefs` event. A failed
-save restores all ten previous values and returns 500. Orientation, line spacing
+save restores all previous values and returns 500. Orientation, line spacing
 and margins were added on 2026-10-05; each key's GET presence is its capability.
 Companions omit absent keys, since older readers ignore unknown keys. These
 settings affect the next book render. Saving does not open a book or replace the
 Sync screen. The app's reading preview is illustrative; screen presentation
 continues to accept only `home` and `brief`.
+
+`pocketAppConnection` (2026-11-02) is advertised only when the image and HAL
+support retained-screen BLE idle. Unsupported images/boards reject an explicit
+write before changing any preferences. Omitting it preserves the device's opt-in;
+the existing app's layout autosaves ignore this reader-only field and never
+disable or enable it. This bounded route avoids constructing the full localized
+settings registry merely to change the connection option. See
+[`reading-sync-ble-v1.md`](reading-sync-ble-v1.md) for its memory/power lifetime.
 
 `sideButtonLayout` and `frontButtonFollowOrientation` were added on
 2026-09-26. Their presence in the GET response is the capability signal:

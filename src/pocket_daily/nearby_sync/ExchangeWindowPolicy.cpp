@@ -15,6 +15,7 @@ uint32_t durationMs(const Trigger trigger) {
     case Trigger::SLEEP:
       return SLEEP_MS;
     case Trigger::STANDBY:
+    case Trigger::HOME_CONNECT:
       return SLEEP_MS;  // bound startup; OPEN remains available until explicitly closed
   }
   return SLEEP_MS;
@@ -52,6 +53,8 @@ const char* triggerName(const Trigger trigger) {
       return "sleep";
     case Trigger::STANDBY:
       return "standby";
+    case Trigger::HOME_CONNECT:
+      return "home-connect";
   }
   return "?";
 }
@@ -122,7 +125,7 @@ Controller::Action Controller::tick(const uint32_t nowMs, const uint32_t renderC
         return Action::NONE;
       }
       const bool frameDone = renderCount != armedRender;
-      if (armedTrigger != Trigger::SLEEP && armedTrigger != Trigger::STANDBY && !frameDone &&
+      if (armedTrigger != Trigger::SLEEP && !persistentWindow(armedTrigger) && !frameDone &&
           !reached(nowMs, armedAt + RENDER_WAIT_MS)) {
         return Action::NONE;
       }
@@ -133,7 +136,7 @@ Controller::Action Controller::tick(const uint32_t nowMs, const uint32_t renderC
     case State::STARTING:
     case State::OPEN:
       if (!shellActive) return close(CloseReason::LEFT_SHELL);
-      if (!(current == State::OPEN && armedTrigger == Trigger::STANDBY) && reached(nowMs, deadline))
+      if (!(current == State::OPEN && persistentWindow(armedTrigger)) && reached(nowMs, deadline))
         return close(CloseReason::TIME_UP);
       return Action::NONE;
   }

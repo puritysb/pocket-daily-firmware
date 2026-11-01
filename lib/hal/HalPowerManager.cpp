@@ -296,6 +296,19 @@ uint32_t HalPowerManager::bleStandbySleepCount() const {
   return 0;
 #endif
 }
+
+bool HalPowerManager::endBleStandby() {
+#ifdef ENABLE_BLE_STANDBY
+  setPowerSaving(false);
+  esp_pm_config_t config{};
+  config.max_freq_mhz = normalFreq;
+  config.min_freq_mhz = 40;
+  config.light_sleep_enable = false;
+  return esp_pm_configure(&config) == ESP_OK;
+#else
+  return true;
+#endif
+}
 uint32_t HalPowerManager::bleStandbySleepMillis() const {
 #ifdef ENABLE_BLE_STANDBY
   return standbySleepMs.load(std::memory_order_relaxed);

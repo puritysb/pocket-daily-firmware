@@ -187,6 +187,12 @@ Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
 
 ## BLE standby and app wake (developer `ble_standby` env)
 
+- 2026-11-02: `pocketAppConnection` defaults OFF; opt-in Home idle borrows the
+  framebuffer and accepts authenticated START_WIFI, preserving normal auto-sleep.
+  Mac UI Home connection passed X3/X4 on w8112bfb3; held-contact guard w2edaaddd
+  passed X3, final X4/physical buttons pending. `build/home-connect-20261102/`,
+  app current handoff. No energy/overnight claim; default/release unchanged.
+
 - `scripts/pio_ble_standby.sh` builds env `ble_standby` (extends `default`, adds
   PM/tickless/BT modem sleep in an isolated SDK copy). It is SDK automatic light
   sleep, not BLE wake from deep sleep. `default`/`gh_release` keep bounded BLE

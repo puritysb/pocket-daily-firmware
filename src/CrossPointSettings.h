@@ -316,6 +316,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // windows with an already paired phone when a book closes, on wake and
   // before sleep. Only effective once a phone was paired through Nearby Sync.
   uint8_t pocketReadingSync = 1;
+  // Opt-in Home BLE listener; never needed for offline reading.
+  uint8_t pocketAppConnection = 0;
   // E-ink refresh frequency (default 15 pages)
   uint8_t refreshFrequency = REFRESH_15;
   uint8_t hyphenationEnabled = 0;

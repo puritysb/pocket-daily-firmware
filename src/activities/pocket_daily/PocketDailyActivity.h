@@ -27,6 +27,7 @@ class PocketDailyActivity final : public Activity {
 
   void onEnter() override;
   bool allowsExchangeWindow() const override { return true; }
+  bool allowsAppConnection() const override { return viewMode == ViewMode::Overview; }
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;

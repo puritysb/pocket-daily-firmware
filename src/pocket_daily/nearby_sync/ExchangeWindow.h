@@ -34,8 +34,9 @@ void runBeforeDeepSleep(uint32_t renderCount, const GfxRenderer& renderer);
 
 enum class StandbyExit : uint8_t { DeepSleep, Reader, SameWifi };
 bool standbyEligible();
+bool homeConnectionEligible();
 // Framebuffer and panel must already be released/asleep. maxMs is only a
 // developer recovery deadline; zero means normal app-requested standby.
-StandbyExit runStandby(const GfxRenderer& renderer, uint32_t maxMs = 0);
+StandbyExit runStandby(const GfxRenderer& renderer, uint32_t maxMs = 0, Trigger trigger = Trigger::STANDBY);
 
 }  // namespace Pocket::NearbySync::Window

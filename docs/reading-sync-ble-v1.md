@@ -30,6 +30,38 @@ acceptance. The historical integration review is `ble-sync-review-2026-09-30.md`
 
 ## Reader: exchange windows
 
+### Optional connection from Pocket Daily Home (2026-11-02)
+
+The power-management developer image exposes **Allow app connection (uses battery)**
+under Settings → System, persisted as `pocketAppConnection`, default 0. It is
+independent of reading-position sharing. A bonded, supported original C3 X3/X4
+on the Pocket Daily overview enters BLE idle after three seconds without input.
+The existing PM/light-sleep and authenticated WAKE1/START_WIFI protocol is reused.
+Wi-Fi stays off until an explicit authenticated request is accepted. No hotspot
+is started and the Mac network is unchanged.
+
+The completed Home frame remains on e-paper. Its framebuffer is temporarily
+released, preventing the radio and full frame from competing for scarce heap.
+The main loop waits; physical input ends BLE, disables automatic light sleep,
+restores and repaints the framebuffer, then resumes normal button handling.
+The normal auto-sleep deadline still runs. Opening a book/card or any other menu
+does not keep this listener. Failure to restore the UI memory/power state reboots
+rather than drawing into an absent buffer. Failed admission is attempted once
+per idle interval, with the existing 96 KiB/40 KiB preflight plus a stricter
+>50 KiB free / 8 KiB block Home ready/running gate. No new persistent radio
+buffer/task is introduced; the existing runtime is reused for this optional period.
+
+A saved bond does not prove current BLE availability. The app identifies a
+connection-stage timeout separately from command acknowledgement failure and
+explains the opt-in requirement instead of attributing it to charging.
+Mac UI Connect from ordinary Home passed on X3/X4 developer w8112bfb3:
+`home-connect → app-wifi`, minimum free/block 67,884/61,428 B (X3) and
+68,132/61,428 B (X4). No sleep-cycle endpoint was used. Final held-input guard
+validation and physical button restoration are tracked in the latest app handoff.
+Private local evidence: `build/home-connect-20261102/`. No battery-current or
+overnight claim follows from these functional samples.
+
+
 ### Experimental app-requested wake (2026-10-09)
 
 The opt-in `ble_standby` build replaces the original ESP32-C3 X3/X4 pre-deep-sleep window with
@@ -42,7 +74,7 @@ even on USB; only X3 confirmed charging permits the lower threshold. The HAL
 retains GPIO levels through light sleep, including X4’s HIGH battery latch. A
 terminal X4 power-off still cuts that latch and cannot be reversed over BLE.
 
-In this standby only, status advertises capability `WAKE1`. An already bonded,
+Standby and the opt-in Home listener described below advertise capability `WAKE1`. An already bonded,
 encrypted peer may send `START_WIFI <id>` (exactly eight uppercase hexadecimal
 digits). `OK <id>` accepts a Same-Wi-Fi handoff; ordinary exchange windows reject
 it with `NOT_IN_SYNC`. `START_AP` remains unavailable. Merely connecting or

@@ -285,3 +285,30 @@ TEST(ExchangeWindowPolicy, StandbyRetainsBatteryBondAndBoardGatesForBothC3Reader
   EXPECT_TRUE(standbyAllowed(true, true, true, 6, true));
   EXPECT_FALSE(standbyAllowed(true, true, true, 5, true));
 }
+
+TEST(ExchangeWindowPolicy, HomeConnectionIsPersistentButNeverSurvivesLeavingTheShell) {
+  auto window = openWindow(Trigger::HOME_CONNECT, 100);
+  EXPECT_EQ(window.tick(100000, 8, true), Action::NONE);
+  EXPECT_EQ(window.tick(100001, 8, false), Action::STOP);
+  EXPECT_EQ(window.lastCloseReason(), CloseReason::LEFT_SHELL);
+  EXPECT_STREQ(triggerName(Trigger::HOME_CONNECT), "home-connect");
+}
+
+TEST(ExchangeWindowPolicy, HomeConnectionHasSeparateOptInAndStricterMemoryFloor) {
+  EXPECT_FALSE(windowEnabled(Trigger::HOME_CONNECT, true, false));
+  EXPECT_TRUE(windowEnabled(Trigger::HOME_CONNECT, false, true));
+  EXPECT_FALSE(windowEnabled(Trigger::STANDBY, false, true));
+  EXPECT_TRUE(windowEnabled(Trigger::WAKE, true, false));
+  EXPECT_FALSE(homeMemoryAllowed(50 * 1024, 8 * 1024));
+  EXPECT_TRUE(homeMemoryAllowed(50 * 1024 + 1, 8 * 1024));
+  EXPECT_FALSE(homeMemoryAllowed(60 * 1024, 8 * 1024 - 1));
+  EXPECT_TRUE(acceptsWifiWake(persistentWindow(Trigger::HOME_CONNECT), true));
+  EXPECT_FALSE(acceptsWifiWake(persistentWindow(Trigger::HOME_CONNECT), false));
+}
+
+TEST(ExchangeWindowPolicy, HeldButtonCannotReenterHomeIdleAndLoseItsRelease) {
+  EXPECT_FALSE(homeIdleAllowed(true, false, 2999));
+  EXPECT_TRUE(homeIdleAllowed(true, false, 3000));
+  EXPECT_FALSE(homeIdleAllowed(true, true, 60000));
+  EXPECT_FALSE(homeIdleAllowed(false, false, 60000));
+}
