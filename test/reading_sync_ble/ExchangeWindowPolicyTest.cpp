@@ -273,3 +273,15 @@ TEST(ExchangeWindowPolicy, ChargingFloorAndPowerLossAreFailClosed) {
   input.freeHeap = BLE_WINDOW_MIN_FREE - 1;
   EXPECT_EQ(evaluate(input), Gate::LOW_MEMORY);
 }
+
+TEST(ExchangeWindowPolicy, StandbyRetainsBatteryBondAndBoardGatesForBothC3Readers) {
+  EXPECT_TRUE(standbyAllowed(true, true, true, 11, false));
+  EXPECT_FALSE(standbyAllowed(false, true, true, 99, true));
+  EXPECT_FALSE(standbyAllowed(true, false, true, 99, true));
+  EXPECT_FALSE(standbyAllowed(true, true, false, 99, true));
+  // An X4 USB cable does not prove charging: its conservative floor is 10%.
+  EXPECT_FALSE(standbyAllowed(true, true, true, 10, false));
+  EXPECT_FALSE(standbyAllowed(true, true, true, 6, false));
+  EXPECT_TRUE(standbyAllowed(true, true, true, 6, true));
+  EXPECT_FALSE(standbyAllowed(true, true, true, 5, true));
+}

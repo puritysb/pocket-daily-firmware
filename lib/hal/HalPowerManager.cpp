@@ -249,9 +249,19 @@ HalPowerManager::Lock::Lock() {
   }
 }
 
+bool HalPowerManager::bleStandbySupported() const {
+#ifdef ENABLE_BLE_STANDBY
+  // Only the original ESP32-C3 X3/X4 boards share this retained-GPIO path.
+  // X4's battery latch must stay HIGH; terminal power-off remains separate.
+  return gpio.isXteinkDevice() && frequencyLock && sleepObserverReady;
+#else
+  return false;
+#endif
+}
+
 bool HalPowerManager::beginBleStandby() {
 #ifdef ENABLE_BLE_STANDBY
-  if (!gpio.deviceIsX3() || !frequencyLock || !sleepObserverReady || currentLockMode != None) return false;
+  if (!bleStandbySupported() || currentLockMode != None) return false;
   // This board keeps SD mounted and polls its physical inputs during standby.
   // The inherited SDK's PM_SLP_DISABLE_GPIO otherwise switches *every* pin to
   // its disabled sleep configuration, including the SD supply and button pulls.

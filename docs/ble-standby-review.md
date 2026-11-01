@@ -1,4 +1,31 @@
-# BLE standby feasibility — 2026-10-09
+# C3 X3/X4 BLE standby extension — 2026-11-02
+
+The opt-in `ble_standby` image now admits original ESP32-C3 X3 and X4 through
+`HalPowerManager::bleStandbySupported()`. It retains the existing SDK PM lock,
+GPIO sleep-configuration preservation and restart handoff. X4's GPIO13 battery
+latch stays HIGH through light sleep; normal terminal power-off is unchanged.
+No new resident buffer, task or allocation was added. X4 uses the >10% battery
+floor even on USB; the >5% charging exception remains X3-only. Bond, setting,
+framebuffer release, free-heap and largest-block gates are unchanged.
+
+Default/release images still do not enable this experiment. This does not add
+BLE to an already powered-off device or ordinary awake reading. Original C3
+boards only: other X4 variants are not implicitly admitted.
+
+Host tests (1176), strict cppcheck and warning-free default/standby builds passed.
+Final developer w02b1fbaf passed physical Mac/X3 and Mac/X4 acceptance:
+real HTTP loss revoked settings; bonded authenticated START_WIFI returned the
+matching reader on Same Wi-Fi; automatic profile/preferences writes survived
+restart and original settings were restored. X3: 73 light sleeps / 1608 ms,
+minimum free/block 67,708/57,332 B. X4: 41 / 799 ms, 69,832/59,380 B.
+These short functional samples do not establish energy savings or overnight
+standby. Controls were changed programmatically in the shipping SwiftUI editor.
+App evidence: `.build/connection-x4-20261102/{x3,x4}/result.json` in the
+`pocket-daily-connection` worktree. Earlier results retain their original scope.
+Local candidate and recovery data: `build/x4-connection-20261102/`.
+Release/distribution remain held.
+
+# Historical X3 BLE standby feasibility — 2026-10-09
 
 Latest installed follow-up (2026-10-09 23:04 KST):
 `8925b142-ble-standby-w79b237a9` preserves GPIO configuration during automatic

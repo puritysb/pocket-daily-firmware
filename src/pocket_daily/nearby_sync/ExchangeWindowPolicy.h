@@ -51,6 +51,11 @@ inline bool batteryAllowed(uint16_t percent, bool charging) {
   return percent > (charging ? CHARGING_MIN_BATTERY_PERCENT : MIN_BATTERY_PERCENT);
 }
 
+// X4 has no verified charge-current sensor: callers pass charging=false there.
+inline bool standbyAllowed(bool supported, bool enabled, bool bonded, uint16_t batteryPercent, bool charging) {
+  return supported && enabled && bonded && batteryAllowed(batteryPercent, charging);
+}
+
 enum class Gate : uint8_t { OPEN, NO_BOND, SETTING_OFF, LOW_BATTERY, LOW_MEMORY };
 
 struct GateInput {

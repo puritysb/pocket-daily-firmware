@@ -298,8 +298,8 @@ void runBeforeDeepSleep(const uint32_t renderCount, const GfxRenderer& renderer)
 
 bool standbyEligible() {
 #ifdef ENABLE_BLE_STANDBY
-  return gpio.deviceIsX3() && SETTINGS.pocketReadingSync && hasStoredBond() &&
-         batteryAllowed(powerManager.getBatteryPercentage(), gpio.isUsbConnected());
+  return standbyAllowed(powerManager.bleStandbySupported(), SETTINGS.pocketReadingSync != 0, hasStoredBond(),
+                        powerManager.getBatteryPercentage(), gpio.deviceIsX3() && gpio.isUsbConnected());
 #else
   return false;
 #endif
@@ -346,7 +346,7 @@ StandbyExit runStandby(const GfxRenderer& renderer, const uint32_t maxMs) {
         break;
       }
       const auto battery = powerManager.getBatteryPercentage();
-      const bool charging = gpio.isUsbConnected();
+      const bool charging = gpio.deviceIsX3() && gpio.isUsbConnected();
       if (!batteryAllowed(battery, charging)) {
 #ifdef ENABLE_DEV_REMOTE_FLASH
         DevSleepCycle::checkpoint(DevSleepCycle::Checkpoint::StandbyAlive, battery, &stats, charging);

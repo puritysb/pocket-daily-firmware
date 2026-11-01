@@ -1771,7 +1771,7 @@ void handleDevBleCycle(WebServer& server, const RouteDeps& d) {
   const String sleep = server.arg("sleep");
   bool standbySupported = false;
 #ifdef ENABLE_BLE_STANDBY
-  standbySupported = gpio.deviceIsX3();
+  standbySupported = powerManager.bleStandbySupported();
 #endif
   if ((sleep == "timer-home" && gpio.deviceIsX3()) ||
       (sleep != "" && sleep != "timer" && sleep != "timer-home" && sleep != "standby") ||

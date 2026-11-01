@@ -32,11 +32,15 @@ acceptance. The historical integration review is `ble-sync-review-2026-09-30.md`
 
 ### Experimental app-requested wake (2026-10-09)
 
-The opt-in `ble_standby` build replaces the X3 pre-deep-sleep window with
+The opt-in `ble_standby` build replaces the original ESP32-C3 X3/X4 pre-deep-sleep window with
 retained-screen BLE standby when the existing bond, setting, battery and memory
 gates pass. Build it with `scripts/pio_ble_standby.sh`, which isolates the
 PM/tickless/controller-modem-sleep SDK from normal builds. Default and release
-images retain the bounded windows described below; X4 standby is not enabled.
+images retain the bounded windows described below. X4 Classic/Pro and other boards
+are not admitted by this C3 path. X4 uses the conservative >10% battery gate
+even on USB; only X3 confirmed charging permits the lower threshold. The HAL
+retains GPIO levels through light sleep, including X4’s HIGH battery latch. A
+terminal X4 power-off still cuts that latch and cannot be reversed over BLE.
 
 In this standby only, status advertises capability `WAKE1`. An already bonded,
 encrypted peer may send `START_WIFI <id>` (exactly eight uppercase hexadecimal
@@ -310,7 +314,7 @@ the app's background reconnect.
 
 ## App-entered Wi-Fi provisioning (`WIFI1`)
 
-`WIFI1` is advertised in the explicit Nearby Sync screen and X3 standby, never
+`WIFI1` is advertised in the explicit Nearby Sync screen and eligible C3 X3/X4 standby, never
 ordinary short reading-position windows. The authenticated command is
 `WIFI_JOIN <id> <SSID uppercase hex> <password uppercase hex or ->`, within
 220 bytes. SSID is 1–32 bytes without control characters; password is 8–63
