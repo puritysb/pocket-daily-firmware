@@ -21,10 +21,23 @@ CI and exact-image device checks are recorded below as they complete.
 
 ## Device validation
 
-Exact-image Home validation is in progress. The run backs up known raw/public
-state and the whole active return slot, then uses the existing bounded trial
-lease to boot the frozen production image and return to the original developer
-image. The trial binds each receipt to the production SHA-256.
+X3 completed the image-bound production Home trial. It captured native Home
+with the book cover and English/Korean title, measured free heap 75,244B and
+largest block 61,428B, then returned to
+`1.0.0-dev-main-83eb0443-w6777cde0`. The whole active return slot was backed up
+and verified before the trial. State, recents, settings, library index and dirty
+marker all matched the pretrial raw bytes. The original staged update was
+restored, the owned frame exported and removed, and the terminal lease cleared.
+Receipt `build/release-prep-20261101/x3/home-finish/receipt.json` records the scope.
+The captured frame is digital framebuffer evidence.
+
+X4 known raw/public state and the whole active return slot were backed up, but
+its first production-stage command timed out during the read-only status check
+with `networkMutationIntents=0`. No production image was transferred or started
+on X4. The app's enrolled-reader discovery found no matching result before it
+was stopped. X4 needs to be prepared in Same Wi-Fi to continue. Preserve the
+failed stage output and recheck identity, exact original version, raw state and
+any pending lease before creating a new output for the next attempt.
 
 ## Release gates
 
