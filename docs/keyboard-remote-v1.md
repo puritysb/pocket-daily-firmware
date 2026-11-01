@@ -126,7 +126,7 @@ physical coverage remains this X3/Mac fixture, not all books or orientations.
 New private evidence: `build/keyboard-remote-perf-20261101/`, including frozen
 `artifact-opt4/`, source hashes, original backups, power JSONL and restoration
 receipt. App xcresult and summary: `.build/keyboard-remote-perf-20261101/` in
-sibling `pocket-daily-remote`. Prior baseline: `build/keyboard-remote-20261101/`.
+sibling `pocket-daily`. Prior baseline: `build/keyboard-remote-20261101/`.
 Failed opt1 skipped render dispatch; opt2 restarted after eight fast turns with
 no established root cause. Evidence is retained separately. Final opt4 completed
 24 turns and the full recording window after render ownership/cache-recovery/
@@ -147,3 +147,11 @@ operation occurred. Source and all safety gates are unchanged from final opt4.
 App PR review hardened pairing changes and fatal ERR handling; those final app
 fixes passed deterministic Mac/iOS regressions, without another physical run.
 Firmware source bytes still match the opt4 hardware source pin.
+
+Merged into main via firmware #26 (`fb9a900a`) and app #19 (`84b96d2`).
+Feature worktrees/branches were cleaned after preserving all four named evidence
+folders under the original firmware `build/` and app `.build/` roots. Their PR
+evidence folders hold migration SHA inventories; firmware pipeline reports are
+nested under `build/keyboard-remote-pr-20261101/dev-pipeline-runs/`. The existing
+SDK storage patch remains in the original firmware checkout. No new image was
+installed during merging; release/distribution remains on hold.

@@ -6,7 +6,7 @@ Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
 ## Keyboard remote development (2026-11-01)
 
 - Owner: default OFF; release/distribution stays on hold. Contract: `docs/keyboard-remote-v1.md`.
-- Isolated `codex/keyboard-remote` branches hold app/firmware changes for PR review; main checkout work is separate.
+- Merged app #19 / firmware #26 into main (2026-11-01); feature branches/worktrees cleaned. Other app work and existing SDK storage patch preserved.
 - X3 opt4 `1.0.0-dev-codex-keyboard-remote-a3fd9694-w319d57e0`: 24 turns passed; median ACK 1.601s (was 4.789s), 22 streamed / 2 chapter fallbacks; checkpoint min free/block 56,824/40,948B.
 - X4 lacked a reader bond; owner ended further pairing trials and accepted code-level verification only. No X4 remote/power hardware sign-off.
 - 4KiB text streaming retains BLE; chapter/image fallback retains radio-off rendering and unchanged memory gates. 80MHz idle/panel-off policies implemented; USB-off follow-up observed 47mA connected idle vs prior 49mA, awake OFF 23–24mA (short onboard comparison). Evidence/backups: `build/keyboard-remote-perf-20261101/`; battery follow-up `build/keyboard-remote-power-20261101/`; baseline `build/keyboard-remote-20261101/`.
