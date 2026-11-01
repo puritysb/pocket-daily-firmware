@@ -496,8 +496,8 @@ bool hasVisibleText(const char* p) {
 // Draw bounded UTF-8 text without std::string/vector allocations. This is used
 // by every overview card during a render pass, so it must not fragment the C3's
 // no-PSRAM heap. Returns the number of lines drawn.
-int drawWrappedFixed(const GfxRenderer& renderer, int fontId, int x, int y, const char* text, int maxWidth,
-                     int maxLines, int lineAdvance, EpdFontFamily::Style style) {
+static int wrappedFixed(const GfxRenderer& renderer, int fontId, int x, int y, const char* text, int maxWidth,
+                        int maxLines, int lineAdvance, EpdFontFamily::Style style, bool draw) {
   if (!text || !text[0] || maxWidth <= 0 || maxLines <= 0) return 0;
   const char* p = text;
   int drawn = 0;
@@ -544,7 +544,7 @@ int drawWrappedFixed(const GfxRenderer& renderer, int fontId, int x, int y, cons
     while (chosen > 0 && line[chosen - 1] == ' ') line[--chosen] = '\0';
 
     const bool more = hasVisibleText(p + consumed);
-    if (drawn == maxLines - 1 && more) {
+    if (draw && drawn == maxLines - 1 && more) {
       constexpr const char* dots = "...";
       while (line[0]) {
         char candidate[kWrapLineBytes];
@@ -554,12 +554,22 @@ int drawWrappedFixed(const GfxRenderer& renderer, int fontId, int x, int y, cons
       }
       strncat(line, dots, sizeof(line) - strlen(line) - 1);
     }
-    renderer.drawText(fontId, x, y + drawn * lineAdvance, line, true, style);
+    if (draw) renderer.drawText(fontId, x, y + drawn * lineAdvance, line, true, style);
     drawn++;
     if (consumed == 0) break;
     p += consumed;
   }
   return drawn;
+}
+
+int drawWrappedFixed(const GfxRenderer& renderer, int fontId, int x, int y, const char* text, int maxWidth,
+                     int maxLines, int lineAdvance, EpdFontFamily::Style style) {
+  return wrappedFixed(renderer, fontId, x, y, text, maxWidth, maxLines, lineAdvance, style, true);
+}
+
+int measureWrappedFixed(const GfxRenderer& renderer, int fontId, const char* text, int maxWidth, int maxLines,
+                        EpdFontFamily::Style style) {
+  return wrappedFixed(renderer, fontId, 0, 0, text, maxWidth, maxLines, 0, style, false);
 }
 
 }  // namespace PocketDaily::HomeDraw

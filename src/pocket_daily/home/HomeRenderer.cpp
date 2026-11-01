@@ -132,9 +132,9 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   using HomeDraw::formatWeatherSnapshotDate;
 
   renderer.clearScreen();
-  if (env.drawHeader) env.drawHeader(env.context, renderer, 0, m.topPadding, w, m.headerHeight, s.pocketDaily, nullptr);
-  // Same top as the sleep face so Home and the retained frame line up.
-  const int contentTop = m.topPadding + m.headerHeight + m.verticalSpacing;
+  const int headerHeight = std::min(m.headerHeight, line12 + m.verticalSpacing * 2);
+  if (env.drawHeader) env.drawHeader(env.context, renderer, 0, m.topPadding, w, headerHeight, s.pocketDaily, nullptr);
+  const int contentTop = m.topPadding + headerHeight + m.verticalSpacing;
   const int hintTop = pageH - renderer.getLineHeight(SMALL_FONT_ID) - 16;
   const bool portrait = pageH > w;
 
@@ -212,26 +212,25 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
         const int posW = renderer.getTextWidth(SMALL_FONT_ID, carouselPosition);
         renderer.drawText(SMALL_FONT_ID, x + cw - 14 - posW, ty, carouselPosition, true);
       }
-      ty += renderer.getLineHeight(labelFont) + 12;
+      ty += renderer.getLineHeight(labelFont) + 6;
       const int titleFont = fontForText(UI_12_FONT_ID, renderReadingSnapshot.title);
       const int titleAdvance = renderer.getLineHeight(titleFont) + 2;
-      const int authorH = renderReadingSnapshot.author[0] ? renderer.getLineHeight(SMALL_FONT_ID) + 6 : 0;
+      const int titleLines = HomeDraw::measureWrappedFixed(renderer, titleFont, renderReadingSnapshot.title, textW, 3,
+                                                           EpdFontFamily::BOLD);
+      const int authorFont = fontForText(SMALL_FONT_ID, renderReadingSnapshot.author);
+      const int authorH = renderReadingSnapshot.author[0] ? renderer.getLineHeight(authorFont) + 6 : 0;
       const int progressH = renderReadingSnapshot.percent >= 0 ? line12 + 34 : 0;
-      const int textBlock = titleAdvance * 2 + authorH + progressH + 16;
-      const int coverH = std::max(0, std::min(panelBottom - ty - textBlock, (textW - 40) * 3 / 2));
+      const int textBlock = titleAdvance * titleLines + authorH + progressH + 12;
+      const int coverH = std::max(0, std::min(panelBottom - ty - textBlock, (textW - 12) * 3 / 2));
       const int coverW = coverH * 2 / 3;
       if (coverW >= 60) {
         drawReadingCover(x + (cw - coverW) / 2, ty, coverW, coverH);
-        ty += coverH + 14;
+        ty += coverH + 10;
       }
-      const auto titleLines =
-          renderer.wrappedText(titleFont, renderReadingSnapshot.title, textW, 2, EpdFontFamily::BOLD);
-      for (const auto& line : titleLines) {
-        renderer.drawText(titleFont, textX, ty, line.c_str(), true, EpdFontFamily::BOLD);
-        ty += titleAdvance;
-      }
+      ty += drawWrappedFixed(renderer, titleFont, textX, ty, renderReadingSnapshot.title, textW, 3, titleAdvance,
+                             EpdFontFamily::BOLD) *
+            titleAdvance;
       if (renderReadingSnapshot.author[0]) {
-        const int authorFont = fontForText(SMALL_FONT_ID, renderReadingSnapshot.author);
         renderer.drawText(authorFont, textX, ty + 4,
                           renderer.truncatedText(authorFont, renderReadingSnapshot.author, textW).c_str(), true);
       }
@@ -240,9 +239,6 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     }
 
     // A wide panel: cover column beside the title, author and progress.
-    const int readingH = std::min(ch, cw * 3 / 4 + 24);
-    y += (ch - readingH) / 2;
-    ch = readingH;
     const int wideBottom = y + ch;
     const int coverColumn = cw * 47 / 100;
     const int coverH = std::min(ch - 24, (coverColumn - 24) * 3 / 2);
@@ -262,14 +258,19 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
       renderer.drawText(SMALL_FONT_ID, x + cw - 13 - posW, y + 14, carouselPosition, true);
     }
     const int titleFont = fontForText(UI_12_FONT_ID, renderReadingSnapshot.title);
-    auto titleLines = renderer.wrappedText(titleFont, renderReadingSnapshot.title, textW, 4, EpdFontFamily::BOLD);
-    int ty = y + 14 + renderer.getLineHeight(labelFont) + 22;
-    for (const auto& titleLine : titleLines) {
-      renderer.drawText(titleFont, textX, ty, titleLine.c_str(), true, EpdFontFamily::BOLD);
-      ty += renderer.getLineHeight(titleFont) + 2;
-    }
+    const int titleAdvance = renderer.getLineHeight(titleFont) + 2;
+    const int authorFont = fontForText(SMALL_FONT_ID, renderReadingSnapshot.author);
+    const int authorH = renderReadingSnapshot.author[0] ? renderer.getLineHeight(authorFont) + 5 : 0;
+    const int textTop = y + 14 + renderer.getLineHeight(labelFont) + 10;
+    const int textBottom = wideBottom - (renderReadingSnapshot.percent >= 0 ? line12 + 36 : 14);
+    const int maxTitleLines = std::max(1, std::min(4, (textBottom - textTop - authorH) / titleAdvance));
+    const int titleLines = HomeDraw::measureWrappedFixed(renderer, titleFont, renderReadingSnapshot.title, textW,
+                                                         maxTitleLines, EpdFontFamily::BOLD);
+    int ty = textTop + std::max(0, (textBottom - textTop - titleLines * titleAdvance - authorH) / 2);
+    ty += drawWrappedFixed(renderer, titleFont, textX, ty, renderReadingSnapshot.title, textW, maxTitleLines,
+                           titleAdvance, EpdFontFamily::BOLD) *
+          titleAdvance;
     if (renderReadingSnapshot.author[0]) {
-      const int authorFont = fontForText(SMALL_FONT_ID, renderReadingSnapshot.author);
       ty += 5;
       renderer.drawText(authorFont, textX, ty,
                         renderer.truncatedText(authorFont, renderReadingSnapshot.author, textW).c_str(), true);

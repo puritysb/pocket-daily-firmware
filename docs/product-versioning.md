@@ -109,8 +109,7 @@ and X4 must pass native OTA and the same-version no-update check before final
 release sign-off.
 
 `1.0.0` requires the full checklist with both device rows signed off against
-the commit and image SHA-256. Before stable sign-off, resolve and test X3
-native HTTPS or explicitly decide and publicly document its continued exclusion
-from the product scope; the current 1.0.0 limitation does not automatically
-approve that scope for `1.0.0`. A host build or staging an image does not sign
-off a device.
+the commit and image SHA-256, within the supported update scope above. Record
+X3 native-HTTPS failure and companion guidance, and verify its companion/SD
+installation and recovery path. X4 native HTTPS remains required. A host build
+or staging an image does not sign off a device.

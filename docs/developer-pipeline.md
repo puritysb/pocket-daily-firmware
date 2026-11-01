@@ -279,6 +279,16 @@ provisioning is a separate test requiring a reachable network supplied by the us
 
 ## Development screen capture
 
+The X3 `--screen-suite` now requires 15 native captures, eight full-frame
+Connected app/Sync preview comparisons and two exact After Sync comparisons
+for ordinary Home and powered-off Brief, each using its own paint input receipt.
+The normal Home capture
+already exists in the timer scenario; this adds no shipping capture route.
+The app waits for fresh idle transfer feedback and a successful read-only
+reader-readiness request before its single EPUB capture POST. A published
+file can still leave the five-second Saved banner painting under RenderLock;
+the POST remains single-shot and drawing rejection is never hidden by replay.
+
 `run --app <checkout> --config build/dev-pipeline-x4.json --x4-sleep` is the
 separate actual-X4 Home/Brief/deep-sleep scenario. It requires external USB
 power detected by the HAL, retains the normal X4 battery-latch shutdown, and

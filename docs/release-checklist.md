@@ -1,5 +1,9 @@
 # Pocket Daily Firmware Release Checklist
 
+Current 1.0.0 preparation and exact-image results are in
+[the candidate record](release-1.0.0-candidate.md). Historical 0.1.0 results below
+keep their original image scope.
+
 ## Current local reading repair — 2026-10-29
 
 Production0.1.0 gh_release, 6,372,784B, SHA
@@ -413,11 +417,12 @@ tag. Checks that require the newly published release are marked below and
 remain pending until that endpoint exists; publication alone is not final
 release sign-off.
 
-For **1.0.0**, complete the full hardware and feature sections on both models.
-The X3 native-HTTPS limitation must be resolved and tested, or its continued
-exclusion must receive an explicit product-scope decision and matching public
-documentation before stable sign-off. This 0.x scope does not grant that
-future approval. No change here signs off an image or a physical scenario.
+For **1.0.0**, complete the full hardware and feature sections on both models
+under the supported scope in [product versioning](product-versioning.md#supported-update-scope-for-100).
+The 2026-11-01 product decision retains X3 companion/SD installation and its
+explicit native-HTTPS limitation. Verify its failure message and companion
+guidance. X4 native HTTPS and both models' supported update/recovery gates
+remain required.
 
 ## Candidate identity
 
