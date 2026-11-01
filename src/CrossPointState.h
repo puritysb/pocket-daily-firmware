@@ -3,7 +3,10 @@
 #include <PersistableStore.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
+
+#include "pocket_daily/ReaderNavigation.h"
 
 class CrossPointState : public PersistableStore<CrossPointState> {
   CrossPointState() = default;
@@ -25,6 +28,7 @@ class CrossPointState : public PersistableStore<CrossPointState> {
   // Shell the device slept in (Pocket Daily or Home; a book counts as the shell
   // that opened it). Waking returns there; only a cold boot uses startupApp.
   bool lastSleepInPocketDaily = false;
+  std::optional<ReaderNavigation> savedReaderNavigation;
   // Set when the device went to sleep through enterDeepSleep and consumed on the
   // next boot. X4 cuts all power while asleep, so its wake looks like a cold boot;
   // this marker tells the two apart on every model.

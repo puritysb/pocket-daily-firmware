@@ -53,6 +53,12 @@ void CrossPointState::toJson(JsonDocument& doc) const {
   doc["readerActivityLoadCount"] = readerActivityLoadCount;
   doc["lastSleepFromReader"] = lastSleepFromReader;
   doc["lastSleepInPocketDaily"] = lastSleepInPocketDaily;
+  if (savedReaderNavigation) {
+    auto navigation = doc["readerNavigation"].to<JsonObject>();
+    navigation["version"] = 1;
+    navigation["reader"] = static_cast<uint8_t>(savedReaderNavigation->reader);
+    navigation["shell"] = static_cast<uint8_t>(savedReaderNavigation->shell);
+  }
   doc["sleptCleanly"] = sleptCleanly;
   doc["showBootScreen"] = showBootScreen;
 }
@@ -92,6 +98,15 @@ bool CrossPointState::fromJson(JsonVariantConst doc) {
   readerActivityLoadCount = doc["readerActivityLoadCount"] | static_cast<uint8_t>(0);
   lastSleepFromReader = doc["lastSleepFromReader"] | false;
   lastSleepInPocketDaily = doc["lastSleepInPocketDaily"] | false;
+  savedReaderNavigation.reset();
+  const auto navigation = doc["readerNavigation"];
+  if (navigation["version"].is<uint8_t>() && navigation["version"].as<uint8_t>() == 1 &&
+      navigation["reader"].is<uint8_t>() && navigation["shell"].is<uint8_t>()) {
+    const auto reader = navigation["reader"].as<uint8_t>();
+    const auto shell = navigation["shell"].as<uint8_t>();
+    if (validReaderNavigation(reader, shell))
+      savedReaderNavigation = ReaderNavigation{static_cast<ReaderReturn>(reader), static_cast<ReaderReturn>(shell)};
+  }
   sleptCleanly = doc["sleptCleanly"] | false;
   showBootScreen = doc["showBootScreen"] | true;
   return true;

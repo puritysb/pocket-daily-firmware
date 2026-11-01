@@ -53,9 +53,11 @@ class SyncRoutesTest(unittest.TestCase):
         # Library or the file browser entered from Pocket Daily return there, and
         # both screens' Back and the reader menu's Home go there too. Only the
         # reader's own re-opens keep the origin.
-        open_book = manager[manager.index("void ActivityManager::goToReader("):]
-        open_book = open_book[:open_book.index("\n}")]
-        self.assertLess(open_book.index("readerReturn = shell;"), open_book.index("if (path.empty())"))
+        navigation = (root / "src/pocket_daily/ReaderNavigation.cpp").read_text()
+        self.assertIn("launchReader(shell, std::move(path), fast)", navigation)
+        launch = navigation[navigation.index("void ActivityManager::launchReader("):]
+        self.assertLess(launch.index("if (!activity) return;"), launch.index("readerReturn = origin;"))
+        self.assertLess(launch.index("readerReturn = origin;"), launch.rindex("replaceActivity(std::move(activity));"))
         browser = (root / "src/activities/home/FileBrowserActivity.cpp").read_text()
         self.assertIn("activityManager.goToShell();", browser)
         epub = (root / "src/activities/reader/EpubReaderActivity.cpp").read_text()
@@ -68,7 +70,9 @@ class SyncRoutesTest(unittest.TestCase):
         main = (root / "src/main.cpp").read_text()
         self.assertIn("APP_STATE.lastSleepInPocketDaily = activityManager.inPocketDailyShell();", main)
         self.assertIn("APP_STATE.sleptCleanly = true;", main)
-        self.assertIn("wokeFromSleep ? APP_STATE.lastSleepInPocketDaily", main)
+        self.assertIn("hasSleepNavigation(APP_STATE.sleptCleanly, isSleepWake, APP_STATE.showBootScreen)", main)
+        self.assertIn("activityManager.restoreReaderNavigation(restoredNavigation);", main)
+        self.assertIn("wakeReaderOrigin(restoredNavigation, APP_STATE.lastSleepFromReader)", main)
         # The startup setting is read only after SETTINGS is loaded.
         self.assertLess(main.index("SETTINGS.loadFromFile();"), main.index("const bool startInPocketDaily"))
         self.assertIn("activityManager.resumeReader(openPath)", reader)
@@ -76,9 +80,10 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertIn("activityManager.resumeReader(epubPath)", sync)
         callers = [p for p in (root / "src").rglob("*.cpp") if "resumeReader(" in p.read_text()]
         self.assertEqual(sorted(p.name for p in callers),
-                         ["ActivityManager.cpp", "KOReaderSyncActivity.cpp", "ReaderActivity.cpp"])
+                         ["KOReaderSyncActivity.cpp", "ReaderActivity.cpp", "ReaderNavigation.cpp"])
         # The first front button leads to CrossPoint Home and says so.
-        self.assertIn("mapLabels(tr(STR_POCKET_HOME)", pocket)
+        self.assertIn("GUI.drawButtonHints(renderer, tr(STR_POCKET_HOME)", pocket)
+        self.assertNotIn("mapLabels(tr(STR_POCKET_HOME)", pocket)
         self.assertNotIn("STR_POCKET_LIBRARY", pocket)
 
     def test_stock_screens_do_not_host_reading_sync_windows(self):

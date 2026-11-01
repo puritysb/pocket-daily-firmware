@@ -134,3 +134,5 @@ add_subdirectory(bounded_http)
 add_subdirectory(trial_reader)
 
 add_subdirectory(book_cache_utils)
+
+add_subdirectory(reader_navigation)

@@ -3,6 +3,11 @@
 Current source/release records override dated observations. Details: cited docs.
 Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
 
+## Sleep navigation fix in development (2026-11-01)
+
+- Immediate reader installation after wake bypassed the pending-only origin assignment, so Back went Home. Origin is now set before installation; reader origin and parent shell persist through sleep/internal reader restart, with legacy fallback.
+- Branch `codex/preserve-sleep-navigation`; final developer w7317c875 installed on X3/X4. Owner-operated Sleep/Wake/Back returned to Pocket Daily on both; state readbacks confirm context. Host 1,175/default build/strict analysis pass. Contextual footer/menu labels corrected with atomic destination reads/writes; full physical label coverage is unverified. Proof: `docs/sleep-navigation.md`, `build/sleep-navigation-hardware-20261101/`. Release/distribution held.
+
 ## Keyboard remote development (2026-11-01)
 
 - Owner: default OFF; release/distribution stays on hold. Contract: `docs/keyboard-remote-v1.md`.

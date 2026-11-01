@@ -13,6 +13,7 @@
 
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
+#include "pocket_daily/ReaderNavigation.h"
 #include "util/ScreenshotInfo.h"
 
 class Activity;    // forward declaration
@@ -34,10 +35,6 @@ enum class HomeMenuItem { NONE, FILE_BROWSER, LIBRARY, OPDS_BROWSER, FILE_TRANSF
  * - No onPause/onResume, since we don't have a concept of background activities
  * - onActivityResult is implemented via a callback instead of a separate method, for simplicity
  */
-// Where leaving a book goes. Stock shells return Home; Pocket Daily and its
-// Articles list return to themselves.
-enum class ReaderReturn : uint8_t { Home, PocketDaily, Articles };
-
 class ActivityManager {
   friend class RenderLock;
 
@@ -56,11 +53,15 @@ class ActivityManager {
   enum class PendingAction { None, Push, Pop, Replace };
   PendingAction pendingAction = PendingAction::None;
 
+  void launchReader(ReaderReturn origin, std::string path, bool allowFastInitialRefresh);
+
+  // Footer rendering reads these while the loop prepares transitions; individual
+  // destination reads must not race with those writes. No activity lifetime is shared.
   // Product shell that opened the current book; leaving the book returns there.
-  ReaderReturn readerReturn = ReaderReturn::Home;
+  std::atomic<ReaderReturn> readerReturn{ReaderReturn::Home};
   // Shell the user last entered (Home or Pocket Daily). Library and books opened
   // from it return there.
-  ReaderReturn shell = ReaderReturn::Home;
+  std::atomic<ReaderReturn> shell{ReaderReturn::Home};
 
   // Task to render and display the activity
   TaskHandle_t renderTaskHandle = nullptr;
@@ -113,6 +114,13 @@ class ActivityManager {
   // Reopen a book from inside the reader flow (after KOReader sync, the next
   // book from the end-of-book menu): the origin of the current book is kept.
   void resumeReader(std::string path);
+  const char* readerReturnLabel() const;
+  const char* shellReturnLabel() const;
+  ReaderNavigation readerNavigation() const { return {readerReturn, shell}; }
+  void restoreReaderNavigation(ReaderNavigation saved) {
+    readerReturn = saved.reader;
+    shell = saved.shell;
+  }
   // Back from a screen both shells open (Library): Pocket Daily or Home.
   void goToShell();
   // Whether the current screen belongs to Pocket Daily (a book: the shell that

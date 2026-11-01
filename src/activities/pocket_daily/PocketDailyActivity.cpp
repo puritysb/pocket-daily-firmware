@@ -655,13 +655,9 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
     // with a full waveform (it is painted once, at power-off).
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);
   } else {
-    // Confirm resumes the open book — label it only when there is one. Left
-    // and Right are physical positions here (handleButtons reads raw gpio), so
-    // they bypass the front-button remap the mapped labels follow.
-    auto labels = mappedInput.mapLabels(tr(STR_POCKET_HOME), continuePath.empty() ? "" : tr(STR_POCKET_READ), "", "");
-    labels.btn3 = tr(STR_ARTICLES);
-    labels.btn4 = tr(STR_POCKET_SYNC);
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    // The empty carousel routes physical Confirm to Sync. These four actions
+    // use physical buttons, so applying the logical reader remap mislabels them.
+    GUI.drawButtonHints(renderer, tr(STR_POCKET_HOME), tr(STR_POCKET_SYNC), tr(STR_ARTICLES), tr(STR_POCKET_SYNC));
     renderer.displayBuffer();
   }
 }

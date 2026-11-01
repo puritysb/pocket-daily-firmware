@@ -63,7 +63,7 @@ void EndOfBookOptions::buildRowItems() {
     rowCount++;
   }
   if (rowCount < MAX_ROWS) {
-    rowLabels[rowCount] = tr(STR_EOB_HOME);
+    rowLabels[rowCount] = activityManager.readerReturnLabel();
     fui::ListItem item;
     item.label = rowLabels[rowCount].c_str();
     item.actionValue = static_cast<int16_t>(rowCount);
