@@ -53,6 +53,8 @@ class GfxRenderer {
   HalDisplay& display;
   RenderMode renderMode;
   mutable bool absoluteGrayPlanes = false;
+  bool absoluteTextAA = false;
+  mutable bool glyphRasterFailed_ = false;
   Orientation orientation;
   bool fadingFix;
   uint8_t* frameBuffer = nullptr;
@@ -481,8 +483,14 @@ class GfxRenderer {
   void copyGrayscaleLsbBuffers() const;
   void copyGrayscaleMsbBuffers() const;
   void displayGrayBuffer() const;
+  void displayGrayBuffer(bool turnOffScreen) const;
   // Active input encoding, used when drawing monochrome overlays into planes.
   bool grayPlanesAreAbsolute() const { return absoluteGrayPlanes; }
+  void resetGlyphRasterFailure() const { glyphRasterFailed_ = false; }
+  void noteGlyphRasterFailure() const { glyphRasterFailed_ = true; }
+  bool glyphRasterFailed() const { return glyphRasterFailed_; }
+  bool absoluteTextAntialiasing() const { return absoluteTextAA; }
+  void setAbsoluteTextAntialiasing(bool enabled) { absoluteTextAA = enabled; }
 
   // Tiled grayscale (X4): stream one band of a plane straight to controller RAM
   // from `scratch` (panelWidthBytes * numRows, physical rows [yStart, yStart+
@@ -521,6 +529,8 @@ class GfxRenderer {
   // One-way ownership transfer before sleep. Call under RenderLock, after
   // saving the retained frame; drawing stays disabled until the next boot.
   bool releaseFrameBufferForSleep();
+  bool releaseFrameBufferForRemote();
+  bool restoreFrameBufferAfterRemote();
 
   // RAII form of the loan above, for blocking build regions with early-return
   // error paths: restores on scope exit (or explicitly via end()). Display the

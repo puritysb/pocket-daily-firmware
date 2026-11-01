@@ -84,6 +84,9 @@ class HalDisplay {
   // Terminal sleep only: the panel retains its image, but no more drawing is
   // legal until the next boot. Caller must exclude every renderer first.
   bool releaseFrameBufferForSleep();
+  // Remote idle only: panel holds its image; redraw fully after restore.
+  bool releaseFrameBufferForRemote();
+  bool restoreFrameBufferAfterRemote();
 
   // Lend the framebuffer's ~48 KB STORAGE to a memory-hungry phase (chapter
   // builds) without freeing it: the allocation never moves, so repeated loans

@@ -18,8 +18,9 @@ constexpr size_t MAX_RECORD_BYTES = RECORD_LIMIT;
 
 // SCREEN: the Nearby Sync screen (passkey pairing, START_AP). WINDOW: a
 // Reading Sync exchange window (docs/reading-sync-ble-v1.md): only already
-// bonded peers, no pairing, no passkey, START_AP refused.
-enum class Mode : uint8_t { SCREEN, WINDOW };
+// bonded peers, no pairing, no passkey, START_AP refused. REMOTE uses the
+// same bonded-only admission but advertises only REMOTE1, never READ1.
+enum class Mode : uint8_t { SCREEN, WINDOW, REMOTE };
 
 // A deliberately small BLE control plane. Callbacks only copy bounded records
 // into a short queue; all state changes, SD and radio transitions happen from
@@ -28,7 +29,7 @@ class Service final {
  public:
   // `advertiseMs` 0 advertises until end().
   bool begin(const char* model, const char* firmware, Mode requestedMode = Mode::SCREEN, uint32_t advertiseMs = 120000,
-             bool appWake = false);
+             bool appWake = false, uint32_t remoteSession = 0);
   void end();
 
   bool isRunning() const { return running_; }
@@ -43,6 +44,7 @@ class Service final {
   // state never outlive the connection that produced them.
   uint32_t connectionGeneration() const { return generation_.load(std::memory_order_acquire); }
   uint32_t connectionCount() const { return connections_.load(std::memory_order_acquire); }
+  uint16_t connectionHandle() const { return connHandle_.load(std::memory_order_acquire); }
   uint32_t connectedAtMs() const { return connectedAt_.load(std::memory_order_acquire); }
 
   // Takes the next well-formed command; false when none is queued. Malformed,

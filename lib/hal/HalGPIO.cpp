@@ -379,3 +379,11 @@ bool HalGPIO::releaseProbePowerButton() {
 #endif
 }
 #endif
+
+bool HalGPIO::readBatteryCurrentMA(int16_t& current) {
+#if CROSSPOINT_EMULATED == 0
+  return deviceIsX3() && X3GPIO::readBQ27220CurrentMA(&current);
+#else
+  return false;
+#endif
+}

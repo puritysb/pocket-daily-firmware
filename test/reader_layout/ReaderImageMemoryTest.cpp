@@ -360,3 +360,145 @@ bool PngToBmpConverter::pngFileToBmpStream(HalFile&, Print&, bool, bool) { retur
 bool PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(HalFile&, Print&, int, int) { return false; }
 bool JpegToBmpConverter::jpegFileToBmpStream(HalFile&, Print&, bool, bool) { return false; }
 bool JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(HalFile&, Print&, int, int) { return false; }
+
+TEST(KeyboardRemoteFramebuffer, RepeatedOwnershipTransfersReattachTheNewWhiteBuffer) {
+  HalDisplay panel;
+  GfxRenderer renderer{panel};
+  renderer.begin();
+  for (int cycle = 0; cycle < 100; ++cycle) {
+    renderer.drawPixel(3, 4);
+    ASSERT_TRUE(renderer.releaseFrameBufferForRemote());
+    EXPECT_FALSE(renderer.hasFrameBuffer());
+    EXPECT_TRUE(panel.fb_.empty());
+    EXPECT_FALSE(renderer.releaseFrameBufferForRemote());
+    // Occupy the freed allocation so a stale cached renderer pointer is exposed.
+    std::vector<uint8_t> competing(HalDisplay::BUFFER_SIZE, static_cast<uint8_t>(cycle));
+    ASSERT_TRUE(renderer.restoreFrameBufferAfterRemote());
+    ASSERT_EQ(renderer.getFrameBuffer(), panel.getFrameBuffer());
+    EXPECT_TRUE(std::all_of(panel.fb_.begin(), panel.fb_.end(), [](uint8_t b) { return b == 0xFF; }));
+    EXPECT_EQ(competing[0], static_cast<uint8_t>(cycle));
+  }
+}
+
+TEST(KeyboardRemoteFramebuffer, FailedRestoreNeverPublishesAnInvalidFramebuffer) {
+  HalDisplay panel;
+  GfxRenderer renderer{panel};
+  renderer.begin();
+  ASSERT_TRUE(renderer.releaseFrameBufferForRemote());
+  panel.failRemoteRestore = true;
+  EXPECT_FALSE(renderer.restoreFrameBufferAfterRemote());
+  EXPECT_FALSE(renderer.hasFrameBuffer());
+  panel.failRemoteRestore = false;
+  EXPECT_TRUE(renderer.restoreFrameBufferAfterRemote());
+  EXPECT_TRUE(renderer.hasFrameBuffer());
+}
+
+TEST(KeyboardRemoteFramebuffer, AStoredOverlayCannotBeFreedUnderItsOwner) {
+  HalDisplay panel;
+  GfxRenderer renderer{panel};
+  renderer.begin();
+  ASSERT_TRUE(renderer.storeBwBuffer());
+  EXPECT_FALSE(renderer.releaseFrameBufferForRemote());
+  EXPECT_TRUE(renderer.hasFrameBuffer());
+  renderer.discardStoredBwBuffer();
+  EXPECT_TRUE(renderer.releaseFrameBufferForRemote());
+  EXPECT_TRUE(renderer.restoreFrameBufferAfterRemote());
+}
+
+TEST_F(ReaderImageMemory, StreamingTextPreservesEveryPixelAcrossAAOrientationsAndStripSizes) {
+  auto page = makePage(false);
+  panel.direct = true;
+  ReaderPageRenderer::Options options;
+  options.fontId = FONT_ID;
+  options.marginLeft = options.marginTop = 4;
+  std::array<uint8_t, 4096> scratch{};
+  for (auto orientation : {GfxRenderer::Portrait, GfxRenderer::LandscapeClockwise, GfxRenderer::PortraitInverted,
+                           GfxRenderer::LandscapeCounterClockwise}) {
+    renderer.setOrientation(orientation);
+    for (const bool aa : {false, true}) {
+      const auto reference = render(page, aa);
+      options.textAntiAliasing = aa;
+      ASSERT_TRUE(renderer.releaseFrameBufferForRemote());
+      for (const uint32_t capacity : {99U, 1287U, 4096U}) {
+        ASSERT_TRUE(ReaderPageRenderer::renderStreaming(renderer, page, options, scratch.data(), capacity));
+        ASSERT_FALSE(renderer.hasFrameBuffer());
+        for (size_t i = 0; i < reference[0].size(); ++i) {
+          uint8_t lsb = 0, msb = 0;
+          for (int bit = 0; bit < 8; ++bit) {
+            const uint8_t mask = 1U << bit;
+            const int level = reference[0][i] & mask             ? 3
+                              : !aa || !(reference[2][i] & mask) ? 0
+                              : reference[1][i] & mask           ? 1
+                                                                 : 2;
+            if (level == 1 || level == 3) lsb |= mask;
+            if (level >= 2) msb |= mask;
+          }
+          ASSERT_EQ(panel.lsb_[i], lsb) << "byte " << i;
+          ASSERT_EQ(panel.msb_[i], msb) << "byte " << i;
+        }
+      }
+      ASSERT_TRUE(renderer.restoreFrameBufferAfterRemote());
+    }
+  }
+}
+
+TEST_F(ReaderImageMemory, StreamingRefusesImagesUnsupportedPanelsAndInvalidScratchBeforeDrawing) {
+  auto text = makePage(false);
+  auto image = makePage(true);
+  ReaderPageRenderer::Options options;
+  options.fontId = FONT_ID;
+  std::array<uint8_t, 4096> scratch{};
+  const unsigned before = panel.c.gray;
+  EXPECT_FALSE(ReaderPageRenderer::renderStreaming(renderer, text, options, scratch.data(), scratch.size()));
+  panel.direct = true;
+  EXPECT_FALSE(ReaderPageRenderer::renderStreaming(renderer, image, options, scratch.data(), scratch.size()));
+  EXPECT_FALSE(ReaderPageRenderer::renderStreaming(renderer, text, options, nullptr, scratch.size()));
+  EXPECT_FALSE(ReaderPageRenderer::renderStreaming(renderer, text, options, scratch.data(), 98));
+  panel.setInverted(true);
+  EXPECT_FALSE(ReaderPageRenderer::renderStreaming(renderer, text, options, scratch.data(), scratch.size()));
+  EXPECT_EQ(panel.c.gray, before);
+  EXPECT_EQ(decodeCalls, 0U);
+}
+
+TEST_F(ReaderImageMemory, StreamingCancelsAnIncompleteRasterBeforeAnyRefresh) {
+  panel.direct = true;
+  auto page = makePage(false);
+  ReaderPageRenderer::Options options;
+  options.fontId = FONT_ID;
+  options.textAntiAliasing = true;
+  // Inject the same error signal an unreadable nonempty glyph raises during
+  // rasterization; no partial absolute plane may reach panel activation.
+  options.context = &renderer;
+  options.drawStatusBar = [](void* context) { static_cast<GfxRenderer*>(context)->noteGlyphRasterFailure(); };
+  std::array<uint8_t, 4096> scratch{};
+  const unsigned before = panel.c.gray;
+  EXPECT_FALSE(ReaderPageRenderer::renderStreaming(renderer, page, options, scratch.data(), scratch.size()));
+  EXPECT_EQ(panel.c.gray, before);
+  EXPECT_FALSE(renderer.grayPlanesAreAbsolute());
+  EXPECT_FALSE(renderer.absoluteTextAntialiasing());
+}
+
+TEST_F(ReaderImageMemory, ReleasedFrameRefusesOrdinaryDrawingButKeepsStripWritesValid) {
+  renderer.setOrientation(GfxRenderer::LandscapeCounterClockwise);
+  ASSERT_TRUE(renderer.releaseFrameBufferForRemote());
+  const auto before = panel.c;
+  std::array<uint8_t, 99> band{};
+  band.fill(0xff);
+  renderer.clearScreen();
+  renderer.fillRect(0, 0, 8, 8);
+  renderer.invertScreen();
+  EXPECT_EQ(renderer.readFramebufferRegion(0, 0, 8, 1, band.data(), band.size()), 0U);
+  renderer.writeFramebufferRegion(0, 0, 8, 1, band.data());
+  EXPECT_FALSE(renderer.storeBwBuffer());
+  renderer.displayBuffer();
+  renderer.displayBufferAsync();
+  EXPECT_EQ(panel.c.fast, before.fast);
+  EXPECT_EQ(panel.c.half, before.half);
+  EXPECT_EQ(panel.c.full, before.full);
+  renderer.beginStripTarget(band.data(), 0, 1);
+  renderer.fillRect(0, 0, 8, 1);
+  renderer.endStripTarget();
+  EXPECT_EQ(band[0], 0);
+  EXPECT_EQ(band[1], 0xff);
+  ASSERT_TRUE(renderer.restoreFrameBufferAfterRemote());
+}

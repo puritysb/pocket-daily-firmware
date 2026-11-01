@@ -21,6 +21,7 @@
 #include "components/UITheme.h"
 #include "pocket_daily/boot/TrialReader.h"
 #include "pocket_daily/dev/ScreenCapture.h"
+#include "pocket_daily/nearby_sync/KeyboardRemote.h"
 
 ReaderActivity::ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
                                std::string bookPath, const bool allowFastInitialRefresh)
@@ -94,11 +95,15 @@ void ReaderActivity::rememberBookOnceRendered() {
   RECENT_BOOKS.addBook(bookPath, getBookTitle(), getBookAuthor(), getBookThumbBmpPath());
 }
 
+bool ReaderActivity::preventAutoSleep() {
 #ifdef ENABLE_DEV_REMOTE_FLASH
-bool ReaderActivity::preventAutoSleep() { return PocketDaily::DevCapture::readerWalkActive(); }
+  if (PocketDaily::DevCapture::readerWalkActive() || PocketDaily::DevCapture::keyboardRemoteTrialActive()) return true;
 #endif
+  return Pocket::KeyboardRemote::active() || Pocket::KeyboardRemote::preparing();
+}
 
 void ReaderActivity::onExit() {
+  Pocket::KeyboardRemote::stop();
   Activity::onExit();
 
   // Keep rebuildable font buffers from pinning the heap between reading sessions.
@@ -216,7 +221,13 @@ void ReaderActivity::loop() {
 }
 
 void ReaderActivity::render(RenderLock&&) {
+  if (!renderer.hasFrameBuffer() && !Pocket::KeyboardRemote::streaming())
+    return;  // BLE idle holds the e-paper image without drawing
   if (isAtEndOfBook()) {
+    if (!renderer.hasFrameBuffer()) {
+      Pocket::KeyboardRemote::requestSlowRender();
+      return;
+    }
     if (!endOfBookOptions) {
       endOfBookOptions = makeUniqueNoThrow<EndOfBookOptions>(renderer);
       if (!endOfBookOptions) LOG_ERR("READER", "OOM: EndOfBookOptions");

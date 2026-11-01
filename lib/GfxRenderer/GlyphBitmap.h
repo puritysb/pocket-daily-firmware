@@ -11,7 +11,25 @@
 namespace glyphBitmap {
 
 // Framebuffer plane a glyph is painted into.
-enum class Plane : uint8_t { BW, GrayLSB, GrayMSB };
+enum class Plane : uint8_t { BW, GrayLSB, GrayMSB, AbsoluteLSB, AbsoluteMSB };
+
+inline constexpr uint8_t levelsFor(bool twoBit, Plane plane) {
+  if (!twoBit) return 0x02;
+  switch (plane) {
+    case Plane::BW:
+      return 0x0e;
+    case Plane::GrayLSB:
+      return 0x04;
+    case Plane::GrayMSB:
+      return 0x06;
+    case Plane::AbsoluteLSB:
+      return 0x0a;  // white/light/dark/black = 1/0/1/0
+    case Plane::AbsoluteMSB:
+      return 0x0c;  // white/light/dark/black = 1/1/0/0
+  }
+  return 0;
+}
+inline constexpr bool overlayPlane(Plane plane) { return plane == Plane::GrayLSB || plane == Plane::GrayMSB; }
 
 // Position of glyph pixel (0, 0) plus the step for one move along the glyph's
 // x and y axes, all in one coordinate space. The axes must describe an
@@ -96,12 +114,8 @@ __attribute__((always_inline)) inline void paint(uint8_t* buffer, int destinatio
 inline void draw(const uint8_t* bitmap, int width, int height, bool twoBit, Plane plane, bool state,
                  const Target& target, Clip clip) {
   // Bit n of levels set means source value n is painted.
-  uint8_t levels = 0x02;
-  bool clearBits = state;
-  if (twoBit) {
-    levels = plane == Plane::BW ? 0x0e : plane == Plane::GrayMSB ? 0x06 : 0x04;
-    if (plane != Plane::BW) clearBits = false;
-  }
+  const uint8_t levels = levelsFor(twoBit, plane);
+  const bool clearBits = twoBit && overlayPlane(plane) ? false : state;
 
   // Intersect with the glyph bounds, then with the panel width and the
   // buffered row band.
@@ -169,8 +183,8 @@ inline void drawScaled(const uint8_t* bitmap, int width, int height, bool twoBit
   clip.right = std::min(clip.right, outWidth);
   clip.bottom = std::min(clip.bottom, outHeight);
   clipToRect(target.frame, 0, target.originY, target.width, target.originY + target.rows, clip);
-  const uint8_t levels = !twoBit ? 0x02 : plane == Plane::BW ? 0x0e : plane == Plane::GrayMSB ? 0x06 : 0x04;
-  const bool clearBits = twoBit && plane != Plane::BW ? false : state;
+  const uint8_t levels = levelsFor(twoBit, plane);
+  const bool clearBits = twoBit && overlayPlane(plane) ? false : state;
   for (int y = clip.top; y < clip.bottom; ++y) {
     const int sy = std::min(height - 1, y * 256 / scale);
     for (int x = clip.left; x < clip.right; ++x) {

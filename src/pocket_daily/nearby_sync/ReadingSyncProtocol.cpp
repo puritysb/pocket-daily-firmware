@@ -98,6 +98,14 @@ ParseResult parseCommand(const char* record, const size_t length, ParsedCommand&
   memcpy(out.requestId, id.text, REQUEST_ID_LENGTH);
   out.requestId[REQUEST_ID_LENGTH] = '\0';
 
+  if (fieldIs(verb, "REMOTE_READY")) {
+    out.verb = Verb::REMOTE_READY;
+    return cursor == end ? ParseResult::OK : ParseResult::BAD_FIELDS;
+  }
+  if (fieldIs(verb, "NEXT") || fieldIs(verb, "PREV")) {
+    out.verb = fieldIs(verb, "NEXT") ? Verb::PAGE_NEXT : Verb::PAGE_PREV;
+    return cursor == end ? ParseResult::OK : ParseResult::BAD_FIELDS;
+  }
   if (fieldIs(verb, "WIFI_JOIN")) {
     out.verb = Verb::WIFI_JOIN;
     if (cursor >= end) return ParseResult::BAD_FIELDS;
