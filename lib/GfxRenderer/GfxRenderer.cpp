@@ -1010,6 +1010,11 @@ void GfxRenderer::blitGlyph(const uint8_t* bitmap, const bool is2Bit, const int 
 
 int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontFamily::Style style,
                               const BidiUtils::BidiBaseDir baseDir) const {
+  return measureTextInk(fontId, text, style, baseDir);
+}
+
+int GfxRenderer::measureTextInk(const int fontId, const char* text, const EpdFontFamily::Style style,
+                                const BidiUtils::BidiBaseDir baseDir) const {
   if (text == nullptr || *text == '\0') {
     return 0;
   }

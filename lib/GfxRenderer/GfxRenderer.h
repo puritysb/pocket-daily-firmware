@@ -155,6 +155,7 @@ class GfxRenderer {
   // RAM-only coverage check: never loads a glyph or touches SD for Cached SD
   // fonts and flash fonts.
   bool fontCovers(int fontId, const EpdFontFamily& font, uint32_t cp, EpdFontFamily::Style style) const;
+  int measureTextInk(int fontId, const char* text, EpdFontFamily::Style style, BidiUtils::BidiBaseDir baseDir) const;
   GlyphRef resolveGlyph(const EpdFontFamily& font, uint32_t cp, EpdFontFamily::Style style, bool allowFallback) const;
   int32_t fallbackAdvanceFP(uint32_t cp, EpdFontFamily::Style style, bool allowFallback,
                             const EpdFontData* primaryData) const;
