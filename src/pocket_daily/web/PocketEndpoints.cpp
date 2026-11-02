@@ -1378,7 +1378,11 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
     server.send(400, "text/plain", error ? error : "Invalid preferences");
     return;
   }
-  if (update.hasAppConnection && !powerManager.bleStandbySupported()) {
+  bool appConnectionSupported = false;
+#ifdef ENABLE_BLE_STANDBY
+  appConnectionSupported = powerManager.bleStandbySupported();
+#endif
+  if (update.hasAppConnection && !appConnectionSupported) {
     server.send(400, "text/plain", "App connection is unavailable on this firmware or board");
     return;
   }
