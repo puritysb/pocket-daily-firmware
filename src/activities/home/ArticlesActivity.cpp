@@ -164,7 +164,7 @@ void ArticlesActivity::loop() {
     activityManager.goToPocketDaily();
     return;
   }
-  if (!state) return;
+  if (!state || failed) return;
   if (inputLocked) {
     if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) inputLocked = false;
     return;
@@ -239,7 +239,18 @@ void ArticlesActivity::render(RenderLock&&) {
                       renderer.getScreenHeight() - metrics.buttonHintsHeight - renderer.getLineHeight(UI_10_FONT_ID),
                       hint);
   }
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const bool canNavigate = state && !failed && count;
+  const char* confirmLabel = "";
+  if (canNavigate) {
+    if (selected == count) {
+      confirmLabel = tr(STR_DELETE);
+    } else if (selected >= pageStart && selected - pageStart < rowsPerPage &&
+               state->status[selected - pageStart] != ReadingState::Unavailable) {
+      confirmLabel = tr(STR_OPEN);
+    }
+  }
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, canNavigate ? tr(STR_DIR_UP) : "",
+                                            canNavigate ? tr(STR_DIR_DOWN) : "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }

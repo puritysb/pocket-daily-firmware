@@ -220,6 +220,16 @@ void SettingsActivity::onExit() {
   UITheme::getInstance().reload();  // Re-apply theme in case it was changed
 }
 
+void SettingsActivity::saveSettingChange(uint8_t CrossPointSettings::* valuePtr) {
+  SETTINGS.saveToFile();
+  // Row values are read live by buildScreen(). Only this choice changes which
+  // rows exist. Ordinary edits must not rescan SD dictionaries/fonts or destroy
+  // the setting/callback currently being used. Resource/language screens keep
+  // their explicit rebuild on return.
+  if (valuePtr == &CrossPointSettings::shortPwrBtn) rebuildSettingsLists();
+  applyUiSettingChange(valuePtr);
+}
+
 void SettingsActivity::applyUiSettingChange(uint8_t CrossPointSettings::* valuePtr) {
   // Theme changes take effect immediately, on this screen — reload the theme
   // and re-derive the app's tokens so the very next repaint is in the new look.
@@ -301,9 +311,7 @@ void SettingsActivity::toggleCurrentSetting() {
                        [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
                          SETTINGS.*valuePtr = idx;
                          syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
-                         SETTINGS.saveToFile();
-                         rebuildSettingsLists();
-                         applyUiSettingChange(valuePtr);
+                         saveSettingChange(valuePtr);
                        });
       requestUpdate();
       return;
@@ -319,8 +327,7 @@ void SettingsActivity::toggleCurrentSetting() {
       auto onSelect = [this, valueSetter, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
         valueSetter(idx);
         syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
-        SETTINGS.saveToFile();
-        rebuildSettingsLists();
+        saveSettingChange(nullptr);
       };
       if (!setting.enumStringValues.empty()) {
         optionPopup.show(setting.nameId, setting.enumStringValues, cur, std::move(onSelect));
@@ -452,10 +459,10 @@ void SettingsActivity::toggleCurrentSetting() {
     return;
   }
 
+  // Rebuilding destroys setting; capture the member pointer before that.
+  const auto valuePtr = setting.valuePtr;
   syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
-  SETTINGS.saveToFile();
-  rebuildSettingsLists();
-  applyUiSettingChange(setting.valuePtr);
+  saveSettingChange(valuePtr);
   activeNav().selected = std::min(ringPos(), settingsCount);
 }
 
@@ -588,10 +595,17 @@ void SettingsActivity::drawChrome() {
 
 void SettingsActivity::drawFooter() {
   const int ring = ringPos();
-  const auto confirmLabel =
-      (ring == 0) ? I18N.get(categoryNames[(selectedCategoryIndex + 1) % categoryCount])
-                  : (ring > 0 && (*currentSettings)[ring - 1].nameId == StrId::STR_TIME_TO_SLEEP ? tr(STR_SELECT)
-                                                                                                 : tr(STR_TOGGLE));
+  const char* confirmLabel = tr(STR_SELECT);
+  if (ring == 0) {
+    confirmLabel = I18N.get(categoryNames[(selectedCategoryIndex + 1) % categoryCount]);
+  } else if (currentSettings && ring > 0 && ring <= static_cast<int>(currentSettings->size())) {
+    const auto& setting = (*currentSettings)[ring - 1];
+    if (setting.type == SettingType::TOGGLE ||
+        (setting.type == SettingType::ENUM && setting.nameId != StrId::STR_TIME_TO_SLEEP &&
+         (setting.enumStringValues.empty() ? setting.enumLabels().size() : setting.enumStringValues.size()) == 2)) {
+      confirmLabel = tr(STR_TOGGLE);
+    }
+  }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

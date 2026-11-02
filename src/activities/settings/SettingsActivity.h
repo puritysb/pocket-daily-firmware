@@ -215,6 +215,7 @@ class SettingsActivity final : public UiTabListActivity {
 
   static std::string settingValueText(const SettingInfo& setting);
   void selectCategory(int categoryIndex);
+  void saveSettingChange(uint8_t CrossPointSettings::* valuePtr);
   void applyUiSettingChange(uint8_t CrossPointSettings::* valuePtr);
 
   void enterCategory(int categoryIndex);
