@@ -43,6 +43,13 @@ bool parsePreferences(const char* json, const size_t length, const PreferenceLim
     return false;
   }
   PreferencesUpdate parsed;
+  if (doc["pocketAppConnection"].is<bool>()) {
+    parsed.hasAppConnection = true;
+    parsed.appConnection = doc["pocketAppConnection"].as<bool>() ? 1 : 0;
+  } else if (!readRange(doc["pocketAppConnection"], 0, 1, parsed.hasAppConnection, parsed.appConnection)) {
+    error = "Invalid pocketAppConnection";
+    return false;
+  }
   if (!readRange(doc["startupApp"], 0, limits.startupAppCount - 1, parsed.hasStartupApp, parsed.startupApp)) {
     error = "Invalid startupApp";
     return false;

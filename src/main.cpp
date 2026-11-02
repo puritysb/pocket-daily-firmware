@@ -977,6 +977,11 @@ void loop() {
 
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
   mappedInputManager.update();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (activityManager.isReaderActivity() && mappedInputManager.wasReleased(MappedInputManager::Button::Back)) {
+    Pocket::NearbySync::Window::noteHomeReturn(Pocket::NearbySync::Stats::ReturnStage::InputDetected);
+  }
+#endif
 
 #ifdef ENABLE_DEV_REMOTE_FLASH
   if (devHomeWakePending) {
@@ -1214,8 +1219,86 @@ void loop() {
     activityManager.requestUpdate();
   }
 
+#ifdef ENABLE_BLE_STANDBY
+  // Opt-in Home idle: retain the completed e-paper image, lend its framebuffer
+  // to the existing BLE standby service, and restore it BEFORE dispatching any
+  // physical input. The main task blocks here, so no navigation or new paint
+  // can race the framebuffer loan. Books/cards never enter this path.
+  static bool homeConnectionAttempted = false;
+  static bool homeRepaintAfterRelease = false;
+  const bool homeIdle = SETTINGS.pocketAppConnection &&
+                        Pocket::NearbySync::Window::homeIdleAllowed(activityManager.allowsAppConnection(),
+                                                                    gpio.rawInputActive(), millis() - lastActivityTime);
+  if (!homeIdle) homeConnectionAttempted = false;
+  if (homeIdle && !homeConnectionAttempted && Pocket::NearbySync::Window::homeConnectionEligible()) {
+    homeConnectionAttempted = true;  // a failed gate never becomes an allocation/retry loop
+    Pocket::NearbySync::Window::close(Pocket::NearbySync::Window::CloseReason::RADIO_OWNER);
+    bool released = false;
+    {
+      // Wait for an existing paint, without starting another cover/AA pass.
+      // The render task also checks hasFrameBuffer() under this lock, so queued
+      // notifications cannot paint after the framebuffer is released.
+      RenderLock lock;
+      released = renderer.releaseFrameBufferForRemote();
+    }
+    if (released) {
+      // Home is resumable within this boot. Keep the panel controller awake:
+      // restoreFrameBufferAfterRemote() reallocates RAM, it does not reset a
+      // controller put into terminal deep sleep. Use the same resumable panel
+      // lifecycle as KeyboardRemote; terminal sleep owns display.deepSleep().
+      auto outcome = Pocket::NearbySync::Window::StandbyExit::DeepSleep;
+      if (powerManager.beginBleStandby()) {
+        const uint32_t elapsed = millis() - lastActivityTime;
+        const uint32_t remaining = sleepTimeoutMs == 0 ? 0 : (elapsed < sleepTimeoutMs ? sleepTimeoutMs - elapsed : 1);
+        outcome = Pocket::NearbySync::Window::runStandby(renderer, remaining,
+                                                         Pocket::NearbySync::Window::Trigger::HOME_CONNECT);
+      }
+      if (!powerManager.endBleStandby()) {
+        LOG_ERR("MAIN", "Cannot restore UI power mode after BLE; restarting");
+        Storage.prepareForDeepSleep();
+        ESP.restart();
+        for (;;) delay(1000);
+      }
+      if (outcome == Pocket::NearbySync::Window::StandbyExit::SameWifi) {
+        PocketDaily::Boot::armStandbyReturn(standbyTicket, PocketDaily::Boot::StandbyReturn::SameWifi);
+        Storage.prepareForDeepSleep();
+        ESP.restart();
+        for (;;) delay(1000);
+      }
+      bool restored = false;
+      {
+        RenderLock lock;
+        restored = renderer.restoreFrameBufferAfterRemote();
+      }
+      if (!restored) {
+        LOG_ERR("MAIN", "Cannot restore Home framebuffer after BLE; restarting");
+        Storage.prepareForDeepSleep();
+        ESP.restart();
+        for (;;) delay(1000);
+      }
+      if (outcome == Pocket::NearbySync::Window::StandbyExit::Reader) {
+        lastActivityTime = millis();
+        // Select acts on RELEASE. Do not block input polling with a redundant
+        // Home repaint before that release can reach the activity. The e-paper
+        // still shows Home; normal navigation will paint the selected screen.
+        homeRepaintAfterRelease = true;
+      } else {
+        activityManager.requestUpdate();
+      }
+      // gpio's press frame is still intact: handleButtons below and the next
+      // normal input poll retain short/long/release behavior.
+    }
+  }
+#endif
+
   const unsigned long activityStartTime = millis();
   activityManager.loop();
+#ifdef ENABLE_BLE_STANDBY
+  if (homeRepaintAfterRelease && gpio.wasAnyReleased()) {
+    homeRepaintAfterRelease = false;
+    activityManager.requestUpdate();  // AFTER the release/navigation was dispatched
+  }
+#endif
   PocketDaily::TrialReader::loop();
   // Existing screens only, under an explicitly provisioned image-bound lease.
   if (PocketDaily::TrialLease::active() &&

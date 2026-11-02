@@ -19,6 +19,8 @@ struct PreferenceLimits {
 };
 
 struct PreferencesUpdate {
+  bool hasAppConnection = false;
+  uint8_t appConnection = 0;
   bool hasOrientation = false;
   uint8_t orientation = 0;
   bool hasLineSpacing = false;

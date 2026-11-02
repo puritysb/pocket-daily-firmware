@@ -177,3 +177,20 @@ TEST(PreferencesUpdate, InvalidReadingLayoutRejectsTheWholeDocument) {
     EXPECT_FALSE(u.hasFontSize);
   }
 }
+
+TEST(PreferencesUpdate, HomeAppConnectionRequiresExplicitBooleanOrZeroOrOne) {
+  PreferencesUpdate u;
+  ASSERT_TRUE(parse("{}", u));
+  EXPECT_FALSE(u.hasAppConnection);
+  for (const auto* value : {"true", "1", "false", "0"}) {
+    ASSERT_TRUE(parse(std::string("{\"pocketAppConnection\":") + value + "}", u));
+    EXPECT_TRUE(u.hasAppConnection);
+    EXPECT_EQ(u.appConnection, value[0] == 't' || value[0] == '1' ? 1 : 0);
+  }
+  for (const auto* value : {"2", "-1", "\"true\"", "1.5", "[]", "{}"}) {
+    u.hasAppConnection = true;
+    u.appConnection = 0;
+    EXPECT_FALSE(parse(std::string("{\"pocketAppConnection\":") + value + ",\"fontSize\":1}", u));
+    EXPECT_EQ(u.appConnection, 0) << "Rejected document must not partially apply";
+  }
+}

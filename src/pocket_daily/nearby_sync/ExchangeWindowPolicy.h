@@ -9,7 +9,23 @@
 // tests drive the same decisions; ExchangeWindow applies them to NimBLE.
 namespace Pocket::NearbySync::Window {
 
-enum class Trigger : uint8_t { BOOK_CLOSED, WAKE, SLEEP, STANDBY };
+enum class Trigger : uint8_t { BOOK_CLOSED, WAKE, SLEEP, STANDBY, HOME_CONNECT };
+
+inline bool persistentWindow(Trigger trigger) {
+  return trigger == Trigger::STANDBY || trigger == Trigger::HOME_CONNECT;
+}
+
+inline bool windowEnabled(Trigger trigger, bool readingSync, bool appConnection) {
+  return trigger == Trigger::HOME_CONNECT ? appConnection : readingSync;
+}
+
+inline bool homeMemoryAllowed(uint32_t freeHeap, uint32_t largestBlock) {
+  return freeHeap > 50U * 1024U && largestBlock >= 8U * 1024U;
+}
+
+inline bool homeIdleAllowed(bool home, bool inputActive, uint32_t idleMs) {
+  return home && !inputActive && idleMs >= 3000;
+}
 
 inline constexpr uint32_t BOOK_CLOSED_MS = 45000;
 inline constexpr uint32_t WAKE_MS = 45000;
@@ -49,6 +65,11 @@ inline constexpr uint16_t CHARGING_MIN_BATTERY_PERCENT = 5;
 // Only confirmed X3 charging permits the lower floor; unknown power is false.
 inline bool batteryAllowed(uint16_t percent, bool charging) {
   return percent > (charging ? CHARGING_MIN_BATTERY_PERCENT : MIN_BATTERY_PERCENT);
+}
+
+// X4 has no verified charge-current sensor: callers pass charging=false there.
+inline bool standbyAllowed(bool supported, bool enabled, bool bonded, uint16_t batteryPercent, bool charging) {
+  return supported && enabled && bonded && batteryAllowed(batteryPercent, charging);
 }
 
 enum class Gate : uint8_t { OPEN, NO_BOND, SETTING_OFF, LOW_BATTERY, LOW_MEMORY };

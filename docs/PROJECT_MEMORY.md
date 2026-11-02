@@ -185,12 +185,23 @@ Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
 - Developer-update return: the origin marker routes a reboot back to Sync or the
   matching chooser (`docs/dev-update-return.md`).
 
-## BLE standby and app wake (X3, developer `ble_standby` env)
+## BLE standby and app wake (developer `ble_standby` env)
+
+- 2026-11-03: default-OFF Home app connection passed Mac/X3/X4. Resumable panel
+  restoration, release-before-repaint and bounded actual-style SD title warming
+  fixed the regression; X4 physical Back7172→1910ms (owner1–2s). Latest developer
+  wdd553a3b is installed on both: automatic Home X3 1006/X4 1071ms, original state
+  and staging restored. Owner reports strong overall improvement; per-menu results
+  remain unspecified. Keep phase-specific memory gates/shaping/pinned ownership.
+  Lessons/evidence: `docs/menu-navigation-audit.md` (Lessons learned) and
+  `build/home-connect-20261102/`. No extra wall-clock/battery claim; release held.
 
 - `scripts/pio_ble_standby.sh` builds env `ble_standby` (extends `default`, adds
   PM/tickless/BT modem sleep in an isolated SDK copy). It is SDK automatic light
   sleep, not BLE wake from deep sleep. `default`/`gh_release` keep bounded BLE
-  windows; X4 standby is gated off. Review: `docs/ble-standby-review.md`.
+  windows. The 2026-11-02 opt-in extension admits original C3 X3/X4 via HAL;
+  w02b1fbaf passed Mac/X3 and Mac/X4 bonded BLE→Same Wi-Fi plus settings restoration;
+  short light-sleep samples only, no energy/overnight claim. Review: `docs/ble-standby-review.md`.
 - After the sleep frame is saved and the framebuffer released, a bonded X3
   advertises `WAKE1` and accepts authenticated `START_WIFI <id>`, then restarts
   once into saved Wi-Fi. Buttons route to reading. Falls back to deep sleep for
@@ -266,7 +277,7 @@ Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
 
 ## Open limitations
 
-- Not established: X4 standby/BLE and physical buttons beyond these suites, iPhone
+- Not established: physical buttons beyond these suites, iPhone
   flows, measured current draw, overnight or battery-only standby, long-term
   leak absence, optical panel quality, input during the panel waveform,
   image-rich EPUBs, BLE-only exchange outside developer standby (book close,

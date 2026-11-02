@@ -150,6 +150,7 @@ class ActivityManager {
   // The current screen tolerates a Reading Sync exchange window and no book is
   // open anywhere on the stack.
   bool allowsExchangeWindow() const;
+  bool allowsAppConnection() const;
   uint32_t renderCount() const { return completedRenders.load(std::memory_order_acquire); }
   bool skipLoopDelay() const;
   ScreenshotInfo getScreenshotInfo() const;

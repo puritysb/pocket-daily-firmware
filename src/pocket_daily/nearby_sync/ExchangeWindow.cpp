@@ -118,7 +118,8 @@ void stopRadio() {
 void start(const GfxRenderer& renderer) {
   powerManager.setPowerSaving(false);  // the controller needs the normal CPU clock
   GateInput input;
-  input.enabled = SETTINGS.pocketReadingSync != 0;
+  input.enabled =
+      windowEnabled(controller.trigger(), SETTINGS.pocketReadingSync != 0, SETTINGS.pocketAppConnection != 0);
   input.bonded = input.enabled && hasStoredBond();
   input.batteryPercent = powerManager.getBatteryPercentage();
   input.charging = gpio.deviceIsX3() && gpio.isUsbConnected();
@@ -144,7 +145,7 @@ void start(const GfxRenderer& renderer) {
     return;
   }
   runtime->model = gpio.deviceIsX3() ? "X3" : "X4";
-  runtime->appWake = controller.trigger() == Trigger::STANDBY;
+  runtime->appWake = persistentWindow(controller.trigger());
   HalSystem::setCrashBreadcrumb("readsync:window-start");
   LOG_INF("RSYNC", "window %s starting (heap %lu, block %lu, battery %u%%)", triggerName(controller.trigger()),
           static_cast<unsigned long>(input.freeHeap), static_cast<unsigned long>(input.largestBlock),
@@ -171,12 +172,14 @@ void finishStart() {
   }
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t largestBlock = ESP.getMaxAllocHeap();
-  Stats::ready(stats, freeHeap, largestBlock, readyAllowed(freeHeap, largestBlock));
+  const bool ready = readyAllowed(freeHeap, largestBlock) &&
+                     (controller.trigger() != Trigger::HOME_CONNECT || homeMemoryAllowed(freeHeap, largestBlock));
+  Stats::ready(stats, freeHeap, largestBlock, ready);
 #ifdef ENABLE_DEV_REMOTE_FLASH
-  if (readyAllowed(freeHeap, largestBlock))
+  if (ready)
     DevSleepCycle::checkpoint(DevSleepCycle::Checkpoint::RadioReady, powerManager.getBatteryPercentage(), &stats);
 #endif
-  if (!readyAllowed(freeHeap, largestBlock)) {
+  if (!ready) {
     controller.started(true, millis());
     controller.close(CloseReason::LOW_MEMORY);
     stopRadio();
@@ -195,7 +198,8 @@ void serve() {
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t largestBlock = ESP.getMaxAllocHeap();
   Stats::sample(stats, freeHeap, largestBlock);
-  if (!runningAllowed(freeHeap, largestBlock)) {
+  if (!runningAllowed(freeHeap, largestBlock) ||
+      (controller.trigger() == Trigger::HOME_CONNECT && !homeMemoryAllowed(freeHeap, largestBlock))) {
     close(CloseReason::LOW_MEMORY);
     return;
   }
@@ -239,7 +243,10 @@ void serve() {
         service.notifyError(command.requestId, NOT_IN_SYNC);
         break;
       default:
-        runtime->session.handle(command);
+        if (SETTINGS.pocketReadingSync)
+          runtime->session.handle(command);
+        else
+          service.notifyError(command.requestId, NOT_IN_SYNC);
         break;
     }
   }
@@ -282,6 +289,67 @@ bool active() { return controller.radioUp(); }
 
 const Stats::Record* statistics() { return Stats::valid(stats) ? &stats : nullptr; }
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+// 36 RTC bytes retain one receipt across the return to Same Wi-Fi. The spinlock
+// covers only fixed-size arithmetic/copies, never I/O; render and loop both write.
+RTC_NOINIT_ATTR static Stats::HomeReturnRecord homeReturnRecord;
+RTC_NOINIT_ATTR static Stats::HomePaintRecord homePaintRecord;
+static std::atomic<bool> homePaintPending{false};
+static std::atomic<uint32_t> homeCoverMs{0};
+static std::atomic<uint32_t> homeResolveMs{0}, homeHeaderMs{0}, homeSnapshotMs{0};
+static portMUX_TYPE homeReturnMux = portMUX_INITIALIZER_UNLOCKED;
+void noteHomeReturn(const Stats::ReturnStage stage) {
+  const uint32_t now = millis();
+  taskENTER_CRITICAL(&homeReturnMux);
+  Stats::noteReturn(homeReturnRecord, stage, now);
+  taskEXIT_CRITICAL(&homeReturnMux);
+}
+Stats::HomeReturnRecord homeReturnStatistics() {
+  taskENTER_CRITICAL(&homeReturnMux);
+  const auto result = homeReturnRecord;
+  taskEXIT_CRITICAL(&homeReturnMux);
+  return Stats::valid(result) ? result : Stats::HomeReturnRecord{};
+}
+void beginHomePaint() {
+  homeCoverMs.store(0, std::memory_order_relaxed);
+  homeResolveMs.store(0, std::memory_order_relaxed);
+  homeHeaderMs.store(0, std::memory_order_relaxed);
+  homeSnapshotMs.store(0, std::memory_order_relaxed);
+  homePaintPending.store(true, std::memory_order_release);
+}
+void noteHomeCover(const uint32_t elapsedMs) { homeCoverMs.fetch_add(elapsedMs, std::memory_order_relaxed); }
+void noteHomeDetail(const Stats::PaintDetail part, const uint32_t elapsedMs) {
+  if (!homePaintPending.load(std::memory_order_acquire)) return;
+  switch (part) {
+    case Stats::PaintDetail::Resolver:
+      homeResolveMs.fetch_add(elapsedMs, std::memory_order_relaxed);
+      break;
+    case Stats::PaintDetail::Header:
+      homeHeaderMs.fetch_add(elapsedMs, std::memory_order_relaxed);
+      break;
+    case Stats::PaintDetail::Snapshot:
+      homeSnapshotMs.fetch_add(elapsedMs, std::memory_order_relaxed);
+      break;
+  }
+}
+void noteHomePaint(const uint32_t composeMs, const uint32_t refreshMs) {
+  if (!homePaintPending.exchange(false, std::memory_order_acq_rel)) return;
+  const uint32_t minFreeHeap = ESP.getMinFreeHeap();
+  const uint32_t cpuMhz = getCpuFrequencyMhz();
+  taskENTER_CRITICAL(&homeReturnMux);
+  Stats::notePaint(homePaintRecord, composeMs, refreshMs, homeCoverMs.load(std::memory_order_relaxed), minFreeHeap,
+                   homeResolveMs.load(std::memory_order_relaxed), homeHeaderMs.load(std::memory_order_relaxed),
+                   homeSnapshotMs.load(std::memory_order_relaxed), cpuMhz);
+  taskEXIT_CRITICAL(&homeReturnMux);
+}
+Stats::HomePaintRecord homePaintStatistics() {
+  taskENTER_CRITICAL(&homeReturnMux);
+  const auto result = homePaintRecord;
+  taskEXIT_CRITICAL(&homeReturnMux);
+  return Stats::valid(result) ? result : Stats::HomePaintRecord{};
+}
+#endif
+
 void runBeforeDeepSleep(const uint32_t renderCount, const GfxRenderer& renderer) {
   arm(Trigger::SLEEP, renderCount);
   while (controller.state() != Controller::State::IDLE) {
@@ -298,20 +366,25 @@ void runBeforeDeepSleep(const uint32_t renderCount, const GfxRenderer& renderer)
 
 bool standbyEligible() {
 #ifdef ENABLE_BLE_STANDBY
-  return gpio.deviceIsX3() && SETTINGS.pocketReadingSync && hasStoredBond() &&
-         batteryAllowed(powerManager.getBatteryPercentage(), gpio.isUsbConnected());
+  return standbyAllowed(powerManager.bleStandbySupported(), SETTINGS.pocketReadingSync != 0, hasStoredBond(),
+                        powerManager.getBatteryPercentage(), gpio.deviceIsX3() && gpio.isUsbConnected());
 #else
   return false;
 #endif
 }
 
-StandbyExit runStandby(const GfxRenderer& renderer, const uint32_t maxMs) {
+bool homeConnectionEligible() {
+  return standbyAllowed(powerManager.bleStandbySupported(), SETTINGS.pocketAppConnection != 0, hasStoredBond(),
+                        powerManager.getBatteryPercentage(), gpio.deviceIsX3() && gpio.isUsbConnected());
+}
+
+StandbyExit runStandby(const GfxRenderer& renderer, const uint32_t maxMs, const Trigger trigger) {
   const uint32_t began = millis();
   uint32_t batteryChecked = began;
 #ifdef ENABLE_DEV_REMOTE_FLASH
   uint32_t evidenceAt = began;
 #endif
-  arm(Trigger::STANDBY, 0);
+  arm(trigger, 0);
   while (controller.state() != Controller::State::IDLE) {
     HalSystem::feedWatchdogIfRegistered();
     gpio.update();
@@ -341,12 +414,13 @@ StandbyExit runStandby(const GfxRenderer& renderer, const uint32_t maxMs) {
     }
     if (gpio.wasUsbStateChanged() || millis() - batteryChecked >= 60000) {
       batteryChecked = millis();
-      if (!SETTINGS.pocketReadingSync || !hasStoredBond()) {
+      if (!windowEnabled(trigger, SETTINGS.pocketReadingSync != 0, SETTINGS.pocketAppConnection != 0) ||
+          !hasStoredBond()) {
         close(CloseReason::RADIO_OWNER);
         break;
       }
       const auto battery = powerManager.getBatteryPercentage();
-      const bool charging = gpio.isUsbConnected();
+      const bool charging = gpio.deviceIsX3() && gpio.isUsbConnected();
       if (!batteryAllowed(battery, charging)) {
 #ifdef ENABLE_DEV_REMOTE_FLASH
         DevSleepCycle::checkpoint(DevSleepCycle::Checkpoint::StandbyAlive, battery, &stats, charging);
@@ -369,7 +443,9 @@ StandbyExit runStandby(const GfxRenderer& renderer, const uint32_t maxMs) {
     // IDF's tickless idle and controller modem sleep own the wake schedule.
     // Never call esp_light_sleep_start while the BLE controller is active.
     powerManager.setPowerSaving(true);
-    delay(25);
+    // Home keeps normal button debounce cadence; the retained sleep screen
+    // only needs its existing slower power-button poll.
+    delay(trigger == Trigger::HOME_CONNECT ? 10 : 25);
   }
   return StandbyExit::DeepSleep;
 }

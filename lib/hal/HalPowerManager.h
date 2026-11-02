@@ -57,7 +57,11 @@ class HalPowerManager {
   bool armRecoveryTimer(uint32_t seconds) const;
   // Enables driver-managed light sleep only while the display is quiescent.
   // False on ordinary builds, unsupported boards or PM initialization failure.
+  bool bleStandbySupported() const;
   bool beginBleStandby();
+  // Resume ordinary UI with automatic light sleep disabled before allocating
+  // the framebuffer or dispatching physical input.
+  bool endBleStandby();
   uint32_t bleStandbySleepCount() const;
   uint32_t bleStandbySleepMillis() const;
 #ifdef ENABLE_DEV_REMOTE_FLASH

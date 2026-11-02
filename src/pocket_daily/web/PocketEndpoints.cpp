@@ -1327,6 +1327,12 @@ void handleContentFile(WebServer& server, const RouteDeps& d) {
 // (added 2026-09-26) tell the companion this reader accepts them on POST.
 // A bounded, temporary response; no full settings registry or retained buffer.
 void handleGetPreferences(WebServer& server) {
+  const char* appConnection = "";
+#ifdef ENABLE_BLE_STANDBY
+  if (powerManager.bleStandbySupported()) {
+    appConnection = SETTINGS.pocketAppConnection ? ",\"pocketAppConnection\":1" : ",\"pocketAppConnection\":0";
+  }
+#endif
   // 320 bytes exceeds the stack budget; temporary ownership avoids retained RAM.
   auto json = makeUniqueNoThrow<char[]>(320);
   if (!json) {
@@ -1337,13 +1343,13 @@ void handleGetPreferences(WebServer& server) {
       json.get(), 320,
       "{\"startupApp\":%u,\"pocketDailySleepCover\":%u,\"sleepTimeoutMinutes\":%u,\"fontSize\":%u,"
       "\"sideButtonLayout\":%u,\"frontButtonFollowOrientation\":%u,\"sleepWakeIndicator\":%u,\"orientation\":%u,"
-      "\"lineSpacing\":%u,\"screenMargin\":%u}",
+      "\"lineSpacing\":%u,\"screenMargin\":%u%s}",
       static_cast<unsigned>(SETTINGS.startupApp), static_cast<unsigned>(SETTINGS.pocketDailySleepCover),
       static_cast<unsigned>(SETTINGS.sleepTimeoutMinutes),
       static_cast<unsigned>(LegacyFontSize::fromPoints(SETTINGS.fontPointSize)),
       static_cast<unsigned>(SETTINGS.sideButtonLayout), static_cast<unsigned>(SETTINGS.frontButtonFollowOrientation),
       static_cast<unsigned>(SETTINGS.sleepWakeIndicator), static_cast<unsigned>(SETTINGS.orientation),
-      static_cast<unsigned>(SETTINGS.lineSpacing), static_cast<unsigned>(SETTINGS.screenMargin));
+      static_cast<unsigned>(SETTINGS.lineSpacing), static_cast<unsigned>(SETTINGS.screenMargin), appConnection);
   if (written <= 0 || static_cast<size_t>(written) >= 320) {
     server.send(500, "text/plain", "Could not encode Pocket preferences");
     return;
@@ -1372,11 +1378,20 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
     server.send(400, "text/plain", error ? error : "Invalid preferences");
     return;
   }
-  const uint8_t previous[10] = {SETTINGS.startupApp,          SETTINGS.pocketDailySleepCover,
-                                SETTINGS.sleepTimeoutMinutes, SETTINGS.fontPointSize,
-                                SETTINGS.sideButtonLayout,    SETTINGS.frontButtonFollowOrientation,
-                                SETTINGS.sleepWakeIndicator,  SETTINGS.orientation,
-                                SETTINGS.lineSpacing,         SETTINGS.screenMargin};
+  bool appConnectionSupported = false;
+#ifdef ENABLE_BLE_STANDBY
+  appConnectionSupported = powerManager.bleStandbySupported();
+#endif
+  if (update.hasAppConnection && !appConnectionSupported) {
+    server.send(400, "text/plain", "App connection is unavailable on this firmware or board");
+    return;
+  }
+  const uint8_t previous[11] = {
+      SETTINGS.startupApp,         SETTINGS.pocketDailySleepCover, SETTINGS.sleepTimeoutMinutes,
+      SETTINGS.fontPointSize,      SETTINGS.sideButtonLayout,      SETTINGS.frontButtonFollowOrientation,
+      SETTINGS.sleepWakeIndicator, SETTINGS.orientation,           SETTINGS.lineSpacing,
+      SETTINGS.screenMargin,       SETTINGS.pocketAppConnection};
+  if (update.hasAppConnection) SETTINGS.pocketAppConnection = update.appConnection;
   if (update.hasStartupApp) SETTINGS.startupApp = update.startupApp;
   if (update.hasSleepWakeIndicator) SETTINGS.sleepWakeIndicator = update.sleepWakeIndicator;
   if (update.hasSleepCover) SETTINGS.pocketDailySleepCover = update.sleepCover;
@@ -1398,7 +1413,8 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
                        previous[4] != SETTINGS.sideButtonLayout ||
                        previous[5] != SETTINGS.frontButtonFollowOrientation ||
                        previous[6] != SETTINGS.sleepWakeIndicator || previous[7] != SETTINGS.orientation ||
-                       previous[8] != SETTINGS.lineSpacing || previous[9] != SETTINGS.screenMargin;
+                       previous[8] != SETTINGS.lineSpacing || previous[9] != SETTINGS.screenMargin ||
+                       previous[10] != SETTINGS.pocketAppConnection;
   if (changed && !SETTINGS.saveToFile()) {
     SETTINGS.startupApp = previous[0];
     SETTINGS.pocketDailySleepCover = previous[1];
@@ -1410,6 +1426,7 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
     SETTINGS.orientation = previous[7];
     SETTINGS.lineSpacing = previous[8];
     SETTINGS.screenMargin = previous[9];
+    SETTINGS.pocketAppConnection = previous[10];
     server.send(500, "text/plain", "Could not save Pocket preferences");
     return;
   }
@@ -1771,7 +1788,7 @@ void handleDevBleCycle(WebServer& server, const RouteDeps& d) {
   const String sleep = server.arg("sleep");
   bool standbySupported = false;
 #ifdef ENABLE_BLE_STANDBY
-  standbySupported = gpio.deviceIsX3();
+  standbySupported = powerManager.bleStandbySupported();
 #endif
   if ((sleep == "timer-home" && gpio.deviceIsX3()) ||
       (sleep != "" && sleep != "timer" && sleep != "timer-home" && sleep != "standby") ||

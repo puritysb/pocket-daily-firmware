@@ -376,6 +376,10 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
             "sleepTimeoutMinutes", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_POCKET_READING_SYNC, &CrossPointSettings::pocketReadingSync, "pocketReadingSync",
                             StrId::STR_CAT_SYSTEM),
+#ifdef ENABLE_BLE_STANDBY
+        SettingInfo::Toggle(StrId::STR_POCKET_APP_CONNECTION, &CrossPointSettings::pocketAppConnection,
+                            "pocketAppConnection", StrId::STR_CAT_SYSTEM),
+#endif
         SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles, "showHiddenFiles",
                             StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_LIBRARY_USE_METADATA, &CrossPointSettings::libraryUseMetadata,

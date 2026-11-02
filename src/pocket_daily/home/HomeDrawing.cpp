@@ -504,22 +504,39 @@ static int wrappedFixed(const GfxRenderer& renderer, int fontId, int x, int y, c
   while (hasVisibleText(p) && drawn < maxLines) {
     while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t') p++;
     char line[kWrapLineBytes];
-    line[0] = '\0';
+    size_t prefix = 0;
+    while (p[prefix] && p[prefix] != '\n' && p[prefix] != '\r') {
+      const size_t span = utf8Span(p + prefix);
+      if (!span || prefix + span >= sizeof(line)) break;
+      prefix += span;
+    }
+    memcpy(line, p, prefix);
+    line[prefix] = '\0';
+    renderer.prepareUiText(fontId, line, style);
+    const int fitted = renderer.getSimpleTextFitBytes(fontId, line, maxWidth, style);
     size_t scan = 0, lastFit = 0, lastSpace = 0;
     bool explicitBreak = false;
-    while (p[scan]) {
-      if (p[scan] == '\n' || p[scan] == '\r') {
-        explicitBreak = true;
-        break;
+    if (fitted >= 0) {
+      scan = lastFit = static_cast<size_t>(fitted);
+      for (size_t i = 0; i < scan; ++i)
+        if (line[i] == ' ') lastSpace = i;
+      explicitBreak = p[scan] == '\n' || p[scan] == '\r';
+    } else {
+      line[0] = '\0';
+      while (p[scan]) {
+        if (p[scan] == '\n' || p[scan] == '\r') {
+          explicitBreak = true;
+          break;
+        }
+        const size_t cp = utf8Span(p + scan);
+        if (cp == 0 || scan + cp >= sizeof(line)) break;
+        memcpy(line + scan, p + scan, cp);
+        line[scan + cp] = '\0';
+        if (renderer.getTextWidth(fontId, line, style) > maxWidth) break;
+        if (p[scan] == ' ') lastSpace = scan;
+        scan += cp;
+        lastFit = scan;
       }
-      const size_t cp = utf8Span(p + scan);
-      if (cp == 0 || scan + cp >= sizeof(line)) break;
-      memcpy(line + scan, p + scan, cp);
-      line[scan + cp] = '\0';
-      if (renderer.getTextWidth(fontId, line, style) > maxWidth) break;
-      if (p[scan] == ' ') lastSpace = scan;
-      scan += cp;
-      lastFit = scan;
     }
 
     size_t chosen = lastFit;

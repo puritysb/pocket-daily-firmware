@@ -443,7 +443,9 @@ void EpubReaderActivity::loop() {
   }
 
   // Any button makes layout running on the render task after a page (layOutAhead) yield.
-  if (mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased()) inputQueued.store(true);
+  const bool inputHasPriority = mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased() ||
+                                mappedInput.isPressed(MappedInputManager::Button::Back);
+  if (inputHasPriority) inputQueued.store(true);
 
   // Drive any in-progress incremental section build forward, off the page-turn critical path,
   // but only within a small window ahead of the reader: an unbounded build monopolized the
@@ -456,7 +458,7 @@ void EpubReaderActivity::loop() {
   // within BUILD_WINDOW_AHEAD of the watermark and would then have to lay out the whole prefix
   // synchronously on the next turn (several seconds of no response on a 60-page prefix). Keep
   // ticking until the rebuild has passed the watermark, then fall back to the window.
-  if (section && section->isBuilding() && !RenderLock::peek() && !turnQueued.load() &&
+  if (!inputHasPriority && section && section->isBuilding() && !RenderLock::peek() && !turnQueued.load() &&
       (Pocket::KeyboardRemote::preparing() || section->isCatchingUp() ||
        static_cast<int>(section->pageCount) < section->currentPage + BUILD_WINDOW_AHEAD)) {
     RenderLock lock;
@@ -501,7 +503,7 @@ void EpubReaderActivity::loop() {
   constexpr unsigned long IDLE_PREWARM_DEBOUNCE_MS = 400;
   {
     RenderLock lock(RenderLock::Mode::Try);
-    if (lock.ownsLock() && section && !section->isBuilding() && renderer.hasFrameBuffer() &&
+    if (!inputHasPriority && lock.ownsLock() && section && !section->isBuilding() && renderer.hasFrameBuffer() &&
         lastRenderCompleteMs != 0 && millis() - lastRenderCompleteMs > IDLE_PREWARM_DEBOUNCE_MS &&
         ESP.getFreeHeap() > RENDER_MIN_FREE_HEAP && ESP.getMaxAllocHeap() > BACKGROUND_BUILD_MIN_MAX_ALLOC &&
         (idlePrewarmSpine != currentSpineIndex || idlePrewarmPage != section->currentPage)) {
