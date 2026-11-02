@@ -103,6 +103,31 @@ String buildStatusJson(const StatusInputs& in) {
   // no crash report was written (clean returnToLaunchOrigin).
   doc["lastBootBreadcrumb"] = HalSystem::getPreviousBootBreadcrumb();
   doc["lastResetReason"] = HalSystem::getResetReasonName();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  const auto paint = Pocket::NearbySync::Window::homePaintStatistics();
+  if (Pocket::NearbySync::Stats::valid(paint)) {
+    auto timing = doc["homePaint"].to<JsonObject>();
+    timing["sequence"] = paint.sequence;
+    timing["composeMs"] = paint.composeMs;
+    timing["refreshMs"] = paint.refreshMs;
+    timing["coverMs"] = paint.coverMs;
+    timing["minFreeHeap"] = paint.minFreeHeap;
+    timing["fontResolveMs"] = paint.resolveMs;
+    timing["headerMs"] = paint.headerMs;
+    timing["snapshotMs"] = paint.snapshotMs;
+    timing["cpuMhz"] = paint.cpuMhz;
+  }
+  const auto back = Pocket::NearbySync::Window::homeReturnStatistics();
+  if (Pocket::NearbySync::Stats::valid(back)) {
+    auto timing = doc["homeReturn"].to<JsonObject>();
+    timing["sequence"] = back.sequence;
+    timing["stage"] = static_cast<uint32_t>(back.stage);
+    timing["navigationRequestedMs"] = back.requestedMs;
+    timing["readerExitedMs"] = back.exitedMs;
+    timing["homeEnteredMs"] = back.enteredMs;
+    timing["homePaintedMs"] = back.paintedMs;
+  }
+#endif
   // Reading-sync exchange windows since power-on (docs/reading-sync-ble-v1.md, "Memory").
   if (const auto* sync = Pocket::NearbySync::Window::statistics()) {
     using namespace Pocket::NearbySync::Window;

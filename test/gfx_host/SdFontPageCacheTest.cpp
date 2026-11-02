@@ -7,6 +7,8 @@
 #include <cstring>
 #include <vector>
 
+#include "pocket_daily/home/HomeDrawing.h"
+
 using PocketUIHost::Asset;
 using PocketUIHost::AssetScope;
 
@@ -106,6 +108,20 @@ TEST_F(SdFontPageCache, UiPrewarmOutsidePageRenderStillMakesGlyphsResident) {
   EXPECT_FALSE(font.isOverflowGlyph(title));
 }
 
+TEST_F(SdFontPageCache, WrappedUiTitleDoesNotReopenSdForEveryMeasuredPrefix) {
+  constexpr const char* title = "ABCDEFGHIJABCDEFGHIJ";
+  HalStorage::readOpenCount = 0;
+  const int lines = PocketDaily::HomeDraw::measureWrappedFixed(renderer, FONT_ID, title, 14, 4, EpdFontFamily::BOLD);
+  EXPECT_GT(lines, 0);
+  EXPECT_LE(HalStorage::readOpenCount, 4u);
+  const auto measuredOpens = HalStorage::readOpenCount;
+  EXPECT_EQ(PocketDaily::HomeDraw::drawWrappedFixed(renderer, FONT_ID, 0, 20, title, 14, 4, 14, EpdFontFamily::BOLD),
+            lines);
+  // Prefix storage is bounded and may be replaced once per output line;
+  // repeated character-by-character measurements must not reopen the file.
+  EXPECT_LE(HalStorage::readOpenCount - measuredOpens, 4u);
+}
+
 // The reader records the CJK status-bar title with the page scan
 // (ReaderPageRenderer, FontCacheManager::recordExtraText): the title's glyphs
 // then load with the page's sorted batch instead of one SD open per glyph per
@@ -195,6 +211,20 @@ class SdFontExtraKerning : public testing::Test {
 // Kerning is built per page from the page's codepoints; a glyph that is not on
 // the page gets none. Extra (status-bar) text must not change that, or the
 // title would shift by a kern pair depending on how it was loaded.
+TEST_F(SdFontExtraKerning, UiMetricPreparationPreservesColdAndWarmKerning) {
+  const int coldWidth = renderer.getTextWidth(FONT_ID, "AB");
+  EXPECT_EQ(kernAB(), 0);
+  renderer.prepareUiText(FONT_ID, "AB", EpdFontFamily::REGULAR);
+  EXPECT_EQ(kernAB(), 0);
+  EXPECT_EQ(renderer.getTextWidth(FONT_ID, "AB"), coldWidth);
+  renderer.prewarmSdCardFont(FONT_ID, "AB", 0x01);
+  ASSERT_EQ(kernAB(), -3);
+  const int warmWidth = renderer.getTextWidth(FONT_ID, "AB");
+  renderer.prepareUiText(FONT_ID, PAGE_TEXT, EpdFontFamily::REGULAR);
+  EXPECT_EQ(kernAB(), -3);
+  EXPECT_EQ(renderer.getTextWidth(FONT_ID, "AB"), warmWidth);
+}
+
 TEST_F(SdFontExtraKerning, ExtraTextGlyphsKeepTheirOnDemandKerning) {
   {
     auto page = cache.createPrewarmScope();

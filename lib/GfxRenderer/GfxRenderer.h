@@ -255,6 +255,9 @@ class GfxRenderer {
   // Replaces the SD font's resident glyph set with this text's glyphs. No-op (returns 0) while a
   // FontCacheManager page prewarm is pinned; the text's glyphs then load on demand.
   int prewarmSdCardFont(int fontId, const char* utf8Text, uint8_t styleMask = 0x0F) const;
+  // Bounded UI text before repeated width queries. Keep existing kerning and
+  // pinned page ownership; replace only a Cached SD face's transient glyph set.
+  void prepareUiText(int fontId, const char* text, EpdFontFamily::Style style) const;
 
   // Glyph fallback. When the font lacks a visible codepoint, drawing and
   // measuring borrow it from the provider's fallback font (e.g. a symbol and

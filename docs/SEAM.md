@@ -392,3 +392,14 @@ in the same commit:
 The product boot cue also uses `util/PowerWakeCue.h` to open the same book tab
 that the inherited sleep activity retains. This is a shared, allocation-free
 rendering primitive; it does not give the base display layer a product dependency.
+
+### Home BLE input and Back profiling (2026-11-03)
+
+`main.cpp` restores the lent framebuffer without terminal panel sleep or a
+synchronous repaint ahead of physical release; `EpubReaderActivity::loop`
+yields background layout/prewarm to button input. Developer-only hooks in
+`main.cpp` and `ActivityManager` record ordered Back-to-PocketDaily boundaries
+through `NearbySync::Window`. Fixed checksum-validated RTC records retain80B;
+shipping builds omit the hooks/status. `GfxRenderer::prepareUiText` prepares
+bounded actual-style SD title prefixes for Home width queries, preserving
+existing kerning/ligatures and pinned/BoundedUI ownership.

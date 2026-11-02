@@ -42,4 +42,22 @@ void sample(Record& record, uint32_t freeHeap, uint32_t largestBlock);
 void closed(Record& record, uint8_t reason, uint16_t connections, uint16_t lists, uint16_t offers, uint32_t freeHeap,
             uint32_t largestBlock);
 
+// Developer Back-to-Home receipt: cumulative milliseconds, no SD writes/buffers.
+enum class ReturnStage : uint32_t { InputDetected = 1, Requested, ReaderExited, HomeEntered, HomePainted };
+struct HomeReturnRecord {
+  uint32_t magic, sequence, started, requestedMs, exitedMs, enteredMs, paintedMs;
+  ReturnStage stage;
+  uint32_t check;
+};
+bool valid(const HomeReturnRecord& record);
+bool noteReturn(HomeReturnRecord& record, ReturnStage stage, uint32_t now);
+struct HomePaintRecord {
+  uint32_t magic, sequence, composeMs, refreshMs, coverMs, minFreeHeap, resolveMs, headerMs, snapshotMs, cpuMhz, check;
+};
+enum class PaintDetail { Resolver, Header, Snapshot };
+bool valid(const HomePaintRecord& record);
+void notePaint(HomePaintRecord& record, uint32_t composeMs, uint32_t refreshMs, uint32_t coverMs = 0,
+               uint32_t minFreeHeap = 0, uint32_t resolveMs = 0, uint32_t headerMs = 0, uint32_t snapshotMs = 0,
+               uint32_t cpuMhz = 0);
+
 }  // namespace Pocket::NearbySync::Stats

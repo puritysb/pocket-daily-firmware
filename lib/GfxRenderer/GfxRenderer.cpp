@@ -300,6 +300,28 @@ int GfxRenderer::prewarmSdCardFont(int fontId, const char* utf8Text, uint8_t sty
   return 0;
 }
 
+void GfxRenderer::prepareUiText(const int fontId, const char* text, const EpdFontFamily::Style style) const {
+  if (!text || !text[0] ||
+      (fontCacheManager_ && (fontCacheManager_->isScanning() || fontCacheManager_->isPageGlyphSetPinned())))
+    return;
+  const int resolved = resolveTextFontId(fontId, text, style);
+  const auto it = sdCardFonts_.find(resolved);
+  if (it == sdCardFonts_.end() || it->second->loadMode() == SdCardFont::LoadMode::BoundedUI) return;
+  const auto face = fontMap.find(resolved);
+  if (face == fontMap.end()) return;
+  const auto* data = face->second.getData(style);
+  // Do not replace an existing shaping/kerning view with an unkerned UI set.
+  // Cold bold UI faces have no such tables; their ink metrics stay identical.
+  if (!data || data->kernMatrix || data->kernRowOffsets || data->ligaturePairs || data->kernLookup ||
+      data->ligatureLookup || data->kernHandler)
+    return;
+  const auto mask = static_cast<uint8_t>(1u << (static_cast<uint8_t>(style) & 0x03));
+  // Width uses ink extents, so metrics-only loading still faults bitmap glyphs
+  // through the eight-entry overflow ring. Batch this bounded prefix instead.
+  // No new kern/lig tables or accumulated screen-long union are needed for UI.
+  it->second->prewarm(text, mask, false, false, false);
+}
+
 void GfxRenderer::ensureSdCardFontReady(const int fontId, const char* const* segments, const size_t* segmentLens,
                                         const size_t segmentCount, const bool includeSpace, const bool includeHyphen,
                                         const uint8_t styleMask) const {

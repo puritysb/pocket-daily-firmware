@@ -289,6 +289,67 @@ bool active() { return controller.radioUp(); }
 
 const Stats::Record* statistics() { return Stats::valid(stats) ? &stats : nullptr; }
 
+#ifdef ENABLE_DEV_REMOTE_FLASH
+// 36 RTC bytes retain one receipt across the return to Same Wi-Fi. The spinlock
+// covers only fixed-size arithmetic/copies, never I/O; render and loop both write.
+RTC_NOINIT_ATTR static Stats::HomeReturnRecord homeReturnRecord;
+RTC_NOINIT_ATTR static Stats::HomePaintRecord homePaintRecord;
+static std::atomic<bool> homePaintPending{false};
+static std::atomic<uint32_t> homeCoverMs{0};
+static std::atomic<uint32_t> homeResolveMs{0}, homeHeaderMs{0}, homeSnapshotMs{0};
+static portMUX_TYPE homeReturnMux = portMUX_INITIALIZER_UNLOCKED;
+void noteHomeReturn(const Stats::ReturnStage stage) {
+  const uint32_t now = millis();
+  taskENTER_CRITICAL(&homeReturnMux);
+  Stats::noteReturn(homeReturnRecord, stage, now);
+  taskEXIT_CRITICAL(&homeReturnMux);
+}
+Stats::HomeReturnRecord homeReturnStatistics() {
+  taskENTER_CRITICAL(&homeReturnMux);
+  const auto result = homeReturnRecord;
+  taskEXIT_CRITICAL(&homeReturnMux);
+  return Stats::valid(result) ? result : Stats::HomeReturnRecord{};
+}
+void beginHomePaint() {
+  homeCoverMs.store(0, std::memory_order_relaxed);
+  homeResolveMs.store(0, std::memory_order_relaxed);
+  homeHeaderMs.store(0, std::memory_order_relaxed);
+  homeSnapshotMs.store(0, std::memory_order_relaxed);
+  homePaintPending.store(true, std::memory_order_release);
+}
+void noteHomeCover(const uint32_t elapsedMs) { homeCoverMs.fetch_add(elapsedMs, std::memory_order_relaxed); }
+void noteHomeDetail(const Stats::PaintDetail part, const uint32_t elapsedMs) {
+  if (!homePaintPending.load(std::memory_order_acquire)) return;
+  switch (part) {
+    case Stats::PaintDetail::Resolver:
+      homeResolveMs.fetch_add(elapsedMs, std::memory_order_relaxed);
+      break;
+    case Stats::PaintDetail::Header:
+      homeHeaderMs.fetch_add(elapsedMs, std::memory_order_relaxed);
+      break;
+    case Stats::PaintDetail::Snapshot:
+      homeSnapshotMs.fetch_add(elapsedMs, std::memory_order_relaxed);
+      break;
+  }
+}
+void noteHomePaint(const uint32_t composeMs, const uint32_t refreshMs) {
+  if (!homePaintPending.exchange(false, std::memory_order_acq_rel)) return;
+  const uint32_t minFreeHeap = ESP.getMinFreeHeap();
+  const uint32_t cpuMhz = getCpuFrequencyMhz();
+  taskENTER_CRITICAL(&homeReturnMux);
+  Stats::notePaint(homePaintRecord, composeMs, refreshMs, homeCoverMs.load(std::memory_order_relaxed), minFreeHeap,
+                   homeResolveMs.load(std::memory_order_relaxed), homeHeaderMs.load(std::memory_order_relaxed),
+                   homeSnapshotMs.load(std::memory_order_relaxed), cpuMhz);
+  taskEXIT_CRITICAL(&homeReturnMux);
+}
+Stats::HomePaintRecord homePaintStatistics() {
+  taskENTER_CRITICAL(&homeReturnMux);
+  const auto result = homePaintRecord;
+  taskEXIT_CRITICAL(&homeReturnMux);
+  return Stats::valid(result) ? result : Stats::HomePaintRecord{};
+}
+#endif
+
 void runBeforeDeepSleep(const uint32_t renderCount, const GfxRenderer& renderer) {
   arm(Trigger::SLEEP, renderCount);
   while (controller.state() != Controller::State::IDLE) {

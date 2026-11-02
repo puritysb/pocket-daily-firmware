@@ -57,8 +57,45 @@ explains the opt-in requirement instead of attributing it to charging.
 Mac UI Connect from ordinary Home passed on X3/X4 developer w8112bfb3:
 `home-connect → app-wifi`, minimum free/block 67,884/61,428 B (X3) and
 68,132/61,428 B (X4). No sleep-cycle endpoint was used. Final held-input guard w2edaaddd also passed X3/X4: minimum free/block
-71,156/61,428 B and 67,904/61,428 B respectively. Physical button restoration
-remains awaiting the owner; see the latest app handoff.
+71,156/61,428 B and 67,904/61,428 B respectively. The owner then reported
+X4 Select unresponsive on actual Home (Home / Select / Articles / Sync footer).
+The Home branch incorrectly deep-slept the panel without resetting it on return;
+framebuffer reallocation alone cannot wake that controller. The working-tree fix
+keeps the panel in its resumable remote-control lifecycle. On w3cc1371e the
+owner passed X3 Select/Back; X4 still stuttered and required repeated Select.
+The next correction removes the extra synchronous Home paint before the loan,
+using the existing render lock/framebuffer guard, and defers the restoration
+repaint until after physical release/navigation. This keeps release polling out
+of the cover/AA paint wait. Connection receipts
+do not establish button responsiveness or end-to-end opening latency.
+On w87e1b1e9 the owner reported quick Select but approximately 7 seconds for Back.
+The follow-up skips reader background layout/font prewarm on button events or
+while Back is held. Developer builds add an optional `homeReturn` status receipt:
+`sequence`, `stage` (1 input release, 2 navigation request, 3 reader destroyed,
+4 Home entered, 5 Home render returned), and cumulative milliseconds
+`navigationRequestedMs`, `readerExitedMs`, `homeEnteredMs`, `homePaintedMs`.
+One checksum-validated 36-byte RTC record survives Same Wi-Fi restart; a short
+critical section protects loop/render updates. There is no task, SD write or
+heap buffer for recording. This measures from software input detection, not the
+physical contact or optical completion. Missing/out-of-order stages cannot
+complete a receipt. Shipping builds omit the hooks and status object, and the
+Apple app ignores this unknown diagnostic member. Fresh hardware timings follow below.
+X4's w319aac98 receipt measured input→navigation1ms, reader-exited790ms,
+Home-entered814ms and Home-painted7172ms: the Home painter used6358ms.
+The independent software-return Home trial reproduced compose5639ms/panel624ms
+at160MHz; resolver58/header5/snapshot8ms ruled out those paths. Width measurement
+of growing title prefixes repeatedly faulted bold SD glyphs through the eight-slot
+overflow ring. `wrappedFixed` now prepares a UTF-8-bounded prefix (<=191 bytes)
+in its actual style before querying widths, without changing kerning/ligature
+state or borrowing pinned/BoundedUI caches. Host SD opens20→<=4; reverting this
+preparation fails the regression test. Actual wd1bc04f2 software trials measured
+compose444/448ms plus panel636/635ms (1080/1083ms total), minimum heap84176B;
+preferences/profile/reading/content were unchanged. These are renderer timings,
+not physical Back acceptance by themselves. Whole-screen batching experiments did not resolve
+the delay and were reverted. Developer `homePaint` retains one first-paint record
+per Home entry: sequence, composition/panel/cover/resolver/header/snapshot times,
+CPU MHz and boot minimum heap. Together with homeReturn it uses80 RTC bytes;
+the recorder adds no task, SD log or image buffer.
 Private local evidence: `build/home-connect-20261102/`. No battery-current or
 overnight claim follows from these functional samples.
 
@@ -380,3 +417,16 @@ App UI, privacy and shared fixtures are documented in the sibling
 [READER_WIFI_SETUP.md](../../pocket-daily/docs/READER_WIFI_SETUP.md).
 The developer pipeline `--wifi-setup` verifies a nonexistent network attempt
 and recovery using the actual app; it is not positive new-network acceptance.
+
+### X4 physical Back acceptance (2026-11-03)
+
+Owner confirmed wd1bc04f2 Select/Back in approximately1–2 seconds. A fresh
+receipt recorded navigation1ms, reader-exited821ms, Home-entered845ms,
+Home-painted1910ms: Home rendering1065ms (composition430 + refresh635).
+Home BLE minimum free/block was79236/69620B, above unchanged50KiB/8KiB gates.
+Paint `minFreeHeap`50364B is the boot-wide minimum up to that paint, not
+a Home-local low-water; its origin during reading versus Home is unresolved.
+Reader render/background budgets remain24/32KiB; Wi-Fi has a separate budget.
+No leak, battery-life or all-orientation conclusion follows from this sample.
+X3 owner passed the earlier panel-restoration version w3cc1371e; this final
+prefix optimization has not been installed/physically accepted on X3.

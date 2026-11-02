@@ -504,6 +504,15 @@ static int wrappedFixed(const GfxRenderer& renderer, int fontId, int x, int y, c
   while (hasVisibleText(p) && drawn < maxLines) {
     while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t') p++;
     char line[kWrapLineBytes];
+    size_t prefix = 0;
+    while (p[prefix]) {
+      const size_t span = utf8Span(p + prefix);
+      if (!span || prefix + span >= sizeof(line)) break;
+      prefix += span;
+    }
+    memcpy(line, p, prefix);
+    line[prefix] = '\0';
+    renderer.prepareUiText(fontId, line, style);
     line[0] = '\0';
     size_t scan = 0, lastFit = 0, lastSpace = 0;
     bool explicitBreak = false;

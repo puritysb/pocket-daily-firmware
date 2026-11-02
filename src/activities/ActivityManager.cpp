@@ -81,6 +81,11 @@ void ActivityManager::renderTaskLoop() {
       // The sleep screen forces normal polarity itself (SleepActivity).
       display.setInverted(SETTINGS.screenInverted != 0);
       currentActivity->render(std::move(lock));
+#ifdef ENABLE_DEV_REMOTE_FLASH
+      if (currentActivity->name == "PocketDaily") {
+        Pocket::NearbySync::Window::noteHomeReturn(Pocket::NearbySync::Stats::ReturnStage::HomePainted);
+      }
+#endif
       DEV_TRACE(PocketDaily::DevTrace::RENDER_DONE);
       completedRenders.fetch_add(1, std::memory_order_acq_rel);
       const UBaseType_t stackHeadroom = uxTaskGetStackHighWaterMark(nullptr);
@@ -226,6 +231,11 @@ void ActivityManager::loop() {
 
       lock.unlock();  // onEnter may acquire its own lock
       currentActivity->onEnter();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+      if (currentActivity->name == "PocketDaily") {
+        Pocket::NearbySync::Window::noteHomeReturn(Pocket::NearbySync::Stats::ReturnStage::HomeEntered);
+      }
+#endif
 
       // onEnter may request another pending action, we will handle it in the next loop iteration
       continue;
@@ -247,8 +257,14 @@ void ActivityManager::loop() {
 void ActivityManager::exitActivity(const RenderLock& lock) {
   // Note: lock must be held by the caller
   if (currentActivity) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    const bool wasReader = currentActivity->isReaderActivity();
+#endif
     currentActivity->onExit();
     currentActivity.reset();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    if (wasReader) Pocket::NearbySync::Window::noteHomeReturn(Pocket::NearbySync::Stats::ReturnStage::ReaderExited);
+#endif
   }
   // The outgoing screen's header back button must not eat taps on the next
   // screen; the next header draw re-records it.
@@ -353,6 +369,9 @@ void ActivityManager::leaveReader() {
   // fails, Home (smaller) is the fallback rather than staying in the book.
   switch (readerReturn.exchange(ReaderReturn::Home)) {
     case ReaderReturn::PocketDaily:
+#ifdef ENABLE_DEV_REMOTE_FLASH
+      Pocket::NearbySync::Window::noteHomeReturn(Pocket::NearbySync::Stats::ReturnStage::Requested);
+#endif
       if (goToPocketDaily()) return;
       break;
     case ReaderReturn::Articles:

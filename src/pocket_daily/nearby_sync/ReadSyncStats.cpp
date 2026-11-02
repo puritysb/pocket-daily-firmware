@@ -84,3 +84,69 @@ void closed(Record& record, const uint8_t reason, const uint16_t connections, co
 }
 
 }  // namespace Pocket::NearbySync::Stats
+
+namespace Pocket::NearbySync::Stats {
+namespace {
+constexpr uint32_t RETURN_MAGIC = 0x48525431u;
+uint32_t returnChecksum(const HomeReturnRecord& r) {
+  const uint32_t words[] = {r.magic,    r.sequence,  r.started,   r.requestedMs,
+                            r.exitedMs, r.enteredMs, r.paintedMs, static_cast<uint32_t>(r.stage)};
+  uint32_t sum = 2166136261u;
+  for (const auto word : words) sum = (sum ^ word) * 16777619u;
+  return sum;
+}
+}  // namespace
+bool valid(const HomeReturnRecord& r) {
+  return r.magic == RETURN_MAGIC && r.sequence != 0 && r.stage >= ReturnStage::InputDetected &&
+         r.stage <= ReturnStage::HomePainted && r.check == returnChecksum(r);
+}
+bool noteReturn(HomeReturnRecord& r, const ReturnStage stage, const uint32_t now) {
+  if (stage < ReturnStage::InputDetected || stage > ReturnStage::HomePainted) return false;
+  if (stage == ReturnStage::InputDetected) {
+    uint32_t sequence = valid(r) ? r.sequence + 1 : 1;
+    if (!sequence) sequence = 1;
+    r = {RETURN_MAGIC, sequence, now, 0, 0, 0, 0, stage, 0};
+  } else {
+    if (!valid(r) || static_cast<uint32_t>(stage) != static_cast<uint32_t>(r.stage) + 1) return false;
+    const uint32_t elapsed = now - r.started;  // millis() wrap is intentional
+    switch (stage) {
+      case ReturnStage::InputDetected:
+        return false;
+      case ReturnStage::Requested:
+        r.requestedMs = elapsed;
+        break;
+      case ReturnStage::ReaderExited:
+        r.exitedMs = elapsed;
+        break;
+      case ReturnStage::HomeEntered:
+        r.enteredMs = elapsed;
+        break;
+      case ReturnStage::HomePainted:
+        r.paintedMs = elapsed;
+        break;
+    }
+    r.stage = stage;
+  }
+  r.check = returnChecksum(r);
+  return true;
+}
+namespace {
+constexpr uint32_t PAINT_MAGIC = 0x48505431u;
+uint32_t paintChecksum(const HomePaintRecord& r) {
+  const uint32_t words[] = {r.magic,       r.sequence,  r.composeMs, r.refreshMs,  r.coverMs,
+                            r.minFreeHeap, r.resolveMs, r.headerMs,  r.snapshotMs, r.cpuMhz};
+  uint32_t sum = 2166136261u;
+  for (const auto word : words) sum = (sum ^ word) * 16777619u;
+  return sum;
+}
+}  // namespace
+bool valid(const HomePaintRecord& r) { return r.magic == PAINT_MAGIC && r.sequence && r.check == paintChecksum(r); }
+void notePaint(HomePaintRecord& r, const uint32_t composeMs, const uint32_t refreshMs, const uint32_t coverMs,
+               const uint32_t minFreeHeap, const uint32_t resolveMs, const uint32_t headerMs, const uint32_t snapshotMs,
+               const uint32_t cpuMhz) {
+  uint32_t sequence = valid(r) ? r.sequence + 1 : 1;
+  if (!sequence) sequence = 1;
+  r = {PAINT_MAGIC, sequence, composeMs, refreshMs, coverMs, minFreeHeap, resolveMs, headerMs, snapshotMs, cpuMhz, 0};
+  r.check = paintChecksum(r);
+}
+}  // namespace Pocket::NearbySync::Stats

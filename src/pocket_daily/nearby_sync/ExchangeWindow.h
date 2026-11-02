@@ -28,6 +28,15 @@ void close(CloseReason reason);
 bool active();
 // Heap and outcome figures of recent windows (kept across restarts), or null.
 const Stats::Record* statistics();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+void noteHomeReturn(Stats::ReturnStage stage);
+Stats::HomeReturnRecord homeReturnStatistics();
+void beginHomePaint();
+void noteHomeCover(uint32_t elapsedMs);
+void noteHomeDetail(Stats::PaintDetail part, uint32_t elapsedMs);
+void noteHomePaint(uint32_t composeMs, uint32_t refreshMs);
+Stats::HomePaintRecord homePaintStatistics();
+#endif
 // The 20 s window after the sleep screen is drawn; returns when it closed
 // (time up, a button press, or a gate refused it). Extends an open window.
 void runBeforeDeepSleep(uint32_t renderCount, const GfxRenderer& renderer);
@@ -35,8 +44,8 @@ void runBeforeDeepSleep(uint32_t renderCount, const GfxRenderer& renderer);
 enum class StandbyExit : uint8_t { DeepSleep, Reader, SameWifi };
 bool standbyEligible();
 bool homeConnectionEligible();
-// Framebuffer and panel must already be released/asleep. maxMs is only a
-// developer recovery deadline; zero means normal app-requested standby.
+// Framebuffer must already be released. HOME_CONNECT keeps the panel resumable;
+// terminal STANDBY sleeps it. maxMs bounds the window (zero means no deadline).
 StandbyExit runStandby(const GfxRenderer& renderer, uint32_t maxMs = 0, Trigger trigger = Trigger::STANDBY);
 
 }  // namespace Pocket::NearbySync::Window

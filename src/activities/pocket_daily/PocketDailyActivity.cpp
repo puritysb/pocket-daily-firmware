@@ -31,6 +31,7 @@
 #include "pocket_daily/home/HomeInputs.h"
 #include "pocket_daily/home/HomeRenderer.h"
 #include "pocket_daily/learning_pack.h"
+#include "pocket_daily/nearby_sync/ExchangeWindow.h"
 #include "util/CjkScript.h"
 #include "util/PowerWakeCue.h"
 #include "util/UiCjkFont.h"
@@ -44,9 +45,16 @@ using PocketDaily::HomeDraw::formatWeatherSnapshotDate;
 // reading font was resident before entering Pocket Daily. Preserve the existing
 // coverage/fallback behavior when that family is absent or lacks a glyph.
 int pocketUiFont(const GfxRenderer& renderer, const char* text, int fallback, EpdFontFamily::Style style) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  const uint32_t started = millis();
+#endif
   if (CjkScript::needsCjkFont(text))
     sdFontSystem.ensureUiFamilyLoaded(const_cast<GfxRenderer&>(renderer), "PocketSansWorld");
-  return UiCjkFont::fontForText(renderer, text, fallback, style, UiCjkFont::CoveragePolicy::RequireFull);
+  const int result = UiCjkFont::fontForText(renderer, text, fallback, style, UiCjkFont::CoveragePolicy::RequireFull);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  Pocket::NearbySync::Window::noteHomeDetail(Pocket::NearbySync::Stats::PaintDetail::Resolver, millis() - started);
+#endif
+  return result;
 }
 // The device picks an installed SD CJK font for text the built-in fonts lack.
 PocketDaily::HomeDraw::FontResolver deviceFonts(const GfxRenderer& renderer) {
@@ -101,6 +109,9 @@ bool hasCJK(const char* s) {
 
 void PocketDailyActivity::onEnter() {
   Activity::onEnter();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  Pocket::NearbySync::Window::beginHomePaint();
+#endif
   appContent.load(nullptr, HalSystem::feedWatchdogIfRegistered);
 
   // Pocket is a hardware-shaped shell. Normalize it to the chassis portrait
@@ -446,6 +457,9 @@ void PocketDailyActivity::preparePersonalSnapshot() {
 
 bool PocketDailyActivity::drawReadingCover(int x, int y, int width, int height) const {
   if (width <= 12 || height <= 18) return false;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  const uint32_t coverStart = millis();
+#endif
   bool coverDrawn = false;
   if (renderReadingSnapshot.coverBmpPath[0]) {
     HalFile coverFile;
@@ -468,6 +482,9 @@ bool PocketDailyActivity::drawReadingCover(int x, int y, int width, int height) 
     }
   }
   // Without art the shared renderer draws a title card instead.
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  Pocket::NearbySync::Window::noteHomeCover(millis() - coverStart);
+#endif
   return coverDrawn;
 }
 
@@ -494,7 +511,13 @@ PocketDaily::Home::Env PocketDailyActivity::homeEnv() const {
                       const char* subtitle) {
     (void)self;
     // Product identity is Pocket itself.
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    const uint32_t started = millis();
+#endif
     GUI.drawHeader(renderer, Rect{x, y, width, height}, title, subtitle);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    Pocket::NearbySync::Window::noteHomeDetail(Pocket::NearbySync::Stats::PaintDetail::Header, millis() - started);
+#endif
   };
   env.drawCover = [](void* self, GfxRenderer&, int x, int y, int width, int height) {
     return static_cast<PocketDailyActivity*>(self)->drawReadingCover(x, y, width, height);
@@ -506,7 +529,13 @@ PocketDaily::Home::Env PocketDailyActivity::homeEnv() const {
 }
 
 void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  const uint32_t composeStart = millis();
+#endif
   preparePersonalSnapshot();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  Pocket::NearbySync::Window::noteHomeDetail(Pocket::NearbySync::Stats::PaintDetail::Snapshot, millis() - composeStart);
+#endif
   // Drawing is shared with the host preview (pocket_daily/home/HomeRenderer).
   PocketDaily::Home::Row homeRows[kOverviewCap];
   for (int i = 0; i < n && i < kOverviewCap; ++i)
@@ -524,7 +553,13 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n) {
   view.profile = PocketDaily::DailyProfile::current();
   view.strings = homeStrings();
   PocketDaily::Home::renderHome(renderer, view, homeEnv());
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  const uint32_t refreshStart = millis();
+#endif
   renderer.displayBuffer();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  Pocket::NearbySync::Window::noteHomePaint(refreshStart - composeStart, millis() - refreshStart);
+#endif
 }
 
 int PocketDailyActivity::drawAppCardImage(const char* cardId, int x, int y, int width, int height) const {
