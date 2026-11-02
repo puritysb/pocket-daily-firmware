@@ -155,7 +155,8 @@ class GfxRenderer {
   // RAM-only coverage check: never loads a glyph or touches SD for Cached SD
   // fonts and flash fonts.
   bool fontCovers(int fontId, const EpdFontFamily& font, uint32_t cp, EpdFontFamily::Style style) const;
-  int measureTextInk(int fontId, const char* text, EpdFontFamily::Style style, BidiUtils::BidiBaseDir baseDir) const;
+  int measureTextInk(int fontId, const char* text, EpdFontFamily::Style style, BidiUtils::BidiBaseDir baseDir,
+                     int maxWidth, size_t* fittedBytes) const;
   GlyphRef resolveGlyph(const EpdFontFamily& font, uint32_t cp, EpdFontFamily::Style style, bool allowFallback) const;
   int32_t fallbackAdvanceFP(uint32_t cp, EpdFontFamily::Style style, bool allowFallback,
                             const EpdFontData* primaryData) const;
@@ -435,6 +436,9 @@ class GfxRenderer {
   // Text
   // Layout may use advance-only SD font tables; rendered measurement includes kerning and ligatures.
   enum class TextMeasureMode { Layout, Rendered };
+  // First overflowing prefix in one pass for context-independent LTR text.
+  // -1 means use ordinary prefix measurement (shaping or font switching).
+  int getSimpleTextFitBytes(int fontId, const char* text, int maxWidth, EpdFontFamily::Style style) const;
   int getTextWidth(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR,
                    BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO) const;
   void drawCenteredText(int fontId, int y, const char* text, bool black = true,

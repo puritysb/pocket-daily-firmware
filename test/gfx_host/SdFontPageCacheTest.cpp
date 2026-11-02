@@ -249,3 +249,43 @@ TEST_F(SdFontExtraKerning, ExtraTextGlyphsKeepTheirOnDemandKerning) {
     EXPECT_EQ(kernAB(), 0);                 // ...with the same (absent) kerning
   }
 }
+
+TEST_F(SdFontPageCache, LinearWrappingKeepsLegacyPixelsAndLineBreaks) {
+  const std::vector<std::string> texts{"ABCDEFGHIJ ABC DEFGHIJ",
+                                       "가A가BC DEF가",
+                                       "A\nB\r\nC",
+                                       "  A B  ",
+                                       std::string(190, 'A') + "가BC",
+                                       std::string(64, 'B') + " " + std::string(100, 'C')};
+  for (const auto [width, height] : {std::pair{800, 480}, {792, 528}}) {
+    HalDisplay display(width, height);
+    GfxRenderer r(display);
+    r.begin();
+    r.registerSdCardFont(FONT_ID, &font);
+    r.insertFont(FONT_ID, EpdFontFamily(font.getEpdFont(0)));
+    for (const auto orientation : {GfxRenderer::Portrait, GfxRenderer::LandscapeClockwise,
+                                   GfxRenderer::PortraitInverted, GfxRenderer::LandscapeCounterClockwise}) {
+      r.setOrientation(orientation);
+      for (int maxWidth : {1, 14, 37, 300}) {
+        for (int maxLines : {1, 2, 4}) {
+          for (const auto& text : texts) {
+            r.clearFallbackFonts();
+            r.clearScreen();
+            const int actual = PocketDaily::HomeDraw::drawWrappedFixed(r, FONT_ID, 10, 25, text.c_str(), maxWidth,
+                                                                       maxLines, 14, EpdFontFamily::BOLD);
+            const std::vector<uint8_t> frame(r.getFrameBuffer(), r.getFrameBuffer() + display.getBufferSize());
+            // An unresolved whole-string fallback preserves the same primary
+            // font but deliberately selects the original prefix-width loop.
+            r.setFallbackFont(FONT_ID, 9999);
+            r.clearScreen();
+            const int expected = PocketDaily::HomeDraw::drawWrappedFixed(r, FONT_ID, 10, 25, text.c_str(), maxWidth,
+                                                                         maxLines, 14, EpdFontFamily::BOLD);
+            EXPECT_EQ(actual, expected);
+            EXPECT_EQ(frame, std::vector<uint8_t>(r.getFrameBuffer(), r.getFrameBuffer() + display.getBufferSize()));
+            EXPECT_TRUE(display.guardsIntact());
+          }
+        }
+      }
+    }
+  }
+}

@@ -402,3 +402,54 @@ TEST(GfxHost, LegacyRectangularIconsKeepExactPixelsInEveryOrientation) {
     EXPECT_TRUE(actual.guardsIntact());
   }
 }
+
+TEST(GfxHost, LinearPrefixFitMatchesEveryLegacyPrefixWithVariableMetrics) {
+  struct Probe {
+    unsigned calls = 0;
+    EpdGlyph glyph{};
+  } probe;
+  EpdFontData data{};
+  data.advanceY = 20;
+  data.glyphMissCtx = &probe;
+  data.glyphMissHandler = [](void* ctx, uint32_t cp) -> const EpdGlyph* {
+    auto& p = *static_cast<Probe*>(ctx);
+    ++p.calls;
+    p.glyph.width = 2 + cp % 9;
+    p.glyph.left = static_cast<int>(cp % 5) - 2;
+    p.glyph.advanceX = 40 + cp % 93;
+    return &p.glyph;
+  };
+  data.kernLookup = [](void*, uint32_t left, uint32_t right) -> int8_t {
+    return static_cast<int8_t>((left + 3 * right) % 17 - 8);
+  };
+  EpdFont face(&data);
+  HalDisplay panel;
+  GfxRenderer renderer(panel);
+  renderer.begin();
+  renderer.insertFont(77, EpdFontFamily(&face));
+  for (uint16_t scale : {128, 256, 384}) {
+    renderer.registerSdCardFontScale(77, scale);
+    for (const std::string text : {"Wi .AV regular title", "책읽는시간 漢字 ABC", "ABCDE FGHIJ"}) {
+      for (int width = 0; width < 160; ++width) {
+        size_t fit = 0;
+        unsigned codepoints = 0;
+        for (size_t end = 0; end < text.size();) {
+          end += PocketDaily::HomeDraw::utf8Span(text.c_str() + end);
+          ++codepoints;
+          if (renderer.getTextWidth(77, text.substr(0, end).c_str()) > width) break;
+          fit = end;
+        }
+        probe.calls = 0;
+        EXPECT_EQ(renderer.getSimpleTextFitBytes(77, text.c_str(), width, EpdFontFamily::REGULAR), fit);
+        EXPECT_LE(probe.calls, codepoints);  // One glyph visit, not all growing prefixes.
+      }
+    }
+  }
+  for (const char* text : {"a\xcc\x81", "שלום", "مرحبا", "👩‍💻", "A\tB"})
+    EXPECT_EQ(renderer.getSimpleTextFitBytes(77, text, 100, EpdFontFamily::REGULAR), -1);
+  renderer.setFallbackFont(77, 78);
+  EXPECT_EQ(renderer.getSimpleTextFitBytes(77, "ABC", 100, EpdFontFamily::REGULAR), -1);
+  renderer.clearFallbackFonts();
+  data.ligatureLookup = [](void*, uint32_t, uint32_t) -> uint32_t { return 0; };
+  EXPECT_EQ(renderer.getSimpleTextFitBytes(77, "ABC", 100, EpdFontFamily::REGULAR), -1);
+}

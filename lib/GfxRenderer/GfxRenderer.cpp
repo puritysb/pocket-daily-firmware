@@ -1010,11 +1010,32 @@ void GfxRenderer::blitGlyph(const uint8_t* bitmap, const bool is2Bit, const int 
 
 int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontFamily::Style style,
                               const BidiUtils::BidiBaseDir baseDir) const {
-  return measureTextInk(fontId, text, style, baseDir);
+  return measureTextInk(fontId, text, style, baseDir, 0, nullptr);
+}
+
+int GfxRenderer::getSimpleTextFitBytes(const int fontId, const char* text, const int maxWidth,
+                                       const EpdFontFamily::Style style) const {
+  if (!text || !*text) return 0;
+  // A later codepoint may redirect the whole prefix to another font.
+  if (fallbackFontMap_.find(fontId) != fallbackFontMap_.end()) return -1;
+  const auto it = fontMap.find(fontId);
+  if (it == fontMap.end()) return -1;
+  const auto* data = it->second.getData(style);
+  if (!data || data->ligaturePairs || data->ligatureLookup) return -1;
+  const char* cursor = text;
+  uint32_t cp;
+  while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&cursor)))) {
+    // No reordering, combining marks or emoji clusters. Extend only with
+    // equivalence coverage; unsupported scripts retain the shaping path.
+    if (!((cp >= 0x20 && cp <= 0x7e) || (cp >= 0x4e00 && cp <= 0x9fff) || (cp >= 0xac00 && cp <= 0xd7a3))) return -1;
+  }
+  size_t fitted = 0;
+  measureTextInk(fontId, text, style, BidiUtils::BidiBaseDir::AUTO, maxWidth, &fitted);
+  return static_cast<int>(fitted);
 }
 
 int GfxRenderer::measureTextInk(const int fontId, const char* text, const EpdFontFamily::Style style,
-                                const BidiUtils::BidiBaseDir baseDir) const {
+                                const BidiUtils::BidiBaseDir baseDir, const int maxWidth, size_t* fittedBytes) const {
   if (text == nullptr || *text == '\0') {
     return 0;
   }
@@ -1081,6 +1102,10 @@ int GfxRenderer::measureTextInk(const int fontId, const char* text, const EpdFon
     hasPrev = true;
     prevKernCp = ref.primary ? cp : 0;
     utf8SkipEmojiClusterTail(reinterpret_cast<const unsigned char**>(&cursor), clusterBase);
+    if (fittedBytes) {
+      if (maxX - minX > maxWidth) break;
+      *fittedBytes = static_cast<size_t>(cursor - renderedText);
+    }
   }
   return maxX - minX;
 }
