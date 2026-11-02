@@ -187,15 +187,14 @@ Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
 
 ## BLE standby and app wake (developer `ble_standby` env)
 
-- 2026-11-03: default-OFF `pocketAppConnection` accepts bonded START_WIFI only
-  on idle Home. Mac Home Connect passed X3/X4; framebuffer restoration now
-  preserves the panel and dispatches release before repaint. X3 owner passed
-  w3cc1371e. X4 wd1bc04f2 owner passed Select/Back in1–2s; RTC Back1910ms,
-  Home1065ms, versus prior7172/6358ms. Bounded actual-style SD title prefixes
-  avoid overflow-ring thrashing; shaping/pinned caches and memory gates unchanged.
-  Automatic Home1080/1083ms; X4 Home BLE minimum free/block79236/69620B.
-  Paint boot-min50364B is not a Home-only low-water. Latest prefix fix not installed
-  on X3. Evidence `build/home-connect-20261102/`; no energy claim; release held.
+- 2026-11-03: default-OFF Home app connection passed Mac/X3/X4. Resumable panel
+  restoration, release-before-repaint and bounded actual-style SD title warming
+  fixed the regression; X4 physical Back7172→1910ms (owner1–2s). Latest developer
+  wdd553a3b is installed on both: automatic Home X3 1006/X4 1071ms, original state
+  and staging restored. Owner reports strong overall improvement; per-menu results
+  remain unspecified. Keep phase-specific memory gates/shaping/pinned ownership.
+  Lessons/evidence: `docs/menu-navigation-audit.md` (Lessons learned) and
+  `build/home-connect-20261102/`. No extra wall-clock/battery claim; release held.
 
 - `scripts/pio_ble_standby.sh` builds env `ble_standby` (extends `default`, adds
   PM/tickless/BT modem sleep in an isolated SDK copy). It is SDK automatic light
