@@ -5,14 +5,32 @@ builds as specified in [product versioning](product-versioning.md).
 
 ## Local security preparation — 2026-11-04
 
-New uncommitted main8dc08b1c security preparation differs from the historical
+The security candidate was built at8dc08b1c with changes subsequently committed
+as main/origin dbd99730. Its sealed security files match that tree. It differs from the historical
 November1 candidate below: gh_release1.0.0, 6,386,624 bytes,
 SHA256 `d2aeaed30fd6009114afa58b823ab4c051c3630d34e0ce53ab660a35e606f53e`. Frozen copy and source/frame/build evidence:
 `build/release-security-20261104/verification.json` and `production.bin`.
 Host1194/default+gh_release warning0/strict cppcheck pass. **No hardware
-installation or acceptance, tag, push or publication.** All applicable exact-image
+installation or acceptance, tag or firmware publication.** Source is pushed;
+CI41827596371 passed. **No final release acceptance.** All applicable exact-image
 X3/X4 gates remain open; this does not inherit November1 or older sign-off.
 See [HTTP origin safety](http-credential-origin.md).
+
+## Owner installation preparation — 2026-11-05
+
+Owner explicitly requested persistent submission-candidate installation for personal
+use validation. Both enrolled X3/X4 identities, models and previous wdd553a3b
+versions verified. Entire active app slots match the reviewed old artifact prefix;
+known raw settings/profiles/library/reading files and prior /update.bin preserved.
+Private evidence: `build/owner-install-20261105/` (not whole SD/NVS equality).
+
+X4 Sync publication size/CRC and whole File Transfer readback SHA match the exact
+production candidate above. Native firmware1.0.0 confirmation/reconnection is
+pending. X3 File Transfer upload timed out at last printed SD ACK2,621,440B;
+no commit or flash was reached. Same temporary path is preserved. X3 is now
+unreachable; owner reconnection and a guarded Sync resume are pending.
+No developer flash endpoint, trial start, release tag or publication was performed.
+These are backup/staging receipts, not installed-image hardware acceptance.
 
 ## Historical November1 frozen image
 
