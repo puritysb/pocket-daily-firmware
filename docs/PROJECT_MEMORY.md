@@ -2,6 +2,7 @@
 
 Current source/release records override dated observations. Details: cited docs.
 Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
+2026-11-04: owner-authorized OPDS origin safety repair; GET Basic/custom headers bind to configured origin, HTTPS downgrade rejected. Host1194/default+gh_release warning0/strict cppcheck/app image validator pass. Frozen local1.0.0 SHA d2aeaed3…e606f53e, build/release-security-20261104/. Not flashed or hardware-accepted; docs/http-credential-origin.md. Existing storage SDK patch preserved.
 
 ## Sleep navigation fix in development (2026-11-01)
 

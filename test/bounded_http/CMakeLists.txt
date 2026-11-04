@@ -1,3 +1,3 @@
-add_executable(bounded_http_test BoundedJsonWriterTest.cpp BoundedFileDownloadTest.cpp)
+add_executable(bounded_http_test BoundedJsonWriterTest.cpp BoundedFileDownloadTest.cpp HttpOriginTest.cpp)
 target_link_libraries(bounded_http_test PRIVATE crosspoint_test_common GTest::gtest_main ArduinoJson)
 gtest_discover_tests(bounded_http_test)

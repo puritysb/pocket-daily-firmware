@@ -3,7 +3,18 @@
 First release uses standard EPUB and lineage 2, with release and developer
 builds as specified in [product versioning](product-versioning.md).
 
-## Frozen image
+## Local security preparation — 2026-11-04
+
+New uncommitted main8dc08b1c security preparation differs from the historical
+November1 candidate below: gh_release1.0.0, 6,386,624 bytes,
+SHA256 `d2aeaed30fd6009114afa58b823ab4c051c3630d34e0ce53ab660a35e606f53e`. Frozen copy and source/frame/build evidence:
+`build/release-security-20261104/verification.json` and `production.bin`.
+Host1194/default+gh_release warning0/strict cppcheck pass. **No hardware
+installation or acceptance, tag, push or publication.** All applicable exact-image
+X3/X4 gates remain open; this does not inherit November1 or older sign-off.
+See [HTTP origin safety](http-credential-origin.md).
+
+## Historical November1 frozen image
 
 - Source commit `6025da03` includes the content-sized Home cover layout and
   native/host preview comparisons.

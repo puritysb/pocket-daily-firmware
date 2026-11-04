@@ -417,7 +417,7 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
             received += length;
             return true;
           },
-          server.username, server.password);
+          server.username, server.password, nullptr, nullptr, server.url.c_str());
     }
   }
   if (!downloaded) {
@@ -623,7 +623,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
           requestUpdate(true);
         }
       },
-      &cancelDownload, server.username, server.password);
+      &cancelDownload, server.username, server.password, nullptr, nullptr, server.url.c_str());
 
   if (result == HttpDownloader::OK) {
     clearBookCache(filename);

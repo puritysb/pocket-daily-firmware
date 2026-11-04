@@ -14,6 +14,8 @@
 #include <functional>
 #include <string>
 
+#include "HttpOrigin.h"
+
 namespace {
 // RX holds the response headers. 4096 fits real OPDS servers; GitHub's release
 // CDN sends more and logs HTTP_HEADER "Buffer length is small", but that's
@@ -96,12 +98,50 @@ esp_err_t httpEventHandler(esp_http_client_event_t* event) {
   return ESP_OK;
 }
 
+// Keep ESP-IDF's configuration frame separate from streaming/redirect state.
+// The client copies configuration; URL and redirect tap remain caller-owned.
+__attribute__((noinline)) esp_http_client_handle_t createHttpClient(const std::string& url, RedirectCapture& redirect,
+                                                                    esp_http_client_method_t method) {
+  esp_http_client_config_t config = {};
+  config.url = url.c_str();
+  config.method = method;
+  const bool localHttp = url.rfind("http://", 0) == 0;
+  config.buffer_size = localHttp ? LOCAL_HTTP_RX_BUF : HTTP_RX_BUF;
+  config.buffer_size_tx = HTTP_TX_BUF;
+  config.timeout_ms = localHttp ? LOCAL_HTTP_TIMEOUT_MS : HTTP_TIMEOUT_MS;
+  config.crt_bundle_attach = esp_crt_bundle_attach;
+  config.keep_alive_enable = false;
+  config.disable_auto_redirect = true;
+  config.event_handler = httpEventHandler;
+  config.user_data = &redirect;
+  return esp_http_client_init(&config);
+}
+
+__attribute__((noinline)) void setGetHeaders(esp_http_client_handle_t client, const std::string& username,
+                                             const std::string& password,
+                                             const HttpDownloader::RequestHeaders* requestHeaders, bool sameOrigin) {
+  esp_http_client_set_header(client, "User-Agent", "PocketDaily-ESP32-" CROSSPOINT_VERSION);
+  if (sameOrigin && requestHeaders && requestHeaders->items) {
+    for (size_t i = 0; i < requestHeaders->count; ++i) {
+      const auto& header = requestHeaders->items[i];
+      if (header.name && header.name[0] && header.value) esp_http_client_set_header(client, header.name, header.value);
+    }
+  }
+  if (sameOrigin && !username.empty() && !password.empty()) {
+    // Preemptive Basic auth, like the prior addHeader; don't wait for a 401.
+    const std::string credentials = username + ":" + password;
+    const String header = "Basic " + base64::encode(credentials.c_str());
+    esp_http_client_set_header(client, "Authorization", header.c_str());
+  }
+}
+
 std::string resolveRedirectUrl(const std::string& currentUrl, const char* location) {
   if (!location || !*location) return "";
   if (strncmp(location, "http://", 7) == 0 || strncmp(location, "https://", 8) == 0) return location;
 
   const size_t schemeEnd = currentUrl.find("://");
   if (schemeEnd == std::string::npos) return "";
+  if (location[0] == '/' && location[1] == '/') return currentUrl.substr(0, schemeEnd + 1) + location;
   const size_t hostStart = schemeEnd + 3;
   const size_t pathStart = currentUrl.find('/', hostStart);
 
@@ -134,9 +174,15 @@ void logHeap(const char* stage) {
 HttpDownloader::DownloadError runGet(const std::string& url, const std::string& username, const std::string& password,
                                      Sink& sink, HttpDownloader::HeaderCapture* headerCapture = nullptr,
                                      const HttpDownloader::RequestHeaders* requestHeaders = nullptr,
-                                     HttpDownloader::EffectiveUrlCapture* effectiveUrl = nullptr) {
+                                     HttpDownloader::EffectiveUrlCapture* effectiveUrl = nullptr,
+                                     const char* credentialOrigin = nullptr) {
   std::string currentUrl = url;
   lastFailureState = {};
+  const std::string_view origin = credentialOrigin ? std::string_view(credentialOrigin) : std::string_view(url);
+  if (!HttpOrigin::allowsRequest(origin, currentUrl)) {
+    noteFailure("unsafe URL");
+    return HttpDownloader::HTTP_ERROR;
+  }
 
   for (int hop = 0; hop <= 5; ++hop) {
     // GitHub release asset redirects carry long signed Azure URLs. Capture the
@@ -144,45 +190,15 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     // buffer on the memory-tight ESP32.
     RedirectCapture redirect;
     redirect.capture = headerCapture;
-    esp_http_client_config_t config = {};
-    config.url = currentUrl.c_str();
     const bool localHttp = currentUrl.rfind("http://", 0) == 0;
-    config.buffer_size = localHttp ? LOCAL_HTTP_RX_BUF : HTTP_RX_BUF;
-    config.buffer_size_tx = HTTP_TX_BUF;
-    config.timeout_ms = localHttp ? LOCAL_HTTP_TIMEOUT_MS : HTTP_TIMEOUT_MS;
-    // Verify HTTPS against the bundled CA roots. This build has esp-tls
-    // CONFIG_ESP_TLS_INSECURE off, so an unverified TLS handshake can't be set
-    // up at all; the model is public servers over verified https and local
-    // servers over plain http (esp_http_client picks the transport from the URL
-    // scheme, so http:// needs no cert config). The prior setInsecure() worked
-    // only because Arduino's ssl_client drives mbedtls directly.
-    config.crt_bundle_attach = esp_crt_bundle_attach;
-    config.keep_alive_enable = false;
-    config.disable_auto_redirect = true;
-    config.event_handler = httpEventHandler;
-    config.user_data = &redirect;
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
+    esp_http_client_handle_t client = createHttpClient(currentUrl, redirect, HTTP_METHOD_GET);
     if (!client) {
       LOG_ERR("HTTP", "client init failed");
       noteFailure("init");
       return HttpDownloader::HTTP_ERROR;
     }
 
-    esp_http_client_set_header(client, "User-Agent", "PocketDaily-ESP32-" CROSSPOINT_VERSION);
-    if (requestHeaders && requestHeaders->items) {
-      for (size_t i = 0; i < requestHeaders->count; ++i) {
-        const auto& header = requestHeaders->items[i];
-        if (header.name && header.name[0] && header.value)
-          esp_http_client_set_header(client, header.name, header.value);
-      }
-    }
-    if (!username.empty() && !password.empty()) {
-      // Preemptive Basic auth, like the prior addHeader; don't wait for a 401.
-      const std::string credentials = username + ":" + password;
-      const String header = "Basic " + base64::encode(credentials.c_str());
-      esp_http_client_set_header(client, "Authorization", header.c_str());
-    }
+    setGetHeaders(client, username, password, requestHeaders, HttpOrigin::same(origin, currentUrl));
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
@@ -233,12 +249,12 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
       esp_http_client_cleanup(client);
       logHeap("after redirect cleanup");
       std::string nextUrl = resolveRedirectUrl(currentUrl, redirect.location);
-      if (nextUrl.empty()) {
-        LOG_ERR("HTTP", "invalid redirect Location");
+      if (!HttpOrigin::allowsRequest(currentUrl, nextUrl)) {
+        LOG_ERR("HTTP", "invalid or insecure redirect Location");
         noteFailure("redirect");
         return HttpDownloader::HTTP_ERROR;
       }
-      LOG_DBG("HTTP", "redirect %d -> %s", status, nextUrl.c_str());
+      LOG_DBG("HTTP", "redirect %d accepted", status);
       currentUrl = std::move(nextUrl);
       continue;
     }
@@ -322,16 +338,17 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
 HttpDownloader::Failure HttpDownloader::lastFailure() { return lastFailureState; }
 
 bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const std::string& username,
-                              const std::string& password, const RequestHeaders* requestHeaders) {
+                              const std::string& password, const RequestHeaders* requestHeaders,
+                              const char* credentialOrigin) {
   LOG_DBG("HTTP", "Fetching: %s", url.c_str());
   Sink sink;
   sink.write = [&outContent](const uint8_t* data, size_t len) { return outContent.write(data, len) == len; };
-  return runGet(url, username, password, sink, nullptr, requestHeaders) == OK;
+  return runGet(url, username, password, sink, nullptr, requestHeaders, nullptr, credentialOrigin) == OK;
 }
 
 bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent, const std::string& username,
                               const std::string& password, const RequestHeaders* requestHeaders,
-                              EffectiveUrlCapture* effectiveUrl) {
+                              EffectiveUrlCapture* effectiveUrl, const char* credentialOrigin) {
   LOG_DBG("HTTP", "Fetching: %s", url.c_str());
   outContent.clear();  // start clean; the sink appends, so don't carry prior content
   Sink sink;
@@ -369,23 +386,24 @@ bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent, c
     outContent.append(reinterpret_cast<const char*>(data), len);
     return true;
   };
-  return runGet(url, username, password, sink, nullptr, requestHeaders, effectiveUrl) == OK;
+  return runGet(url, username, password, sink, nullptr, requestHeaders, effectiveUrl, credentialOrigin) == OK;
 }
 
 bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username,
                               const std::string& password, const RequestHeaders* requestHeaders,
-                              EffectiveUrlCapture* effectiveUrl) {
+                              EffectiveUrlCapture* effectiveUrl, const char* credentialOrigin) {
   LOG_DBG("HTTP", "Fetching: %s", url.c_str());
   Sink sink;
   sink.write = onData;
-  return runGet(url, username, password, sink, nullptr, requestHeaders, effectiveUrl) == OK;
+  return runGet(url, username, password, sink, nullptr, requestHeaders, effectiveUrl, credentialOrigin) == OK;
 }
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
                                                              ProgressCallback progress, bool* cancelFlag,
                                                              const std::string& username, const std::string& password,
                                                              HeaderCapture* headerCapture,
-                                                             const RequestHeaders* requestHeaders) {
+                                                             const RequestHeaders* requestHeaders,
+                                                             const char* credentialOrigin) {
   LOG_DBG("HTTP", "Downloading: %s -> %s", url.c_str(), destPath.c_str());
 
   if (Storage.exists(destPath.c_str())) {
@@ -402,7 +420,8 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   sink.cancelFlag = cancelFlag;
   sink.write = [&file](const uint8_t* data, size_t len) { return file.write(data, len) == len; };
 
-  const DownloadError result = runGet(url, username, password, sink, headerCapture, requestHeaders);
+  const DownloadError result =
+      runGet(url, username, password, sink, headerCapture, requestHeaders, nullptr, credentialOrigin);
   // Close before any remove() on the same path; DESTRUCTOR_CLOSES_FILE would
   // otherwise close only after the remove.
   file.close();

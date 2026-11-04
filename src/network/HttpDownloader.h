@@ -72,21 +72,25 @@ class HttpDownloader {
   };
 
   /**
-   * Fetch text content from a URL with optional credentials.
+   * Fetch text content with credentials/custom headers bound to the initial origin.
+   * OPDS callers supply their configured server as credentialOrigin, so absolute
+   * feed/acquisition links cannot inherit credentials for another origin.
+   * HTTPS-to-HTTP transitions fail before a network request.
    */
   static bool fetchUrl(const std::string& url, std::string& outContent, const std::string& username = "",
                        const std::string& password = "", const RequestHeaders* requestHeaders = nullptr,
-                       EffectiveUrlCapture* effectiveUrl = nullptr);
+                       EffectiveUrlCapture* effectiveUrl = nullptr, const char* credentialOrigin = nullptr);
 
   static bool fetchUrl(const std::string& url, Stream& stream, const std::string& username = "",
-                       const std::string& password = "", const RequestHeaders* requestHeaders = nullptr);
+                       const std::string& password = "", const RequestHeaders* requestHeaders = nullptr,
+                       const char* credentialOrigin = nullptr);
 
   /**
    * Stream the response body to onData as it arrives, without buffering it.
    */
   static bool fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username = "",
                        const std::string& password = "", const RequestHeaders* requestHeaders = nullptr,
-                       EffectiveUrlCapture* effectiveUrl = nullptr);
+                       EffectiveUrlCapture* effectiveUrl = nullptr, const char* credentialOrigin = nullptr);
 
   /**
    * Download a file to the SD card with optional credentials.
@@ -95,7 +99,8 @@ class HttpDownloader {
                                       ProgressCallback progress = nullptr, bool* cancelFlag = nullptr,
                                       const std::string& username = "", const std::string& password = "",
                                       HeaderCapture* headerCapture = nullptr,
-                                      const RequestHeaders* requestHeaders = nullptr);
+                                      const RequestHeaders* requestHeaders = nullptr,
+                                      const char* credentialOrigin = nullptr);
 
   /**
    * POST a JSON body and collect the (bounded) JSON response. Plain-http local
