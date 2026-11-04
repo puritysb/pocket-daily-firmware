@@ -32,6 +32,9 @@ unreachable; owner reconnection and a guarded Sync resume are pending.
 No developer flash endpoint, trial start, release tag or publication was performed.
 These are backup/staging receipts, not installed-image hardware acceptance.
 
+Later owner direction: X4-only validation when resumed. X3 work and X4 native
+installation/testing are deferred; preserve all evidence without further device I/O.
+
 ## Historical November1 frozen image
 
 - Source commit `6025da03` includes the content-sized Home cover layout and

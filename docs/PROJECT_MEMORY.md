@@ -8,6 +8,8 @@ Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
 in `build/owner-install-20261105/`. X4 candidate full-SHA staged/native confirmation
 pending. X3 upload interrupted before commit; staging preserved, reconnect/Sync
 resume pending. No flash/acceptance. App handoff owns current setup state.
+Owner's laterNov5 direction: focus on X4 only, with installation/testing postponed
+until resume. X3/iPhone deferred; no further device I/O or reconnection prompts now.
 
 ## Sleep navigation fix in development (2026-11-01)
 
