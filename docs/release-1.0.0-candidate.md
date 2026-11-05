@@ -24,16 +24,24 @@ versions verified. Entire active app slots match the reviewed old artifact prefi
 known raw settings/profiles/library/reading files and prior /update.bin preserved.
 Private evidence: `build/owner-install-20261105/` (not whole SD/NVS equality).
 
-X4 Sync publication size/CRC and whole File Transfer readback SHA match the exact
-production candidate above. Native firmware1.0.0 confirmation/reconnection is
-pending. X3 File Transfer upload timed out at last printed SD ACK2,621,440B;
-no commit or flash was reached. Same temporary path is preserved. X3 is now
-unreachable; owner reconnection and a guarded Sync resume are pending.
-No developer flash endpoint, trial start, release tag or publication was performed.
-These are backup/staging receipts, not installed-image hardware acceptance.
+Both X3/X4 /update.bin whole readbacks match the exact production SHA above.
+X4 publication completed through Sync in the initial preparation. After the owner
+resumed all devices, X3's preserved staging path returned validated resume offset0;
+full size/CRC, one-shot atomic publication and entire File Transfer readback passed.
+Its reading records had changed, so fresh known raw-state/reading/prior-update
+backups were completed first. Successful receipts:
+`build/owner-install-20261105/X3-resumed-current-backup2/`.
+The initial interrupted X3 upload and local guard stops remain private evidence;
+no unknown commit was replayed. The updated app production harness admits exact
+1.0.0 and keeps identity/model/registry gates; Mac13/iOS1 deterministic checks pass.
 
-Later owner direction: X4-only validation when resumed. X3 work and X4 native
-installation/testing are deferred; preserve all evidence without further device I/O.
+Native X3 installation is requested, not verified. X4 owner did not observe update
+progress/restart and requested another attempt; fresh same-identity status still
+reports developer wdd553a3b on both readers. No serial USB interface is currently
+enumerated, and the supported developer --flash clients reject production images.
+The native SD updater's final confirmation remains required; no guard bypass,
+remote flash, trial lease, release tag or publication was performed.
+Staging and harness checks are not installed-image hardware acceptance.
 
 ## Historical November1 frozen image
 

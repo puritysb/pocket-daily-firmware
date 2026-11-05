@@ -4,12 +4,15 @@ Current source/release records override dated observations. Details: cited docs.
 Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
 2026-11-04: owner-authorized OPDS origin safety repair; GET Basic/custom headers bind to configured origin, HTTPS downgrade rejected. Host1194/default+gh_release warning0/strict cppcheck/app image validator pass. Frozen local1.0.0 SHA d2aeaed3…e606f53e, build/release-security-20261104/. Not flashed or hardware-accepted; docs/http-credential-origin.md. Existing storage SDK patch preserved.
 
-2026-11-05 owner-install preparation: both original slots/known SD state backed up
-in `build/owner-install-20261105/`. X4 candidate full-SHA staged/native confirmation
-pending. X3 upload interrupted before commit; staging preserved, reconnect/Sync
-resume pending. No flash/acceptance. App handoff owns current setup state.
-Owner's laterNov5 direction: focus on X4 only, with installation/testing postponed
-until resume. X3/iPhone deferred; no further device I/O or reconnection prompts now.
+2026-11-05 owner-install: original slots/known SD state preserved in
+`build/owner-install-20261105/`. Owner resumed all three devices after the earlier
+X4-only pause. X3 fresh reading/raw-state backup, same-path Sync resume (offset0),
+atomic commit and entire /update.bin readback now match frozen candidate SHA.
+Native X3 confirmation remains pending. X4 owner reported install/reconnect done,
+but fresh identity-bound status remains developer wdd553a3b; owner did not observe
+progress and requested retry. Both native confirmations remain required; no remote
+flash/trial/acceptance. Production --flash guards retained; no USB reader enumerated.
+App handoff owns iPhone TestFlight and full setup status.
 
 ## Sleep navigation fix in development (2026-11-01)
 
