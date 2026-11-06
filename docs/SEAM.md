@@ -153,12 +153,18 @@ acceptance without a menu press; absent from production builds.
 - Staged firmware: a `landsOnShell` flag set by the Pocket Daily and silent
   Home branches, then `PocketDaily::StagedFirmware::consumeOffer(...)` (every
   boot) pushes a staged-mode `SdFirmwareUpdateActivity` for `/update.bin`.
+- First boot after stock CrossPoint (`SETTINGS.loadedStockCrossPointFile`):
+  one else-if after the X3 first-setup branch opens Sync as a first-use offer
+  (saved Wi-Fi joins; X3 without it advertises Bluetooth; X4 shows the chooser).
 - Consumed developer-update return calls `goToFileTransfer(true)`; its one-shot
   flag skips only network mode selection and reuses saved-network association
   with the existing interactive failure path. Normal launches keep the chooser.
 
 ### `src/activities/network/CrossPointWebServerActivity.{h,cpp}` (~180 lines)
 
+- `firstSetup` first-use offer: Bluetooth unless a saved-network join was
+  requested; a Same Wi-Fi offer returns to reading after five minutes without
+  an app request; Back reads "Read offline".
 - `POCKET_NEARBY_SYNC` branches in `onEnter` / `onExit` /
   `returnToLaunchOrigin()` (≤3 lines each; the plan's E-exception shrank to
   these). `startUpdateCheck()` replaces the idle Sync menu with
@@ -283,7 +289,10 @@ Fork-resident product patches (no upstream intent):
   Daily with Wi-Fi off).
 - `src/network/OtaUpdater.cpp`, `src/network/WebDAVHandler.cpp` — OTA channel,
   WebDAV guards.
-- `src/CrossPointSettings.h` — Pocket preference fields.
+- `src/CrossPointSettings.{h,cpp}` — Pocket preference fields; stock
+  CrossPoint file migration through `pocket_daily/SettingsMigration.h`
+  (long-press order, stock 2.0 `lineHeight` and `NotoSerif`, and the
+  non-persisted `loadedStockCrossPointFile` flag).
 - `src/main.cpp` — `SET_LOOP_TASK_STACK_SIZE`; RTC_NOINIT
   `silentRebootMagic`/`silentRebootTarget` words; the `SilentRestart.h`
   declaration set (Pocket implementations attach from `ProductBoot.cpp` via

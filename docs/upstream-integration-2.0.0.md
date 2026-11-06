@@ -157,3 +157,26 @@ existing books.
   `scripts/check_crosspoint_plugin.py` in CI. Owner decision 2026-11-06: a
   sideload package only, not listed on Plugin Hub (an installer-only entry
   would misuse a feature catalog). Not tried on a reader.
+
+## Moving from stock CrossPoint
+
+Checked against the 2.0.0 sources what a stock reader carries into Pocket Daily:
+
+| Data | Result |
+| --- | --- |
+| Wi-Fi (`/.crosspoint/wifi.json`) | Same format and per-device key; reused. |
+| Reading position (`progress.bin`) | Stock's 4/6/10-byte records decode; sections rebuild for v138. |
+| App state, recents | Same keys; stock's sleep-image rotation counters are dropped. |
+| Settings (`settings.json`) | Keyed and clamped: out-of-range values from 2.0-only options (cover-transparent sleep, B/W images, clipping or footnote long-press, extra power-button actions) fall back to defaults; nothing is corrupted. 2.0 `lineHeight` maps to the fork's four spacings (inverse of stock's own upgrade), and the `NotoSerif` SD choice keeps the built-in serif as fallback. |
+
+First boot after stock CrossPoint: a settings file without the fork markers
+(`startupApp`, `longPressMenuOrder`) sets the non-persisted
+`loadedStockCrossPointFile`. That boot opens Sync once as a first-use offer:
+with saved Wi-Fi it joins (the companion that staged the image reconnects by
+model and exact staged version); X3 without Wi-Fi offers Bluetooth setup; X4
+without Wi-Fi shows the Sync chooser. Read offline, or five minutes without an
+app request, returns to reading; the load's resave adds the marker, so it never
+repeats. Host tests cover the marker rule and line-height mapping with fault
+injection. Not tried on a reader: no stock 2.0 → Pocket Daily install has been
+run end to end.
+

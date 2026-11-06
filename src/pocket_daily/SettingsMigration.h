@@ -30,4 +30,32 @@ constexpr uint8_t longPressFromFile(const uint8_t stored, const bool writtenByFo
   }
 }
 
+// A settings file without either fork marker was written by stock CrossPoint:
+// this is Pocket Daily's first boot after an install from CrossPoint. The fork
+// always writes kLongPressOrderKey, so the first load's resave ends the state.
+constexpr bool writtenByStockCrossPoint(const bool hasStartupApp, const bool hasOrderMarker) {
+  return !hasStartupApp && !hasOrderMarker;
+}
+
+// Stock 2.0 "lineHeight" (100, 110, 120, 130, 145, 160, 175 %) to the fork's
+// Tight 0 / Normal 1 / Wide 2 / Extra Wide 3. Stock maps the fork's four steps
+// to 110/120/130/145, so this is its inverse; the outer steps fold inward.
+constexpr uint8_t lineSpacingFromStockLineHeight(const uint8_t lineHeight) {
+  switch (lineHeight) {
+    case 0:
+    case 1:
+      return 0;
+    case 2:
+      return 1;
+    case 3:
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+// Stock 2.0 removed the built-in serif and selects it as the SD family
+// "NotoSerif". Pocket Daily still ships the built-in serif.
+constexpr const char* kStockSerifFamily = "NotoSerif";
+
 }  // namespace PocketDaily::SettingsMigration

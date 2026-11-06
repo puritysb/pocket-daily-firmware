@@ -22,3 +22,26 @@ TEST(LongPressMigration, MarkedFileKeepsStockValuesAndRetiresBilingualToggle) {
   for (uint8_t v = 0; v <= 4; ++v) EXPECT_EQ(longPressFromFile(v, true, /*hasOrderMarker=*/true), v);
   EXPECT_EQ(longPressFromFile(5, true, /*hasOrderMarker=*/true), 1);
 }
+
+using PocketDaily::SettingsMigration::lineSpacingFromStockLineHeight;
+using PocketDaily::SettingsMigration::writtenByStockCrossPoint;
+
+TEST(StockCrossPointMigration, OnlyAFileWithoutEitherForkMarkerIsStock) {
+  EXPECT_TRUE(writtenByStockCrossPoint(/*hasStartupApp=*/false, /*hasOrderMarker=*/false));
+  EXPECT_FALSE(writtenByStockCrossPoint(true, false));
+  EXPECT_FALSE(writtenByStockCrossPoint(false, true));
+  EXPECT_FALSE(writtenByStockCrossPoint(true, true));
+}
+
+// Stock 2.0 LINE_COMPRESSION: 100, 110, 120, 130, 145, 160, 175 %.
+TEST(StockCrossPointMigration, LineHeightMapsEachStepToTheNearestForkSpacing) {
+  constexpr uint8_t expected[] = {0, 0, 1, 2, 3, 3, 3};
+  for (uint8_t v = 0; v < sizeof(expected); ++v) EXPECT_EQ(lineSpacingFromStockLineHeight(v), expected[v]) << int(v);
+  EXPECT_EQ(lineSpacingFromStockLineHeight(200), 3);
+}
+
+// Stock's own upgrade maps fork Tight/Normal/Wide/Extra Wide to 110/120/130/145
+// (lineHeight 1..4); the inverse must return each one unchanged.
+TEST(StockCrossPointMigration, LineHeightInvertsStocksOwnSpacingUpgrade) {
+  for (uint8_t fork = 0; fork <= 3; ++fork) EXPECT_EQ(lineSpacingFromStockLineHeight(fork + 1), fork);
+}

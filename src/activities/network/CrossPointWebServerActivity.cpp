@@ -110,8 +110,10 @@ void CrossPointWebServerActivity::onEnter() {
   lastHandleClientTime = 0;
   requestUpdate();
 
-  if (firstSetup || Pocket::NearbySync::WifiSetup::wantsBluetooth()) {
-    firstSetupAt = millis();
+  if (firstSetup) firstSetupAt = millis();
+  // A first-use offer with a saved network (first boot after stock CrossPoint)
+  // joins it below; without one it advertises for Bluetooth setup.
+  if ((firstSetup && !autoJoinSavedNetwork) || Pocket::NearbySync::WifiSetup::wantsBluetooth()) {
     startNearbySync();
     return;
   }
@@ -730,6 +732,14 @@ void CrossPointWebServerActivity::loop() {
     returnToLaunchOrigin();
     return;
   }
+  // The same bound on Same Wi-Fi: if no app request (status polls excluded)
+  // arrives within five minutes, return to reading instead of holding the radio
+  // (Sync prevents auto-sleep). Once the app has used the server it stays up.
+  if (firstSetup && state == WebServerActivityState::SERVER_RUNNING && !isApMode && webServer &&
+      webServer->lastClientActivityAt() == 0 && millis() - firstSetupAt >= 300000) {
+    returnToLaunchOrigin();
+    return;
+  }
   if (Pocket::NearbySync::WifiSetup::restartDue()) {
     silentRestartToPocketNearbySync();
     return;
@@ -1107,7 +1117,7 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     }
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_EXIT), "", "", "");
+  const auto labels = mappedInput.mapLabels(firstSetup ? tr(STR_POCKET_READ_OFFLINE) : tr(STR_EXIT), "", "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
