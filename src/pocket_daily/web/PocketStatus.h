@@ -29,11 +29,14 @@ struct StatusInputs {
   // Home / Daily Brief presentation routes are registered (Sync profiles only).
   bool screenPresentation = false;
   bool layoutInputs = false;
+  // CrossPoint 2.0 plugin identity (inherited util/FirmwareIdentity.h).
+  const char* firmwareFamily = nullptr;  // static storage
+  int pluginApi = 0;
   LiveInputs live;
 };
 
-// Full /api/status body. The upstream base fields (deviceID, version, ip,
-// mode, rssi, freeHeap, uptime, device) are a mirror obligation tracked in
+// Full /api/status body. The upstream base fields (deviceID, version,
+// firmwareFamily, pluginApi, ip, mode, rssi, freeHeap, uptime, device) are a mirror obligation tracked in
 // docs/SEAM.md: upstream's home page parses them, so they track upstream's
 // handleStatus even though this module owns the builder.
 String buildStatusJson(const StatusInputs& in);

@@ -24,6 +24,7 @@ conflicts can only land at hook sites and carried patches.
 The CrossPoint 2.0.0 merge (2026-11-06) kept the fork's `CrossPointWebServer`,
 `WebDAVHandler`, settings and reader engine whole instead of re-hooking them
 into upstream's rewrites; the only new inherited touchpoints are the plugin
+identity fields marshalled in `statusInputs()` (E2), the plugin
 event refresh/drain calls (web server activity, settings save, sleep path) and
 the `pluginsEnabled` gate. See `docs/upstream-integration-2.0.0.md`.
 

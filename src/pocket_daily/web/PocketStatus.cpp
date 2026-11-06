@@ -14,7 +14,6 @@
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
 #include "pocket_daily/nearby_sync/WifiSetup.h"
 #include "pocket_daily/web/UploadStreamServer.h"
-#include "util/FirmwareIdentity.h"
 
 namespace PocketDaily::Web {
 namespace {
@@ -87,8 +86,8 @@ String buildStatusJson(const StatusInputs& in) {
   // pluginCapabilities list is left out: it describes the on-device catalog,
   // which no LAN client of this server needs, and would add ~330 B to every
   // heartbeat response on a private AP with a few KB of free heap.
-  doc["firmwareFamily"] = firmwareidentity::FAMILY;
-  doc["pluginApi"] = firmwareidentity::PLUGIN_API_VERSION;
+  if (in.firmwareFamily) doc["firmwareFamily"] = in.firmwareFamily;
+  doc["pluginApi"] = in.pluginApi;
   doc["ip"] = ipAddr;
   doc["mode"] = in.apMode ? "AP" : "STA";
   doc["rssi"] = in.apMode ? 0 : WiFi.RSSI();
