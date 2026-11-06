@@ -53,6 +53,7 @@ App handoff owns iPhone TestFlight and full setup status.
   ships on 2.0.0 even if late. Fork keeps its reader engine, settings and web
   server; adopts plugins (default off, `pluginsEnabled`, auto-on when the card
   has plugins), OPDS 2.0 with origin-bound credentials, device fixes. No
+  Dev image a5bf0bb8 installed on X3/X4 2026-11-06 (status/heap only).
   wolfSSL, LCP out, bold-italic falls back to bold (flash; owner-confirmed 2026-11-06), section v138.
   Plugin distribution layers A (firmware) / B (app CrossPoint-mode install) /
   C (Hub plugin `distribution/crosspoint-plugin/`, local; publish needs owner

@@ -805,7 +805,9 @@ int HttpDownloader::request(const std::string& url, const RequestOptions& option
         break;
       }
     }
-    if (ok && !esp_http_client_is_complete_data_received(client)) ok = false;
+    // A HEAD reply may announce Content-Length without a body; ESP-IDF's own
+    // perform() skips the completeness check for HEAD the same way.
+    if (ok && method != HTTP_METHOD_HEAD && !esp_http_client_is_complete_data_received(client)) ok = false;
   }
   esp_http_client_cleanup(client);
   if (!ok) {
