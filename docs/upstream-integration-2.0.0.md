@@ -93,6 +93,23 @@ Build hazard found: two PlatformIO builds of different projects running at the
 same time corrupt the shared `~/.platformio` framework libraries ("ROM libc
 configuration" error). Build sequentially.
 
+## Device install — 2026-11-06
+
+Developer image `1.0.0-dev-feature-upstream-2.0.0-a5bf0bb8-w14df17fa`
+(SHA-256 `a6f4c3e4…14faf7`, 6,238,656 B) was uploaded over Same Wi-Fi and
+installed through the developer flash endpoint on both readers; each came back
+with that exact version in 28 s. `/api/status` reports `crossPointBase`
+`2.0.0`, `firmwareFamily` `crosspoint`, `pluginApi` 1.
+
+| Reader / mode | Free heap | Largest block | Min free | Before (previous dev build) |
+| --- | ---: | ---: | ---: | --- |
+| X4, Sync → Same Wi-Fi | 38,516 | 32,756 | 36,696 | 38,508 / 34,804 |
+| X3, File Transfer | 22,256 | 19,444 | 20,348 | 21,760 / 18,420 (after a long session) |
+
+Single idle samples right after boot, not a soak. The X4 largest block is
+about 2 KB lower; it needs a session-length comparison. Python on the host Mac
+had no Local Network access, so the scripted reader walk did not run.
+
 ## Not verified — hardware acceptance required
 
 - X3 and X4 runtime heap and largest free block with plugins off and on,
