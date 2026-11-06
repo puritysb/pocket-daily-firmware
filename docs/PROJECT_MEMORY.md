@@ -48,12 +48,12 @@ App handoff owns iPhone TestFlight and full setup status.
 
 ## Upstream base and fork delta
 
-- Base (in progress 2026-11-06, `feature/upstream-2.0.0`, uncommitted):
+- Base (in progress 2026-11-06, PR #29 `feature/upstream-2.0.0`):
   CrossPoint 2.0.0 `42d58daa`, FreeInk SDK `5e94fe74`. Owner decision: 1.0.0
   ships on 2.0.0 even if late. Fork keeps its reader engine, settings and web
   server; adopts plugins (default off, `pluginsEnabled`, auto-on when the card
   has plugins), OPDS 2.0 with origin-bound credentials, device fixes. No
-  wolfSSL, LCP out, bold-italic falls back to bold (flash), section v138.
+  wolfSSL, LCP out, bold-italic falls back to bold (flash; owner-confirmed 2026-11-06), section v138.
   Plugin distribution layers A (firmware) / B (app CrossPoint-mode install) /
   C (Hub plugin, publish needs owner approval). `docs/upstream-integration-2.0.0.md`.
 - Previous base: CrossPoint 1.6.5 (`93e98bb7`) on `main` at `ee188fe7` (PR #4);

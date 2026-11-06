@@ -51,8 +51,7 @@ the renderer falls back to the bold face for bold-italic runs. No other
 reading feature was removed. Because cached layouts measured the old faces,
 `SECTION_FILE_VERSION` moved 137 → **138** (bytes unchanged; next free fork
 number 139, `lib/Epub/AGENTS.md`). **Product-visible: bold-italic text now
-renders upright bold.** The owner should confirm this trade or pick another
-saving before release.
+renders upright bold.** Owner confirmed this trade on 2026-11-06.
 
 | Environment | Image bytes | Remaining OTA slot bytes | SHA-256 |
 | --- | ---: | ---: | --- |
@@ -65,6 +64,19 @@ by hash, not version string. Rebuild after the commit before any device test.
 Static RAM (`.data` + `.bss`): default 73,296 B versus 71,544 B on the 1.6.5
 base (+1,752 B); gh_release 71,752 B. Static size does not measure runtime heap
 or the largest free block.
+
+## Status and update compatibility
+
+- `/api/status` mirrors the new 2.0 base fields `firmwareFamily` and
+  `pluginApi`; `crossPointBase` reports `2.0.0`. Not mirrored: `serial`,
+  per-plugin `deviceId`, `pluginCapabilities` (`docs/SEAM.md`).
+- Stock 2.0 adds a board tag check to SD and OTA updates: only an image whose
+  `CROSSPOINT-BOARD-V1:<board>;` tag names a different board is rejected. Pocket
+  Daily images carry `x4`, the same tag as stock's shared X3/X4 image, so stock
+  2.0's SD Card Firmware Update should accept them and Pocket accepts a stock
+  image back for rollback (source reading only; not tried on a reader).
+- Stock 2.0's Settings "General" section is labelled "System" in English, so
+  the app's "Settings → System → SD Card Firmware Update" guidance holds.
 
 ## Verification (host only)
 

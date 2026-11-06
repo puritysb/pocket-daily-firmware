@@ -342,8 +342,12 @@ Facts duplicated across the seam. When one side changes, the other must change
 in the same commit:
 
 1. **Status base fields.** `PocketStatus.cpp::buildStatusJson()` must emit
-   every base field upstream's `handleStatus()` emits — currently seven:
-   `version`, `ip`, `mode`, `rssi`, `freeHeap`, `uptime`, `device`. An
+   every base field upstream's `handleStatus()` emits — currently nine:
+   `version`, `firmwareFamily`, `pluginApi`, `ip`, `mode`, `rssi`,
+   `freeHeap`, `uptime`, `device`. Deliberately not mirrored: `serial` (eFuse
+   device identifier), the per-plugin `deviceId` (needs the removed
+   DeviceSecret), and `pluginCapabilities` (on-device catalog only; ~330 B per
+   heartbeat on a starved private AP). An
    upstream field addition must be mirrored here (this is why `/api/status`
    byte-comparison is part of the hardware verification bundle).
 2. **Silent-reboot magic.** `ProductBoot.cpp`'s `kSilentRebootMagic`

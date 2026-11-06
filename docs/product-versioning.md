@@ -14,11 +14,11 @@ Each published release gets a new version; one version is never reused for a
 different image. Do not publish `1.0.0-beta.*`: the companion treats those
 names as retired lineage-1 test releases and never offers them.
 
-Its CrossPoint source baseline is **1.6.5**
-(`93e98bb78702e29868a16a13b80c40e6b36ccdff`); the pinned FreeInk SDK and
+Its CrossPoint source baseline is **2.0.0**
+(`42d58daaabcf469a2e5e1ba871714fb9dcf51d29`); the pinned FreeInk SDK and
 selected upstream ports are tracked independently in Git. Product versions
 describe the Pocket Daily release and never claim to be a CrossPoint release
-number. `/api/status` reports `firmwareLineage` and `crossPointBase: "1.6.5"`;
+number. `/api/status` reports `firmwareLineage` and `crossPointBase: "2.0.0"`;
 About shows the CrossPoint base.
 
 ## Display
