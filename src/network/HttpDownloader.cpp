@@ -374,11 +374,9 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
   HeaderTable table;
   if (!options.accept.empty()) table.add("Accept", options.accept.c_str());
   if (!options.acceptLanguage.empty()) table.add("Accept-Language", options.acceptLanguage.c_str());
-  std::string bearer;
-  if (!options.bearer.empty()) {
-    bearer = "Bearer " + options.bearer;
-    table.add("Authorization", bearer.c_str());
-  }
+  // The table keeps the pointer, so the header value lives until the request ends.
+  const std::string bearer = options.bearer.empty() ? std::string() : "Bearer " + options.bearer;
+  if (!bearer.empty()) table.add("Authorization", bearer.c_str());
   for (const auto& header : options.headers) table.add(header.first.c_str(), header.second.c_str());
   Sink sink;
   sink.write = onData;

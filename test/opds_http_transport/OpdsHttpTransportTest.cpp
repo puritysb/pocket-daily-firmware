@@ -21,8 +21,8 @@ fo::HttpAuth catalogAuth() {
 TEST(OpdsHttpTransport, BindsCredentialsToTheConfiguredServer) {
   OpdsHttpTransport transport;
   transport.setCredentialOrigin("https://books.example.org/opds");
-  const auto result = transport.get("https://books.example.org/opds/new", catalogAuth(), "application/atom+xml",
-                                    "ko", true, [](const uint8_t*, size_t) { return true; });
+  const auto result = transport.get("https://books.example.org/opds/new", catalogAuth(), "application/atom+xml", "ko",
+                                    true, [](const uint8_t*, size_t) { return true; });
   EXPECT_TRUE(result.ok);
   EXPECT_EQ(result.status, 200);
   const auto& sent = http_stub::lastOptions;
