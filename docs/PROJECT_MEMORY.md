@@ -56,8 +56,9 @@ App handoff owns iPhone TestFlight and full setup status.
   Dev image a5bf0bb8 installed on X3/X4 2026-11-06 (status/heap only).
   wolfSSL, LCP out, bold-italic falls back to bold (flash; owner-confirmed 2026-11-06), section v138.
   Plugin distribution layers A (firmware) / B (app CrossPoint-mode install) /
-  C (Hub plugin `distribution/crosspoint-plugin/`, local; publish needs owner
-  approval; add each public release to its `releases.json`).
+  C (installer plugin `distribution/crosspoint-plugin/`, sideload only — owner
+  decided 2026-11-06 not to list it on Plugin Hub; add each public release to
+  its `releases.json`).
   `docs/upstream-integration-2.0.0.md`.
 - Previous base: CrossPoint 1.6.5 (`93e98bb7`) on `main` at `ee188fe7` (PR #4);
   `docs/upstream-integration-1.6.5.md`. The 2026-10-28 develop audit and reader

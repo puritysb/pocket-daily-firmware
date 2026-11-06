@@ -133,6 +133,6 @@ had no Local Network access, so the scripted reader walk did not run.
   `pocket-daily-installer` payload: a stock 2.0 JSON catalog over
   `releases.json` on `main` that downloads a release's `firmware.bin` to
   `/pocket-daily.bin` for the stock SD updater. Validated by
-  `scripts/check_crosspoint_plugin.py` in CI. Not published: Plugin Hub
-  listing needs a public repository with the `crosspoint-plugin` topic and a
-  release, which the owner approves first. Not tried on a reader.
+  `scripts/check_crosspoint_plugin.py` in CI. Owner decision 2026-11-06: a
+  sideload package only, not listed on Plugin Hub (an installer-only entry
+  would misuse a feature catalog). Not tried on a reader.

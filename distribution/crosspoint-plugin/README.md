@@ -26,7 +26,16 @@ an existing file; redirects (GitHub release assets) are followed.
 - The payload `version` changes only when `manifest.json`, `device.json` or
   `README.md` change; release entries do not need a plugin release.
 
-## Publishing (owner approval required)
+## Not on Plugin Hub (owner decision 2026-11-06)
+
+The installer is a sideload package only: link it from Pocket Daily's README,
+site and release notes; stock users with the companion app move through the
+app instead. Every Plugin Hub entry adds a feature to stock CrossPoint; one
+whose only purpose is to replace the firmware would misuse that catalog, and
+stock 2.0 cannot hide it on non-X3/X4 boards (the `devices` advisory is
+ignored). A Hub plugin needs its own value for stock users first.
+
+## How Plugin Hub publishing works (for a future plugin)
 
 Plugin Hub discovers a public repository that carries the `crosspoint-plugin`
 topic, exactly one direct-child `<name>.crosspoint-plugin/` folder and a
