@@ -3,8 +3,8 @@
 Prepared on 2026-11-06 on `feature/upstream-2.0.0`. Owner decision
 (2026-11-06): ship Pocket Daily 1.0.0 on the CrossPoint 2.0.0 base even if that
 delays the release, and use the 2.0 plugin system to make Pocket Daily easy to
-reach for stock CrossPoint users. Nothing in this integration was installed or
-tested on a physical reader.
+reach for stock CrossPoint users. Merged through PRs #29, #31 and #32. Device
+evidence so far is limited to the developer install and page walk below.
 
 ## Pinned inputs
 
@@ -106,16 +106,36 @@ with that exact version in 28 s. `/api/status` reports `crossPointBase`
 | X4, Sync → Same Wi-Fi | 38,516 | 32,756 | 36,696 | 38,508 / 34,804 |
 | X3, File Transfer | 22,256 | 19,444 | 20,348 | 21,760 / 18,420 (after a long session) |
 
-Single idle samples right after boot, not a soak. The X4 largest block is
-about 2 KB lower; it needs a session-length comparison. Python on the host Mac
-had no Local Network access, so the scripted reader walk did not run.
+Single idle samples right after boot, not a soak.
+
+### Developer page walk — 2026-11-06
+
+`scripts/dev_reader_walk.py` on a generated six-chapter EPUB with regular,
+bold, italic, `<b><i>`, CSS bold-italic and Korean bold-italic runs (evidence
+`build/walk-20261106/`, private). The X3 was switched from File Transfer to
+Sync with the developer `transfer-mode` endpoint first.
+
+| Reader | Result | Rendered / turns | Elapsed | Idle after walk reboot (free / largest) |
+| --- | --- | ---: | ---: | --- |
+| X4 | PASS | 24 / 23 | 54.4 s | 38,140 / 34,804 |
+| X3 | PASS | 24 / 23 | 57.8 s | 32,120 / 24,564 (Sync) |
+
+Both walks: monotonic progress, no new build failure, public state unchanged,
+fixture removed. Captures show bold-italic as upright bold, Korean included.
+Italic text is upright because the SD reader font in use has no italic face
+(existing behaviour). The walk used the SD font, so the built-in families whose
+bold-italic faces were removed were not exercised on device. The X4 idle
+largest block after the walk matched the previous build (34,804), so the
+earlier 2 KB drop was a single-sample difference; still not a soak. Not
+covered: optical/button acceptance, other orientations, v138 rebuild of
+existing books.
 
 ## Not verified — hardware acceptance required
 
 - X3 and X4 runtime heap and largest free block with plugins off and on,
   including Wi-Fi bring-up and HTTPS OTA (X3 OTA was already memory-limited).
-- Bold-italic rendering and v138 cache rebuild of existing books, all four
-  orientations.
+- Bold-italic with a built-in font family, v138 cache rebuild of existing
+  books, all four orientations.
 - OPDS over HTTPS with credentials, including a cross-origin redirect.
 - Plugin catalog browse/install and a plugin HTTP request on device.
 - Companion Bluetooth/Nearby Sync and reading-position round trip.
@@ -128,7 +148,8 @@ had no Local Network access, so the scripted reader walk did not run.
   auto-on when the card already holds plugins.
 - **B (companion app, `pocket-daily`):** a "CrossPoint reader" mode that installs
   Pocket Daily firmware through stock CrossPoint's `/upload` plus SD update.
-  Not started; needs app-side tests against the stock web server.
+  Merged in app PR #26 (status fields, board-tag check); not tried against a
+  stock 2.0 reader.
 - **C (Hub plugin):** `distribution/crosspoint-plugin/` holds the
   `pocket-daily-installer` payload: a stock 2.0 JSON catalog over
   `releases.json` on `main` that downloads a release's `firmware.bin` to
