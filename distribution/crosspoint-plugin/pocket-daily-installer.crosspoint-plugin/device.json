@@ -1,0 +1,25 @@
+{
+  "title": "Pocket Daily",
+  "description": "Download Pocket Daily firmware for X3/X4 to the SD card.",
+  "browse": {
+    "format": "json",
+    "url": "https://raw.githubusercontent.com/puritysb/pocket-daily-firmware/main/distribution/crosspoint-plugin/releases.json",
+    "items": "releases",
+    "fields": {
+      "title": "title",
+      "author": "subtitle",
+      "id": "version",
+      "url": "url",
+      "description": "notes"
+    },
+    "compatibility": {
+      "firmware_family": "compatibility.firmware_family",
+      "plugin_api_min": "compatibility.plugin_api_min"
+    },
+    "page_size": 8
+  },
+  "download": {
+    "url": "{url}",
+    "filename": "pocket-daily.bin"
+  }
+}

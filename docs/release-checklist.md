@@ -641,6 +641,9 @@ artifact hash. No host/simulator result signs these off.
       `bootloader.bin`, `partitions.bin`, and license notices.
 - [ ] Published `firmware.bin` SHA-256 matches the tested candidate; otherwise
       the new image remains unapproved and requires exact-image acceptance.
+- [ ] After the release is public, add its entry to
+      `distribution/crosspoint-plugin/releases.json` (stock CrossPoint installer
+      plugin) and merge it to `main`; `scripts/check_crosspoint_plugin.py` passes.
 - [ ] `/releases/latest` resolves to the intended `pocket-v<version>` and the
       companion stable channel parses/downloads it. Complete the post-publication
       X4 no-update check; X3 remains on the documented companion/SD path.
