@@ -193,6 +193,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   enum READER_MENU_STYLE { READER_MENU_LIST = 0, READER_MENU_TOOLBAR = 1, READER_MENU_STYLE_COUNT };
 
   enum TILT_PAGE_TURN { TILT_OFF = 0, TILT_NORMAL = 1, TILT_NVERTED = 2, TILT_PAGE_TURN_COUNT };
+  // Haptics (HalHaptics; a no-op on X3/X4, which have no motor). Not
+  // persisted or listed: kept so the shared touch helpers compile unchanged.
+  enum VIBRATION { VIBRATION_TOUCH = 0, VIBRATION_TOUCH_PAGE = 1, VIBRATION_OFF = 2 };
+  uint8_t vibration = VIBRATION_OFF;
+  enum HAPTIC_INTENSITY { HAPTIC_LOW = 0, HAPTIC_MEDIUM = 1, HAPTIC_HIGH = 2 };
+  uint8_t hapticIntensity = HAPTIC_HIGH;
 
   enum TOUCH_READER_CONTROLS { TOUCH_READER_OFF = 0, TOUCH_READER_ON = 1, TOUCH_READER_CONTROLS_COUNT };
 
@@ -358,6 +364,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Dictionary folder name under /dictionaries (empty = no dictionary)
   char dictionaryName[32] = "";
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
+  // Master switch for all SD-card plugin discovery/execution. New installs keep
+  // this disabled; settings migration enables it when pre-existing plugin files
+  // are found so a firmware update never silently disables an existing setup.
+  uint8_t pluginsEnabled = 0;
+  // User hid the Plugin Hub install row; cleared when plugins are turned back on.
+  uint8_t pluginHubPromptHidden = 0;
   uint8_t showHiddenFiles = 0;
   // Show the title and author read from inside each book rather than its
   // filename. Users can disable this to make index rebuilds skip EPUB parsing.

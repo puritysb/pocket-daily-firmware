@@ -316,7 +316,7 @@ void KOReaderSyncActivity::performUpload() {
   // Rich CrossPoint position for the default CrossPoint sync server (lossless
   // CrossPoint<->CrossPoint sync). The HTTP client also enforces this boundary
   // before serializing the extension.
-  if (KOREADER_STORE.usesCrossPointSyncServer()) {
+  if (KOREADER_STORE.supportsRichProgress()) {
     KOReaderRichPosition pos;
     const float pct = localProgress.percentage < 0.0f   ? 0.0f
                       : localProgress.percentage > 1.0f ? 1.0f

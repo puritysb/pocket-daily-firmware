@@ -26,6 +26,7 @@
 #include "pocket_daily/live_studio/NetHealth.h"
 #include "pocket_daily/nearby_sync/WifiSetup.h"
 #include "pocket_daily/preview/LayoutInputsDevice.h"
+#include "util/PluginEvents.h"
 #include "util/QrUtils.h"
 #include "util/TaskWatchdog.h"
 #include "util/UiCjkFont.h"
@@ -236,6 +237,11 @@ void CrossPointWebServerActivity::onExit() {
   nearbySync.end();
   stopDnsServer();
   MDNS.end();
+
+  // Web uploads may have installed or removed plugins. Non-touch devices
+  // reboot below (setup() re-reads everything), but touch devices end the
+  // session in place, so re-read event subscriptions here.
+  pluginevents::refreshSubscriptions();
 
   // Skip reboot if WiFi was never activated (e.g. user backed out of mode selection).
   if (WiFi.getMode() != WIFI_MODE_NULL) {
@@ -694,6 +700,13 @@ void CrossPointWebServerActivity::startWebServer() {
       PocketDaily::Web::apBootLog("wdt-armed");
     }
     lastWifiBars = isApMode ? 0 : barsForRssi(WiFi.RSSI(), 0);
+
+    // The device is online: deliver queued plugin events through their
+    // manifest handlers. STA only (AP mode has no internet route); bounded by
+    // the drain's per-call event budget so serving is not noticeably delayed.
+    if (!isApMode) {
+      pluginevents::drain(&renderer);
+    }
 
     // Force an immediate render since we're transitioning from a subactivity
     // that had its own rendering task. We need to make sure our display is shown.

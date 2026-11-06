@@ -3,6 +3,8 @@
 
 #include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 /**
  * HTTP client utility for fetching content and downloading files. Built on
@@ -27,7 +29,69 @@ class HttpDownloader {
     // 304 — the server's conditional (e.g. ?sig= echo) matched; no body was
     // sent and nothing was written. Only surfaced by downloadToFile.
     NOT_MODIFIED,
+    UNAUTHORIZED,  // 401/403: callers holding a refreshable credential can retry
   };
+
+  // Extra request header (e.g. a per-server custom header or Bearer token).
+  // Sent only to the credential origin, like Basic credentials.
+  using Header = std::pair<std::string, std::string>;
+
+  /**
+   * HTTP status of the last GET/POST on this task, or 0 when it never got a
+   * response (DNS, connect, TLS, timeout).
+   */
+  static int lastStatus();
+
+  /**
+   * True when the last answer came from a different origin than the URL asked
+   * for, after a redirect. Credentials are withheld from such a hop, so a 401
+   * there is not a wrong password.
+   */
+  static bool lastAnswerRedirected();
+
+  /**
+   * Upstream-compatible streaming GET options. `bearer` overrides Basic
+   * credentials. `credentialOrigin` (Pocket Daily) names the configured server:
+   * credentials and headers go only to that origin; empty means the request URL.
+   */
+  struct FetchOptions {
+    std::string username;
+    std::string password;
+    std::string bearer;
+    std::string accept;
+    std::string acceptLanguage;
+    std::vector<Header> headers;
+    std::string credentialOrigin;
+    int* statusOut = nullptr;
+    bool captureErrorBody = false;
+  };
+
+  static bool fetchUrl(const std::string& url, const DataCallback& onData, const FetchOptions& options);
+
+  /**
+   * POST an application/x-www-form-urlencoded body and collect the response
+   * (any status, capped at 4 KiB). Returns true on 2xx. No redirects.
+   */
+  static bool postForm(const std::string& url, const std::string& formBody, std::string& outResponse,
+                       int* statusOut = nullptr);
+
+  /**
+   * POST a body and stream the response to SD through "<dest>.part". Single
+   * attempt, no redirects.
+   */
+  static DownloadError postToFile(const std::string& url, const std::string& body, const std::string& contentType,
+                                  const std::string& destPath, ProgressCallback progress = nullptr,
+                                  const bool* cancelFlag = nullptr);
+
+  /**
+   * Upstream-compatible download with extra headers. HTTPS is never downgraded:
+   * `downgradeRedirectsToHttp` is accepted for source compatibility and ignored,
+   * because HttpOrigin rejects HTTPS-to-HTTP transitions (docs/http-credential-origin.md).
+   */
+  static DownloadError downloadToFile(const std::string& url, const std::string& destPath, ProgressCallback progress,
+                                      const bool* cancelFlag, const std::string& username, const std::string& password,
+                                      const std::vector<Header>& headers, bool downgradeRedirectsToHttp = false,
+                                      const char* credentialOrigin = nullptr);
 
   // Why the most recent GET on this task failed, for a user-visible reason on
   // screens like the update check (serial logs are not available to users).
@@ -96,11 +160,28 @@ class HttpDownloader {
    * Download a file to the SD card with optional credentials.
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
-                                      ProgressCallback progress = nullptr, bool* cancelFlag = nullptr,
+                                      ProgressCallback progress = nullptr, const bool* cancelFlag = nullptr,
                                       const std::string& username = "", const std::string& password = "",
                                       HeaderCapture* headerCapture = nullptr,
                                       const RequestHeaders* requestHeaders = nullptr,
                                       const char* credentialOrigin = nullptr);
+
+  // One request with an arbitrary method (plugin manifests declare GET, POST,
+  // PUT, PATCH, DELETE), certificate-verified like every other HTTPS call here.
+  // No redirect following: a 3xx is returned as its status. Headers go only to
+  // the request URL's own origin by construction (no redirects).
+  struct RequestOptions {
+    const char* method = "GET";
+    const std::string* body = nullptr;
+    const std::vector<Header>* headers = nullptr;
+    // Receives response headers in receive order (bounded: MAX_RESPONSE_HEADERS).
+    std::vector<Header>* responseHeaders = nullptr;
+    const std::function<bool()>* shouldAbort = nullptr;
+  };
+  static constexpr size_t MAX_RESPONSE_HEADERS = 24;
+  // Returns the HTTP status (error statuses still stream their body), or -1 on
+  // transport failure, abort, a sink refusal, or a short body.
+  static int request(const std::string& url, const RequestOptions& options, const DataCallback& onData);
 
   /**
    * POST a JSON body and collect the (bounded) JSON response. Plain-http local

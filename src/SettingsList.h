@@ -380,6 +380,9 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Toggle(StrId::STR_POCKET_APP_CONNECTION, &CrossPointSettings::pocketAppConnection,
                             "pocketAppConnection", StrId::STR_CAT_SYSTEM),
 #endif
+        // CrossPoint 2.0 SD plugins (docs/sd-plugins.md). Off on clean installs.
+        SettingInfo::Toggle(StrId::STR_PLUGINS, &CrossPointSettings::pluginsEnabled, "pluginsEnabled",
+                            StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles, "showHiddenFiles",
                             StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_LIBRARY_USE_METADATA, &CrossPointSettings::libraryUseMetadata,
@@ -407,6 +410,9 @@ inline const std::vector<SettingInfo>& getBaseSettingsList() {
         SettingInfo::Value(StrId::STR_WARMTH, &CrossPointSettings::frontlightWarmth, {0, 100, 5}, "frontlightWarmth"),
 #endif
         SettingInfo::Toggle(StrId::STR_FRONTLIGHT, &CrossPointSettings::frontlightOn, "frontlightOn"),
+        // Plugin Hub install row dismissal: persisted, category-less (hidden
+        // from the on-device list; cleared when plugins are turned back on).
+        SettingInfo::Toggle(StrId::STR_PLUGIN_HUB, &CrossPointSettings::pluginHubPromptHidden, "pluginHubPromptHidden"),
 
         // --- KOReader Sync (web-only, uses KOReaderCredentialStore) ---
         SettingInfo::DynamicString(

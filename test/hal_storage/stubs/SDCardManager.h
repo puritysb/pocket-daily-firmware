@@ -99,6 +99,10 @@ class FsFile {
     FakeSDK::checkLock();
     return opened;
   }
+  bool truncate(uint64_t) {
+    FakeSDK::checkLock();
+    return opened;
+  }
   int available() const {
     FakeSDK::checkLock();
     return opened ? 7 : 0;
@@ -187,6 +191,7 @@ class SDCardManager {
   bool exists(const char*) { return true; }
   bool remove(const char*) { return true; }
   bool rename(const char*, const char*) { return true; }
+  bool replaceFile(const char*, const char*) { return true; }
   bool rmdir(const char*) { return true; }
   bool removeDir(const char*) { return true; }
   FsFile open(const char*, oflag_t) {

@@ -1,5 +1,6 @@
 #include "ActivityManager.h"
 
+#include <BlePageTurner.h>
 #include <BoardConfig.h>
 #include <FontCacheManager.h>
 #include <HalDisplay.h>
@@ -10,7 +11,9 @@
 #include <algorithm>
 #include <utility>
 
+#include "Activity.h"
 #include "CrossPointSettings.h"
+#include "HapticFeedback.h"
 #include "OpdsServerStore.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
@@ -23,6 +26,7 @@
 #include "library/LibraryListActivity.h"
 #include "network/CrossPointWebServerActivity.h"
 #include "network/UsbDriveActivity.h"
+#include "plugins/PluginCatalogActivity.h"
 #include "pocket_daily/PocketDailyActivity.h"
 #include "pocket_daily/live_studio/DevTrace.h"
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
@@ -30,10 +34,19 @@
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
+#include "util/BmpViewerActivity.h"
 #include "util/FrontlightPanelActivity.h"
 #include "util/FullScreenMessageActivity.h"
 
 static portMUX_TYPE activityManagerSpinlock = portMUX_INITIALIZER_UNLOCKED;
+
+ActivityManager::ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput)
+    : renderer(renderer), mappedInput(mappedInput), renderingMutex(xSemaphoreCreateMutex()) {
+  assert(renderingMutex != nullptr && "Failed to create rendering mutex");
+  stackActivities.reserve(10);
+}
+
+ActivityManager::~ActivityManager() { assert(false); /* should never be called */ }
 
 void ActivityManager::begin() {
 #if defined(configNUM_CORES) && configNUM_CORES > 1
@@ -80,6 +93,7 @@ void ActivityManager::renderTaskLoop() {
       // Night mode is a global output polarity applied to every activity.
       // The sleep screen forces normal polarity itself (SleepActivity).
       display.setInverted(SETTINGS.screenInverted != 0);
+      const uint32_t renderingVisit = screenVisit;
       currentActivity->render(std::move(lock));
 #ifdef ENABLE_DEV_REMOTE_FLASH
       if (currentActivity->name == "PocketDaily") {
@@ -93,6 +107,7 @@ void ActivityManager::renderTaskLoop() {
         LOG_ERR("ACT", "Render stack headroom low: %uB", (unsigned)stackHeadroom);
       else
         LOG_DBG("ACT", "Render stack min-free: %uB", (unsigned)stackHeadroom);
+      paintedVisit.store(renderingVisit, std::memory_order_release);
     }
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
     TaskHandle_t waiter = nullptr;
@@ -142,7 +157,9 @@ void ActivityManager::loop() {
       // The header back button shares this band; its taps stay Back.
       statusBarTap = mappedInput.wasScreenTapped(tx, ty) && ty < 44 && !HeaderBackTapTarget::contains(tx, ty);
     }
-    if (currentActivity->name != "FrontlightPanel" && (statusBarTap || mappedInput.wasLightPanelGesture())) {
+    if (mappedInput.hasTouch() && currentActivity->name != "FrontlightPanel" &&
+        (statusBarTap || mappedInput.wasLightPanelGesture())) {
+      haptic_feedback::touchAction();
       pushActivity(std::make_unique<FrontlightPanelActivity>(renderer, mappedInput));
       return;
     }
@@ -153,6 +170,12 @@ void ActivityManager::loop() {
 
   bool closedBook = false;
   while (pendingAction != PendingAction::None) {
+    // The page turner's radio gives its heap back before the next screen allocates. Its teardown
+    // can span loop passes and runs outside the render lock.
+    if (pendingAction != PendingAction::ReplaceForSleep &&
+        !bleturner::beforeScreenChange(0, pendingActivity && pendingActivity->isReaderActivity())) {
+      return;
+    }
     if (pendingAction == PendingAction::Pop) {
       RenderLock lock;
 
@@ -163,6 +186,7 @@ void ActivityManager::loop() {
         continue;
       }
 
+      ++screenVisit;
       ActivityResult pendingResult = std::move(currentActivity->result);
       closedBook = closedBook || currentActivity->isReaderActivity();
 
@@ -210,7 +234,7 @@ void ActivityManager::loop() {
                                   !pendingActivity->isReaderActivity());
       RenderLock lock;
 
-      if (pendingAction == PendingAction::Replace) {
+      if (pendingAction == PendingAction::Replace || pendingAction == PendingAction::ReplaceForSleep) {
         // Destroy the current activity
         exitActivity(lock);
         // Clear the stack
@@ -226,6 +250,7 @@ void ActivityManager::loop() {
         HeaderBackTapTarget::clear();
         LOG_DBG("ACT", "Pushed to activity stack, new size = %zu", stackActivities.size());
       }
+      ++screenVisit;
       pendingAction = PendingAction::None;
       currentActivity = std::move(pendingActivity);
 
@@ -364,6 +389,10 @@ void ActivityManager::goToBrowser() {
   }
 }
 
+void ActivityManager::goToPlugins(bool showOpds) {
+  replaceActivity(std::make_unique<PluginCatalogActivity>(renderer, mappedInput, showOpds, /*rootMode=*/true));
+}
+
 void ActivityManager::leaveReader() {
   // The shell is constructed while the book is still alive; if that allocation
   // fails, Home (smaller) is the fallback rather than staying in the book.
@@ -385,6 +414,7 @@ void ActivityManager::leaveReader() {
 
 void ActivityManager::goToSleep(bool fromTimeout) {
   replaceActivity(std::make_unique<SleepActivity>(renderer, mappedInput, fromTimeout));
+  if (pendingAction == PendingAction::Replace) pendingAction = PendingAction::ReplaceForSleep;
   loop();  // Important: sleep screen must be rendered immediately, the caller will go to sleep right after this returns
 }
 
@@ -403,7 +433,7 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefr
       initialMenuItem = HomeMenuItem::FILE_BROWSER;
     } else if (activityName == "Library") {
       initialMenuItem = HomeMenuItem::LIBRARY;
-    } else if (activityName == "OpdsBookBrowser") {
+    } else if (activityName == "OpdsBookBrowser" || activityName == "PluginCatalog") {
       initialMenuItem = HomeMenuItem::OPDS_BROWSER;
     } else if (activityName == "CrossPointWebServer") {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
@@ -478,6 +508,10 @@ bool ActivityManager::isReaderActivity() const {
          (currentActivity && currentActivity->isReaderActivity());
 }
 
+bool ActivityManager::isForegroundReader() const {
+  return pendingAction == PendingAction::None && currentActivity && currentActivity->isReaderActivity();
+}
+
 bool ActivityManager::handleForcedRefresh() { return currentActivity && currentActivity->handleForcedRefresh(); }
 
 bool ActivityManager::skipLoopDelay() const { return currentActivity && currentActivity->skipLoopDelay(); }
@@ -487,6 +521,12 @@ ScreenshotInfo ActivityManager::getScreenshotInfo() const {
     return currentActivity->getScreenshotInfo();
   }
   return {};
+}
+
+void ActivityManager::prepareForSleep() {
+  RenderLock lock;
+  for (const auto& activity : stackActivities) activity->prepareForSleep();
+  if (currentActivity) currentActivity->prepareForSleep();
 }
 
 void ActivityManager::requestUpdate(bool immediate) {

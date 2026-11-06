@@ -51,7 +51,9 @@ struct Sink {
   // first 1 KiB LAN read fragments the X3 heap.
   std::function<bool(size_t)> prepare;
   HttpDownloader::ProgressCallback progress;
-  bool* cancelFlag = nullptr;
+  const bool* cancelFlag = nullptr;
+  // Stream a 401/403 body to write() too (OPDS authentication documents).
+  bool streamUnauthorizedBody = false;
   size_t total = 0;
   size_t downloaded = 0;
 };
@@ -155,6 +157,8 @@ std::string resolveRedirectUrl(const std::string& currentUrl, const char* locati
 }
 
 HttpDownloader::Failure lastFailureState;
+int lastStatusState = 0;
+bool lastRedirectedState = false;
 
 void noteFailure(const char* stage, const int code = 0, const int tlsCode = 0) {
   lastFailureState = {stage, code, tlsCode, static_cast<uint32_t>(ESP.getFreeHeap()),
@@ -178,6 +182,8 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
                                      const char* credentialOrigin = nullptr) {
   std::string currentUrl = url;
   lastFailureState = {};
+  lastStatusState = 0;
+  lastRedirectedState = false;
   const std::string_view origin = credentialOrigin ? std::string_view(credentialOrigin) : std::string_view(url);
   if (!HttpOrigin::allowsRequest(origin, currentUrl)) {
     noteFailure("unsafe URL");
@@ -221,6 +227,8 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
       return HttpDownloader::HTTP_ERROR;
     }
     const int status = esp_http_client_get_status_code(client);
+    lastStatusState = status;
+    lastRedirectedState = !HttpOrigin::same(url, currentUrl);
     LOG_DBG("HTTP", "status=%d contentLength=%lld", status, (long long)contentLength);
 
     if (isRedirect(status)) {
@@ -269,7 +277,14 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     // Pull OTA resumes use 206 Partial Content. The sink already owns the
     // append offset and validates the completed image size + MD5, so a partial
     // response is a successful body transfer, not an HTTP failure.
-    if (status != 200 && status != 206) {
+    const bool unauthorized = status == 401 || status == 403;
+    if (unauthorized && !sink.streamUnauthorizedBody) {
+      LOG_ERR("HTTP", "unauthorized: %d", status);
+      noteFailure("status", status);
+      esp_http_client_cleanup(client);
+      return HttpDownloader::UNAUTHORIZED;
+    }
+    if (!unauthorized && (status < 200 || status > 299)) {
       LOG_ERR("HTTP", "unexpected status: %d", status);
       noteFailure("status", status);
       esp_http_client_cleanup(client);
@@ -328,7 +343,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
       noteFailure("incomplete", static_cast<int>(sink.downloaded));
       return HttpDownloader::HTTP_ERROR;
     }
-    return HttpDownloader::OK;
+    return unauthorized ? HttpDownloader::UNAUTHORIZED : HttpDownloader::OK;
   }
 
   return HttpDownloader::HTTP_ERROR;
@@ -336,6 +351,57 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
 }  // namespace
 
 HttpDownloader::Failure HttpDownloader::lastFailure() { return lastFailureState; }
+int HttpDownloader::lastStatus() { return lastStatusState; }
+bool HttpDownloader::lastAnswerRedirected() { return lastRedirectedState; }
+
+namespace {
+// Bounded header table for the upstream-compatible APIs: no map, no per-header
+// heap beyond the caller's own strings (and one Bearer string).
+constexpr size_t MAX_EXTRA_HEADERS = 12;
+struct HeaderTable {
+  HttpDownloader::RequestHeader items[MAX_EXTRA_HEADERS];
+  HttpDownloader::RequestHeaders view;
+  void add(const char* name, const char* value) {
+    if (!name || !name[0] || !value || view.count >= MAX_EXTRA_HEADERS) return;
+    items[view.count++] = {name, value};
+  }
+  HeaderTable() { view.items = items; }
+};
+}  // namespace
+
+bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData, const FetchOptions& options) {
+  LOG_DBG("HTTP", "Fetching: %s", url.c_str());
+  HeaderTable table;
+  if (!options.accept.empty()) table.add("Accept", options.accept.c_str());
+  if (!options.acceptLanguage.empty()) table.add("Accept-Language", options.acceptLanguage.c_str());
+  std::string bearer;
+  if (!options.bearer.empty()) {
+    bearer = "Bearer " + options.bearer;
+    table.add("Authorization", bearer.c_str());
+  }
+  for (const auto& header : options.headers) table.add(header.first.c_str(), header.second.c_str());
+  Sink sink;
+  sink.write = onData;
+  sink.streamUnauthorizedBody = options.captureErrorBody;
+  const std::string& user = options.bearer.empty() ? options.username : std::string();
+  const std::string& pass = options.bearer.empty() ? options.password : std::string();
+  const DownloadError result = runGet(url, user, pass, sink, nullptr, &table.view, nullptr,
+                                      options.credentialOrigin.empty() ? nullptr : options.credentialOrigin.c_str());
+  if (options.statusOut) *options.statusOut = lastStatusState;
+  return result == OK;
+}
+
+HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
+                                                             ProgressCallback progress, const bool* cancelFlag,
+                                                             const std::string& username, const std::string& password,
+                                                             const std::vector<Header>& headers,
+                                                             const bool /*downgradeRedirectsToHttp*/,
+                                                             const char* credentialOrigin) {
+  HeaderTable table;
+  for (const auto& header : headers) table.add(header.first.c_str(), header.second.c_str());
+  return downloadToFile(url, destPath, std::move(progress), cancelFlag, username, password, nullptr, &table.view,
+                        credentialOrigin);
+}
 
 bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const std::string& username,
                               const std::string& password, const RequestHeaders* requestHeaders,
@@ -399,7 +465,7 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
 }
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
-                                                             ProgressCallback progress, bool* cancelFlag,
+                                                             ProgressCallback progress, const bool* cancelFlag,
                                                              const std::string& username, const std::string& password,
                                                              HeaderCapture* headerCapture,
                                                              const RequestHeaders* requestHeaders,
@@ -548,4 +614,205 @@ bool HttpDownloader::postJson(const std::string& url, const char* body, size_t b
     return true;
   }
   return false;
+}
+
+namespace {
+// Single-attempt POST used by postForm/postToFile. The response streams to
+// onData; no redirects (the endpoints answer directly).
+bool runPost(const std::string& url, const std::string& body, const char* contentType,
+             const std::function<bool(const char*, int)>& onData, const bool* cancelFlag, int* statusOut,
+             size_t* contentLengthOut) {
+  lastStatusState = 0;
+  lastRedirectedState = false;
+  if (!HttpOrigin::allowsRequest(url, url)) return false;
+  RedirectCapture redirect;
+  esp_http_client_handle_t client = createHttpClient(url, redirect, HTTP_METHOD_POST);
+  if (!client) return false;
+  esp_http_client_set_header(client, "User-Agent", "PocketDaily-ESP32-" CROSSPOINT_VERSION);
+  esp_http_client_set_header(client, "Content-Type", contentType);
+  bool ok = esp_http_client_open(client, static_cast<int>(body.size())) == ESP_OK;
+  if (ok && !body.empty())
+    ok = esp_http_client_write(client, body.data(), static_cast<int>(body.size())) == static_cast<int>(body.size());
+  const int64_t length = ok ? esp_http_client_fetch_headers(client) : -1;
+  ok = ok && length >= 0;
+  const int status = ok ? esp_http_client_get_status_code(client) : 0;
+  lastStatusState = status;
+  if (statusOut) *statusOut = status;
+  if (contentLengthOut) *contentLengthOut = length > 0 ? static_cast<size_t>(length) : 0;
+  if (ok) {
+    char buf[512];  // bounded stack chunk; the body streams to the sink
+    while (true) {
+      if (cancelFlag && *cancelFlag) {
+        ok = false;
+        break;
+      }
+      const int read = esp_http_client_read(client, buf, sizeof(buf));
+      if (read < 0) {
+        ok = false;
+        break;
+      }
+      if (read == 0) break;
+      if (!onData(buf, read)) {
+        ok = false;
+        break;
+      }
+    }
+  }
+  esp_http_client_cleanup(client);
+  return ok;
+}
+}  // namespace
+
+bool HttpDownloader::postForm(const std::string& url, const std::string& formBody, std::string& outResponse,
+                              int* statusOut) {
+  static constexpr size_t MAX_RESPONSE = 4096;
+  outResponse.clear();
+  int status = 0;
+  const bool ok = runPost(
+      url, formBody, "application/x-www-form-urlencoded",
+      [&outResponse](const char* data, const int len) {
+        const size_t take =
+            std::min(static_cast<size_t>(len), MAX_RESPONSE - std::min(MAX_RESPONSE, outResponse.size()));
+        if (take > 0 && (size_t)ESP.getMaxAllocHeap() < outResponse.size() + take + 512) return false;
+        outResponse.append(data, take);
+        return true;
+      },
+      nullptr, &status, nullptr);
+  if (statusOut) *statusOut = status;
+  return ok && status >= 200 && status < 300;
+}
+
+HttpDownloader::DownloadError HttpDownloader::postToFile(const std::string& url, const std::string& body,
+                                                         const std::string& contentType, const std::string& destPath,
+                                                         ProgressCallback progress, const bool* cancelFlag) {
+  const std::string partPath = destPath + ".part";
+  if (Storage.exists(partPath.c_str())) Storage.remove(partPath.c_str());
+  HalFile file;
+  if (!Storage.openFileForWrite("HTTP", partPath.c_str(), file)) return FILE_ERROR;
+  size_t written = 0;
+  size_t total = 0;
+  int status = 0;
+  bool writeFailed = false;
+  const bool ok = runPost(
+      url, body, contentType.c_str(),
+      [&](const char* data, const int len) {
+        if (file.write(reinterpret_cast<const uint8_t*>(data), len) != static_cast<size_t>(len)) {
+          writeFailed = true;
+          return false;
+        }
+        written += len;
+        if (progress && total > 0) progress(written, total);
+        return true;
+      },
+      cancelFlag, &status, &total);
+  file.close();
+  if (!ok || status < 200 || status > 299 || written == 0) {
+    Storage.remove(partPath.c_str());
+    if (cancelFlag && *cancelFlag) return ABORTED;
+    if (writeFailed) return FILE_ERROR;
+    return (status == 401 || status == 403) ? UNAUTHORIZED : HTTP_ERROR;
+  }
+  if (Storage.exists(destPath.c_str())) Storage.remove(destPath.c_str());
+  if (!Storage.rename(partPath.c_str(), destPath.c_str())) return FILE_ERROR;
+  return OK;
+}
+
+namespace {
+struct ResponseHeaderTap {
+  std::vector<HttpDownloader::Header>* out = nullptr;
+};
+
+esp_err_t requestEventHandler(esp_http_client_event_t* event) {
+  if (event->event_id != HTTP_EVENT_ON_HEADER || !event->header_key || !event->header_value) return ESP_OK;
+  auto* tap = static_cast<ResponseHeaderTap*>(event->user_data);
+  if (!tap || !tap->out || tap->out->size() >= HttpDownloader::MAX_RESPONSE_HEADERS) return ESP_OK;
+  // Bounded per value; plugin auth reads short headers (Location, tokens).
+  constexpr size_t MAX_VALUE = 512;
+  const size_t len = strnlen(event->header_value, MAX_VALUE);
+  if (ESP.getMaxAllocHeap() < len + 1024) return ESP_OK;
+  tap->out->emplace_back(event->header_key, std::string(event->header_value, len));
+  return ESP_OK;
+}
+
+esp_http_client_method_t methodFromName(const char* method) {
+  if (!method || strcasecmp(method, "GET") == 0) return HTTP_METHOD_GET;
+  if (strcasecmp(method, "POST") == 0) return HTTP_METHOD_POST;
+  if (strcasecmp(method, "PUT") == 0) return HTTP_METHOD_PUT;
+  if (strcasecmp(method, "PATCH") == 0) return HTTP_METHOD_PATCH;
+  if (strcasecmp(method, "DELETE") == 0) return HTTP_METHOD_DELETE;
+  if (strcasecmp(method, "HEAD") == 0) return HTTP_METHOD_HEAD;
+  return HTTP_METHOD_MAX;
+}
+}  // namespace
+
+int HttpDownloader::request(const std::string& url, const RequestOptions& options, const DataCallback& onData) {
+  lastStatusState = 0;
+  lastRedirectedState = false;
+  const esp_http_client_method_t method = methodFromName(options.method);
+  if (method == HTTP_METHOD_MAX) {
+    LOG_ERR("HTTP", "unsupported method: %s", options.method);
+    return -1;
+  }
+  if (!HttpOrigin::allowsRequest(url, url)) return -1;
+  if (options.responseHeaders) {
+    options.responseHeaders->clear();
+    options.responseHeaders->reserve(8);
+  }
+  ResponseHeaderTap tap{options.responseHeaders};
+  esp_http_client_config_t config = {};
+  config.url = url.c_str();
+  config.method = method;
+  const bool localHttp = url.rfind("http://", 0) == 0;
+  config.buffer_size = localHttp ? LOCAL_HTTP_RX_BUF : HTTP_RX_BUF;
+  config.buffer_size_tx = HTTP_TX_BUF;
+  config.timeout_ms = 30000;
+  config.crt_bundle_attach = esp_crt_bundle_attach;
+  config.keep_alive_enable = false;
+  config.disable_auto_redirect = true;
+  config.event_handler = requestEventHandler;
+  config.user_data = &tap;
+  esp_http_client_handle_t client = esp_http_client_init(&config);
+  if (!client) return -1;
+  esp_http_client_set_header(client, "User-Agent", "PocketDaily-ESP32-" CROSSPOINT_VERSION);
+  if (options.headers) {
+    for (const auto& header : *options.headers) {
+      if (!header.first.empty()) esp_http_client_set_header(client, header.first.c_str(), header.second.c_str());
+    }
+  }
+  const size_t bodySize = options.body ? options.body->size() : 0;
+  const auto aborted = [&options] { return options.shouldAbort && *options.shouldAbort && (*options.shouldAbort)(); };
+  bool ok = esp_http_client_open(client, static_cast<int>(bodySize)) == ESP_OK;
+  if (ok && bodySize > 0) {
+    ok = esp_http_client_write(client, options.body->data(), static_cast<int>(bodySize)) == static_cast<int>(bodySize);
+  }
+  const int64_t length = ok ? esp_http_client_fetch_headers(client) : -1;
+  ok = ok && length >= 0;
+  const int status = ok ? esp_http_client_get_status_code(client) : -1;
+  lastStatusState = status;
+  if (ok) {
+    uint8_t buf[512];  // bounded stack chunk; the body streams to the sink
+    while (true) {
+      if (aborted()) {
+        ok = false;
+        break;
+      }
+      const int read = esp_http_client_read(client, reinterpret_cast<char*>(buf), sizeof(buf));
+      if (read < 0) {
+        ok = false;
+        break;
+      }
+      if (read == 0) break;
+      if (!onData(buf, static_cast<size_t>(read))) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok && !esp_http_client_is_complete_data_received(client)) ok = false;
+  }
+  esp_http_client_cleanup(client);
+  if (!ok) {
+    LOG_ERR("HTTP", "request failed: %s status=%d", options.method, status);
+    return -1;
+  }
+  return status;
 }

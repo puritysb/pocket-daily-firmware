@@ -478,7 +478,7 @@ TEST_F(ReadingPositionLayout, SectionFilesMatchTheLayoutGolden) {
         ASSERT_TRUE(in) << path;
         std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         ASSERT_FALSE(bytes.empty());
-        ASSERT_EQ(static_cast<uint8_t>(bytes[0]), 137);
+        ASSERT_EQ(static_cast<uint8_t>(bytes[0]), 138);
         // Normalize only the semantic version byte to retain the independent
         // v135 layout golden; any other serialized byte change still fails.
         bytes[0] = static_cast<char>(135);

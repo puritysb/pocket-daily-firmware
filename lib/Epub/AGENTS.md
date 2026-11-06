@@ -21,7 +21,7 @@ hash, a new cache, and **lost reading progress**. That is expected behaviour, no
 |---|---|
 | `book.bin` | **7** (metadata structure) |
 | `section.bin` — incremental upstream baseline | **44** (CrossPoint 1.6.5) |
-| `section.bin` — **this fork** | **137** |
+| `section.bin` — **this fork** | **138** |
 
 The fork's section format differs from upstream's (incremental trailer, page text offsets); it numbers itself in the **reserved 128–255
 range** rather than `upstream + 1`. Upstream keeps incrementing 27→28→…; a
@@ -66,7 +66,13 @@ v136 keeps the bytes unchanged but rebuilds completed and partial layouts that m
 contain an ALT fallback from small-entry ZIP inflater allocation failure. Only section
 caches are invalidated; metadata, retained HTML and reading-progress files remain.
 
-The next fork-specific finalized format must use `137`, not an upstream version number or
+v137 drops the bilingual view-mode header byte.
+
+v138 keeps the bytes unchanged: built-in reader fonts no longer ship a bold-italic face
+(bold-italic falls back to bold, freeing flash for the CrossPoint 2.0 base), so bold-italic
+runs measure differently and every section cache is rebuilt.
+
+The next fork-specific finalized format must use `139`, not an upstream version number or
 the `0xFF` partial sentinel.
 
 ## What else invalidates a cache
