@@ -5,6 +5,7 @@
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <I18n.h>
+#include <Logging.h>
 #include <WiFi.h>
 
 #include <algorithm>
@@ -19,7 +20,6 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "SilentRestart.h"
-#include "agent/AgentLog.h"
 #include "components/UITheme.h"  // GUI (theme) + ThemeMetrics + Rect
 #include "fontIds.h"
 #include "pocket_daily/ContentActiveStore.h"
@@ -146,7 +146,7 @@ void PocketDailyActivity::onEnter() {
   const auto& profile = PocketDaily::DailyProfile::current();
   if (profile.dailyWord || profile.shows(PocketDaily::DailyProfile::HomeItem::Word)) buildLocalStudyCard();
 
-  AgentLog::line("POCKET", "Pocket reader onEnter (glance %s)", glanceSnapshot.savedEpoch ? "saved" : "none");
+  LOG_INF("POCKET", "Pocket reader onEnter (glance %s)", glanceSnapshot.savedEpoch ? "saved" : "none");
   // Paint Pocket immediately — local reading and carried cards need nothing.
   requestUpdate();
 }
@@ -312,8 +312,8 @@ void PocketDailyActivity::buildLocalStudyCard() {
     RenderLock studyLock(*this);
     localStudyCard = card;
   }
-  AgentLog::line("POCKET", "offline JP lesson ready: source=%s day=%lu index=%u", fromPack ? "sd-pack" : "firmware",
-                 (unsigned long)day, (unsigned)index);
+  LOG_INF("POCKET", "offline JP lesson ready: source=%s day=%lu index=%u", fromPack ? "sd-pack" : "firmware",
+          (unsigned long)day, (unsigned)index);
 }
 
 void PocketDailyActivity::handleButtons() {
@@ -709,7 +709,7 @@ bool PocketDailyActivity::paintSleepFrame() {
   glanceReason = GlanceReason::PoweredOff;
   sleepFramePending = true;
   requestUpdateAndWait();
-  AgentLog::line("POCKET", "retaining powered-off Daily Brief frame");
+  LOG_INF("POCKET", "retaining powered-off Daily Brief frame");
   return true;
 }
 
