@@ -14,19 +14,6 @@ progress and requested retry. Both native confirmations remain required; no remo
 flash/trial/acceptance. Production --flash guards retained; no USB reader enumerated.
 App handoff owns iPhone TestFlight and full setup status.
 
-## Sleep navigation fix in development (2026-11-01)
-
-- Immediate reader installation after wake bypassed the pending-only origin assignment, so Back went Home. Origin is now set before installation; reader origin and parent shell persist through sleep/internal reader restart, with legacy fallback.
-- Branch `codex/preserve-sleep-navigation`; final developer w7317c875 installed on X3/X4. Owner-operated Sleep/Wake/Back returned to Pocket Daily on both; state readbacks confirm context. Host 1,175/default build/strict analysis pass. Contextual footer/menu labels corrected with atomic destination reads/writes; full physical label coverage is unverified. Proof: `docs/sleep-navigation.md`, `build/sleep-navigation-hardware-20261101/`. Release/distribution held.
-
-## Keyboard remote development (2026-11-01)
-
-- Owner: default OFF; release/distribution stays on hold. Contract: `docs/keyboard-remote-v1.md`.
-- Merged app #19 / firmware #26 into main (2026-11-01); feature branches/worktrees cleaned. Other app work and existing SDK storage patch preserved.
-- X3 opt4 `1.0.0-dev-codex-keyboard-remote-a3fd9694-w319d57e0`: 24 turns passed; median ACK 1.601s (was 4.789s), 22 streamed / 2 chapter fallbacks; checkpoint min free/block 56,824/40,948B.
-- X4 lacked a reader bond; owner ended further pairing trials and accepted code-level verification only. No X4 remote/power hardware sign-off.
-- 4KiB text streaming retains BLE; chapter/image fallback retains radio-off rendering and unchanged memory gates. 80MHz idle/panel-off policies implemented; USB-off follow-up observed 47mA connected idle vs prior 49mA, awake OFF 23–24mA (short onboard comparison). Evidence/backups: `build/keyboard-remote-perf-20261101/`; battery follow-up `build/keyboard-remote-power-20261101/`; baseline `build/keyboard-remote-20261101/`.
-
 ## Repositories and collaboration
 
 - Firmware: this repository (`puritysb/pocket-daily-firmware`). App: sibling
@@ -48,18 +35,17 @@ App handoff owns iPhone TestFlight and full setup status.
 
 ## Upstream base and fork delta
 
-- Base (in progress 2026-11-06, PR #29 `feature/upstream-2.0.0`):
-  CrossPoint 2.0.0 `42d58daa`, FreeInk SDK `5e94fe74`. Owner decision: 1.0.0
-  ships on 2.0.0 even if late. Fork keeps its reader engine, settings and web
-  server; adopts plugins (default off, `pluginsEnabled`, auto-on when the card
-  has plugins), OPDS 2.0 with origin-bound credentials, device fixes. No
-  Dev image a5bf0bb8 installed on X3/X4 2026-11-06 (status/heap only).
-  wolfSSL, LCP out, bold-italic falls back to bold (flash; owner-confirmed 2026-11-06), section v138.
-  Plugin distribution layers A (firmware) / B (app CrossPoint-mode install) /
-  C (installer plugin `distribution/crosspoint-plugin/`, sideload only — owner
-  decided 2026-11-06 not to list it on Plugin Hub; add each public release to
-  its `releases.json`).
-  `docs/upstream-integration-2.0.0.md`.
+- Base (merged 2026-11-06, PRs #29/#31/#32): CrossPoint 2.0.0 `42d58daa`,
+  FreeInk SDK `5e94fe74`. Owner decision: 1.0.0 ships on 2.0.0 even if late.
+  Fork keeps its reader engine, settings and web server; adopts plugins (default
+  off, `pluginsEnabled`, auto-on when the card has plugins), OPDS 2.0 with
+  origin-bound credentials, device fixes. No wolfSSL, LCP out, bold-italic falls
+  back to bold (flash; owner-confirmed 2026-11-06), section v138. Dev image
+  a5bf0bb8 installed on X3/X4; 24-page style walk passed on both (bold-italic
+  renders upright bold). Plugin distribution layers A (firmware) / B (app
+  CrossPoint-mode install) / C (installer plugin `distribution/crosspoint-plugin/`,
+  sideload only, not on Plugin Hub; add each public release to its
+  `releases.json`). `docs/upstream-integration-2.0.0.md`.
 - Previous base: CrossPoint 1.6.5 (`93e98bb7`) on `main` at `ee188fe7` (PR #4);
   `docs/upstream-integration-1.6.5.md`. The 2026-10-28 develop audit and reader
   A/B pilots are archived in `docs/history/PROJECT_MEMORY-before-2.0.0-2026-11-06.md`.
