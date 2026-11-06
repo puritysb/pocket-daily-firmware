@@ -9,6 +9,7 @@ add_executable(LibraryBuilderTest
 target_include_directories(LibraryBuilderTest PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/stubs
   ${REPO_ROOT}/lib/LibraryIndex
+  ${REPO_ROOT}/lib/FsHelpers
   ${REPO_ROOT}/lib/Serialization
   ${REPO_ROOT}/lib/Utf8
 )
@@ -29,6 +30,7 @@ add_executable(LibraryBuilderDevBudgetTest
 target_include_directories(LibraryBuilderDevBudgetTest PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/stubs
   ${REPO_ROOT}/lib/LibraryIndex
+  ${REPO_ROOT}/lib/FsHelpers
   ${REPO_ROOT}/lib/Serialization
   ${REPO_ROOT}/lib/Utf8
 )

@@ -76,10 +76,10 @@ add_subdirectory(build_failure)
 add_subdirectory(reader_perf)
 add_subdirectory(reader_layout)
 
-add_subdirectory(opds_parser)
-
 add_subdirectory(articles)
 add_subdirectory(opds_filename)
+add_subdirectory(url_utils)
+add_subdirectory(opds_feed_error)
 add_subdirectory(html_to_plain_text)
 add_subdirectory(library_text)
 add_subdirectory(library_format)
@@ -101,9 +101,12 @@ add_subdirectory(page_link)
 add_subdirectory(content_opf_parser)
 add_subdirectory(chapter_position)
 add_subdirectory(home_button)
+add_subdirectory(button_press_navigation)
 
 add_subdirectory(inflate_stream)
+add_subdirectory(zip_file)
 add_subdirectory(fs_helpers)
+add_subdirectory(http_header)
 
 add_subdirectory(absolute_grayscale)
 
@@ -136,3 +139,11 @@ add_subdirectory(trial_reader)
 add_subdirectory(book_cache_utils)
 
 add_subdirectory(reader_navigation)
+
+# CrossPoint 2.0 plugin system (shell/services adopted from upstream; see
+# docs/upstream-integration-2.0.0.md).
+add_subdirectory(plugin_catalog_paging)
+add_subdirectory(plugin_manifest_classification)
+add_subdirectory(plugin_picker_layout)
+add_subdirectory(protected_paths)
+add_subdirectory(opds_http_transport)

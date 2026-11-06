@@ -12,8 +12,8 @@ namespace PocketDaily::FirmwareIdentity {
 //   2:    the 0.x development series (docs/product-versioning.md); a later
 //         real 1.0.0 stays in lineage 2 and is newer than everything above.
 inline constexpr int LINEAGE = 2;
-inline constexpr char CROSSPOINT_BASE[] = "1.6.5";
-inline constexpr char CROSSPOINT_COMMIT[] = "93e98bb78702e29868a16a13b80c40e6b36ccdff";
+inline constexpr char CROSSPOINT_BASE[] = "2.0.0";
+inline constexpr char CROSSPOINT_COMMIT[] = "42d58daaabcf469a2e5e1ba871714fb9dcf51d29";
 
 // What screens show (docs/product-versioning.md "Display"): only a release and
 // a developer image are told apart, both marked as Pocket Daily so they never

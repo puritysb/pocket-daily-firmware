@@ -50,7 +50,7 @@ class ActivityManager {
 
   // Pending activity to be launched on next loop iteration
   std::unique_ptr<Activity> pendingActivity;
-  enum class PendingAction { None, Push, Pop, Replace };
+  enum class PendingAction { None, Push, Pop, Replace, ReplaceForSleep };
   PendingAction pendingAction = PendingAction::None;
 
   void launchReader(ReaderReturn origin, std::string path, bool allowFastInitialRefresh);
@@ -84,13 +84,15 @@ class ActivityManager {
   // This variable must only be set by the main loop, to avoid race conditions
   std::atomic<bool> requestedUpdate{false};
 
+  // Counts screen changes, so the Bluetooth page turner can tell one visit of a book from the next.
+  // Written by the main loop under RenderLock; the render task captures it under that lock.
+  uint32_t screenVisit = 0;
+  // The screen visit whose frame the render task painted last.
+  std::atomic<uint32_t> paintedVisit{0};
+
  public:
-  explicit ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : renderer(renderer), mappedInput(mappedInput), renderingMutex(xSemaphoreCreateMutex()) {
-    assert(renderingMutex != nullptr && "Failed to create rendering mutex");
-    stackActivities.reserve(10);
-  }
-  ~ActivityManager() { assert(false); /* should never be called */ };
+  explicit ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput);
+  ~ActivityManager();
 
   void begin();
   void loop();
@@ -100,14 +102,16 @@ class ActivityManager {
 
   // goTo... functions are convenient wrapper for replaceActivity()
   void goToFileTransfer(bool autoJoinSavedNetwork = false);
+  void goToUsbDrive();
   bool goToPocketDaily();
   void goToPocketNearbySync(bool autoJoinSavedNetwork = false, bool firstSetup = false);
+  // openSection jumps straight into one group (End = the section list).
   void goToSettings();
   void goToFileBrowser(std::string path = {});
   bool goToArticles();
-  void goToUsbDrive();
   void goToLibrary();
   void goToBrowser();
+  void goToPlugins(bool showOpds);
   void goToReader(std::string path, bool allowFastInitialRefresh = false);
   // Open a book from a product shell so that leaveReader() returns to it.
   void goToReaderFrom(ReaderReturn origin, std::string path, bool allowFastInitialRefresh = false);
@@ -146,6 +150,7 @@ class ActivityManager {
   bool paintSleepFrame();
   bool requiresExclusiveStorageLoop() const;
   bool isReaderActivity() const;
+  bool isForegroundReader() const;
   bool handleForcedRefresh();
   // The current screen tolerates a Reading Sync exchange window and no book is
   // open anywhere on the stack.
@@ -154,6 +159,7 @@ class ActivityManager {
   uint32_t renderCount() const { return completedRenders.load(std::memory_order_acquire); }
   bool skipLoopDelay() const;
   ScreenshotInfo getScreenshotInfo() const;
+  void prepareForSleep();
 
   // If immediate is true, the update will be triggered immediately.
   // Otherwise, it will be deferred until the end of the current loop iteration.

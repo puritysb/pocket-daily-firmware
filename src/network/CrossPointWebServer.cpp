@@ -40,6 +40,7 @@
 #include "pocket_daily/live_studio/DevTrace.h"
 #include "pocket_daily/upload_stream_protocol.h"
 #include "util/BookCacheUtils.h"
+#include "util/FirmwareIdentity.h"
 #include "util/TaskWatchdog.h"
 
 namespace {
@@ -753,6 +754,8 @@ PocketDaily::Web::StatusInputs CrossPointWebServer::statusInputs() const {
   in.live.push = liveStudio.pushActive();
   in.live.suspended = liveStudio.listenerSuspended();
   in.live.wsPort = wsPort;
+  in.firmwareFamily = firmwareidentity::FAMILY;
+  in.pluginApi = firmwareidentity::PLUGIN_API_VERSION;
   return in;
 }
 

@@ -8,3 +8,6 @@ void clearBookCache(const std::string& path);
 
 // Returns true if the directory name matches a book cache entry.
 bool isBookCacheDirectoryName(const char* name);
+
+// Delete a local book, then its reader cache (library shelf delete).
+bool removeBookFile(const std::string& path);

@@ -39,6 +39,7 @@
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
 #include "pocket_daily/FirmwareIdentity.h"
+#include "util/PluginEvents.h"
 
 namespace fui = freeink::ui;
 
@@ -227,6 +228,15 @@ void SettingsActivity::saveSettingChange(uint8_t CrossPointSettings::* valuePtr)
   // the setting/callback currently being used. Resource/language screens keep
   // their explicit rebuild on return.
   if (valuePtr == &CrossPointSettings::shortPwrBtn) rebuildSettingsLists();
+  if (valuePtr == &CrossPointSettings::pluginsEnabled) {
+    // Turning plugins on brings back a dismissed Plugin Hub install row; the
+    // event subscriptions follow the master switch either way.
+    if (SETTINGS.pluginsEnabled && SETTINGS.pluginHubPromptHidden) {
+      SETTINGS.pluginHubPromptHidden = 0;
+      SETTINGS.saveToFile();
+    }
+    pluginevents::refreshSubscriptions();
+  }
   applyUiSettingChange(valuePtr);
 }
 

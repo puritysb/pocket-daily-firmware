@@ -6,7 +6,12 @@ product patch, or delete it. `docs/SEAM.md` owns the *mechanics* of the product
 boundary (hooks, include rules, mirror obligations); this register owns the
 *intent and evidence* behind each inherited-file change.
 
-Baseline: CrossPoint 1.6.5, `upstream/master` `93e98bb7`, fully merged into
+Baseline update 2026-11-06: `feature/upstream-2.0.0` merges CrossPoint 2.0.0
+(`42d58daa`) and keeps the fork engine, settings and web server wholesale; the
+per-file audit below predates it and must be re-run against 2.0.0 after that
+branch lands. Boundary decisions: `docs/upstream-integration-2.0.0.md`.
+
+Previous baseline: CrossPoint 1.6.5, `upstream/master` `93e98bb7`, fully merged into
 `main` at `04aae8c3`. Audit date 2026-10-01. At that point the fork modified
 120 inherited `src/`/`lib/` files (+13.3k/−2.8k lines outside the two product
 directories). Reproduce with:

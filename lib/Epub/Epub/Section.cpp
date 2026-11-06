@@ -39,7 +39,9 @@ namespace {
 // v135: automatic bitmap reader fonts honor requested point size in raster and layout.
 // v136: rebuild cached ALT layouts after small-entry ZIP inflater memory correction.
 // v137: the bilingual view-mode header byte is removed (the header is one byte shorter).
-constexpr uint8_t SECTION_FILE_VERSION = 137;
+// v138: bytes unchanged; built-in reader fonts no longer carry a bold-italic face, so
+// bold-italic runs measure with the bold face and cached layouts must be rebuilt.
+constexpr uint8_t SECTION_FILE_VERSION = 138;
 
 // Written into the version field while a build is in progress and replaced only after
 // every table has been committed. A crash-interrupted .part file is therefore rejected.

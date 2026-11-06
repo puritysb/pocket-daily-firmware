@@ -21,6 +21,13 @@ and reduced the inherited-file footprint to the hooks below. Upstream has no
 paths under `src/pocket_daily/`, so module files themselves never conflict;
 conflicts can only land at hook sites and carried patches.
 
+The CrossPoint 2.0.0 merge (2026-11-06) kept the fork's `CrossPointWebServer`,
+`WebDAVHandler`, settings and reader engine whole instead of re-hooking them
+into upstream's rewrites; the only new inherited touchpoints are the plugin
+identity fields marshalled in `statusInputs()` (E2), the plugin
+event refresh/drain calls (web server activity, settings save, sleep path) and
+the `pluginsEnabled` gate. See `docs/upstream-integration-2.0.0.md`.
+
 ## Module inventory (`src/pocket_daily/web/`, `src/pocket_daily/boot/`)
 
 | Module | Owns |
@@ -336,8 +343,12 @@ Facts duplicated across the seam. When one side changes, the other must change
 in the same commit:
 
 1. **Status base fields.** `PocketStatus.cpp::buildStatusJson()` must emit
-   every base field upstream's `handleStatus()` emits — currently seven:
-   `version`, `ip`, `mode`, `rssi`, `freeHeap`, `uptime`, `device`. An
+   every base field upstream's `handleStatus()` emits — currently nine:
+   `version`, `firmwareFamily`, `pluginApi`, `ip`, `mode`, `rssi`,
+   `freeHeap`, `uptime`, `device`. Deliberately not mirrored: `serial` (eFuse
+   device identifier), the per-plugin `deviceId` (needs the removed
+   DeviceSecret), and `pluginCapabilities` (on-device catalog only; ~330 B per
+   heartbeat on a starved private AP). An
    upstream field addition must be mirrored here (this is why `/api/status`
    byte-comparison is part of the hardware verification bundle).
 2. **Silent-reboot magic.** `ProductBoot.cpp`'s `kSilentRebootMagic`

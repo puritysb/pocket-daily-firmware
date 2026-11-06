@@ -5,6 +5,7 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <SDCardManager.h>
+#include <esp_heap_caps.h>
 #if FREEINK_CAP_USB_MSC
 #include <UsbMassStorage.h>
 #endif
@@ -107,16 +108,12 @@ void HalStorage::prepareForDeepSleep() {
   SDCard.shutdown();
 }
 
-#if FREEINK_CAP_USB_MSC && !FREEINK_SD_SDMMC
-#error "USB Drive requires an SDMMC-backed storage profile"
-#endif
-
 bool HalStorage::beginUsbDrive() {
 #if FREEINK_CAP_USB_MSC
   StorageLock lock;
   auto* const blockDevice = SDCard.detachFilesystemForRawAccess();
   if (!blockDevice) {
-    LOG_ERR("USB", "USB Drive requires a mounted SDMMC filesystem");
+    LOG_ERR("USB", "USB Drive requires a mounted SD filesystem");
     return false;
   }
 
@@ -198,6 +195,25 @@ size_t HalStorage::readFileToBuffer(const char* path, char* buffer, size_t buffe
   HAL_STORAGE_WRAPPED_CALL(readFileToBuffer, path, buffer, bufferSize, maxBytes);
 }
 
+// Composed of already-locked HalStorage/HalFile operations; needs no
+// StorageLock of its own.
+bool HalStorage::readFileToString(const char* moduleName, const std::string& path, size_t cap, std::string& out) {
+  out.clear();
+  HalFile file;
+  if (!openFileForRead(moduleName, path, file)) return false;
+  if (file.isDirectory()) return false;
+  const size_t size = file.fileSize();
+  if (size == 0 || size > cap) return false;
+  // string growth is a bare allocation under -fno-exceptions; probe first so
+  // a large file on a fragmented heap fails soft instead of abort()ing.
+  if (heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < size + 512) {
+    LOG_ERR(moduleName, "readFileToString OOM: %u bytes for %s", static_cast<unsigned>(size), path.c_str());
+    return false;
+  }
+  out.resize(size);
+  return file.read(out.data(), size) == static_cast<int>(size);
+}
+
 bool HalStorage::writeFile(const char* path, const String& content) {
   HAL_STORAGE_WRAPPED_CALL(writeFile, path, content);
 }
@@ -275,6 +291,10 @@ bool HalStorage::exists(const char* path) { HAL_STORAGE_WRAPPED_CALL(exists, pat
 bool HalStorage::remove(const char* path) { HAL_STORAGE_WRAPPED_CALL(remove, path); }
 bool HalStorage::rename(const char* oldPath, const char* newPath) {
   HAL_STORAGE_WRAPPED_CALL(rename, oldPath, newPath);
+}
+
+bool HalStorage::replaceFile(const char* tmpPath, const char* path) {
+  HAL_STORAGE_WRAPPED_CALL(replaceFile, tmpPath, path);
 }
 
 bool HalStorage::rmdir(const char* path) { HAL_STORAGE_WRAPPED_CALL(rmdir, path); }
@@ -375,6 +395,10 @@ bool HalFile::seekSet(size_t offset) {
 bool HalFile::preAllocate(size_t length) {
   drainWriteBuffer();
   HAL_FILE_WRAPPED_CALL(preAllocate, false, length);
+}
+bool HalFile::truncate(const uint64_t length) {
+  drainWriteBuffer();
+  HAL_FILE_WRAPPED_CALL(truncate, false, length);
 }
 int HalFile::available() const { HAL_FILE_WRAPPED_CALL(available, 0, ); }
 size_t HalFile::position() const {

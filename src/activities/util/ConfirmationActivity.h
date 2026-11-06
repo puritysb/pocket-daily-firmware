@@ -10,6 +10,8 @@ class ConfirmationActivity : public Activity {
   // Input data
   std::string heading;
   std::string body;
+  std::string cancelLabel;
+  std::string confirmLabel;
 
   OptionPopup confirmPopup;
 #ifdef ENABLE_DEV_REMOTE_FLASH
@@ -18,7 +20,8 @@ class ConfirmationActivity : public Activity {
 
  public:
   ConfirmationActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& heading,
-                       const std::string& body);
+                       const std::string& body, const std::string& cancelLabel = {},
+                       const std::string& confirmLabel = {});
 
 #ifdef ENABLE_DEV_REMOTE_FLASH
   void acceptAfterRenderForDeveloperTest() { developerAccept = true; }

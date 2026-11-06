@@ -48,16 +48,18 @@ App handoff owns iPhone TestFlight and full setup status.
 
 ## Upstream base and fork delta
 
-- Audit 2026-10-28: `main`/`origin/main` `3f0bade2` includes stable `93e98bb7`;
-  develop `40a633e7` adds 177 ancestry commits, 74 merge-conflict paths. No RC
-  firmware imported; `--check` reports development separately. Candidates,
-  exclusions and existing seam failures: `docs/upstream-audit-2026-10-28.md`.
-- Reader A/B loop: `docs/reader-benchmark.md`; raster (0.9–6.0%) and font-I/O
-  (107→57 reads, no speedup), and idle-font reuse (2.7% English/1.0% Korean-image,
-  heap regression) pilots rejected; source reverted. Evidence/recovery linked there.
-- Base: CrossPoint 1.6.5 (`93e98bb7`) integrated on `main` at `ee188fe7`
-  (PR #4), FreeInk SDK `111fdcc7`. wolfSSL intentionally excluded.
-  `docs/upstream-integration-1.6.5.md`.
+- Base (in progress 2026-11-06, PR #29 `feature/upstream-2.0.0`):
+  CrossPoint 2.0.0 `42d58daa`, FreeInk SDK `5e94fe74`. Owner decision: 1.0.0
+  ships on 2.0.0 even if late. Fork keeps its reader engine, settings and web
+  server; adopts plugins (default off, `pluginsEnabled`, auto-on when the card
+  has plugins), OPDS 2.0 with origin-bound credentials, device fixes. No
+  Dev image a5bf0bb8 installed on X3/X4 2026-11-06 (status/heap only).
+  wolfSSL, LCP out, bold-italic falls back to bold (flash; owner-confirmed 2026-11-06), section v138.
+  Plugin distribution layers A (firmware) / B (app CrossPoint-mode install) /
+  C (Hub plugin, publish needs owner approval). `docs/upstream-integration-2.0.0.md`.
+- Previous base: CrossPoint 1.6.5 (`93e98bb7`) on `main` at `ee188fe7` (PR #4);
+  `docs/upstream-integration-1.6.5.md`. The 2026-10-28 develop audit and reader
+  A/B pilots are archived in `docs/history/PROJECT_MEMORY-before-2.0.0-2026-11-06.md`.
 - `docs/SEAM.md` is the source of truth for the Pocket/inherited boundary: hook
   inventory, exceptions, carried-patch register, include rules and the mirror
   obligations (status base fields, silent-reboot magic `0xC1EAB007`,
@@ -268,23 +270,11 @@ App handoff owns iPhone TestFlight and full setup status.
   <ip>` with `--dev-flash` for developer images. `platformio.local.ini` is
   machine-local.
 
-## Current 1.0.0 preparation — 2026-11-01
+## Current 1.0.0 preparation
 
-- Candidate source `6025da03`, gh_release 1.0.0, 6,374,848B, SHA256
-  `4376a1f99da9d8d4e6369a882a7038436c6889a4ef5857d76d027e6e4ed84d13`.
-  Exact-image status and remaining gates: `docs/release-1.0.0-candidate.md`.
-- Home uses measured title/author height to maximize covers in both layouts.
-  Host renderer re-imported by the app; developer screen evidence covers eight
-  connected previews plus actual Home and sleep, all ten pixel comparisons exact.
-  `build/dev-pipeline-runs/20261031T201436-2a15e9/report.json`.
-- Host1156/Python310/strict cppcheck/default and gh_release builds passed.
-  Candidate artifacts and current device receipts: `build/release-prep-20261101/`.
-  Latest installed versions and restoration status live in the app hand-off.
-- Actual X3 slots0x10000/0x780000 each0x770000; X4 slots0x10000/0x650000 each0x640000.
-  Preserve each device's own whole return slot before a bounded production trial.
-- Historical memory/reading and BLE/settings baselines are archived in
-  `docs/history/PROJECT_MEMORY-candidates-before-1.0.0-prep-2026-11-01.md`.
-  Prior image results keep their original scope; release requires current-image gates.
+- The 1.6.5-base candidate (`6025da03`, `docs/release-1.0.0-candidate.md`) is
+  superseded by the 2.0.0 base; its gates must be re-run on a new 2.0.0-base
+  image. Archived: `docs/history/PROJECT_MEMORY-before-2.0.0-2026-11-06.md`.
 
 ## Open limitations
 
