@@ -4,7 +4,8 @@ Hardware acceptance for the customer route in the app's `docs/OOBE.md`
 (Route 1) and the first boot after stock CrossPoint
 (`docs/upstream-integration-2.0.0.md`, "Moving from stock CrossPoint"). It
 installs official stock CrossPoint 2.0.0 on a reader that runs Pocket Daily,
-then moves it back the way a customer would. Prepared 2026-11-06; not run yet.
+then moves it back the way a customer would. Prepared and run on the X4 on
+2026-11-06; results below.
 
 ## Inputs
 
@@ -74,6 +75,22 @@ and confirm the reader returns to reading after five minutes.
   repository uploader (app `docs/OOBE.md`, Route 3).
 - Stock cannot see Wi-Fi: use stock's Wi-Fi settings; the saved network list
   is shared.
+
+## Results — X4, 2026-11-06
+
+| Step | Result |
+| --- | --- |
+| 1–3 | Baseline recorded; `PocketSansWorld` removed; stock image on the SD root, reader CRC matched. |
+| 4–5 | Stock 2.0.0 installed through the reader's SD Card Firmware Update. `/api/status`: `2.0.0`, `firmwareFamily` `crosspoint`, no `deviceID`; File Transfer free heap about 69–73 KB. |
+| 6 | First app attempt failed: the Debug app's registry would not load (a host test had left the fixture ID `install-reader` in the unsandboxed app's defaults). After moving the app state aside, the app found the CrossPoint reader and copied `pocket-daily.bin`; read-back matched. Fixed in app PR #29 (registry sanitizing, Reset Saved Readers, test isolation). |
+| 7–8 | The reader installed the image and answered at 18:34:19 with the staged version and the same device ID `C8729208`. It joined the saved Wi-Fi and opened Sync by itself; Back read "Read offline" (owner). Sync stayed open past five minutes, so the app was making Pocket requests (the reconnect). Free heap 38,408, largest block 34,804. |
+| 9 | Reading positions unchanged. Settings unchanged except `fontFamily` 0 → 1: stock had cleared the missing SD `NotoSerif` choice on its own load, which is expected. |
+| 10 | A sleep/wake returned to Home, but a power-button wake is excluded from the first-boot branch by design (`isSleepWake`), and the X4's power-off is a sleep. Checked the file instead: `/.crosspoint/settings.json` holds `startupApp` and `longPressMenuOrder`, so the branch cannot repeat. |
+| 11 | `PocketSansWorld` restored (CRC `A652D7ED`). The three install images were deleted from the SD root afterwards. |
+
+Evidence is in `build/stock-2.0.0-20261106/` (private). Not run: the optional
+five-minute exit without the app, and a cold boot (only USB or a reset gives
+one on the X4).
 
 ## Not covered
 
