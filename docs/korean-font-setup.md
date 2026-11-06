@@ -62,8 +62,8 @@ Open an EPUB with both Korean and Latin text. With Font Family set to
 
 If Korean still shows tofu after switching to RIDIBatang:
 1. Confirm the SD path is exactly `/SD/.fonts/RIDIBatang/RIDIBatang_*.cpfont`.
-2. Run `pio device monitor` (or check `agentdeck.log` on SD if USB-CDC is
-   unavailable) for `SDFONT` log lines — they list families found during scan.
+2. Run `python3 scripts/debugging_monitor.py` for `SDFONT` log lines — they
+   list families found during scan.
 3. Re-generate from source with `python3 lib/EpdFont/scripts/build-sd-fonts.py
    --only RIDIBatang`.
 

@@ -1,12 +1,11 @@
 #include "pocket_daily/learning_pack.h"
 
 #include <HalStorage.h>
+#include <Logging.h>
 #include <mbedtls/sha256.h>
 
 #include <cstdio>
 #include <cstring>
-
-#include "agent/AgentLog.h"
 
 namespace PocketDaily {
 namespace LearningPack {
@@ -65,7 +64,7 @@ bool validate(const char* path, Metadata* metadata) {
   Header header{};
   if (file.read(&header, sizeof(header)) != static_cast<int>(sizeof(header)) || !headerValid(header, file.size()) ||
       !payloadHashValid(file, header)) {
-    AgentLog::line("LEARN", "pack rejected: %s", path);
+    LOG_INF("LEARN", "pack rejected: %s", path);
     return false;
   }
   copyMetadata(header, metadata);
@@ -77,7 +76,7 @@ bool ensureAvailable(Metadata* metadata) {
   if (!validate(PACK_BACKUP_PATH, metadata)) return false;
   Storage.remove(PACK_PATH);
   if (!Storage.rename(PACK_BACKUP_PATH, PACK_PATH)) return false;
-  AgentLog::line("LEARN", "recovered learning pack backup");
+  LOG_INF("LEARN", "recovered learning pack backup");
   return validate(PACK_PATH, metadata);
 }
 
@@ -102,8 +101,8 @@ bool install(const char* candidatePath, Metadata* metadata) {
   }
   Storage.remove(PACK_BACKUP_PATH);
   if (metadata) *metadata = installed;
-  AgentLog::line("LEARN", "pack installed: %s v%lu records=%lu", installed.packageId,
-                 (unsigned long)installed.contentVersion, (unsigned long)installed.recordCount);
+  LOG_INF("LEARN", "pack installed: %s v%lu records=%lu", installed.packageId, (unsigned long)installed.contentVersion,
+          (unsigned long)installed.recordCount);
   return true;
 }
 
