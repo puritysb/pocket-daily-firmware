@@ -212,14 +212,18 @@ App handoff owns iPhone TestFlight and full setup status.
 - App Connect checks LAN first, requests BLE wake only when needed, validates
   identity on LAN, and suspends periodic BLE/LAN exchange during idle tests.
 - Fresh X3 without settings offers authenticated BLE setup once, with Read
-  offline and a five-minute idle exit. Never recommend Pocket Daily via
-  CrossPoint's unlocker on locked units (see app `docs/READER_FIRST_USE.md`).
+  offline and a five-minute idle exit. First boot after stock CrossPoint
+  (settings file without fork markers) opens Sync once on X3/X4: saved Wi-Fi
+  joins and the app reconnects to the staged version; Read offline or five
+  minutes without an app request returns to reading. Stock 2.0 `lineHeight` and
+  `NotoSerif` carry over. Never recommend Pocket Daily via CrossPoint's
+  unlocker on locked units (see app `docs/READER_FIRST_USE.md`).
 - Wake cue replaces the old refresh with no animation dwell; an active panel
   waveform cannot be cancelled; input during BUSY is not established.
 
 ## Reader engine facts
 
-- Section cache v137 (`lib/Epub/Epub/Section.cpp`, bilingual header byte removed); cache formats, version
+- Section cache v138 (`lib/Epub/Epub/Section.cpp`; bold-italic faces removed); cache formats, version
   bytes and invalidation rules are in `lib/Epub/AGENTS.md`. Partials carry a
   format tag.
 - `ReaderLayoutAhead` lays out ahead on the render task after each page and

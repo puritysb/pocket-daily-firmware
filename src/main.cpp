@@ -697,6 +697,7 @@ void setup() {
   const bool firstPocketSetup = gpio.deviceIsX3() && !isSilentReboot && !isSleepWake &&
                                 !Storage.exists(CrossPointSettings::getFilePath()) && APP_STATE.openEpubPath.empty();
   SETTINGS.loadFromFile();
+  const bool firstBootAfterCrossPoint = SETTINGS.loadedStockCrossPointFile && !isSilentReboot && !isSleepWake;
   // Waking returns to the shell the device slept in (stock returns to its only
   // shell, Home, or the open book); a boot without a clean sleep (reset, update,
   // power loss) follows the startupApp setting, read only now that it is loaded.
@@ -980,6 +981,18 @@ void setup() {
       activityManager.goToPocketNearbySync(false, true);
     else
       activityManager.goToPocketDaily();
+  } else if (firstBootAfterCrossPoint && !mappedInputManager.isPressed(MappedInputManager::Button::Back)) {
+    // First boot after an install from stock CrossPoint: open Sync once so the
+    // companion that staged this image reconnects without menu steps. The
+    // settings load already resaved the fork marker, so this never repeats.
+    // Saved Wi-Fi joins directly; without it X3 offers Bluetooth setup and X4
+    // shows the Sync chooser. Read offline / five idle minutes return to reading.
+    // Stock CrossPoint's wifi.json shares this format and per-device key.
+    const bool savedNetwork = WIFI_STORE.loadFromFile() && WIFI_STORE.getCredentialCount() > 0;
+    if (savedNetwork || gpio.deviceIsX3())
+      activityManager.goToPocketNearbySync(savedNetwork, true);
+    else
+      activityManager.goToPocketNearbySync();
   } else if (mappedInputManager.isPressed(MappedInputManager::Button::Back)) {
     // CrossPoint Home is always one deliberate held button away, but is no
     // longer the product's default boot identity.

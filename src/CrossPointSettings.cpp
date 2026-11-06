@@ -203,6 +203,14 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     if (doc[PocketDaily::SettingsMigration::kLongPressOrderKey].isNull()) needsResave = true;
   }
 
+  loadedStockCrossPointFile = PocketDaily::SettingsMigration::writtenByStockCrossPoint(
+      !doc["startupApp"].isNull(), !doc[PocketDaily::SettingsMigration::kLongPressOrderKey].isNull());
+  // Stock 2.0 stores line spacing as "lineHeight"; keep the reader's choice.
+  if (doc["lineSpacing"].isNull() && doc["lineHeight"].is<uint8_t>()) {
+    lineSpacing = PocketDaily::SettingsMigration::lineSpacingFromStockLineHeight(doc["lineHeight"].as<uint8_t>());
+    needsResave = true;
+  }
+
   // Older files stored one combined touch mode under "touchReaderControls":
   // 0=off, 1=tap, 2=swipe, 3=inverted tap. Split it into the master toggle
   // plus the per-direction gesture pair (the generic loop above already folded
@@ -268,6 +276,12 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     sdFontFamilyName[sizeof(sdFontFamilyName) - 1] = '\0';
     needsResave = true;
   } else if (storedFontFamily >= BUILTIN_FONT_COUNT) {
+    needsResave = true;
+  }
+  // Stock 2.0 selects serif as an SD family. Keep the SD choice (used when that
+  // family is on the card) and fall back to the built-in serif, not sans.
+  if (loadedStockCrossPointFile && strcmp(sdFontFamilyName, PocketDaily::SettingsMigration::kStockSerifFamily) == 0) {
+    fontFamily = NOTOSERIF;
     needsResave = true;
   }
   // Dictionary folder name — uses dynamic getter/setter in SettingsList, load manually

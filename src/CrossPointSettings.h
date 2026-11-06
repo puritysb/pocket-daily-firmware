@@ -311,6 +311,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // New installs start on Home, as in stock; Pocket Daily is an opt-in
   // (Settings → System). Saved files keep their value.
   uint8_t startupApp = STARTUP_HOME;
+  // Not persisted. True after loading a file stock CrossPoint wrote: this boot
+  // is Pocket Daily's first after an install from CrossPoint. The load's resave
+  // adds the fork marker, so the next boot reads false.
+  bool loadedStockCrossPointFile = false;
   // The retired AgentDeck keys (agentDeckCompanionEnabled, agentPullSyncEnabled)
   // are no longer read or written: settings.json is keyed, so an old file
   // still loads and the next save simply omits them.
