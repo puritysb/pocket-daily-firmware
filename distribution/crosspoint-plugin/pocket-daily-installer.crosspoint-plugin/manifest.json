@@ -1,0 +1,17 @@
+{
+  "name": "pocket-daily-installer",
+  "title": "Pocket Daily",
+  "description": "Download Pocket Daily firmware for X3/X4 to the SD card.",
+  "author": "SeungBeom Choi",
+  "version": "0.1.0",
+  "compatibility": {
+    "firmware_family": ["crosspoint"],
+    "plugin_api_min": 1,
+    "devices": ["x4"]
+  },
+  "files": [
+    "manifest.json",
+    "device.json",
+    "README.md"
+  ]
+}

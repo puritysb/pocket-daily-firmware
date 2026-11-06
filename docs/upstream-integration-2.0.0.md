@@ -112,6 +112,10 @@ configuration" error). Build sequentially.
 - **B (companion app, `pocket-daily`):** a "CrossPoint reader" mode that installs
   Pocket Daily firmware through stock CrossPoint's `/upload` plus SD update.
   Not started; needs app-side tests against the stock web server.
-- **C (Hub plugin):** a minimal plugin that points stock users to Pocket
-  Daily. Local scaffold only; publishing to the plugin Hub needs the owner's
-  approval of the exact content.
+- **C (Hub plugin):** `distribution/crosspoint-plugin/` holds the
+  `pocket-daily-installer` payload: a stock 2.0 JSON catalog over
+  `releases.json` on `main` that downloads a release's `firmware.bin` to
+  `/pocket-daily.bin` for the stock SD updater. Validated by
+  `scripts/check_crosspoint_plugin.py` in CI. Not published: Plugin Hub
+  listing needs a public repository with the `crosspoint-plugin` topic and a
+  release, which the owner approves first. Not tried on a reader.
