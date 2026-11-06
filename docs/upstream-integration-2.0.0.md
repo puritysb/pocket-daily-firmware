@@ -139,8 +139,8 @@ existing books.
 - OPDS over HTTPS with credentials, including a cross-origin redirect.
 - Plugin catalog browse/install and a plugin HTTP request on device.
 - Companion Bluetooth/Nearby Sync and reading-position round trip.
-- Stock CrossPoint 2.0 → Pocket Daily SD update path with plugins installed,
-  and the downgrade/rollback path.
+- Stock CrossPoint 2.0 → Pocket Daily with plugins installed, on the X3, and
+  the downgrade/rollback path. (The X4 without plugins passed on 2026-11-06.)
 
 ## Plugin distribution plan
 
@@ -177,6 +177,8 @@ model and exact staged version); X3 without Wi-Fi offers Bluetooth setup; X4
 without Wi-Fi shows the Sync chooser. Read offline, or five minutes without an
 app request, returns to reading; the load's resave adds the marker, so it never
 repeats. Host tests cover the marker rule and line-height mapping with fault
-injection. Not tried on a reader: no stock 2.0 → Pocket Daily install has been
-run end to end.
+injection. Run end to end on the X4 on 2026-11-06 (stock 2.0.0 → Pocket Daily
+through the app and the reader's SD update): Sync opened by itself, the app
+reconnected, positions and settings carried over and the marker was written
+(`docs/stock-crosspoint-migration-test.md`). Not run on the X3.
 

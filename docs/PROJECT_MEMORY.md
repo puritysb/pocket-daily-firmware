@@ -214,9 +214,9 @@ App handoff owns iPhone TestFlight and full setup status.
 - Fresh X3 without settings offers authenticated BLE setup once, with Read
   offline and a five-minute idle exit. First boot after stock CrossPoint
   (settings file without fork markers) opens Sync once on X3/X4: saved Wi-Fi
-  joins and the app reconnects to the staged version; Read offline or five
-  minutes without an app request returns to reading. Stock 2.0 `lineHeight` and
-  `NotoSerif` carry over. Never recommend Pocket Daily via CrossPoint's
+  joins, the app reconnects; Read offline or 5 min idle returns to reading.
+  `lineHeight`/`NotoSerif` carry over. X4 stock 2.0 passed 2026-11-06
+  (`docs/stock-crosspoint-migration-test.md`); X3 not run. Never recommend Pocket Daily via CrossPoint's
   unlocker on locked units (see app `docs/READER_FIRST_USE.md`).
 - Wake cue replaces the old refresh with no animation dwell; an active panel
   waveform cannot be cancelled; input during BUSY is not established.
