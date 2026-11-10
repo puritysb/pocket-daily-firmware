@@ -67,7 +67,7 @@ int32_t pdui_copy_frame(const pdui_context* context, uint8_t* output, size_t cap
 // * provider and monitor were retired with the AgentDeck daemon: a profile may
 //   still name them, and they never produce a Home page.
 typedef struct {
-  uint8_t home_items[4];      // 1 reading, 2 my cards, 3 provider*, 4 monitor*, 5 daily word
+  uint8_t home_items[4];      // 1 reading, 2 my cards, 3 provider*, 4 monitor*, 5 daily word, 6–8 desk clock variants
   uint8_t home_count;         // 1..4, distinct
   uint8_t daily_word;         // 0/1
   uint8_t weather;            // 0 bottom, 1 top, 2 off
@@ -94,7 +94,12 @@ int32_t pdui_render_brief(pdui_context* context, const pdui_profile* profile, ui
 // Version 1 additive: sleep preferences. Existing render_brief keeps its old
 // cover-on, cue-off behavior. options: bit 0 WAKE cue, bit 1 book cover.
 // The cue uses the same portrait-anchored painter as the physical reader.
-enum { PDUI_SLEEP_WAKE_INDICATOR = 1u, PDUI_SLEEP_BOOK_COVER = 2u, PDUI_SLEEP_ALL = 3u };
+enum {
+  PDUI_SLEEP_WAKE_INDICATOR = 1u,
+  PDUI_SLEEP_BOOK_COVER = 2u,
+  PDUI_SLEEP_ALL = 3u,
+  PDUI_SLEEP_FULL_SCREEN_COVER = 4u
+};
 int32_t pdui_render_sleep_brief(pdui_context* context, const pdui_profile* profile, uint32_t samples,
                                 uint32_t options) PDUI_NOEXCEPT;
 
@@ -144,7 +149,8 @@ typedef struct {
 } pdui_layout_asset_info;
 int32_t pdui_get_layout_asset_info(const uint8_t* snapshot, size_t size, pdui_layout_asset_info* output) PDUI_NOEXCEPT;
 // Actual Home (surface0) or powered-off Brief (surface1), includes real cover,
-// localized asleep/wake labels and requested wake cue. options PDUI_SLEEP_ALL.
+// localized asleep/wake labels and requested wake cue. Pass PDUI_SLEEP_FULL_SCREEN_COVER only for readers advertising
+// it.
 int32_t pdui_render_reader_device(pdui_context* context, const pdui_profile* profile, const uint8_t* snapshot,
                                   size_t size, const char* revision, uint32_t surface, uint32_t options,
                                   const uint8_t* cover, size_t cover_size) PDUI_NOEXCEPT;

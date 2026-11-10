@@ -95,3 +95,11 @@ also remains unresolved. Both need explicit disposition for release sign-off.
 Create `pocket-v1.0.0` only after exact-image acceptance, green main CI and
 owner approval of the tagged commit and published artifact. Update the app's
 `FirmwareGuidance.minimumRecommended` together with that publication.
+
+## Publishing the stable image
+
+Download `production-release-assets` from successful push CI for the release
+commit on `main`. Install and verify that exact `firmware.bin` on both readers
+and record its SHA-256 with the hardware results. Create the annotated stable
+tag with the subject `Firmware-SHA256: <lowercase SHA-256>`. The tag workflow
+publishes those same CI assets after checking the checksum and embedded version.

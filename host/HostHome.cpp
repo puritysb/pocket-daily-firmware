@@ -194,6 +194,9 @@ int buildRows(const PocketDaily::DailyProfile::Profile& profile, const Sample& s
                        cards[i].card.title,
                        cards[i].summary.c_str()};
         break;
+      case RowSource::DeskClock:
+        rows[n++] = {.clockPage = true};
+        break;
       case RowSource::DailyWord:
         rows[n++] = {false, true, false, true, false, sample.word.cardId, sample.word.title, sample.word.question};
         break;

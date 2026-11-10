@@ -5,10 +5,12 @@ on:
       - 'pocket-v*'
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
   build-release:
+    if: contains(github.ref_name, '-beta.')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -100,3 +102,34 @@ jobs:
             $RELEASE_FLAGS \
             --generate-notes \
             --title "Pocket Daily Firmware ${GITHUB_REF_NAME}"
+
+  publish-validated-stable:
+    if: "!contains(github.ref_name, '-beta.')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download and publish the hardware-tested CI build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/^version = //p' platformio.ini | head -1)
+          TAG="$GITHUB_REF_NAME"
+          test "$TAG" = "pocket-v${VERSION}"
+          git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
+          test "$(git cat-file -t "refs/tags/$TAG")" = tag
+          COMMIT=$(git rev-parse "refs/tags/$TAG^{commit}")
+          EXPECTED=$(git for-each-ref --format='%(contents:subject)' "refs/tags/$TAG")
+          [[ "$EXPECTED" =~ ^Firmware-SHA256:\ [a-f0-9]{64}$ ]]
+          EXPECTED="${EXPECTED#Firmware-SHA256: }"
+          RUN=$(gh run list --workflow ci.yml --branch main --event push --commit "$COMMIT" \
+            --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          test -n "$RUN"
+          gh run download "$RUN" --name production-release-assets --dir release-assets
+          printf '%s  %s\n' "$EXPECTED" release-assets/firmware.bin | sha256sum -c -
+          strings release-assets/firmware.bin | grep -Fx "CrossPoint version: $VERSION" >/dev/null
+          (cd release-assets && sha256sum firmware.bin > firmware.bin.sha256)
+          gh release create "$TAG" release-assets/* LICENSE licenses/NimBLE-Arduino-LICENSE.txt \
+            licenses/NimBLE-Arduino-NOTICE.txt --verify-tag --latest --generate-notes \
+            --title "Pocket Daily Firmware $TAG"

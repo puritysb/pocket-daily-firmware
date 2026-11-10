@@ -495,3 +495,47 @@ TEST(LayoutInputs, CompactBoldBookTitleKeepsTheProgressGapClear) {
   }
   EXPECT_EQ(collisions, 0) << "Bold title spills into the progress clearance";
 }
+
+TEST(LayoutInputs, DeskClockSnapshotKeepsTheCapturedTimeAndChangesTheFrame) {
+  auto input = sample();
+  input.schema = 3;
+  input.clock.date = 20261110;
+  input.clock.minute = 9 * 60 + 41;
+  strcpy(input.clock.line, "Make time for a few pages.");
+  auto encoded = encode(input);
+  PocketDaily::Preview::LayoutInputs decoded;
+  ASSERT_TRUE(PocketDaily::Preview::decodeLayoutInputs(encoded.data(), encoded.size(), decoded));
+  EXPECT_EQ(decoded.clock.date, 20261110u);
+  EXPECT_EQ(decoded.clock.minute, 581);
+  EXPECT_STREQ(decoded.clock.line, input.clock.line);
+  Context context;
+  auto desk = profile();
+  desk.home_count = 1;
+  desk.home_items[0] = 8;
+  desk.home_items[1] = 0;
+  ASSERT_EQ(pdui_render_reader_home(context.value, &desk, encoded.data(), encoded.size(), ""), PDUI_OK);
+  const auto first = context.pixels();
+  ++input.clock.minute;
+  encoded = encode(input);
+  ASSERT_EQ(pdui_render_reader_home(context.value, &desk, encoded.data(), encoded.size(), ""), PDUI_OK);
+  EXPECT_NE(context.pixels(), first);
+  input.clock.minute = 1441;
+  EXPECT_FALSE(PocketDaily::Preview::validLayoutInputs(input));
+}
+
+TEST(LayoutInputs, DeskClockSelectsTheEarliestFutureTimedEvent) {
+  auto profile = PocketDaily::DailyProfile::defaults();
+  profile.homeCount = 1;
+  profile.homeItems[0] = PocketDaily::DailyProfile::HomeItem::ClockEvent;
+  PocketDaily::Glance glance{};
+  glance.eventCount = 3;
+  strcpy(glance.events[0].startHm, "10:30");
+  strcpy(glance.events[0].title, "Later");
+  strcpy(glance.events[1].startHm, "08:30");
+  strcpy(glance.events[1].title, "Already started");
+  strcpy(glance.events[2].startHm, "10:00");
+  strcpy(glance.events[2].title, "Next");
+  PocketDaily::Home::DeskClock clock;
+  clock.minute = 9 * 60 + 41;
+  EXPECT_STREQ(PocketDaily::Home::clockDetail(profile, clock, glance, {}).text, "10:00 Next  ·  19m");
+}

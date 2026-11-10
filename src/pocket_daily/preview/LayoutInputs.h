@@ -33,6 +33,7 @@ struct LayoutInputs {
   Home::OpenBook book{};
   AppGlance::Snapshot glance{};
   Card word{};
+  Home::DeskClock clock;
   char labels[LABEL_COUNT][LABEL_BYTES]{};
 };
 // Strict bounded versioned little-endian codec. No alignment casts, allocation,

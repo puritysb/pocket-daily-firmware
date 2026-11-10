@@ -22,6 +22,24 @@ class HalClock {
   // Call after BoardConfig has selected the active device.
   void begin();
 
+  struct CompanionTime {
+    time_t epoch;
+    int16_t offsetMinutes;
+  };
+  static constexpr int16_t UNSPECIFIED_OFFSET = INT16_MIN;
+  static constexpr uint32_t COMPANION_MIN_EPOCH = 1735689600;
+  static constexpr uint32_t COMPANION_MAX_EPOCH = 4102444800;
+  static constexpr bool supportsCompanionTime() {
+#if CONFIG_IDF_TARGET_ESP32C3
+    return true;
+#else
+    return false;
+#endif
+  }
+  // Desk Clock only. Never changes the firmware's system or trusted time.
+  bool setCompanionTime(uint32_t epoch, int16_t offsetMinutes);
+  CompanionTime companionTime(time_t systemTime) const;
+
   // True if an RTC is present on this device
   bool isAvailable() const { return _available; }
 

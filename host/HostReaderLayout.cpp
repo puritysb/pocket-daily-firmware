@@ -25,7 +25,7 @@ struct DrawContext {
 bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::LayoutInputs& in,
                         const PocketDaily::DailyProfile::Profile& profile, const UserCards& cards, const bool brief,
                         const bool sleepCover, const bool actual, const bool wakeIndicator, const uint8_t* cover,
-                        const size_t coverSize) {
+                        const size_t coverSize, const bool fullScreenCover) {
   using namespace PocketDaily;
   DrawContext context{in, hostEnv(renderer, cards), false, cover, coverSize};
   Home::Env env;
@@ -80,6 +80,7 @@ bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::Layou
     Home::BriefView view;
     view.isSleep = true;
     if (actual && wakeIndicator) view.contentTopInset = PowerWakeCue::portraitContentTop(in.isX3);
+    view.fullScreenCover = actual && fullScreenCover;
     view.sleepCover = sleepCover;
     view.glance = &in.glance.glance;
     view.reading = reading;
@@ -115,6 +116,9 @@ bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::Layou
             rows[n++] = {false, true, true, false, !card.image.empty(), card.card.cardId, "", ""};
           }
           break;
+        case Home::RowSource::DeskClock:
+          rows[n++] = {.clockPage = true};
+          break;
         case Home::RowSource::DailyWord:
           if (n == 0) firstCard = &in.word;
           rows[n++] = {false, true, false, true, false, in.word.cardId, "", ""};
@@ -139,6 +143,7 @@ bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::Layou
     view.snapshotStale = in.glanceStale;
     view.profile = profile;
     view.strings = Preview::layoutStrings(in);
+    view.clock = in.clock;
     Home::renderHome(renderer, view, env);
   }
   if (brief && actual && wakeIndicator) PowerWakeCue::draw(renderer, in.isX3, in.labels[21]);

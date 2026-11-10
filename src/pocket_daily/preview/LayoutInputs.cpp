@@ -188,10 +188,15 @@ void fields(IO& io, S& s) {
   io.text(s.word.context);
   // Choices are not drawn by Home/Brief and never copied into the snapshot.
   for (size_t i = 0; i < (s.schema == 1 ? 20u : LABEL_COUNT); ++i) io.text(s.labels[i]);
-  if (s.schema == 2) {
+  if (s.schema >= 2) {
     io.number(s.coverKey);
     io.number(s.coverSize);
     io.number(s.coverCrc);
+  }
+  if (s.schema == 3) {
+    io.number(s.clock.date);
+    io.number(s.clock.minute);
+    io.text(s.clock.line);
   }
 }
 bool hex(const char* value, size_t length, bool upper) {
@@ -220,9 +225,16 @@ void clearLayoutInputs(LayoutInputs& out) {
 }
 
 bool validLayoutInputs(const LayoutInputs& s) {
-  if ((s.schema != 1 && s.schema != 2) || s.coverSize > 131072 || (!s.coverSize && (s.coverKey || s.coverCrc)) ||
+  if ((s.schema < 1 || s.schema > 3) || s.coverSize > 131072 || (!s.coverSize && (s.coverKey || s.coverCrc)) ||
       (s.coverSize && !s.coverKey))
     return false;
+  if (s.schema == 3) {
+    const auto date = s.clock.date;
+    const auto month = date / 100 % 100;
+    const auto day = date % 100;
+    if (s.clock.minute > 1440 || (s.clock.minute == 1440) != (date == 0)) return false;
+    if (date && (date < 20231114 || date > 99991231 || month < 1 || month > 12 || day < 1 || day > 31)) return false;
+  }
   // Encoding is also our complete bounded-string validator.
   Writer strings{nullptr, MAX_BYTES};
   fields(strings, s);
@@ -278,7 +290,7 @@ size_t encodeLayoutInputs(const LayoutInputs& in, uint8_t* bytes, size_t capacit
 
 bool decodeLayoutInputs(const uint8_t* bytes, size_t size, LayoutInputs& out) {
   clearLayoutInputs(out);
-  if (!bytes || size < 12 || size > MAX_BYTES || memcmp(bytes, "PDLI", 4) != 0 || (bytes[4] != 1 && bytes[4] != 2) ||
+  if (!bytes || size < 12 || size > MAX_BYTES || memcmp(bytes, "PDLI", 4) != 0 || (bytes[4] < 1 || bytes[4] > 3) ||
       bytes[5] || bytes[6] || bytes[7])
     return false;
   Reader checksum{bytes + size - 4, 4};

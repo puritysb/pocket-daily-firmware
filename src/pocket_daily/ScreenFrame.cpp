@@ -1,6 +1,7 @@
 #include "ScreenFrame.h"
 
 #include <GfxRenderer.h>
+#include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalSystem.h>
 #include <I18n.h>
@@ -69,6 +70,9 @@ bool buildHomeRows(Frame& frame) {
           if (!card.card.cardId[0]) continue;
           append({false, true, true, false, card.imagePath[0] != '\0', card.card.cardId, "", ""});
         }
+        break;
+      case Home::RowSource::DeskClock:
+        append({.clockPage = true});
         break;
       case Home::RowSource::DailyWord:
         if (n == 0) firstIsWord = true;
@@ -140,6 +144,10 @@ static LoadResult loadFrameInputs(const Surface surface, const DailyProfile::Pro
   const time_t now = time(nullptr);
   Home::rollGlanceToToday(frame->glance, now);
   frame->glanceStale = HomeDraw::snapshotIsStale(frame->glance.savedEpoch, now);
+  if (isDeskClock(profile.clockPage()) || profile.shows(DailyProfile::HomeItem::ClockCompact) || includeHiddenWord) {
+    const auto clock = halClock.companionTime(now);
+    frame->clock = Home::readDeskClock(frame->glance, clock.epoch, clock.offsetMinutes);
+  }
 
   // Active My cards: the same verified snapshot the reader loads on entry.
   switch (frame->cards.load(nullptr, HalSystem::feedWatchdogIfRegistered)) {
@@ -204,6 +212,10 @@ bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* conte
       return false;
     case Surface::Home: {
       if (!visitStrings(context, visit, {s.home, s.select, s.articles, s.sync})) return false;
+      if (frame.rowCount > 0 && frame.rows[0].clockPage) {
+        const auto detail = Home::clockDetail(profile, frame.clock, g, s);
+        return visitStrings(context, visit, {s.library, detail.label, detail.text});
+      }
       const Home::Row* first = frame.rowCount ? &frame.rows[0] : nullptr;
       if (first && first->reading) {
         if (!visitStrings(context, visit, {s.continueReading, frame.book.title, frame.book.author})) return false;
@@ -312,6 +324,7 @@ bool drawFrame(GfxRenderer& renderer, const Frame& frame, const int cjkFont, Hea
       view.snapshotStale = frame.glanceStale;
       view.profile = frame.profile;
       view.strings = Home::deviceStrings();
+      view.clock = frame.clock;
       Home::renderHome(renderer, view, env);
       break;
     }

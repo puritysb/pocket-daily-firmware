@@ -1,6 +1,7 @@
 #include "pocket_daily/web/PocketStatus.h"
 
 #include <ArduinoJson.h>
+#include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
@@ -71,9 +72,15 @@ String buildStatusJson(const StatusInputs& in) {
     transfer["percent"] = feedback.percent();
   }
   if (in.screenPresentation) doc["screenPresentation"] = 1;
-  if (in.layoutInputs && isSyncProfile(in.profile)) doc["layoutInputs"] = 2;
+  if (in.layoutInputs && isSyncProfile(in.profile)) {
+    doc["layoutInputs"] = 2;
+    doc["fullScreenSleepCover"] = 1;
+  }
   // Pocket Daily profile endpoints (docs/pocket-profile-v1.md) exist on Sync.
-  if (isSyncProfile(in.profile)) doc["pocketProfile"] = 1;
+  if (isSyncProfile(in.profile)) {
+    doc["pocketProfile"] = 1;
+    if (HalClock::supportsCompanionTime()) doc["deskClockSync"] = 1;
+  }
   // POST /api/pocket/v1/glance (docs/pocket-glance-v1.md) sits beside it.
   if (isSyncProfile(in.profile)) doc["pocketGlance"] = 1;
   // GET /api/pocket/v1/content/file: read-only published revision files.
@@ -95,8 +102,8 @@ String buildStatusJson(const StatusInputs& in) {
   doc["totalHeap"] = ESP.getHeapSize();
   doc["largestFreeBlock"] = ESP.getMaxAllocHeap();
   doc["minimumFreeHeap"] = ESP.getMinFreeHeap();
-  // 2: list/delete/storage plus piece download (docs/reader-files.md).
-  if (isSyncProfile(in.profile)) doc["readerFiles"] = 2;
+  // 3: list/delete/storage plus book and image piece download (docs/reader-files.md).
+  if (isSyncProfile(in.profile)) doc["readerFiles"] = 4;
   // GET/POST /api/pocket/v1/reading (docs/reading-progress-v1.md), Sync profiles only.
   if (isSyncProfile(in.profile)) doc["readingProgress"] = 1;
   // GET /api/fonts, POST /api/fonts/delete and font-only /api/settings

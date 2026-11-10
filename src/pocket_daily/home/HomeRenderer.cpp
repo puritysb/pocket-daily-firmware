@@ -35,6 +35,14 @@ int homeRowSources(const DailyProfile::Profile& profile, const RowAvailability& 
       case HomeItem::Word:
         out[n++] = RowSource::DailyWord;
         break;
+      case HomeItem::ClockEvent:
+      case HomeItem::ClockWeather:
+      case HomeItem::ClockLine:
+      case HomeItem::ClockLandscape:
+        out[n++] = RowSource::DeskClock;
+        break;
+      case HomeItem::ClockCompact:
+        break;
       case HomeItem::Provider:
       case HomeItem::Monitor:
         // Retired with the AgentDeck daemon: still valid in stored profiles,
@@ -102,6 +110,138 @@ void drawTitleCover(const GfxRenderer& renderer, const Env& env, const Reading& 
   }
 }
 
+ClockDetail clockDetail(const DailyProfile::Profile& profile, const DeskClock& clock, const Glance& glance,
+                        const Strings& s) {
+  using DailyProfile::HomeItem;
+  switch (profile.clockPage()) {
+    case HomeItem::ClockLandscape:
+    case HomeItem::ClockEvent: {
+      ClockDetail detail{s.nextEvent};
+      const Event* next = nullptr;
+      int earliest = 1440;
+      if (clock.minute < 1440) {
+        for (uint8_t i = 0; i < glance.eventCount && i < Glance::EVENT_CAP; ++i) {
+          const int start = GlanceFormat::hmToMinutes(glance.events[i].startHm);
+          if (start < clock.minute || start >= earliest || !glance.events[i].title[0]) continue;
+          earliest = start;
+          next = &glance.events[i];
+        }
+      }
+      if (next)
+        snprintf(detail.text, sizeof(detail.text), "%s %s  ·  %dm", next->startHm, next->title,
+                 earliest - clock.minute);
+      else
+        snprintf(detail.text, sizeof(detail.text), "%s", s.noEvents);
+      return detail;
+    }
+    case HomeItem::ClockWeather: {
+      ClockDetail detail{s.weather};
+      if (!glance.weather.valid)
+        snprintf(detail.text, sizeof(detail.text), "%s", s.noWeather);
+      else if (!GlanceFormat::formatRainLine(detail.text, sizeof(detail.text), glance.weather))
+        GlanceFormat::formatWeatherNow(detail.text, sizeof(detail.text), glance.weather);
+      return detail;
+    }
+    default: {
+      ClockDetail detail{s.today};
+      snprintf(detail.text, sizeof(detail.text), "%s", clock.line);
+      return detail;
+    }
+  }
+}
+
+namespace {
+// Compact monochrome numeral masks. Run lengths draw as rectangles at the
+// same scale on both panels, independent of loaded fonts or image caches.
+constexpr uint8_t kDigits[10][7] = {
+    {14, 17, 19, 21, 25, 17, 14}, {4, 12, 4, 4, 4, 4, 14},    {14, 17, 1, 2, 4, 8, 31},     {30, 1, 1, 14, 1, 1, 30},
+    {2, 6, 10, 18, 31, 2, 2},     {31, 16, 16, 30, 1, 1, 30}, {14, 16, 16, 30, 17, 17, 14}, {31, 1, 2, 4, 8, 8, 8},
+    {14, 17, 17, 14, 17, 17, 14}, {14, 17, 17, 15, 1, 1, 14}};
+
+void drawDeskClock(GfxRenderer& r, const HomeView& view, const Env& env, const int headerHeight) {
+  const int w = r.getScreenWidth();
+  const int h = r.getScreenHeight();
+  const int pad = env.metrics.contentSidePadding;
+  const int digitCount = view.clock.second < 60 ? 6 : 4;
+  const int widthInUnits = digitCount * 10 - 3;
+  const int unit = std::max(1, std::min((w - 2 * pad) / widthInUnits, h / (w > h ? 31 : 25)));
+  const int tile = 8 * unit;
+  const int top = w > h ? h / 5 : h * 3 / 10;
+  const int left = (w - widthInUnits * unit) / 2;
+  const bool valid = view.clock.minute < 1440;
+  const int hour = view.clock.minute / 60;
+  const int minute = view.clock.minute % 60;
+  const int second = view.clock.second;
+  const int numbers[] = {hour / 10, hour % 10, minute / 10, minute % 10, second / 10, second % 10};
+  const int priorHour = view.clock.foldingFromMinute / 60;
+  const int priorMinute = view.clock.foldingFromMinute % 60;
+  const int priorSecond = view.clock.foldingFromSecond;
+  const int prior[] = {priorHour / 10,   priorHour % 10,   priorMinute / 10,
+                       priorMinute % 10, priorSecond / 10, priorSecond % 10};
+
+  r.clearScreen();
+  if (env.drawHeader)
+    env.drawHeader(env.context, r, 0, env.metrics.topPadding, w, headerHeight, view.strings.pocketDaily, nullptr);
+  for (int index = 0; index < digitCount; ++index) {
+    const int x = left + (index * 9 + index / 2 * 2) * unit;
+    const bool hasPrevious = index < 4 ? view.clock.foldingFromMinute < 1440 : priorSecond < 60;
+    const bool folding = hasPrevious && prior[index] != numbers[index];
+    const int glyphX = x + (tile - 5 * unit) / 2;
+    const int glyphY = top + 2 * unit;
+    const int hinge = top + 11 * unit / 2;
+    r.fillRect(x, top, tile, 11 * unit);
+    if (valid) {
+      for (int row = 0; row < 7; ++row) {
+        // The new upper leaf is exposed first. The lower leaf still carries
+        // the previous digit until the moving flap settles.
+        const int numeral = folding && row >= 3 ? prior[index] : numbers[index];
+        for (int col = 0; col < 5; ++col)
+          if (kDigits[numeral][row] & (1u << (4 - col)))
+            r.fillRect(glyphX + col * unit, glyphY + row * unit, unit, unit, false);
+      }
+    } else {
+      r.fillRect(glyphX + unit, glyphY + 3 * unit, 3 * unit, unit, false);
+    }
+    if (folding) {
+      const int flapDepth = std::max(2, unit / 2);
+      r.fillRect(x + 1, hinge + 1, tile - 2, flapDepth);
+      r.drawLine(x + unit, hinge + flapDepth, x + tile - unit - 1, hinge + flapDepth, false);
+    }
+    r.fillRect(x, hinge, tile, 1, false);
+  }
+  if (!view.clock.hideColon) {
+    for (int group = 1; group < digitCount / 2; ++group) {
+      const int center = left + (group * 20 - 2) * unit;
+      r.fillRect(center, top + 4 * unit, unit, unit);
+      r.fillRect(center, top + 7 * unit, unit, unit);
+    }
+  }
+
+  char calendar[18]{};
+  const unsigned value = view.clock.date;
+  if (valid && value >= 19700101 && value <= 99991231) {
+    char date[11]{}, weekday[4]{};
+    snprintf(date, sizeof(date), "%04u-%02u-%02u", value / 10000, (value / 100) % 100, value % 100);
+    GlanceFormat::formatWeekday(weekday, sizeof(weekday), date);
+    snprintf(calendar, sizeof(calendar), "%s  %s", date, weekday);
+  }
+  const int dateY = top + 13 * unit;
+  r.drawCenteredText(UI_12_FONT_ID, dateY, calendar, true, EpdFontFamily::BOLD);
+  const int dividerY = dateY + r.getLineHeight(UI_12_FONT_ID) + 2 * unit;
+  r.drawLine(pad, dividerY, w - pad, dividerY);
+  const auto detail = clockDetail(view.profile, view.clock, *view.glance, view.strings);
+  const int labelY = dividerY + unit;
+  r.drawCenteredText(env.text.resolve(detail.label, SMALL_FONT_ID), labelY, detail.label);
+  const int body = env.text.resolve(detail.text, UI_12_FONT_ID);
+  const auto fitted = r.truncatedText(body, detail.text, w - 2 * pad);
+  r.drawCenteredText(body, labelY + r.getLineHeight(SMALL_FONT_ID) + unit / 2, fitted.c_str());
+  const auto& s = view.strings;
+  if (view.count > 1) HomeDraw::drawPocketSideChevrons(r, view.isX3);
+  HomeDraw::drawPocketActionStrip(r, view.isX3, env.labels, s.home, view.reading.valid ? s.select : s.library,
+                                  s.articles, s.sync);
+}
+}  // namespace
+
 void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   const auto& m = env.metrics;
   const auto& s = view.strings;
@@ -131,8 +271,17 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   using HomeDraw::drawWrappedFixed;
   using HomeDraw::formatWeatherSnapshotDate;
 
-  renderer.clearScreen();
   const int headerHeight = std::min(m.headerHeight, line12 + m.verticalSpacing * 2);
+  const int selectedIndex = view.selected >= 0 && view.selected < n ? view.selected : 0;
+  if (view.profile.deskClock() || (n > 0 && rows[selectedIndex].clockPage)) {
+    const auto orientation = renderer.getOrientation();
+    if (view.profile.clockPage() == DailyProfile::HomeItem::ClockLandscape)
+      renderer.setOrientation(GfxRenderer::Orientation::LandscapeClockwise);
+    drawDeskClock(renderer, view, env, headerHeight);
+    renderer.setOrientation(orientation);
+    return;
+  }
+  renderer.clearScreen();
   if (env.drawHeader) env.drawHeader(env.context, renderer, 0, m.topPadding, w, headerHeight, s.pocketDaily, nullptr);
   const int contentTop = m.topPadding + headerHeight + m.verticalSpacing;
   const int hintTop = pageH - renderer.getLineHeight(SMALL_FONT_ID) - 16;
@@ -140,7 +289,6 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
 
   // The row list is also the visible carousel: the current book and carried
   // study items use the same large content area instead of competing cards.
-  const int selectedIndex = view.selected >= 0 && view.selected < n ? view.selected : 0;
   const int selectedPocketIndex = n > 0 && rows[selectedIndex].pocket ? selectedIndex : -1;
   char carouselPosition[16] = {0};
   if (n > 1) snprintf(carouselPosition, sizeof(carouselPosition), "%d/%d", selectedIndex + 1, n);
@@ -367,10 +515,20 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   int primaryW = w - pad * 2;
   int primaryH = availableH;
   auto drawPrimary = [&](int x, int y, int cw, int ch) {
-    if (n > 0 && rows[selectedIndex].reading)
+    if (n > 0 && rows[selectedIndex].reading) {
+      if (view.profile.shows(DailyProfile::HomeItem::ClockCompact)) {
+        char time[8] = "--:--";
+        if (view.clock.minute < 1440)
+          snprintf(time, sizeof(time), "%02u:%02u", view.clock.minute / 60u, view.clock.minute % 60u);
+        const int height = line12 + 12;
+        centeredIn(UI_12_FONT_ID, x, cw, y + 4, time, EpdFontFamily::BOLD);
+        y += height;
+        ch -= height;
+      }
       drawReading(x, y, cw, ch);
-    else
+    } else {
       drawStudy(x, y, cw, ch);
+    }
   };
   // Weather/forecast panel placement from the profile; Off gives its space to
   // the primary item.
@@ -432,6 +590,14 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   using HomeDraw::formatWeatherSnapshotDate;
 
   renderer.clearScreen();
+  // A reading-only sleep layout uses the whole panel for the cover. Keep the
+  // ordinary Brief when no artwork is available or more sections are selected.
+  using PocketDaily::DailyProfile::SleepSection;
+  const auto& profile = view.profile;
+  if (isSleep && view.fullScreenCover && view.sleepCover && renderReadingSnapshot.valid && profile.sleepCount == 1 &&
+      profile.sleeps(SleepSection::Reading) && env.drawCover && env.drawCover(env.context, renderer, 0, 0, w, pageH)) {
+    return;
+  }
   if (env.drawHeader)
     env.drawHeader(env.context, renderer, 0, m.topPadding, w, m.headerHeight, s.pocketDaily, view.headerMeta);
 
@@ -655,8 +821,6 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   // book, one carried study item, weather and today's schedule.
   // Sleep sections and their order come from the profile (defaults: reading,
   // study, weather, today). Study stays a fallback while a book is shown.
-  using PocketDaily::DailyProfile::SleepSection;
-  const auto& profile = view.profile;
   const bool studyShown = !renderReadingSnapshot.valid || !profile.sleeps(SleepSection::Reading);
   if (isSleep && pageH > w) {
     // The retained portrait is a glance, not a dashboard; sections that no

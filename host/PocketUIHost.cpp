@@ -345,6 +345,9 @@ int32_t pdui_render_home(pdui_context* context, const pdui_profile* profile, uin
     view.reading = sample.reading;
     view.glance = &sample.glance;
     view.profile = parsed;
+    view.clock.date = 20261110;
+    view.clock.minute = 9 * 60 + 41;
+    snprintf(view.clock.line, sizeof(view.clock.line), "Keep one small promise today.");
     PocketDaily::Home::renderHome(context->renderer, view, PocketUIHost::hostEnv(context->renderer, context->cards));
     if (context->activeFont().boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
     context->frameValid = true;
@@ -452,7 +455,8 @@ int32_t renderReaderLayout(pdui_context* context, const pdui_profile* profile, c
   PocketDaily::Preview::LayoutInputs in;
   if (!profile || !toProfile(*profile, parsed) || !PocketDaily::Preview::decodeLayoutInputs(bytes, size, in) ||
       !revision || strnlen(revision, 65) > 64 || strcmp(revision, in.contentRevision) != 0 ||
-      context->cards.size() != in.cardCount || (options & ~(actual ? PDUI_SLEEP_ALL : PDUI_SLEEP_BOOK_COVER)) ||
+      context->cards.size() != in.cardCount ||
+      (options & ~(actual ? (PDUI_SLEEP_ALL | PDUI_SLEEP_FULL_SCREEN_COVER) : PDUI_SLEEP_BOOK_COVER)) ||
       context->renderer.getOrientation() != GfxRenderer::Orientation::Portrait ||
       context->panel.getDisplayWidth() != in.physicalWidth || context->panel.getDisplayHeight() != in.physicalHeight ||
       (brief && parsed.sleepMode != PocketDaily::DailyProfile::SleepMode::Brief))
@@ -464,13 +468,14 @@ int32_t renderReaderLayout(pdui_context* context, const pdui_profile* profile, c
   // maps in a destructor: map insertion can throw and a noexcept destructor
   // would terminate. Every sample/content render selects its own mode too.
   if (actual &&
-      (in.schema != 2 || coverSize != in.coverSize ||
+      (in.schema < 2 || coverSize != in.coverSize ||
        (coverSize && (!cover || ~PocketDaily::Content::contentCrcUpdate(UINT32_MAX, cover, coverSize) != in.coverCrc))))
     return PDUI_INVALID_IMAGE;
   selectFontMode(*context, !actual);
   if (!PocketUIHost::renderReaderLayout(context->renderer, in, parsed, context->cards, brief,
                                         (options & PDUI_SLEEP_BOOK_COVER) != 0, actual,
-                                        (options & PDUI_SLEEP_WAKE_INDICATOR) != 0, cover, coverSize) ||
+                                        (options & PDUI_SLEEP_WAKE_INDICATOR) != 0, cover, coverSize,
+                                        (options & PDUI_SLEEP_FULL_SCREEN_COVER) != 0) ||
       context->font.boundedReadFailed() || !context->panel.guardsIntact())
     return PDUI_RENDER_FAILED;
   context->frameValid = true;
