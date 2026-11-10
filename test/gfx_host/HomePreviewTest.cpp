@@ -682,3 +682,149 @@ TEST(BriefHeader, ResolvedFontLineBoxSeparatesHeaderAndBody) {
   EXPECT_GE(coverY, 8 + 48 + 12 + 42 + 6);
   EXPECT_TRUE(panel.guardsIntact());
 }
+
+TEST(HomeDeskClock, BlinkAndFoldOnlyChangeTheirOwnRegions) {
+  for (bool x3 : {false, true}) {
+    HalDisplay panel(x3 ? 792 : 800, x3 ? 528 : 480);
+    GfxRenderer renderer(panel);
+    renderer.begin();
+    PocketUIHost::registerUiFonts(renderer);
+    renderer.setOrientation(GfxRenderer::Portrait);
+    PocketDaily::Glance glance{};
+    PocketDaily::Home::HomeView view{};
+    view.isX3 = x3;
+    view.glance = &glance;
+    view.profile.homeCount = 1;
+    view.profile.homeItems[0] = PocketDaily::DailyProfile::HomeItem::ClockEvent;
+    view.clock.date = 20261110;
+    view.clock.minute = 581;
+    PocketDaily::Home::Env env{};
+    env.metrics = {5, 84, 10, 20, 30};
+    PocketDaily::Home::renderHome(renderer, view, env);
+    const std::vector<uint8_t> visible(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize());
+    view.clock.hideColon = true;
+    PocketDaily::Home::renderHome(renderer, view, env);
+    int changed = 0;
+    for (size_t i = 0; i < visible.size(); ++i)
+      changed += __builtin_popcount(static_cast<unsigned>(visible[i] ^ panel.getFrameBuffer()[i]));
+    const int unit = (renderer.getScreenWidth() - 2 * env.metrics.contentSidePadding) / 37;
+    EXPECT_EQ(changed, 2 * unit * unit);
+
+    view.clock.hideColon = false;
+    view.clock.minute = 582;
+    PocketDaily::Home::renderHome(renderer, view, env);
+    const std::vector<uint8_t> settled(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize());
+    view.clock.foldingFromMinute = 581;
+    PocketDaily::Home::renderHome(renderer, view, env);
+    const int left = (renderer.getScreenWidth() - 37 * unit) / 2;
+    const int stride = panel.getDisplayWidthBytes();
+    bool folded = false;
+    for (int row = 0; row < panel.getDisplayHeight(); ++row) {
+      if (memcmp(settled.data() + row * stride, panel.getFrameBuffer() + row * stride, stride) == 0) continue;
+      folded = true;
+      const int logicalX = renderer.getScreenWidth() - 1 - row;
+      EXPECT_GE(logicalX, left + 29 * unit);
+      EXPECT_LT(logicalX, left + 37 * unit);
+      const int cardTop = renderer.getScreenHeight() * 3 / 10;
+      for (const int edge : {cardTop, cardTop + 11 * unit - 1}) {
+        const auto index = row * stride + edge / 8;
+        const int mask = 0x80 >> (edge % 8);
+        EXPECT_EQ(settled[index] & mask, panel.getFrameBuffer()[index] & mask);
+      }
+    }
+    EXPECT_TRUE(folded);
+    EXPECT_TRUE(panel.guardsIntact());
+  }
+}
+
+TEST(HomeDeskClock, CompactStaysOnReadingAndLandscapeRestoresOrientation) {
+  using namespace PocketDaily;
+  for (bool x3 : {false, true}) {
+    HalDisplay panel(x3 ? 792 : 800, x3 ? 528 : 480);
+    GfxRenderer renderer(panel);
+    renderer.begin();
+    PocketUIHost::registerUiFonts(renderer);
+    Glance glance{};
+    Home::HomeView view{};
+    view.isX3 = x3;
+    view.glance = &glance;
+    view.profile = DailyProfile::defaults();
+    view.profile.homeItems[1] = DailyProfile::HomeItem::ClockCompact;
+    view.profile.homeItems[2] = DailyProfile::HomeItem::ClockLandscape;
+    view.profile.homeCount = 3;
+    Home::RowSource sources[DailyProfile::HOME_ITEM_CAP];
+    ASSERT_EQ(Home::homeRowSources(view.profile, {}, sources), 2);
+    EXPECT_EQ(sources[0], Home::RowSource::Reading);
+    EXPECT_EQ(sources[1], Home::RowSource::DeskClock);
+
+    const Home::Row rows[] = {{.reading = true}, {.clockPage = true}};
+    view.rows = rows;
+    view.count = 2;
+    view.reading = {true, "Example book", "Author", 25};
+    view.clock.date = 20261110;
+    view.clock.minute = 581;
+    Home::Env env{};
+    env.metrics = {5, 84, 10, 20, 30};
+    int covers = 0;
+    env.context = &covers;
+    env.drawCover = [](void* context, GfxRenderer&, int, int, int, int) {
+      ++*static_cast<int*>(context);
+      return true;
+    };
+    auto capture = [&] {
+      Home::renderHome(renderer, view, env);
+      return std::vector<uint8_t>(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize());
+    };
+    const auto compact = capture();
+    ++view.clock.minute;
+    EXPECT_NE(compact, capture());
+    EXPECT_EQ(covers, 2);
+
+    view.selected = 1;
+    const auto landscape = capture();
+    EXPECT_EQ(renderer.getOrientation(), GfxRenderer::Portrait);
+    view.profile.homeItems[2] = DailyProfile::HomeItem::ClockEvent;
+    EXPECT_NE(landscape, capture());
+    EXPECT_EQ(covers, 2);
+    EXPECT_TRUE(panel.guardsIntact());
+  }
+}
+
+TEST(HomeDeskClock, SecondFoldOnlyChangesTheAdvancingDigit) {
+  for (bool x3 : {false, true}) {
+    HalDisplay panel(x3 ? 792 : 800, x3 ? 528 : 480);
+    GfxRenderer renderer(panel);
+    renderer.begin();
+    PocketUIHost::registerUiFonts(renderer);
+    renderer.setOrientation(GfxRenderer::Portrait);
+    PocketDaily::Glance glance{};
+    PocketDaily::Home::HomeView view{};
+    view.isX3 = x3;
+    view.glance = &glance;
+    view.profile.homeCount = 1;
+    view.profile.homeItems[0] = PocketDaily::DailyProfile::HomeItem::ClockEvent;
+    view.clock.date = 20261110;
+    view.clock.minute = 582;
+    view.clock.second = 42;
+    PocketDaily::Home::Env env{};
+    env.metrics = {5, 84, 10, 20, 30};
+    PocketDaily::Home::renderHome(renderer, view, env);
+    const std::vector<uint8_t> settled(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize());
+    view.clock.foldingFromSecond = 41;
+    PocketDaily::Home::renderHome(renderer, view, env);
+    const int width = renderer.getScreenWidth();
+    const int unit = (width - 2 * env.metrics.contentSidePadding) / 57;
+    const int left = (width - 57 * unit) / 2;
+    const int stride = panel.getDisplayWidthBytes();
+    bool folded = false;
+    for (int row = 0; row < panel.getDisplayHeight(); ++row) {
+      if (memcmp(settled.data() + row * stride, panel.getFrameBuffer() + row * stride, stride) == 0) continue;
+      folded = true;
+      const int logicalX = width - 1 - row;
+      EXPECT_GE(logicalX, left + 49 * unit);
+      EXPECT_LT(logicalX, left + 57 * unit);
+    }
+    EXPECT_TRUE(folded);
+    EXPECT_TRUE(panel.guardsIntact());
+  }
+}

@@ -228,3 +228,43 @@ screens remain an outline; their private image is not fetched for preview.
 - No push send while an upload owns the heap; a dead peer drops the
   subscription instead of queuing sends.
 - Nothing in this protocol touches the OTA/update path or persists data.
+
+
+### Full-screen cover in the retained Daily Brief
+
+Readers that advertise `fullScreenSleepCover: 1` alongside `layoutInputs: 2`
+fit the cached book cover to the panel when Daily Brief has only the Reading
+section and the book-cover preference is on. The artwork keeps its aspect
+ratio. The wake cue follows its own preference. Without cached artwork,
+or with additional sections, the reader draws the regular Daily Brief.
+Sync presentation continues to draw its title-card preview. The host's
+`pdui_render_reader_device` accepts `PDUI_SLEEP_FULL_SCREEN_COVER` to reproduce
+the new retained layout. Leave the flag off for older readers.
+
+
+### Desk Clock preview snapshot
+
+`GET /api/pocket/v1/layout-inputs?deviceID=…&schema=3` appends the reader's
+local date (`uint32`, YYYYMMDD), minute of day (`uint16`, 1440 for unset), and
+localized daily line (the existing bounded string format, up to 95 bytes)
+before the CRC. The default remains schema 2. Older readers may return
+schema 1 or 2. The host shares the device painter and uses the captured time
+when rendering a clock profile.
+
+The awake Desk Clock alternates the colon every two seconds and paints one
+folded intermediate frame on a consecutive minute change. Sync presentation
+and captured previews show a settled frame. The default Home remains Continue
+Reading, and neither clock update wakes a sleeping reader.
+
+### Companion time for Desk Clock
+
+X3 and X4 Sync sessions advertise `deskClockSync: 1`. The companion sends
+`POST /api/pocket/v1/clock?deviceID=…` with exactly two integer fields,
+`utcEpoch` (UTC seconds in 2025–2099) and `utcOffsetMinutes` (−720…840).
+The reader validates identity, admission and both fields, then returns 204.
+The current offset is written to NVS only when it changes. The displayed
+time is anchored to the retained hardware counter for software restarts and
+deep sleep. After loss of that counter, the clock uses the system epoch with
+the saved offset until the next synchronization. The offset includes the
+companion's current daylight-saving adjustment. No timezone rules or device
+credentials are sent. The display anchor cannot alter system or trusted time.

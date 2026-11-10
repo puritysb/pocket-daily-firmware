@@ -61,7 +61,11 @@ bool operator==(const Profile& a, const Profile& b) {
 }
 
 bool valid(const Profile& p) {
-  return distinctKnown(p.homeItems, p.homeCount, HOME_ITEM_CAP, HOME_ITEM_MAX_ID) &&
+  if (!distinctKnown(p.homeItems, p.homeCount, HOME_ITEM_CAP, HOME_ITEM_MAX_ID)) return false;
+  unsigned clockPages = 0;
+  for (uint8_t i = 0; i < p.homeCount; ++i)
+    if (isDeskClock(p.homeItems[i])) ++clockPages;
+  return clockPages <= 1 && (!p.shows(HomeItem::ClockCompact) || p.shows(HomeItem::Reading)) &&
          distinctKnown(p.sleepSections, p.sleepCount, SLEEP_SECTION_CAP, SLEEP_SECTION_MAX_ID) &&
          static_cast<uint8_t>(p.weather) <= 2 && static_cast<uint8_t>(p.sleepMode) <= 1;
 }

@@ -31,6 +31,34 @@ void copyBookText(char (&out)[N], const char* text) {
 }
 }  // namespace
 
+DeskClock readDeskClock(const AppGlance::Snapshot& glance, const time_t now, const int16_t companionOffset) {
+  DeskClock clock;
+  if (now < AppGlance::MIN_EPOCH) return clock;
+  struct tm local{};
+  if (companionOffset != INT16_MIN || glance.savedEpoch) {
+    const int16_t offset = companionOffset != INT16_MIN ? companionOffset : glance.utcOffsetMinutes;
+    const time_t adjusted = now + offset * 60;
+    if (!gmtime_r(&adjusted, &local)) return clock;
+  } else if (!localtime_r(&now, &local)) {
+    return clock;
+  }
+  clock.date = (local.tm_year + 1900) * 10000u + (local.tm_mon + 1) * 100u + local.tm_mday;
+  clock.minute = local.tm_hour * 60 + local.tm_min;
+  const char* line = tr(STR_POCKET_CLOCK_LINE_PROMISE);
+  switch (local.tm_yday % 3) {
+    case 1:
+      line = tr(STR_POCKET_CLOCK_LINE_PAGES);
+      break;
+    case 2:
+      line = tr(STR_POCKET_CLOCK_LINE_PAUSE);
+      break;
+    default:
+      break;
+  }
+  snprintf(clock.line, sizeof(clock.line), "%s", line);
+  return clock;
+}
+
 Strings deviceStrings() {
   Strings s;
   s.pocketDaily = tr(STR_POCKET_DAILY);

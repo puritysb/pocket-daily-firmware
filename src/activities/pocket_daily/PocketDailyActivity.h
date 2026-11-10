@@ -10,6 +10,7 @@
 // Concurrency: input runs on the loop task and paints on the render task. The
 // render lock (RenderLock) guards the few members both touch after onEnter.
 //
+#include <atomic>
 #include <cstring>
 #include <string>
 
@@ -48,13 +49,13 @@ class PocketDailyActivity final : public Activity {
     char activity[192];
     bool pocket;
     bool reading;
-    bool mine;      // one of the companion's cards
-    bool word;      // the firmware daily word
+    bool mine;  // one of the companion's cards
+    bool word;  // the firmware daily word
+    bool clockPage;
     bool hasImage;  // mine: the card carries an image
   };
 
-  // Local reading + three card slots. The profile orders these sources; a
-  // later source is dropped when full.
+  // Room for all Home sources, including the local word and companion cards.
   static constexpr int kOverviewCap = PocketDaily::Home::ROW_CAP;
   // Scratch lives in the heap-allocated Activity object, not either task stack.
   // Separate render/loop copies prevent cross-task races.
@@ -128,6 +129,14 @@ class PocketDailyActivity final : public Activity {
   static constexpr uint32_t kDecisionCooldownMs = 400;  // debounce a card choice
 
   ViewMode viewMode = ViewMode::Overview;
+  enum class ClockRefresh : uint8_t { Off, Minute, Animated };
+  std::atomic<ClockRefresh> clockRefresh{ClockRefresh::Off};
+  ClockRefresh lastClockRefresh = ClockRefresh::Off;  // loop task only
+  time_t deskClockTick = 0;
+  uint16_t lastDeskMinute = 1440;  // render task only
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  time_t lastDeskSecondEpoch = 0;  // render task only
+#endif
   int overviewCursor = 0;  // selected Reading/Study item in the Home carousel
   // Returns a script-appropriate SD CJK font id when available, else the given
   // UI font. The shared selector validates real glyph coverage, which matters

@@ -1,3 +1,70 @@
+# Reader files version4 — move without replacing files
+
+2026-11-09: Sync profiles advertise `readerFiles: 4`. All v1–3 routes remain.
+`POST /api/pocket/v1/files/move?deviceID=…&path=…&destination=…&size=…`
+moves one ordinary file to an existing directory, preserving its filename.
+Both paths must satisfy deletion policy; folders, firmware, fonts, packs and
+system/hidden files remain protected. Identity/admission/heap checks precede SD
+access; expected size must match. Existing destination files or state cause409.
+Reply: `{deviceID,moved:true,path,destination,size}`; cache-control no-store.
+The app gates the action on4 and validates every receipt field, without replay.
+
+The cold handler uses a bounded fallible workspace and existing HAL renames,
+with no second file buffer or retained allocation. Book cache and bookmark
+paths move before the file; subsequent failure rolls back moved state. Rollback
+failure is separately reported. Recent/open-book references and library index
+are updated only after success. Article completion IDs remain unchanged.
+Power interruption between SD operations is not a transactional guarantee.
+Host tests inject each rename failure and a rollback failure, reject collision,
+unsafe paths and filename changes, and verify nonuniform file/state values.
+
+# Reader files version3 — user image management
+
+2026-11-08: `readerFiles: 3` extends the existing bounded file API to user
+PNG/JPEG/BMP files outside protected paths. Both content GET and confirmed,
+size/identity-checked DELETE accept these images. Book behavior is unchanged;
+old version2 apps continue to work. Image deletion does not clear book caches,
+recent reading entries or article completion markers. Images are decoded on the
+Apple device, not on the reader. The4096/1024-byte shared staging buffer and
+all admission/heap/path/identity checks remain unchanged; no extra buffer,
+activity or retained allocation was added.
+
+The companion gates image requests on version3 and imposes8 MiB encoded /16 MP
+and2048px decoded-thumbnail limits. System/font/learning-pack files are
+not added to the download or deletion permissions. Ordinary unsupported files
+remain outside download support; the Nov9 follow-up below permits deletion. Host tests explicitly cover
+case-insensitive image suffixes, protected and traversal paths, and refusal of
+firmware/fonts/packs (SVG remains non-downloadable). Removing BMP support fails the new test.
+
+2026-11-09 follow-up: DELETE now accepts ordinary files independent of whether
+the app can preview them, including PDF/ZIP/SVG and extensionless files. The live
+`deletable` flag carries this permission; no new payload, capability number,
+endpoint or buffer is added. Hidden/system paths, root diagnostics, `.bin`,
+`.cpfont`, `.ttf`, `.otf` and `.pdl` remain protected. Directories cannot be
+deleted. Only EPUB/TXT/MD/XTC deletion invokes book cache/recent/history cleanup.
+GET content is unchanged: unsupported types cannot be downloaded. Older
+firmware continues to advertise its narrower flags, respected by the app.
+
+Physical follow-up on 2026-11-09: final enrolled X3/X4 developer image
+`1.0.0-dev-main-06ee8cbb-ble-standby-wc659f165` passed the signed Mac app's
+`/Books` upload/exact-byte and ordinary-file deletion/stale-size tests. Original
+raw/public state and inventory were restored (except the authorized firmware
+artifact). Receipts: sibling `.build/library-hardware-20261109/`; no new
+physical iPhone, Direct, BLE wake or production acceptance is implied.
+
+The app's File Info owns Preview / Add to Library / confirmed Delete. All Files
+is an inline scope of the SD Card. Folder uploads use the existing stream and
+commit path contract; selected directories persist in the app's prepared record
+for resume/receipt/discard. `genericContentWriteAllowed` remains authoritative.
+Host tests, strict cppcheck and the default build are in
+`build/library-flow-20261109/`; this image has not been flashed for this task.
+No new allocation or retained state was added; only string-view predicates and
+an existing cleanup condition changed. Physical SD deletion, all orientations,
+heap and cache behavior remain hardware acceptance items.
+
+The earlier version1/2 contract follows; its book-only lists describe those
+versions rather than the current image extension.
+
 # Reader resources and SD files
 
 Implemented 2026-09-27; physical acceptance remains pending on updated firmware.

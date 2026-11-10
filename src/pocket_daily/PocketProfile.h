@@ -12,13 +12,28 @@ namespace PocketDaily::DailyProfile {
 // profile, Study falls back to the daily word when `dailyWord` is set (v1).
 // Provider and Monitor were fed only by the retired AgentDeck daemon: they
 // still parse, validate and encode, are not advertised, and are never shown.
-enum class HomeItem : uint8_t { Reading = 1, Study = 2, Provider = 3, Monitor = 4, Word = 5 };
+enum class HomeItem : uint8_t {
+  Reading = 1,
+  Study = 2,
+  Provider = 3,
+  Monitor = 4,
+  Word = 5,
+  ClockEvent = 6,
+  ClockWeather = 7,
+  ClockLine = 8,
+  ClockCompact = 9,
+  ClockLandscape = 10
+};
+constexpr bool isDeskClock(const HomeItem item) {
+  return item == HomeItem::ClockEvent || item == HomeItem::ClockWeather || item == HomeItem::ClockLine ||
+         item == HomeItem::ClockLandscape;
+}
 enum class WeatherPanel : uint8_t { Bottom = 0, Top = 1, Off = 2 };
 enum class SleepMode : uint8_t { Brief = 0, Reader = 1 };
 // Card is the first of the companion's cards, shown whether or not a book is
 // open (for example contact details for a lost reader, with its image).
 enum class SleepSection : uint8_t { Reading = 1, Study = 2, Weather = 3, Today = 4, Card = 5 };
-inline constexpr uint8_t HOME_ITEM_MAX_ID = 5;
+inline constexpr uint8_t HOME_ITEM_MAX_ID = 10;
 inline constexpr uint8_t SLEEP_SECTION_MAX_ID = 5;
 
 inline constexpr uint8_t HOME_ITEM_CAP = 4;
@@ -34,6 +49,12 @@ struct Profile {
   SleepSection sleepSections[SLEEP_SECTION_CAP]{};
   uint8_t sleepCount = 0;
 
+  HomeItem clockPage() const {
+    for (uint8_t i = 0; i < homeCount && i < HOME_ITEM_CAP; ++i)
+      if (isDeskClock(homeItems[i])) return homeItems[i];
+    return HomeItem::Reading;
+  }
+  bool deskClock() const { return homeCount == 1 && isDeskClock(homeItems[0]); }
   bool shows(HomeItem item) const;
   bool sleeps(SleepSection section) const;
 };

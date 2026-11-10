@@ -5,5 +5,5 @@ namespace PocketUIHost {
 bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::LayoutInputs& inputs,
                         const PocketDaily::DailyProfile::Profile& profile, const UserCards& cards, bool brief,
                         bool sleepCover, bool actual = false, bool wakeIndicator = false,
-                        const uint8_t* cover = nullptr, size_t coverSize = 0);
+                        const uint8_t* cover = nullptr, size_t coverSize = 0, bool fullScreenCover = false);
 }

@@ -14,6 +14,40 @@ Contract between this repository and the companion app (`pocket-daily`).
 > `docs/pocket-glance-v1.md`). Statements below about provider cards, the
 > monitoring card and the AgentDeck toggles are historical.
 
+
+## Desk Clock Home extension (2026-11-10)
+
+Clock IDs are advertised in `capabilities.homeItems`. The existing profile
+generation and record fields carry them. When `clockCompact` is advertised,
+at most one full-screen clock can be placed in the Home page order alongside
+reading and cards. A previously saved single-clock layout still loads.
+Earlier firmware that advertises only the portrait clock IDs requires a
+full-screen clock to be its sole Home item.
+
+- `clockEvent` shows the earliest saved timed event that has not started
+  and the minutes until it starts.
+- `clockWeather` shows a saved rain window or a compact weather summary.
+- `clockLine` shows a short offline prompt selected by local calendar day.
+- `clockLandscape` rotates the full-screen next-event clock clockwise. It
+  restores the previous renderer orientation when leaving the page.
+- `clockCompact` draws HH:MM above the cover on `reading`. It requires
+  `reading`, adds no separate page and updates only at minute boundaries.
+
+Desk Clock follows the companion time and offset from the Sync clock
+endpoint when available. Without that offset, it uses the saved glance's
+offset or the reader's configured timezone. An unset clock shows dashes.
+In production, a visible full-screen clock toggles the colon every two seconds and paints one
+folded intermediate frame at consecutive minute changes. Confirm resumes the book
+or opens Library. Back, Articles and Sync keep their existing actions.
+Continue Reading remains the default Home. The clock has no deep-sleep
+refresh and does not change the Sleep profile.
+Developer firmware currently displays HH:MM:SS with steady colons and one
+folded frame per consecutive second for the physical panel trial. The saved
+profile and app preview continue to use the same format.
+
+Older readers do not advertise the IDs. Older companion apps reject a
+profile containing unknown IDs instead of rewriting it.
+
 ## Why
 
 The companion should configure Pocket Daily itself — which Home items appear,

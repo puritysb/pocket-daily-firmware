@@ -142,3 +142,16 @@ TEST_F(HomeInputsTest, WithoutAnOpenBookContinueReadingFallsBackToTheMostRecentB
   EXPECT_TRUE(book.valid);
   expectText(book.title, "吾輩は猫である");
 }
+
+TEST_F(HomeInputsTest, CompanionOffsetWinsOverSavedGlanceAndCrossesMidnight) {
+  PocketDaily::AppGlance::Snapshot glance{};
+  glance.savedEpoch = 1794242880;
+  glance.utcOffsetMinutes = 0;
+  // 2026-11-09 16:48 UTC is 01:48 on November 10 in Korea.
+  const auto clock = PocketDaily::Home::readDeskClock(glance, 1794242880, 540);
+  const auto utc = PocketDaily::Home::readDeskClock(glance, 1794242880);
+  EXPECT_EQ(clock.date, 20261110u);
+  EXPECT_EQ(clock.minute, 108);
+  EXPECT_EQ(utc.date, 20261109u);
+  EXPECT_EQ(utc.minute, 1008);
+}

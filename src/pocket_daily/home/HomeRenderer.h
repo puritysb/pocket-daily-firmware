@@ -18,7 +18,7 @@ namespace PocketDaily::Home {
 // the firmware daily word when there are none and the profile keeps it. The
 // retired `provider` and `monitor` profile items (AgentDeck daemon data) still
 // parse but resolve to no source.
-enum class RowSource : uint8_t { Reading, AppCards, DailyWord };
+enum class RowSource : uint8_t { Reading, AppCards, DailyWord, DeskClock };
 
 // Reading retains its empty-state page; optional sources need content.
 struct RowAvailability {
@@ -54,6 +54,7 @@ struct Row {
   const char* cardId = "";    // mine: identifies the card for Env::drawCardImage
   const char* project = "";   // item title
   const char* activity = "";  // item body text
+  bool clockPage = false;
 };
 
 struct Reading {
@@ -108,6 +109,24 @@ struct Env {
                        int height) = nullptr;
 };
 
+struct DeskClock {
+  uint32_t date = 0;       // YYYYMMDD in the clock's local zone
+  uint16_t minute = 1440;  // unset
+  char line[96]{};
+  bool hideColon = false;
+  uint16_t foldingFromMinute = 1440;  // awake device transition only
+  uint8_t second = 60;                // unset outside the seconds trial
+  uint8_t foldingFromSecond = 60;     // awake device transition only
+};
+
+struct ClockDetail {
+  const char* label;
+  char text[112]{};
+};
+
+ClockDetail clockDetail(const DailyProfile::Profile& profile, const DeskClock& clock, const Glance& glance,
+                        const Strings& strings);
+
 struct HomeView {
   bool isX3 = true;
   const Row* rows = nullptr;
@@ -118,6 +137,7 @@ struct HomeView {
   bool snapshotStale = false;
   DailyProfile::Profile profile = DailyProfile::defaults();
   Strings strings;
+  DeskClock clock;
 };
 
 // Clears the framebuffer and draws the whole Home face.
@@ -130,6 +150,7 @@ struct BriefView {
   const char* headerMeta = nullptr;             // snapshot date/sync, nullptr when powered off
   const PocketDaily::Glance* glance = nullptr;  // required
   Reading reading;
+  bool fullScreenCover = false;
   bool sleepCover = true;                         // SETTINGS.pocketDailySleepCover
   const PocketDaily::Card* pocketCard = nullptr;  // required; empty cardId = none
   const PocketDaily::Card* pinnedCard = nullptr;  // first of the companion's cards, or nullptr

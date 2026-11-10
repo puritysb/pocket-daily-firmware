@@ -211,7 +211,7 @@ def exercise_content(client, plan, owner, out):
         status = client.get_json('/api/status')
         witness = status.get('trialLease', {})
         need(status.get('deviceID') == plan['deviceID'] and status.get('version') == plan['productionVersion'] and
-             status.get('sessionEnd') is True and status.get('readerFiles') == 2 and witness.get('run') == plan['run'] and
+             status.get('sessionEnd') is True and status.get('readerFiles', 0) >= 2 and witness.get('run') == plan['run'] and
              witness.get('imageSHA256') == plan['imageSHA256'], 'Piece reads left the exact production Sync trial')
         return status
     health()

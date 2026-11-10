@@ -23,6 +23,7 @@ struct Frame {
   DailyProfile::Profile profile{};
   AppGlance::Snapshot glance{};  // rolled to today
   bool glanceStale = false;
+  Home::DeskClock clock;
   Content::ContentViewState cards;  // separate <=2400 B snapshot when cards exist
   Home::OpenBook book{};
   // The daily word when it is drawn; otherwise only a placeholder id that

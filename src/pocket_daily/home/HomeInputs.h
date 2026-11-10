@@ -22,11 +22,12 @@ class ContentViewState;
 // host-compiled in HomeRenderer/HomeDrawing.
 namespace PocketDaily::Home {
 
-// The local book plus up to CARD_CAP companion cards.
-inline constexpr int ROW_CAP = 1 + PocketDaily::CARD_CAP;
+// The local book, daily word, full-screen clock and up to CARD_CAP companion cards.
+inline constexpr int ROW_CAP = 3 + PocketDaily::CARD_CAP;
 
 // tr() values for the painters' labels.
 Strings deviceStrings();
+DeskClock readDeskClock(const AppGlance::Snapshot& glance, time_t now, int16_t companionOffset = INT16_MIN);
 // The active theme's metrics.
 Metrics deviceMetrics();
 

@@ -36,6 +36,7 @@ bool captureLayoutInputs(const GfxRenderer& renderer, LayoutInputs& out) {
   out.glance = frame->glance;
   out.glanceStale = frame->glanceStale;
   out.word = frame->word;
+  out.clock = frame->clock;
   snprintf(out.fontFamily, sizeof(out.fontFamily), "PocketSansWorld");
   // Registry lookup only. Do not load a font, trigger a scan or change the
   // renderer's font state merely to inspect a proposed profile.
