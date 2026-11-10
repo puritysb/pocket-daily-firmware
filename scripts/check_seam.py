@@ -14,6 +14,8 @@ EXCEPTIONS = {
         "util/PowerWakeCue.h": "reuses the retained sleep tab geometry for the single-frame wake transition",
     },
     "src/pocket_daily/web/PocketEndpoints.cpp": {
+        "CrossPointState.h": "file moves update the persisted path of the open book",
+        "util/BookmarkUtil.h": "file moves preserve EPUB bookmarks under the existing path convention",
         "RecentBooksStore.h": "reading sync and removal update the reader's recent list",
         "articles/ArticleStorage.h": "product article storage used by app routes",
         "activities/RenderLock.h": "developer screen capture locks the existing renderer before reading its framebuffer",

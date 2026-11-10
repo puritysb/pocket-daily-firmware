@@ -597,7 +597,6 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n) {
     view.clock = PocketDaily::Home::readDeskClock(glanceSnapshot, now, clock.offsetMinutes);
   if (fullClock) {
     view.reading.valid = !continuePath.empty();
-    view.clock.hideColon = view.clock.minute < 1440 && (now / kDeskClockInterval) % 2 != 0;
     const auto minute = view.clock.minute;
     const bool minuteAdvanced = lastDeskMinute < 1440 && minute == (lastDeskMinute + 1) % 1440;
 #ifdef ENABLE_DEV_REMOTE_FLASH
@@ -609,6 +608,7 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n) {
     lastDeskSecondEpoch = clockValid ? now : 0;
     if (secondAdvanced) view.clock.foldingFromSecond = (now - 1) % 60;
 #else
+    view.clock.hideColon = view.clock.minute < 1440 && (now / kDeskClockInterval) % 2 != 0;
     constexpr bool secondAdvanced = false;
 #endif
     if (minuteAdvanced || secondAdvanced) {
