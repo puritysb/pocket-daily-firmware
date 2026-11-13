@@ -17,15 +17,16 @@ Sibling CURRENT_HANDOFF records hashes, physical evidence and verification limit
 Public fixture evidence: `build/themes-20261113/public`; the later receipt-only
 correction has an 88-frame equivalence record under `build/themes-clock-fix-20261113`.
 
-## Main integration handoff — 2026-11-13
+## Main integration handoff — completed 2026-11-14
 
-All accumulated reader-interface work is recorded on product `main`; preserve the
+All accumulated reader-interface work is recorded on local/origin `main`; preserve the
 installed/tested w433a8042 image and its acceptance evidence when starting the next
 change. Repository cleanup does not install another firmware image or tag a release.
 The SDK working change is generated from tracked `scripts/storage_sdk.patch`;
 reverse only that exact patch after validation. The next build reapplies it.
 Retired PageLink work is already merged as upstream PR3813 and independently
-covered by the product fix/tests; do not merge its old upstream snapshot again.
+covered by the product fix/tests; do not merge its old upstream snapshot again. The owner authorized origin push and deletion of
+the four retired branches on November 14; only main remains locally and on origin.
 
 ## Repositories and collaboration
 
