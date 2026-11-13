@@ -62,7 +62,7 @@ bool recentCoverMetadata(unsigned index, uint32_t& key, uint32_t& size, uint32_t
   char path[RECENT_PATH_BYTES];
   return recentBookCoverPath(index, path, sizeof(path)) && coverMetadataForPath(path, key, size, crc);
 }
-bool drawCachedCover(GfxRenderer& r, const char* path, int x, int y, int width, int height) {
+bool drawCachedCover(const GfxRenderer& r, const char* path, int x, int y, int width, int height) {
   if (!path || !path[0] || width <= 4 || height <= 4) return false;
   HalFile file = Storage.open(path, O_RDONLY);
   if (!file) return false;

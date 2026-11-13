@@ -36,8 +36,10 @@ bool captureLayoutInputs(const GfxRenderer& renderer, LayoutInputs& out) {
   out.recentCount = frame->recentCount;
   out.agenda = frame->agenda;
   for (uint8_t i = 0; i < out.recentCount; ++i) {
-    auto& c = out.recentCovers[i];
-    if (frame->recentCovers[i][0]) Home::coverMetadataForPath(frame->recentCovers[i], c.key, c.size, c.crc);
+    if (frame->recentCovers[i][0]) {
+      auto& cover = out.recentCovers[i];
+      Home::coverMetadataForPath(frame->recentCovers[i], cover.key, cover.size, cover.crc);
+    }
   }
   for (uint8_t i = 0; i < Home::RECENT_CAP; ++i) out.recentBooks[i] = frame->recentBooks[i];
   out.glance = frame->glance;
