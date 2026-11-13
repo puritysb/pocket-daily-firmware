@@ -167,6 +167,19 @@ jobs:
           path: .pio/build/${{ matrix.environment }}/firmware.bin
           if-no-files-found: error
 
+      - name: Upload production release assets
+        if: matrix.environment == 'gh_release' && github.event_name == 'push' && github.ref_name == 'main'
+        uses: actions/upload-artifact@v6
+        with:
+          name: production-release-assets
+          if-no-files-found: error
+          path: |
+            .pio/build/gh_release/bootloader.bin
+            .pio/build/gh_release/firmware.bin
+            .pio/build/gh_release/firmware.elf
+            .pio/build/gh_release/firmware.map
+            .pio/build/gh_release/partitions.bin
+
   unit-tests:
     runs-on: ubuntu-latest
     steps:
