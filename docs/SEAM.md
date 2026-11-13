@@ -390,11 +390,10 @@ in the same commit:
 
 ## Merge routine
 
-1. `./scripts/sync-upstream.sh --dry-run --ref <stable-commit>`, then prepare the merge
-   on a clean integration branch with `--branch <existing-branch> --ref <stable-commit>`
-   (the stable remote branch is `upstream/master`; merge, never rebase)
-   product history onto upstream; never send Pocket product-stack files
-   upstream.
+1. Verify the published CrossPoint release tag and run
+   `./scripts/sync-upstream.sh --dry-run --ref <release-tag-or-commit>`.
+   Then prepare the merge into Pocket Daily on a clean integration branch with
+   `--branch <existing-branch> --ref <release-tag-or-commit>`.
 2. Expect conflicts only at the hook sites and carried patches above.
    Resolution: take upstream's code, re-apply the named hooks verbatim.
    `src/pocket_daily/**` paths cannot conflict (upstream has none).

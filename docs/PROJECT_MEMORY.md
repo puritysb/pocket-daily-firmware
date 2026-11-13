@@ -35,9 +35,9 @@ the four retired branches on November 14; only main remains locally and on origi
   sibling relative to this checkout; absolute `~/github/` paths are stale.
 - Firmware owns device behavior/storage/memory/flashing; the app owns its client.
   Change and verify contracts on both sides together; record paired commits.
-- Remote topology: `origin` = this repo, product branch `main`; `upstream` =
-  `crosspoint-reader/crosspoint-reader`, foundation `upstream/master`. Product
-  directories are downstream-only; merge upstream, never rebase product history.
+- `origin/main` is the product branch. Merge published CrossPoint release tags
+  from the `upstream/master` line. The [fork-sync procedure](../.claude/skills/fork-sync/SKILL.md)
+  covers urgent backports and reconciliation at the next release.
 - Agents share `AGENTS.md` and this memory. Scoped guides/skills are indexed
   there; never add `CLAUDE.md`, which would hide that guide from Claude Code.
 - Upstream sync hazard (#3058, 2026-08-15): upstream made `AGENTS.md` real,
@@ -49,6 +49,11 @@ the four retired branches on November 14; only main remains locally and on origi
 
 ## Upstream base and fork delta
 
+- WebDAV backport [CrossPoint #4263](https://github.com/crosspoint-reader/crosspoint-reader/pull/4263)
+  (`9d76fc7b9543b93c630204752c2fea4f425dd528`): apply credential-path protection
+  to WebDAV and check `PROPFIND` before opening storage. The port retains the
+  Pocket Daily folder exclusions. Reconcile this backport when a published
+  CrossPoint release includes it.
 - Base (merged 2026-11-06, PRs #29/#31/#32): CrossPoint 2.0.0 `42d58daa`,
   FreeInk SDK `5e94fe74`. Owner decision: 1.0.0 ships on 2.0.0 even if late.
   Fork keeps its reader engine, settings and web server; adopts plugins (default

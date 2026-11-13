@@ -103,13 +103,13 @@ class SyncUpstreamTests(unittest.TestCase):
         self.assertUnchanged()
 
     def test_wrong_branch_does_not_checkout(self):
-        result = self.sync("--branch", "main")
+        result = self.sync("--branch", "main", "--ref", self.target)
         self.assertNotEqual(result.returncode, 0)
         self.assertUnchanged()
 
     def test_dirty_worktree_is_rejected(self):
         (self.work / "user.txt").write_text("untracked work\n")
-        self.assertNotEqual(self.sync().returncode, 0)
+        self.assertNotEqual(self.sync("--ref", self.target).returncode, 0)
         self.assertUnchanged()
         self.assertEqual((self.work / "user.txt").read_text(), "untracked work\n")
 
@@ -125,10 +125,19 @@ class SyncUpstreamTests(unittest.TestCase):
         self.assertIn("not on the fetched upstream stable line", result.stdout)
         self.assertUnchanged()
 
+    def test_integration_requires_an_explicit_release_ref(self):
+        for args in [(), ("--dry-run",)]:
+            with self.subTest(args=args):
+                result = self.sync(*args)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertIn("verified CrossPoint release tag", result.stdout)
+        self.assertUnchanged()
+        self.assertFalse((self.work / ".git/MERGE_HEAD").exists())
+
     def test_dry_run_reports_conflicts_without_touching_index(self):
         self.commit(self.work, "reader.txt", "product reader\n")
         self.head = self.git(self.work, "rev-parse", "HEAD").strip()
-        result = self.sync("--dry-run")
+        result = self.sync("--dry-run", "--ref", self.target)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("reader.txt", result.stdout)
         self.assertUnchanged()
@@ -138,7 +147,7 @@ class SyncUpstreamTests(unittest.TestCase):
     def test_conflicted_merge_preserves_merge_state(self):
         self.commit(self.work, "reader.txt", "product reader\n")
         self.head = self.git(self.work, "rev-parse", "HEAD").strip()
-        result = self.sync()
+        result = self.sync("--ref", self.target)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertUnchanged()
         self.assertEqual(self.git(self.work, "rev-parse", "MERGE_HEAD").strip(), self.target)

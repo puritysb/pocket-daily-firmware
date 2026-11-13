@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Fetch the stable CrossPoint line and prepare a reviewable merge. Never commit,
-# switch branches, rebase, or push. --ref pins the integration input.
+# Fetch the CrossPoint stable line and prepare a merge of a selected release.
+# Never commit, switch branches, rebase, or push.
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 [--branch EXISTING_BRANCH] [--ref STABLE_COMMIT] [--check | --dry-run]"
+  echo "Usage: $0 [--branch EXISTING_BRANCH] [--ref RELEASE_TAG_OR_COMMIT] [--check | --dry-run]"
 }
 branch=""
-ref="upstream/master"
+ref=""
 mode="merge"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -22,6 +22,14 @@ while [[ $# -gt 0 ]]; do
     *) usage >&2; exit 2 ;;
   esac
 done
+
+if [[ -z "$ref" ]]; then
+  if [[ "$mode" != check ]]; then
+    echo "ERROR: pass --ref with a verified CrossPoint release tag or its commit." >&2
+    exit 2
+  fi
+  ref="upstream/master"
+fi
 
 git rev-parse --is-inside-work-tree >/dev/null
 current=$(git branch --show-current)

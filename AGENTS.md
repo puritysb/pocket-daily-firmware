@@ -113,7 +113,9 @@ are cross-repository contracts; verify both sides when any of them changes.
 provider (`src/agentdeck/`) was removed on 2026-09-25; the companion app is the
 only content source. Being far ahead of `upstream/master` is expected.
 
-- Pull upstream only with `./scripts/sync-upstream.sh`: merge, never rebase.
+- Merge published CrossPoint release tags with `./scripts/sync-upstream.sh`.
+  Follow the [fork-sync procedure](.claude/skills/fork-sync/SKILL.md) for
+  selecting a release and tracking urgent backports.
 - An upstream PR contains zero product-stack files, so keep product and reader
   changes in separate commits from the start. Full procedure: `fork-sync`.
 

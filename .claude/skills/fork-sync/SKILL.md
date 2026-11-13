@@ -17,17 +17,26 @@ Daily product code is downstream-only and never goes upstream.**
 ## Pulling upstream — merge, never rebase
 
 ```bash
-./scripts/sync-upstream.sh --check   # fetch and report only
-./scripts/sync-upstream.sh --dry-run --ref <stable-commit>
+./scripts/sync-upstream.sh --check   # report master and develop ancestry
+./scripts/sync-upstream.sh --dry-run --ref <release-tag-or-commit>
 # In a clean, explicitly selected integration branch:
-./scripts/sync-upstream.sh --branch <existing-branch> --ref <stable-commit>
+./scripts/sync-upstream.sh --branch <existing-branch> --ref <release-tag-or-commit>
 # Resolve, verify default + gh_release + host + strict cppcheck + app contracts.
 # The script never switches branches, commits, rebases, or pushes.
 ```
 
-Upstream's stable line is **`master`**, not `main`; releases land there. Upstream also has
-`develop` (its default branch, ahead of `master`) — pull that only when you explicitly want
-pre-release work. Upstream PRs, however, target `develop` (below).
+Choose a published, non-prerelease tag from the
+[CrossPoint releases page](https://github.com/crosspoint-reader/crosspoint-reader/releases)
+and verify its commit before integration. The script checks that the selected
+commit belongs to `upstream/master`. The `master` and `develop` tips are useful
+for monitoring. Routine integrations use the verified release tag or its commit.
+Upstream PRs target `develop`.
+
+Between releases, consider a small backport when Pocket Daily has a confirmed
+security issue, data loss, or recurring crash that warrants an early fix. Record
+the upstream PR and commit, review its dependencies, and verify the affected
+Pocket Daily paths. During the next release merge, reconcile the backport with
+the upstream version and run its regression tests again.
 
 Our `main` being far ahead of `upstream/master` is **expected, not drift**.
 
