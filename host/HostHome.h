@@ -23,6 +23,8 @@ struct Sample {
   PocketDaily::Card card{};  // sample study card (SampleStudy)
   PocketDaily::Card word{};  // the firmware daily word, always present
   PocketDaily::Home::Reading reading;
+  PocketDaily::Home::BookSummary recentBooks[PocketDaily::Home::RECENT_CAP]{};
+  uint8_t recentCount = 0;
 };
 
 // The companion's own cards (pdui_set_cards), owned by the context. They take
@@ -35,6 +37,7 @@ struct UserCard {
 using UserCards = std::vector<UserCard>;
 
 void registerUiFonts(GfxRenderer& renderer);
+void attachSampleCovers(PocketDaily::Home::Env& env);
 PocketDaily::Home::Env hostEnv(GfxRenderer& renderer, const UserCards& cards);
 Sample buildSample(uint32_t samples);
 int buildRows(const PocketDaily::DailyProfile::Profile& profile, const Sample& sample, uint32_t samples,

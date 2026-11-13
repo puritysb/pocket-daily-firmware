@@ -147,3 +147,7 @@ add_subdirectory(plugin_manifest_classification)
 add_subdirectory(plugin_picker_layout)
 add_subdirectory(protected_paths)
 add_subdirectory(opds_http_transport)
+
+add_subdirectory(pocket_agenda)
+
+add_subdirectory(reading_shelf)

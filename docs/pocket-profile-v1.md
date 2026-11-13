@@ -8,11 +8,85 @@ Contract between this repository and the companion app (`pocket-daily`).
 > remain valid IDs: stored profiles and documents naming them still load,
 > validate and round-trip unchanged (record encoding is unchanged), but the
 > reader no longer lists them in `capabilities.homeItems` and
-> `homeRowSources` resolves them to no page. The default Home items are now
-> `reading`, `study`. Weather and today's events on Home and the Daily Brief
+> `homeRowSources` resolves them to no page. At that time the default Home items became
+> `reading`, `study`; the current default is documented below. Weather and today's events on Home and the Daily Brief
 > come from the companion app (`POST /api/pocket/v1/glance`,
 > `docs/pocket-glance-v1.md`). Statements below about provider cards, the
 > monitoring card and the AgentDeck toggles are historical.
+
+
+## Reading interfaces and explicit views (2026-11-13)
+
+`homeInterfaces: 3` keeps profile schema 1, the 32-byte record, generation checks,
+and the four-item limit unchanged. `readingShelf` (ID 11) now shows one large
+cover with title, author and progress; side keys cycle within the selected books.
+It retains all selected books, up to four. `readingList` (12) uses compact rows;
+`reading` remains the compatible single current-book layout. At most one of
+these reading layouts is allowed. A new unsaved profile defaults to
+`[readingShelf]`; existing saved profiles are not rewritten.
+
+The left front button is labelled **Views**. It opens an explicit chooser for
+configured Reading, Calendar, Study and Clock sections, plus Articles. Side
+keys move within this chooser and Confirm selects the view. Back cancels it
+without changing the current book. Outside the chooser, side keys never cross
+from the last book into Calendar or another content type. Confirm opens the
+selected book; returning from the reader restores that book's position in a
+manually ordered shelf. Home and Sync retain their existing exit routes.
+Selection changes do not write SD settings.
+
+`clockCompact` adds an inline clock to the reading layout and omits the
+redundant header clock. `nextEvent` also works with weather off: a separate
+line shows the first event from the current saved today snapshot, or its empty
+state. It is not a full calendar. Weather top/bottom retains the weather and
+forecast panel. These combinations support Reading Focus, Book + Clock,
+Book + Agenda, Book + Weather, Reading List and Calendar presets in the app.
+
+`calendar` (13) is a separate explicit view. Confirm enters date selection;
+side keys move by Gregorian day across month and year boundaries. The selected
+day reads the bounded saved agenda from [pocket-agenda-v1.md](pocket-agenda-v1.md).
+Downloaded empty dates and unavailable dates remain distinct. Book order is
+stored separately under [pocket-reading-shelf-v1.md](pocket-reading-shelf-v1.md).
+Actual cached covers resolve either the full cover or the theme-sized thumbnail.
+
+Connected previews use unchanged PDLI schema 5; `homeInterfaces: 3` signals the
+new presentation and navigation semantics, not a new binary layout. Host
+sample previews use original geometric demo covers only; connected snapshots
+never invent cover artwork. Native fixtures cover both panel sizes in all four
+orientations. Physical button and installed-frame validation are separate
+hardware evidence recorded by the developer runner.
+
+## Desk Clock Home extension (2026-11-10)
+
+Clock IDs are advertised in `capabilities.homeItems`. The existing profile
+generation and record fields carry them. When `clockCompact` is advertised,
+at most one full-screen clock can be placed in the Home page order alongside
+reading and cards. A previously saved single-clock layout still loads.
+Earlier firmware that advertises only the portrait clock IDs requires a
+full-screen clock to be its sole Home item.
+
+- `clockEvent` shows the earliest saved timed event that has not started
+  and the minutes until it starts.
+- `clockWeather` shows a saved rain window or a compact weather summary.
+- `clockLine` shows a short offline prompt selected by local calendar day.
+- `clockLandscape` rotates the full-screen next-event clock clockwise. It
+  restores the previous renderer orientation when leaving the page.
+- `clockCompact` draws HH:MM above the selected reading layout. It requires
+  one reading layout, adds no separate page and updates only at minute boundaries.
+
+Desk Clock follows the companion time and offset from the Sync clock
+endpoint when available. Without that offset, it uses the saved glance's
+offset or the reader's configured timezone. An unset clock shows dashes.
+In production, a visible full-screen clock toggles the colon every two seconds and paints one
+folded intermediate frame at consecutive minute changes. Confirm resumes the book
+or opens Library. Back, Articles and Sync keep their existing actions.
+Continue Reading remains the default Home. The clock has no deep-sleep
+refresh and does not change the Sleep profile.
+Developer firmware currently displays HH:MM:SS with steady colons and one
+folded frame per consecutive second for the physical panel trial. The saved
+profile and app preview continue to use the same format.
+
+Older readers do not advertise the IDs. Older companion apps reject a
+profile containing unknown IDs instead of rewriting it.
 
 ## Why
 

@@ -263,6 +263,38 @@ TEST(ReaderFilesPolicy, DownloadsOnlyFormatsTheAppReads) {
     EXPECT_FALSE(downloadableReaderFile(path)) << path;
 }
 
+TEST(ReaderFilesPolicy, UserImagesCanBePreviewedAndDeletedWithoutExposingSystemResources) {
+  using namespace PocketDaily::Web;
+  for (const auto path : {"/Pictures/cover.PNG", "/Books/map.jpg", "/Screens/sleep.JPEG", "/picture.bmp"}) {
+    EXPECT_TRUE(imageReaderFile(path)) << path;
+    EXPECT_TRUE(downloadableReaderFile(path)) << path;
+    EXPECT_TRUE(deletableReaderFile(path)) << path;
+  }
+  for (const auto path : {"/.crosspoint/cover.png", "/pocket-daily/cards/a.jpg", "/Books/../cover.png",
+                          "/Books//cover.png", "/update.bin", "/font.cpfont", "/pack.pdl", "/cover.png/"}) {
+    EXPECT_FALSE(imageReaderFile(path)) << path;
+    EXPECT_FALSE(downloadableReaderFile(path)) << path;
+    EXPECT_FALSE(deletableReaderFile(path)) << path;
+  }
+}
+
+TEST(ReaderFilesPolicy, OrdinaryFilesCanBeDeletedWithoutEnablingDownloadOrBookCleanup) {
+  using namespace PocketDaily::Web;
+  for (const auto path : {"/Documents/paper.pdf", "/image.svg", "/notes.csv", "/Downloads/archive.zip", "/README"}) {
+    EXPECT_TRUE(deletableReaderFile(path)) << path;
+    EXPECT_FALSE(downloadableReaderFile(path)) << path;
+    EXPECT_FALSE(bookReaderFile(path)) << path;
+  }
+  for (const auto path :
+       {"/", "/.crosspoint/settings.json", "/pocket-daily/profile.json", "/update.BIN", "/Fonts/font.TTF",
+        "/Fonts/font.otf", "/font.cpfont", "/pack.pdl", "/crash_report.1.txt", "/nearby_ap_log.txt"}) {
+    EXPECT_FALSE(deletableReaderFile(path)) << path;
+  }
+  EXPECT_TRUE(bookReaderFile("/Books/book.EPUB"));
+  EXPECT_TRUE(bookReaderFile("/Books/book.xtc"));
+  EXPECT_FALSE(bookReaderFile("/Pictures/cover.png"));
+}
+
 TEST(ReaderFilesPolicy, ByteCountsAreUnsignedDecimalsWithoutOverflow) {
   using namespace PocketDaily::Web;
   uint64_t value = 7;
@@ -411,4 +443,62 @@ TEST_F(StorageAllocation, WriteBufferBatchesSmallWritesWithoutChangingBytes) {
     EXPECT_EQ(moved.position(), 1u);
   }  // and destruction writes it
   EXPECT_EQ(FakeSDK::written, expected);
+}
+
+#include <map>
+#include <set>
+
+#include "pocket_daily/web/ReaderFileMove.h"
+
+TEST(ReaderFilesPolicy, MoveRetainsFilenameAndProtectsSystemPaths) {
+  using PocketDaily::Web::readerFileMovePath;
+  EXPECT_TRUE(readerFileMovePath("/Books/a.epub", "/Archive/a.epub"));
+  EXPECT_TRUE(readerFileMovePath("/note", "/Books/note"));
+  EXPECT_TRUE(readerFileMovePath("/image.png", "/Images/image.png"));
+  for (const char* path :
+       {"/a.bin", "/.crosspoint/a.epub", "/pocket-daily/a.epub", "/../a.epub", "/crash_report.txt"}) {
+    EXPECT_FALSE(readerFileMovePath(path, "/Books/a.epub"));
+    EXPECT_FALSE(readerFileMovePath("/Books/a.epub", path));
+  }
+  EXPECT_FALSE(readerFileMovePath("/a.epub", "/Books/b.epub"));
+  EXPECT_FALSE(readerFileMovePath("/Books/a.epub", "/Books/a.epub"));
+}
+
+TEST(ReaderFileMove, KeepsBytesAndStateAndRollsBackEveryRenameFailure) {
+  using namespace PocketDaily::Web;
+  struct Disk {
+    std::map<std::string, int> files{{"/book", 91}, {"/cache", 22}, {"/marks", 37}};
+    std::set<int> failures;
+    int calls = 0;
+    bool exists(const char* path) { return files.count(path) != 0; }
+    bool rename(const char* from, const char* to) {
+      if (failures.count(++calls) || !exists(from) || exists(to)) return false;
+      files[to] = files.at(from);
+      files.erase(from);
+      return true;
+    }
+  };
+  const MoveStatePath paths[] = {{"/cache", "/new-cache"}, {"/marks", "/new-marks"}};
+  for (int failure : {1, 2, 3}) {
+    Disk disk;
+    const auto original = disk.files;
+    disk.failures.insert(failure);
+    EXPECT_EQ(moveFileWithState(disk, "/book", "/Books/book", paths, 2), MoveResult::Failed);
+    EXPECT_EQ(disk.files, original);
+  }
+  Disk success;
+  EXPECT_EQ(moveFileWithState(success, "/book", "/Books/book", paths, 2), MoveResult::Moved);
+  EXPECT_EQ(success.files, (std::map<std::string, int>{{"/Books/book", 91}, {"/new-cache", 22}, {"/new-marks", 37}}));
+  for (const char* conflict : {"/Books/book", "/new-cache", "/new-marks"}) {
+    Disk disk;
+    disk.files[conflict] = 45;
+    const auto original = disk.files;
+    EXPECT_EQ(moveFileWithState(disk, "/book", "/Books/book", paths, 2), MoveResult::Conflict);
+    EXPECT_EQ(disk.files, original);
+    EXPECT_EQ(disk.calls, 0);
+  }
+  Disk damaged;
+  damaged.failures = {3, 4};
+  EXPECT_EQ(moveFileWithState(damaged, "/book", "/Books/book", paths, 2), MoveResult::RollbackFailed);
+  EXPECT_TRUE(damaged.exists("/book"));
 }

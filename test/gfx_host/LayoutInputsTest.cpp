@@ -495,3 +495,158 @@ TEST(LayoutInputs, CompactBoldBookTitleKeepsTheProgressGapClear) {
   }
   EXPECT_EQ(collisions, 0) << "Bold title spills into the progress clearance";
 }
+
+TEST(LayoutInputs, DeskClockSnapshotKeepsTheCapturedTimeAndChangesTheFrame) {
+  auto input = sample();
+  input.schema = 3;
+  input.clock.date = 20261110;
+  input.clock.minute = 9 * 60 + 41;
+  strcpy(input.clock.line, "Make time for a few pages.");
+  auto encoded = encode(input);
+  PocketDaily::Preview::LayoutInputs decoded;
+  ASSERT_TRUE(PocketDaily::Preview::decodeLayoutInputs(encoded.data(), encoded.size(), decoded));
+  EXPECT_EQ(decoded.clock.date, 20261110u);
+  EXPECT_EQ(decoded.clock.minute, 581);
+  EXPECT_STREQ(decoded.clock.line, input.clock.line);
+  Context context;
+  auto desk = profile();
+  desk.home_count = 1;
+  desk.home_items[0] = 8;
+  desk.home_items[1] = 0;
+  ASSERT_EQ(pdui_render_reader_home(context.value, &desk, encoded.data(), encoded.size(), ""), PDUI_OK);
+  const auto first = context.pixels();
+  ++input.clock.minute;
+  encoded = encode(input);
+  ASSERT_EQ(pdui_render_reader_home(context.value, &desk, encoded.data(), encoded.size(), ""), PDUI_OK);
+  EXPECT_NE(context.pixels(), first);
+  input.clock.minute = 1441;
+  EXPECT_FALSE(PocketDaily::Preview::validLayoutInputs(input));
+}
+
+TEST(LayoutInputs, DeskClockSelectsTheEarliestFutureTimedEvent) {
+  auto profile = PocketDaily::DailyProfile::defaults();
+  profile.homeCount = 1;
+  profile.homeItems[0] = PocketDaily::DailyProfile::HomeItem::ClockEvent;
+  PocketDaily::Glance glance{};
+  glance.eventCount = 3;
+  strcpy(glance.events[0].startHm, "10:30");
+  strcpy(glance.events[0].title, "Later");
+  strcpy(glance.events[1].startHm, "08:30");
+  strcpy(glance.events[1].title, "Already started");
+  strcpy(glance.events[2].startHm, "10:00");
+  strcpy(glance.events[2].title, "Next");
+  PocketDaily::Home::DeskClock clock;
+  clock.minute = 9 * 60 + 41;
+  EXPECT_STREQ(PocketDaily::Home::clockDetail(profile, clock, glance, {}).text, "10:00 Next  ·  19m");
+}
+
+TEST(LayoutInputs, SchemaFourPreservesEachRecentBookAndRejectsInvalidEntries) {
+  auto in = sample();
+  in.schema = 4;
+  in.recentCount = 4;
+  for (int i = 0; i < 4; ++i) {
+    auto& b = in.recentBooks[i];
+    b.valid = true;
+    b.percent = static_cast<int8_t>(11 + i * 19);
+    snprintf(b.title, sizeof(b.title), "Book %d", i);
+    snprintf(b.author, sizeof(b.author), "Author %d", i);
+  }
+  auto bytes = encode(in);
+  Preview::LayoutInputs out;
+  ASSERT_TRUE(Preview::decodeLayoutInputs(bytes.data(), bytes.size(), out));
+  EXPECT_EQ(out.recentCount, 4);
+  for (int i = 0; i < 4; ++i) {
+    EXPECT_STREQ(out.recentBooks[i].title, in.recentBooks[i].title);
+    EXPECT_EQ(out.recentBooks[i].percent, 11 + i * 19);
+  }
+  in.recentCount = 5;
+  EXPECT_FALSE(Preview::validLayoutInputs(in));
+  in.recentCount = 4;
+  in.recentBooks[2].percent = 101;
+  EXPECT_FALSE(Preview::validLayoutInputs(in));
+  in.recentBooks[2].percent = 50;
+  in.recentBooks[3].valid = false;
+  EXPECT_FALSE(Preview::validLayoutInputs(in));
+  for (const auto schema : {1, 2, 3}) {
+    auto legacy = sample();
+    legacy.schema = schema;
+    bytes = encode(legacy);
+    ASSERT_TRUE(Preview::decodeLayoutInputs(bytes.data(), bytes.size(), out));
+    EXPECT_EQ(out.recentCount, 0);
+  }
+}
+
+TEST(LayoutInputs, SchemaFiveBindsFourDifferentCoversAndDatedAgenda) {
+  Context c;
+  auto in = sample();
+  in.schema = 5;
+  in.recentCount = 4;
+  in.clock.date = 20261113;
+  in.clock.minute = 608;
+  in.agenda.dayCount = 2;
+  in.agenda.days[0].date = 20261113;
+  in.agenda.days[1].date = 20261114;
+  in.agenda.days[1].eventCount = 1;
+  strcpy(in.agenda.days[1].events[0].startHm, "14:20");
+  strcpy(in.agenda.days[1].events[0].endHm, "15:10");
+  strcpy(in.agenda.days[1].events[0].title, "Tomorrow only");
+  std::vector<uint8_t> art[4];
+  for (unsigned n = 0; n < 4; ++n) {
+    in.recentBooks[n].valid = true;
+    snprintf(in.recentBooks[n].title, sizeof(in.recentBooks[n].title), "Book %u", n);
+    in.recentBooks[n].percent = 12 + 19 * n;
+    auto& bmp = art[n];
+    bmp.resize(190);
+    const auto put = [&](size_t at, uint32_t value) {
+      for (unsigned i = 0; i < 4; ++i) bmp[at + i] = value >> (8 * i);
+    };
+    bmp[0] = 'B';
+    bmp[1] = 'M';
+    put(2, bmp.size());
+    put(10, 62);
+    put(14, 40);
+    put(18, 32);
+    put(22, 32);
+    bmp[26] = 1;
+    bmp[28] = 1;
+    put(34, 128);
+    put(46, 2);
+    bmp[58] = bmp[59] = bmp[60] = 255;
+    for (size_t i = 62; i < bmp.size(); ++i) bmp[i] = static_cast<uint8_t>((i * (n + 3) + 17 * n) % 256);
+    in.recentCovers[n] = {n + 1, static_cast<uint32_t>(bmp.size()),
+                          ~Content::contentCrcUpdate(UINT32_MAX, bmp.data(), bmp.size())};
+  }
+  auto bytes = encode(in);
+  ASSERT_FALSE(bytes.empty());
+  Preview::LayoutInputs decoded;
+  ASSERT_TRUE(Preview::decodeLayoutInputs(bytes.data(), bytes.size(), decoded));
+  EXPECT_EQ(decoded.agenda.days[1].date, 20261114u);
+  EXPECT_STREQ(decoded.agenda.days[1].events[0].title, "Tomorrow only");
+  auto p = profile();
+  p.home_count = 1;
+  p.home_items[0] = 11;
+  p.weather = 2;
+  EXPECT_EQ(pdui_render_reader_home(c.value, &p, bytes.data(), bytes.size(), ""), PDUI_INVALID_IMAGE);
+  for (unsigned n = 0; n < 4; ++n) {
+    pdui_layout_asset_info asset{};
+    ASSERT_EQ(pdui_get_recent_cover_info(bytes.data(), bytes.size(), n, &asset), PDUI_OK);
+    EXPECT_EQ(asset.key, n + 1);
+    EXPECT_EQ(asset.crc, in.recentCovers[n].crc);
+    ASSERT_EQ(pdui_set_recent_cover(c.value, n, art[n].data(), art[n].size()), PDUI_OK);
+  }
+  ASSERT_EQ(pdui_render_reader_home(c.value, &p, bytes.data(), bytes.size(), ""), PDUI_OK);
+  const auto first = c.pixels();
+  ASSERT_EQ(pdui_set_home_selection(c.value, 3, 0), PDUI_OK);
+  ASSERT_EQ(pdui_render_reader_home(c.value, &p, bytes.data(), bytes.size(), ""), PDUI_OK);
+  EXPECT_NE(first, c.pixels());
+  ASSERT_EQ(pdui_set_recent_cover(c.value, 1, art[2].data(), art[2].size()), PDUI_OK);
+  EXPECT_EQ(pdui_render_reader_home(c.value, &p, bytes.data(), bytes.size(), ""), PDUI_INVALID_IMAGE);
+  p.home_items[0] = 13;
+  ASSERT_EQ(pdui_set_home_selection(c.value, 0, 20261113), PDUI_OK);
+  ASSERT_EQ(pdui_render_reader_home(c.value, &p, bytes.data(), bytes.size(), ""), PDUI_OK);
+  const auto today = c.pixels();
+  ASSERT_EQ(pdui_set_home_selection(c.value, 0, 20261114), PDUI_OK);
+  ASSERT_EQ(pdui_render_reader_home(c.value, &p, bytes.data(), bytes.size(), ""), PDUI_OK);
+  EXPECT_NE(today, c.pixels());
+  EXPECT_EQ(pdui_set_home_selection(c.value, 0, 20260230), PDUI_INVALID_ARGUMENT);
+}

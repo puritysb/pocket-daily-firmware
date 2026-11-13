@@ -15,6 +15,8 @@ EXCEPTIONS = {
     },
     "src/pocket_daily/web/PocketEndpoints.cpp": {
         "RecentBooksStore.h": "reading sync and removal update the reader's recent list",
+        "CrossPointState.h": "book moves preserve the active reader path after atomic file publication",
+        "util/BookmarkUtil.h": "book moves retain the inherited bookmark path convention",
         "articles/ArticleStorage.h": "product article storage used by app routes",
         "activities/RenderLock.h": "developer screen capture locks the existing renderer before reading its framebuffer",
         "network/OtaBootSwitch.h": "developer-only checked trial admission selects the validated production slot",

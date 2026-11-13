@@ -4,12 +4,95 @@
 #include <WiFi.h>
 #include <esp_sntp.h>
 #include <time.h>
+#if CONFIG_IDF_TARGET_ESP32C3
+#include <Preferences.h>
+#include <esp_attr.h>
+#include <esp_private/esp_clk.h>
+#include <esp_system.h>
+#include <soc/rtc.h>
+#endif
 
 HalClock halClock;  // Singleton instance
 
+#if CONFIG_IDF_TARGET_ESP32C3
+namespace {
+constexpr uint32_t kDeskClockMagic = 0x50444331;
+constexpr uint64_t kMaxElapsedSeconds = 31ULL * 86400;
+constexpr const char* kClockNamespace = "pocketclock";
+constexpr const char* kOffsetKey = "offset";
+struct ClockAnchor {
+  uint64_t ticks;
+  uint32_t calibration;
+  uint32_t epoch;
+  uint32_t magic;
+};
+RTC_NOINIT_ATTR ClockAnchor companionAnchor;
+int16_t companionOffset = HalClock::UNSPECIFIED_OFFSET;
+portMUX_TYPE companionTimeLock = portMUX_INITIALIZER_UNLOCKED;
+
+bool validOffset(int16_t offset) { return offset >= -720 && offset <= 840; }
+}  // namespace
+#endif
+
 void HalClock::begin() {
+#if CONFIG_IDF_TARGET_ESP32C3
+  // Software return from Sync and deep sleep keep the hardware counter.
+  // Power loss and other reset causes must not reuse a stale anchor.
+  const auto reset = esp_reset_reason();
+  if (reset != ESP_RST_SW && reset != ESP_RST_DEEPSLEEP) companionAnchor.magic = 0;
+  Preferences prefs;
+  if (prefs.begin(kClockNamespace, true)) {
+    const int16_t saved = prefs.getShort(kOffsetKey, UNSPECIFIED_OFFSET);
+    if (validOffset(saved)) companionOffset = saved;
+  }
+#endif
   _available = _sdkRtc.begin();
   LOG_INF("CLK", _available ? "SDK RTC found" : "RTC not found");
+}
+
+bool HalClock::setCompanionTime(const uint32_t epoch, const int16_t offsetMinutes) {
+#if CONFIG_IDF_TARGET_ESP32C3
+  if (epoch < COMPANION_MIN_EPOCH || epoch >= COMPANION_MAX_EPOCH || !validOffset(offsetMinutes)) return false;
+  const uint32_t calibration = esp_clk_slowclk_cal_get();
+  if (!calibration) return false;
+  const uint64_t ticks = rtc_time_get();
+  // Only the web task writes; readers copy the complete state under the lock.
+  if (offsetMinutes != companionOffset) {
+    Preferences prefs;
+    if (!prefs.begin(kClockNamespace, false) || prefs.putShort(kOffsetKey, offsetMinutes) != sizeof(offsetMinutes))
+      return false;
+  }
+  portENTER_CRITICAL(&companionTimeLock);
+  companionAnchor = {ticks, calibration, epoch, kDeskClockMagic};
+  companionOffset = offsetMinutes;
+  portEXIT_CRITICAL(&companionTimeLock);
+  return true;
+#else
+  (void)epoch;
+  (void)offsetMinutes;
+  return false;
+#endif
+}
+
+HalClock::CompanionTime HalClock::companionTime(const time_t systemTime) const {
+#if CONFIG_IDF_TARGET_ESP32C3
+  portENTER_CRITICAL(&companionTimeLock);
+  const auto anchor = companionAnchor;
+  const auto offset = companionOffset;
+  portEXIT_CRITICAL(&companionTimeLock);
+  if (anchor.magic == kDeskClockMagic && anchor.calibration && anchor.epoch >= COMPANION_MIN_EPOCH &&
+      anchor.epoch < COMPANION_MAX_EPOCH && validOffset(offset)) {
+    const uint64_t ticks = rtc_time_get();
+    if (ticks >= anchor.ticks && ticks - anchor.ticks <= UINT64_MAX / anchor.calibration) {
+      const uint64_t seconds = rtc_time_slowclk_to_us(ticks - anchor.ticks, anchor.calibration) / 1000000;
+      if (seconds <= kMaxElapsedSeconds && anchor.epoch + seconds < COMPANION_MAX_EPOCH)
+        return {static_cast<time_t>(anchor.epoch + seconds), offset};
+    }
+  }
+  return {systemTime, offset};
+#else
+  return {systemTime, UNSPECIFIED_OFFSET};
+#endif
 }
 
 namespace {

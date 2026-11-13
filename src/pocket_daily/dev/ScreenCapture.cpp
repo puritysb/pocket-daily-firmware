@@ -198,6 +198,7 @@ bool saveLayoutInputs(uint32_t run, bool sleep, bool returned) {
     LOG_ERR("VISUAL", "Could not capture actual layout inputs");
     return false;
   }
+  inputs->schema = 5;
   const size_t count = Preview::encodeLayoutInputs(*inputs, bytes.get(), Preview::MAX_BYTES);
   HalFile file;
   return count &&

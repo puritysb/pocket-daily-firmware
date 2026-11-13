@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import dev_pipeline as pipeline
@@ -276,10 +277,127 @@ class PipelineTest(unittest.TestCase):
         record['wifiSetupRollback'] = 'passed'
         self.assertEqual(validate()['wifiSetupRollback'], 'passed')
 
+    def test_home_interfaces_require_actual_art_exact_layouts_and_restoration(self):
+        record = self.evidence()
+        detail = {'bookCount': 2, 'downloadedCoverCount': 2, 'snapshotSchema': 5,
+                  'datedAgendaReadback': True, 'orderedShelfReadback': True,
+                  'originalRecordsAndReadingRestored': True,
+                  'nativeRenderComparisons': [{'layout': name, 'pixelDifferences': 0}
+                      for name in ['readingShelf', 'readingList', 'calendar']]}
+        def validate(value):
+            value_record = dict(record, homeInterfaces=value)
+            return pipeline.hardware_evidence(pipeline.MARKER + json.dumps(value_record),
+                                              123, 'x-dev-y', False, 'macOS')
+        self.assertTrue(validate(detail)['passed'])
+        for key, values in {'bookCount': [0, 5, True], 'downloadedCoverCount': [0, 3, True],
+                            'snapshotSchema': [4, '5'], 'datedAgendaReadback': [False],
+                            'orderedShelfReadback': [False],
+                            'originalRecordsAndReadingRestored': [False]}.items():
+            for value in values:
+                broken = json.loads(json.dumps(detail)); broken[key] = value
+                with self.assertRaises(RuntimeError): validate(broken)
+        for index in range(3):
+            broken = json.loads(json.dumps(detail))
+            broken['nativeRenderComparisons'].pop(index)
+            with self.assertRaises(RuntimeError): validate(broken)
+            broken = json.loads(json.dumps(detail))
+            broken['nativeRenderComparisons'][index]['pixelDifferences'] = 1
+            with self.assertRaises(RuntimeError): validate(broken)
+        broken = json.loads(json.dumps(detail))
+        broken['nativeRenderComparisons'][1]['layout'] = 'readingShelf'
+        with self.assertRaises(RuntimeError): validate(broken)
+        for invalid in [None, {}, []]:
+            with self.assertRaises(RuntimeError): validate(invalid)
+
+    def test_modern_home_requires_all_six_theme_comparisons(self):
+        detail = {'bookCount': 2, 'downloadedCoverCount': 2, 'snapshotSchema': 5,
+                  'homeInterfaceVersion': 3, 'datedAgendaReadback': True, 'orderedShelfReadback': True,
+                  'originalRecordsAndReadingRestored': True, 'nativeRenderComparisons': [
+                      {'layout': name, 'pixelDifferences': 0} for name in [
+                          'readingShelf', 'readingList', 'calendar', 'readingShelfClock',
+                          'readingShelfAgenda', 'readingShelfWeather']]}
+        pipeline.check_home_interfaces(detail)
+        for index in range(6):
+            broken = json.loads(json.dumps(detail)); broken['nativeRenderComparisons'].pop(index)
+            with self.assertRaises(RuntimeError): pipeline.check_home_interfaces(broken)
+        detail['homeInterfaceVersion'] = 4
+        with self.assertRaises(RuntimeError): pipeline.check_home_interfaces(detail)
+
+    def test_interface_run_ids_reserve_capture_and_reboot_offsets(self):
+        args = SimpleNamespace(interface_suite=True)
+        with patch.object(pipeline.secrets, 'randbelow', side_effect=lambda limit: limit - 1) as random:
+            largest = pipeline.hardware_run_id(args)
+            random.assert_called_once_with(0xffffffff - 512)
+        for offset in [0, 100, 101, 102, 300, 301, 512]:
+            self.assertGreater(largest + offset, 0)
+            self.assertLessEqual(largest + offset, 0xffffffff)
+        with patch.object(pipeline.secrets, 'randbelow', return_value=0):
+            self.assertEqual(pipeline.hardware_run_id(args), 1)
+
+    def test_inventory_firmware_transition_uses_only_verified_explicit_artifact(self):
+        args = SimpleNamespace(interface_recover_from='/private/prior', firmware=Path('/explicit/candidate.bin'))
+        artifact = {'bytes': 6276992, 'version': '1.0.0-dev-main-example'}
+        with patch.object(Path, 'read_bytes', side_effect=AssertionError('do not reread mutable artifact')):
+            env = pipeline.interface_recovery_environment(args, 'macOS', artifact)
+        self.assertEqual(env['TEST_RUNNER_POCKET_HARDWARE_RECOVERY_FIRMWARE_BYTES'], '6276992')
+        self.assertEqual(pipeline.interface_recovery_environment(args, 'iOS-device', artifact), {})
+        for invalid in [None, {}, dict(artifact, bytes=0), dict(artifact, bytes=True), dict(artifact, version='1.0.0')]:
+            with self.assertRaises(ValueError): pipeline.interface_recovery_environment(args, 'macOS', invalid)
+        no_explicit = SimpleNamespace(interface_recover_from='/private/prior', firmware=None)
+        self.assertNotIn('TEST_RUNNER_POCKET_HARDWARE_RECOVERY_FIRMWARE_BYTES',
+                         pipeline.interface_recovery_environment(no_explicit, 'macOS', artifact))
+        args.interface_recover_from = None
+        self.assertEqual(pipeline.interface_recovery_environment(args, 'macOS', artifact), {})
+
+    def test_rich_profile_recovery_scope_environment_and_required_receipt(self):
+        base = dict(action='run', interface_suite=True, rich_profile_recover_from='/private/retained-proof')
+        args = SimpleNamespace(**base)
+        self.assertIsNone(pipeline.rich_profile_recovery_argument_error(args))
+        with patch.object(Path, 'read_bytes', side_effect=AssertionError('private proof belongs to app')):
+            self.assertEqual(pipeline.rich_profile_recovery_environment(args, 'macOS'),
+                             {'TEST_RUNNER_POCKET_HARDWARE_RICH_PROFILE_RECOVERY_ROOT': base['rich_profile_recover_from']})
+        self.assertEqual(pipeline.rich_profile_recovery_environment(args, 'iOS-device'), {})
+        self.assertEqual(pipeline.rich_profile_recovery_environment(SimpleNamespace(), 'macOS'), {})
+        for change in [dict(action='configure'), dict(interface_suite=False),
+                       dict(rich_profile_recover_from='relative'), dict(rich_profile_recover_from=''),
+                       *[{key: True} for key in ['install_only', 'ios_device', 'x4_continuity',
+                         'x4_sleep', 'x4_starters', 'x4_settings', 'x4_layout_only',
+                         'x4_typography_only', 'x4_recover_from', 'x4_recover_empty_revision']]]:
+            with self.subTest(change=change):
+                self.assertIsNotNone(pipeline.rich_profile_recovery_argument_error(SimpleNamespace(**(base | change))))
+        pipeline.check_rich_profile_recovery({'richProfileRecoveryRestored': True})
+        for value in [{}, {'richProfileRecoveryRestored': False}, {'richProfileRecoveryRestored': 1}]:
+            with self.assertRaises(RuntimeError): pipeline.check_rich_profile_recovery(value)
+
+    def test_interface_recovery_scope_environment_and_receipt(self):
+        base = dict(action='run', interface_suite=True,
+                    interface_recover_from='/sandbox/private/prior-owned-proof')
+        args = SimpleNamespace(**base)
+        self.assertIsNone(pipeline.interface_recovery_argument_error(args))
+        self.assertEqual(pipeline.interface_recovery_environment(args, 'macOS'),
+                         {'TEST_RUNNER_POCKET_HARDWARE_INVENTORY_RECOVERY_ROOT': base['interface_recover_from']})
+        self.assertEqual(pipeline.interface_recovery_environment(args, 'iOS-device'), {})
+        self.assertEqual(pipeline.interface_recovery_environment(SimpleNamespace(), 'macOS'), {})
+        for change in [dict(action='configure'), dict(interface_suite=False),
+                       dict(interface_recover_from='relative'), dict(interface_recover_from=''),
+                       *[{key: True} for key in ['install_only', 'ios_device', 'x4_continuity',
+                         'x4_sleep', 'x4_starters', 'x4_settings', 'x4_layout_only',
+                         'x4_typography_only', 'x4_recover_from', 'x4_recover_empty_revision']]]:
+            with self.subTest(change=change):
+                self.assertIsNotNone(pipeline.interface_recovery_argument_error(SimpleNamespace(**(base | change))))
+        pipeline.check_interface_recovery({'inventoryRecoveryRestored': True})
+        for value in [{}, {'inventoryRecoveryRestored': False}, {'inventoryRecoveryRestored': 1}]:
+            with self.assertRaises(RuntimeError): pipeline.check_interface_recovery(value)
+
     def test_interface_requires_every_case_and_recovery(self):
         record = self.evidence()
         record['transferFeedbackRecovery'] = 'passed'
-        record['interfaceCases'] = [{'id': name, 'state': 'passed'} for name in sorted(pipeline.INTERFACE_CASES)]
+        current_cases = ['identity-rejection', 'storage-usage', 'preferences-roundtrip',
+                         'profile-roundtrip-conflict', 'batch-article-download',
+                         'downloaded-book-reading', 'pause-resume', 'pause-discard',
+                         'inventory-preservation']
+        self.assertEqual(pipeline.INTERFACE_CASES, set(current_cases))
+        record['interfaceCases'] = [{'id': name, 'state': 'passed'} for name in current_cases]
         def validate(value):
             return pipeline.hardware_evidence(pipeline.MARKER + json.dumps(value),
                                               123, 'x-dev-y', True, 'macOS', True)
@@ -288,8 +406,20 @@ class PipelineTest(unittest.TestCase):
             broken = json.loads(json.dumps(record))
             broken['interfaceCases'][0]['state'] = state
             with self.assertRaises(RuntimeError): validate(broken)
-        record['interfaceCases'].pop()
-        with self.assertRaises(RuntimeError): validate(record)
+        for index in range(len(current_cases)):
+            broken = json.loads(json.dumps(record))
+            broken['interfaceCases'].pop(index)
+            with self.assertRaises(RuntimeError): validate(broken)
+        for extra in ['folder-copy', 'unrecognized-case', current_cases[0]]:
+            broken = json.loads(json.dumps(record))
+            broken['interfaceCases'].append({'id': extra, 'state': 'passed'})
+            with self.assertRaises(RuntimeError): validate(broken)
+        broken = json.loads(json.dumps(record))
+        broken['interfaceCases'][1] = broken['interfaceCases'][0]
+        with self.assertRaises(RuntimeError): validate(broken)
+        broken = json.loads(json.dumps(record))
+        broken['transferFeedbackRecovery'] = 'not-run'
+        with self.assertRaises(RuntimeError): validate(broken)
 
     def test_screen_evidence_rejects_stale_missing_and_unrestored_captures(self):
         record = self.evidence()

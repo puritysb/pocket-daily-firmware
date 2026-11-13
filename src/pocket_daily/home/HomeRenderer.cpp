@@ -25,6 +25,13 @@ int homeRowSources(const DailyProfile::Profile& profile, const RowAvailability& 
         // An empty reading slot is still the first usable route to the library.
         out[n++] = RowSource::Reading;
         break;
+      case HomeItem::ReadingShelf:
+      case HomeItem::ReadingList:
+        out[n++] = RowSource::RecentBooks;
+        break;
+      case HomeItem::Calendar:
+        out[n++] = RowSource::Calendar;
+        break;
       case HomeItem::Study:
         // Without its own Word item, v1 keeps the daily word as the fallback.
         if (available.appCards)
@@ -34,6 +41,14 @@ int homeRowSources(const DailyProfile::Profile& profile, const RowAvailability& 
         break;
       case HomeItem::Word:
         out[n++] = RowSource::DailyWord;
+        break;
+      case HomeItem::ClockEvent:
+      case HomeItem::ClockWeather:
+      case HomeItem::ClockLine:
+      case HomeItem::ClockLandscape:
+        out[n++] = RowSource::DeskClock;
+        break;
+      case HomeItem::ClockCompact:
         break;
       case HomeItem::Provider:
       case HomeItem::Monitor:
@@ -102,6 +117,323 @@ void drawTitleCover(const GfxRenderer& renderer, const Env& env, const Reading& 
   }
 }
 
+ClockDetail clockDetail(const DailyProfile::Profile& profile, const DeskClock& clock, const Glance& glance,
+                        const Strings& s) {
+  using DailyProfile::HomeItem;
+  switch (profile.clockPage()) {
+    case HomeItem::ClockLandscape:
+    case HomeItem::ClockEvent: {
+      ClockDetail detail{s.nextEvent};
+      const Event* next = nullptr;
+      int earliest = 1440;
+      if (clock.minute < 1440) {
+        for (uint8_t i = 0; i < glance.eventCount && i < Glance::EVENT_CAP; ++i) {
+          const int start = GlanceFormat::hmToMinutes(glance.events[i].startHm);
+          if (start < clock.minute || start >= earliest || !glance.events[i].title[0]) continue;
+          earliest = start;
+          next = &glance.events[i];
+        }
+      }
+      if (next)
+        snprintf(detail.text, sizeof(detail.text), "%s %s  ·  %dm", next->startHm, next->title,
+                 earliest - clock.minute);
+      else
+        snprintf(detail.text, sizeof(detail.text), "%s", s.noEvents);
+      return detail;
+    }
+    case HomeItem::ClockWeather: {
+      ClockDetail detail{s.weather};
+      if (!glance.weather.valid)
+        snprintf(detail.text, sizeof(detail.text), "%s", s.noWeather);
+      else if (!GlanceFormat::formatRainLine(detail.text, sizeof(detail.text), glance.weather))
+        GlanceFormat::formatWeatherNow(detail.text, sizeof(detail.text), glance.weather);
+      return detail;
+    }
+    default: {
+      ClockDetail detail{s.today};
+      snprintf(detail.text, sizeof(detail.text), "%s", clock.line);
+      return detail;
+    }
+  }
+}
+
+namespace {
+// Compact monochrome numeral masks. Run lengths draw as rectangles at the
+// same scale on both panels, independent of loaded fonts or image caches.
+constexpr uint8_t kDigits[10][7] = {
+    {14, 17, 19, 21, 25, 17, 14}, {4, 12, 4, 4, 4, 4, 14},    {14, 17, 1, 2, 4, 8, 31},     {30, 1, 1, 14, 1, 1, 30},
+    {2, 6, 10, 18, 31, 2, 2},     {31, 16, 16, 30, 1, 1, 30}, {14, 16, 16, 30, 17, 17, 14}, {31, 1, 2, 4, 8, 8, 8},
+    {14, 17, 17, 14, 17, 17, 14}, {14, 17, 17, 15, 1, 1, 14}};
+
+void drawDeskClock(GfxRenderer& r, const HomeView& view, const Env& env, const int headerHeight) {
+  const int w = r.getScreenWidth();
+  const int h = r.getScreenHeight();
+  const int pad = env.metrics.contentSidePadding;
+  const int digitCount = view.clock.second < 60 ? 6 : 4;
+  const int widthInUnits = digitCount * 10 - 3;
+  const int unit = std::max(1, std::min((w - 2 * pad) / widthInUnits, h / (w > h ? 31 : 25)));
+  const int tile = 8 * unit;
+  const int top = w > h ? h / 5 : h * 3 / 10;
+  const int left = (w - widthInUnits * unit) / 2;
+  const bool valid = view.clock.minute < 1440;
+  const int hour = view.clock.minute / 60;
+  const int minute = view.clock.minute % 60;
+  const int second = view.clock.second;
+  const int numbers[] = {hour / 10, hour % 10, minute / 10, minute % 10, second / 10, second % 10};
+  const int priorHour = view.clock.foldingFromMinute / 60;
+  const int priorMinute = view.clock.foldingFromMinute % 60;
+  const int priorSecond = view.clock.foldingFromSecond;
+  const int prior[] = {priorHour / 10,   priorHour % 10,   priorMinute / 10,
+                       priorMinute % 10, priorSecond / 10, priorSecond % 10};
+
+  r.clearScreen();
+  if (env.drawHeader)
+    env.drawHeader(env.context, r, 0, env.metrics.topPadding, w, headerHeight, view.strings.pocketDaily, nullptr);
+  for (int index = 0; index < digitCount; ++index) {
+    const int x = left + (index * 9 + index / 2 * 2) * unit;
+    const bool hasPrevious = index < 4 ? view.clock.foldingFromMinute < 1440 : priorSecond < 60;
+    const bool folding = hasPrevious && prior[index] != numbers[index];
+    const int glyphX = x + (tile - 5 * unit) / 2;
+    const int glyphY = top + 2 * unit;
+    const int hinge = top + 11 * unit / 2;
+    r.fillRect(x, top, tile, 11 * unit);
+    if (valid) {
+      for (int row = 0; row < 7; ++row) {
+        // The new upper leaf is exposed first. The lower leaf still carries
+        // the previous digit until the moving flap settles.
+        const int numeral = folding && row >= 3 ? prior[index] : numbers[index];
+        for (int col = 0; col < 5; ++col)
+          if (kDigits[numeral][row] & (1u << (4 - col)))
+            r.fillRect(glyphX + col * unit, glyphY + row * unit, unit, unit, false);
+      }
+    } else {
+      r.fillRect(glyphX + unit, glyphY + 3 * unit, 3 * unit, unit, false);
+    }
+    if (folding) {
+      const int flapDepth = std::max(2, unit / 2);
+      r.fillRect(x + 1, hinge + 1, tile - 2, flapDepth);
+      r.drawLine(x + unit, hinge + flapDepth, x + tile - unit - 1, hinge + flapDepth, false);
+    }
+    r.fillRect(x, hinge, tile, 1, false);
+  }
+  if (!view.clock.hideColon) {
+    for (int group = 1; group < digitCount / 2; ++group) {
+      const int center = left + (group * 20 - 2) * unit;
+      r.fillRect(center, top + 4 * unit, unit, unit);
+      r.fillRect(center, top + 7 * unit, unit, unit);
+    }
+  }
+
+  char calendar[18]{};
+  const unsigned value = view.clock.date;
+  if (valid && value >= 19700101 && value <= 99991231) {
+    char date[11]{}, weekday[4]{};
+    snprintf(date, sizeof(date), "%04u-%02u-%02u", value / 10000, (value / 100) % 100, value % 100);
+    GlanceFormat::formatWeekday(weekday, sizeof(weekday), date);
+    snprintf(calendar, sizeof(calendar), "%s  %s", date, weekday);
+  }
+  const int dateY = top + 13 * unit;
+  r.drawCenteredText(UI_12_FONT_ID, dateY, calendar, true, EpdFontFamily::BOLD);
+  const int dividerY = dateY + r.getLineHeight(UI_12_FONT_ID) + 2 * unit;
+  r.drawLine(pad, dividerY, w - pad, dividerY);
+  const auto detail = clockDetail(view.profile, view.clock, *view.glance, view.strings);
+  const int labelY = dividerY + unit;
+  r.drawCenteredText(env.text.resolve(detail.label, SMALL_FONT_ID), labelY, detail.label);
+  const int body = env.text.resolve(detail.text, UI_12_FONT_ID);
+  const auto fitted = r.truncatedText(body, detail.text, w - 2 * pad);
+  r.drawCenteredText(body, labelY + r.getLineHeight(SMALL_FONT_ID) + unit / 2, fitted.c_str());
+  const auto& s = view.strings;
+
+  HomeDraw::drawPocketActionStrip(r, view.isX3, env.labels, s.home, view.reading.valid ? s.select : s.library, s.views,
+                                  s.sync);
+}
+}  // namespace
+
+int stepHomeSection(const uint8_t* groups, int count, int selected, int direction) {
+  if (!groups || count <= 0) return 0;
+  if (selected < 0 || selected >= count) selected = 0;
+  for (int distance = 1; distance <= count; ++distance) {
+    const int candidate = (selected + (direction < 0 ? -distance : distance) + count) % count;
+    if (groups[candidate] == groups[selected]) return candidate;
+  }
+  return selected;
+}
+int homeSectionStarts(const uint8_t* groups, int count, uint8_t* starts, int capacity) {
+  int found = 0;
+  for (int i = 0; groups && starts && i < count && found < capacity; ++i) {
+    bool seen = false;
+    for (int j = 0; j < found; ++j)
+      if (groups[starts[j]] == groups[i]) seen = true;
+    if (!seen) starts[found++] = i;
+  }
+  return found;
+}
+
+int calendarDays(const int year, const int month) {
+  static constexpr int days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (year < 1 || year > 9999 || month < 1 || month > 12) return 0;
+  return days[month - 1] + (month == 2 && year % 4 == 0 && (year % 100 != 0 || year % 400 == 0));
+}
+int calendarWeekday(int year, const int month) {
+  if (!calendarDays(year, month)) return -1;
+  static constexpr int shift[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+  year -= month < 3;
+  return (year + year / 4 - year / 100 + year / 400 + shift[month - 1] + 7) % 7;
+}
+uint32_t calendarMonth(const uint32_t date, const int offset) {
+  const int year = date / 10000, month = date / 100 % 100;
+  if (!calendarDays(year, month) || date % 100 < 1 || date % 100 > static_cast<unsigned>(calendarDays(year, month)))
+    return 0;
+  const int index = year * 12 + month - 1 + std::max(-12, std::min(12, offset));
+  if (index < 12 || index >= 10000 * 12) return 0;
+  return (index / 12) * 10000u + (index % 12 + 1) * 100u + 1;
+}
+namespace {
+void drawRecentBooks(GfxRenderer& r, const HomeView& view, const Env& env, const int x, const int y, const int width,
+                     const int height, const int selected) {
+  const int lineH = r.getLineHeight(UI_12_FONT_ID);
+  const int smallH = r.getLineHeight(SMALL_FONT_ID);
+  const int count = view.recentBooks ? std::min<int>(view.recentCount, RECENT_CAP) : 0;
+
+  if (!count) {
+    const int font = env.text.resolve(view.strings.startReading, UI_12_FONT_ID);
+    HomeDraw::drawWrappedFixed(r, font, x, y + lineH * 2, view.strings.startReading, width, 3,
+                               r.getLineHeight(font) + 4);
+    return;
+  }
+  // A wide shelf gives each cover one full-height column; a two-row grid
+  // would consume the image area with repeated title/progress chrome.
+  const bool wide = width > height && width >= count * 150 && height > lineH * 8;
+  const bool tiles =
+      view.profile.shows(DailyProfile::HomeItem::ReadingShelf) && (wide || (height > lineH * 13 && width > 300));
+  const int gap = std::max(8, env.metrics.verticalSpacing);
+  const int top = y;
+  const int columns = tiles ? (wide ? count : 2) : 1;
+  const int rows = (count + columns - 1) / columns;
+  const int cellW = (width - (columns - 1) * gap) / columns;
+  const int cellH = std::min((height - (rows - 1) * gap) / rows, lineH * 2 + smallH * 2 + 24);
+  for (int i = 0; i < count; ++i) {
+    const auto& book = view.recentBooks[i];
+    const int bx = x + (i % columns) * (cellW + gap), by = top + (i / columns) * (cellH + gap);
+    const int textX = bx + 14, textW = cellW - 28;
+    r.drawLine(bx + 12, by + cellH, bx + cellW, by + cellH, 1, true);
+    if (i == selected) r.fillRect(bx + 1, by + 8, 4, cellH - 16, true);
+    const int font = env.text.resolve(book.title, UI_12_FONT_ID);
+    const int advance = r.getLineHeight(font) + 3;
+    int ty = by + 12;
+    const int coverH = tiles ? cellH - advance * 2 - smallH * 2 - 36 : 0;
+    const bool hasCover =
+        coverH >= lineH * 2 && env.drawRecentCover && env.drawRecentCover(env.context, r, i, textX, ty, textW, coverH);
+    if (hasCover) ty += coverH + 6;
+    const int titleLines = std::max(1, std::min(hasCover ? 2
+                                                : tiles  ? 4
+                                                         : 2,
+                                                (by + cellH - ty - smallH * 2 - 16) / advance));
+    ty += HomeDraw::drawWrappedFixed(r, font, textX, ty, book.title, textW, titleLines, advance, EpdFontFamily::BOLD) *
+          advance;
+    const int author = env.text.resolve(book.author, SMALL_FONT_ID);
+    if (ty + r.getLineHeight(author) + smallH + 10 < by + cellH)
+      HomeDraw::drawWrappedFixed(r, author, textX, ty + 4, book.author, textW, 1, r.getLineHeight(author));
+    if (book.percent >= 0 && cellH >= lineH + smallH + 24) {
+      char percent[8];
+      snprintf(percent, sizeof(percent), "%d%%", book.percent);
+      const int py = by + cellH - smallH - 8;
+      r.drawText(SMALL_FONT_ID, textX + textW - r.getTextWidth(SMALL_FONT_ID, percent), py, percent, true,
+                 EpdFontFamily::BOLD);
+      const int barW = std::max(1, textW - r.getTextWidth(SMALL_FONT_ID, "100%") - 12);
+      r.drawLine(textX, py + smallH / 2, textX + barW, py + smallH / 2, 1, true);
+      if (book.percent) r.drawLine(textX, py + smallH / 2, textX + barW * book.percent / 100, py + smallH / 2, 5, true);
+    }
+  }
+}
+void drawCalendar(const GfxRenderer& r, const HomeView& view, const Env& env, const int x, const int y, const int width,
+                  const int height) {
+  const uint32_t selectedDate = view.calendarSelection ? view.calendarSelection : view.clock.date;
+  const auto date = calendarMonth(selectedDate, view.calendarOffset);
+  const bool split = width > height * 14 / 10;
+  const int gridWidth = split ? width * 58 / 100 : width;
+  const int detailsX = split ? x + gridWidth + 18 : x;
+  const int detailsWidth = split ? width - gridWidth - 18 : width;
+  const int heading = env.labels.resolve(view.strings.calendar, UI_12_FONT_ID);
+  r.drawText(heading, x, y, view.strings.calendar, true, EpdFontFamily::BOLD);
+  if (!date) {
+    r.drawText(UI_12_FONT_ID, x, y + r.getLineHeight(heading) * 2, "---- / --", true);
+    return;
+  }
+  const int year = date / 10000, month = date / 100 % 100;
+  char label[16];
+  snprintf(label, sizeof(label), "%04d / %02d", year, month);
+  const int lineH = r.getLineHeight(UI_12_FONT_ID), smallH = r.getLineHeight(SMALL_FONT_ID);
+  const int labelX = x + gridWidth - r.getTextWidth(UI_12_FONT_ID, label, EpdFontFamily::BOLD);
+  if (view.calendarBrowsing) r.drawRect(labelX - 5, y - 5, x + gridWidth - labelX + 10, lineH + 10, 2, true);
+  r.drawText(UI_12_FONT_ID, labelX, y, label, true, EpdFontFamily::BOLD);
+  const int gridTop = y + lineH + 16;
+  const int cellW = gridWidth / 7;
+  const int cellH = std::max(lineH + 8, std::min(lineH + 22, (height - lineH * 5) / 7));
+  const char* weekday = view.strings.weekdays;
+  for (int i = 0; i < 7; ++i) {
+    char name[24]{};
+    size_t n = 0;
+    while (weekday[n] && weekday[n] != '|' && n < sizeof(name) - 1) {
+      name[n] = weekday[n];
+      ++n;
+    }
+    const int font = env.labels.resolve(name, SMALL_FONT_ID);
+    r.drawText(font, x + i * cellW + (cellW - r.getTextWidth(font, name)) / 2, gridTop, name, true);
+    weekday += n;
+    if (*weekday == '|') ++weekday;
+  }
+  const int first = calendarWeekday(year, month), days = calendarDays(year, month);
+  for (int d = 1; d <= days; ++d) {
+    const int index = first + d - 1, bx = x + (index % 7) * cellW, by = gridTop + smallH + 8 + (index / 7) * cellH;
+    const bool today = view.calendarOffset == 0 && static_cast<unsigned>(d) == selectedDate % 100;
+    if (today) r.fillRect(bx + 2, by - 3, cellW - 4, lineH + 6, true);
+    char number[4];
+    snprintf(number, sizeof(number), "%d", d);
+    r.drawText(UI_12_FONT_ID, bx + (cellW - r.getTextWidth(UI_12_FONT_ID, number)) / 2, by, number, !today,
+               EpdFontFamily::BOLD);
+    const auto* agendaDay = view.agenda ? Agenda::findDay(*view.agenda, date + d - 1) : nullptr;
+    if (agendaDay && (agendaDay->eventCount || agendaDay->omittedEventCount))
+      r.fillRect(bx + cellW / 2 - 2, by + lineH + 4, 4, 3, true);
+  }
+  const int weeks = (first + days + 6) / 7;
+  int ey = split ? gridTop : gridTop + smallH + 8 + weeks * cellH + 12;
+  if (ey + smallH + lineH + 18 > y + height) return;
+  r.drawLine(detailsX, ey, detailsX + detailsWidth, ey, 2, true);
+  ey += 10;
+  char selectedLabel[16];
+  snprintf(selectedLabel, sizeof(selectedLabel), "%04u/%02u/%02u", unsigned(selectedDate / 10000),
+           unsigned(selectedDate / 100 % 100), unsigned(selectedDate % 100));
+  r.drawText(SMALL_FONT_ID, detailsX, ey, selectedLabel, true, EpdFontFamily::BOLD);
+  ey += smallH + 8;
+  const auto* day = view.agenda ? Agenda::findDay(*view.agenda, selectedDate) : nullptr;
+  const bool legacyToday = !view.agenda && selectedDate == view.clock.date;
+  const auto* events = day ? day->events : legacyToday ? view.glance->events : nullptr;
+  const uint8_t count = day ? day->eventCount : legacyToday ? view.glance->eventCount : 0;
+  if (!events || !count) {
+    // A dash denotes a date not downloaded, not an assertion that it is free.
+    const char* empty = events ? view.strings.noEvents : "-";
+    const int font = env.text.resolve(empty, UI_12_FONT_ID);
+    HomeDraw::drawWrappedFixed(r, font, detailsX, ey, empty, detailsWidth, 1, r.getLineHeight(font));
+  }
+  uint8_t drawn = 0;
+  for (; drawn < count && drawn < Glance::EVENT_CAP && ey + lineH <= y + height; ++drawn) {
+    char event[96];
+    GlanceFormat::formatEventLine(event, sizeof(event), events[drawn]);
+    const int font = env.text.resolve(event, UI_12_FONT_ID);
+    HomeDraw::drawWrappedFixed(r, font, detailsX, ey, event, detailsWidth, 1, r.getLineHeight(font));
+    ey += r.getLineHeight(font) + 10;
+  }
+  const unsigned omitted = (day ? day->omittedEventCount : 0) + count - drawn;
+  if (omitted) {
+    char more[12];
+    snprintf(more, sizeof(more), "+%u", omitted);
+    r.drawText(SMALL_FONT_ID, detailsX + detailsWidth - r.getTextWidth(SMALL_FONT_ID, more),
+               (split ? gridTop : gridTop + smallH + 8 + weeks * cellH + 12) + 10, more, true);
+  }
+}
+}  // namespace
+
 void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   const auto& m = env.metrics;
   const auto& s = view.strings;
@@ -109,19 +441,47 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   const int n = view.count;
   const int w = renderer.getScreenWidth();
   const int pageH = renderer.getScreenHeight();
-  const bool sidePaging = n > 1;
+  const int cursor = view.selected >= 0 && view.selected < n ? view.selected : 0;
+  const bool newInterface = n > 0 && (rows[cursor].shelfIndex >= 0 || rows[cursor].calendarPage);
+  uint8_t groups[16]{};
+  const int boundedCount = std::min(n, 16);
+  int groupCount = 0, groupPosition = 0;
+  for (int i = 0; i < boundedCount; ++i) {
+    groups[i] = static_cast<uint8_t>(
+        homeSection(rows[i].reading, rows[i].shelfIndex >= 0, rows[i].clockPage, rows[i].calendarPage));
+    if (groups[i] == static_cast<uint8_t>(homeSection(rows[cursor].reading, rows[cursor].shelfIndex >= 0,
+                                                      rows[cursor].clockPage, rows[cursor].calendarPage))) {
+      ++groupCount;
+      if (i <= cursor) ++groupPosition;
+    }
+  }
+  const bool sidePaging = groupCount > 1 || view.calendarBrowsing || view.choosingView;
+  const bool rotatedNew = newInterface && renderer.getOrientation() != GfxRenderer::Orientation::Portrait;
+  const int hardwareMargin = rotatedNew ? renderer.getLineHeight(SMALL_FONT_ID) + 20 : 0;
   // X3 gets borderless edge chevrons instead of the old 30px PREV/NEXT rails.
   // X4 has enough width to retain its hardware-aligned side hints.
-  const int pad =
+  const int originalPad =
       sidePaging && !view.isX3 ? std::max(m.contentSidePadding, m.sideButtonHintsWidth + 6) : m.contentSidePadding;
+  const int pad = std::max(originalPad, hardwareMargin);
+  const int headerY =
+      m.topPadding +
+      (rotatedNew && renderer.getOrientation() == GfxRenderer::Orientation::PortraitInverted ? hardwareMargin : 0);
   const int line12 = renderer.getLineHeight(UI_12_FONT_ID);
   const int line10 = renderer.getLineHeight(UI_10_FONT_ID);
   // Local names match the activity members this body was moved from.
   const PocketDaily::Glance& renderGlanceSnapshot = *view.glance;
-  const Reading& renderReadingSnapshot = view.reading;
+  Reading renderReadingSnapshot = view.reading;
+  const int selectedShelf = n > 0 ? rows[cursor].shelfIndex : -1;
+  if (selectedShelf >= 0 && view.recentBooks && selectedShelf < view.recentCount) {
+    const auto& book = view.recentBooks[selectedShelf];
+    renderReadingSnapshot = {book.valid, book.title, book.author, book.percent};
+  }
   auto fontForText = [&](int uiFontId, const char* text) { return env.text.resolve(text, uiFontId); };
   auto drawReadingCover = [&](int x, int y, int width, int height) {
-    if (env.drawCover && env.drawCover(env.context, renderer, x, y, width, height)) return true;
+    if (selectedShelf >= 0 && env.drawRecentCover &&
+        env.drawRecentCover(env.context, renderer, selectedShelf, x, y, width, height))
+      return true;
+    if (selectedShelf < 0 && env.drawCover && env.drawCover(env.context, renderer, x, y, width, height)) return true;
     drawTitleCover(renderer, env, renderReadingSnapshot, x, y, width, height);
     return false;
   };
@@ -131,19 +491,56 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   using HomeDraw::drawWrappedFixed;
   using HomeDraw::formatWeatherSnapshotDate;
 
+  if (view.choosingView) {
+    renderer.clearScreen();
+    uint8_t starts[4]{};
+    const int sections = homeSectionStarts(groups, boundedCount, starts, 4);
+    int y = headerY + 12;
+    renderer.drawText(UI_12_FONT_ID, pad, y, s.views, true, EpdFontFamily::BOLD);
+    y += line12 + 20;
+    for (int i = 0; i <= sections; ++i) {
+      const Section section = i < sections ? static_cast<Section>(groups[starts[i]]) : Section::Reading;
+      const char* label = i == sections                  ? s.articles
+                          : section == Section::Reading  ? s.reading
+                          : section == Section::Calendar ? s.calendar
+                          : section == Section::Clock    ? s.clock
+                                                         : s.study;
+      const int font = env.labels.resolve(label, UI_12_FONT_ID);
+      const int h = renderer.getLineHeight(font) + 18;
+      if (i == view.viewChoice) renderer.drawRect(pad - 4, y - 7, w - pad * 2 + 8, h, 2, true);
+      renderer.drawText(font, pad + 10, y, label, true, EpdFontFamily::BOLD);
+      y += h + 6;
+    }
+    HomeDraw::drawPocketActionStrip(renderer, view.isX3, env.labels, s.back, s.select, s.views, s.sync);
+    HomeDraw::drawPocketSideChevrons(renderer, view.isX3);
+    return;
+  }
+  const bool readingPage = n > 0 && (rows[cursor].reading || selectedShelf >= 0);
+  const int headerHeight = readingPage && view.profile.shows(DailyProfile::HomeItem::ClockCompact)
+                               ? 0
+                               : std::min(m.headerHeight, line12 + (readingPage ? 4 : m.verticalSpacing * 2));
+  const int selectedIndex = view.selected >= 0 && view.selected < n ? view.selected : 0;
+  if (view.profile.deskClock() || (n > 0 && rows[selectedIndex].clockPage)) {
+    const auto orientation = renderer.getOrientation();
+    if (view.profile.clockPage() == DailyProfile::HomeItem::ClockLandscape)
+      renderer.setOrientation(GfxRenderer::Orientation::LandscapeClockwise);
+    drawDeskClock(renderer, view, env, headerHeight);
+    renderer.setOrientation(orientation);
+    return;
+  }
   renderer.clearScreen();
-  const int headerHeight = std::min(m.headerHeight, line12 + m.verticalSpacing * 2);
-  if (env.drawHeader) env.drawHeader(env.context, renderer, 0, m.topPadding, w, headerHeight, s.pocketDaily, nullptr);
-  const int contentTop = m.topPadding + headerHeight + m.verticalSpacing;
-  const int hintTop = pageH - renderer.getLineHeight(SMALL_FONT_ID) - 16;
+  if (env.drawHeader && headerHeight > 0)
+    env.drawHeader(env.context, renderer, pad - originalPad, headerY, w - 2 * (pad - originalPad), headerHeight,
+                   s.pocketDaily, nullptr);
+  const int contentTop = headerY + headerHeight + m.verticalSpacing;
+  const int hintTop = pageH - std::max(renderer.getLineHeight(SMALL_FONT_ID) + 16, hardwareMargin);
   const bool portrait = pageH > w;
 
   // The row list is also the visible carousel: the current book and carried
   // study items use the same large content area instead of competing cards.
-  const int selectedIndex = view.selected >= 0 && view.selected < n ? view.selected : 0;
   const int selectedPocketIndex = n > 0 && rows[selectedIndex].pocket ? selectedIndex : -1;
   char carouselPosition[16] = {0};
-  if (n > 1) snprintf(carouselPosition, sizeof(carouselPosition), "%d/%d", selectedIndex + 1, n);
+  if (groupCount > 1) snprintf(carouselPosition, sizeof(carouselPosition), "%d/%d", groupPosition, groupCount);
 
   auto sectionHeader = [&](int x, int y, int cw, const char* label, const char* right) -> int {
     const int labelFont = fontForText(SMALL_FONT_ID, label);
@@ -171,7 +568,6 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
 
   auto drawReading = [&](int x, int y, int cw, int ch) {
     const int panelBottom = y + ch;
-    renderer.drawRect(x, y, cw, ch, 2, true);
     if (!renderReadingSnapshot.valid) {
       // The whole panel says what is missing and names the control below that fixes it.
       y = sectionHeader(x + 12, y + 10, cw - 24, s.continueReading, carouselPosition);
@@ -185,12 +581,17 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     }
 
     auto drawProgress = [&](int textX, int textW, int bottom) {
-      if (renderReadingSnapshot.percent < 0) return;
+      if (renderReadingSnapshot.percent < 0) {
+        if (carouselPosition[0])
+          renderer.drawText(SMALL_FONT_ID, textX + textW - renderer.getTextWidth(SMALL_FONT_ID, carouselPosition),
+                            bottom - line10 - 10, carouselPosition, true);
+        return;
+      }
       char pct[8];
       snprintf(pct, sizeof(pct), "%d%%", renderReadingSnapshot.percent);
       const int progressY = bottom - line12 - 24;
       renderer.drawText(UI_12_FONT_ID, textX, progressY, pct, true, EpdFontFamily::BOLD);
-      const char* resume = "RESUME";
+      const char* resume = carouselPosition;
       const int resumeW = renderer.getTextWidth(SMALL_FONT_ID, resume, EpdFontFamily::BOLD);
       renderer.drawText(SMALL_FONT_ID, textX + textW - resumeW, progressY + line12 - line10, resume, true,
                         EpdFontFamily::BOLD);
@@ -205,14 +606,7 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
       // height above a full-width title, author and progress block.
       const int textX = x + 14;
       const int textW = cw - 28;
-      const int labelFont = fontForText(SMALL_FONT_ID, s.continueReading);
-      int ty = y + 12;
-      renderer.drawText(labelFont, textX, ty, s.continueReading, true, EpdFontFamily::BOLD);
-      if (carouselPosition[0]) {
-        const int posW = renderer.getTextWidth(SMALL_FONT_ID, carouselPosition);
-        renderer.drawText(SMALL_FONT_ID, x + cw - 14 - posW, ty, carouselPosition, true);
-      }
-      ty += renderer.getLineHeight(labelFont) + 6;
+      int ty = y + 4;
       const int titleFont = fontForText(UI_12_FONT_ID, renderReadingSnapshot.title);
       const int titleAdvance = renderer.getLineHeight(titleFont) + 2;
       const int titleLines = HomeDraw::measureWrappedFixed(renderer, titleFont, renderReadingSnapshot.title, textW, 3,
@@ -248,20 +642,11 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     renderer.drawLine(metaX, y, metaX, wideBottom, 2, true);
     const int textX = metaX + 14;
     const int textW = x + cw - textX - 13;
-    const char* readingLabel = s.continueReading;
-    const int labelFont = fontForText(SMALL_FONT_ID, readingLabel);
-    renderer.drawText(labelFont, textX, y + 14,
-                      renderer.truncatedText(labelFont, readingLabel, textW - (carouselPosition[0] ? 34 : 0)).c_str(),
-                      true, EpdFontFamily::BOLD);
-    if (carouselPosition[0]) {
-      const int posW = renderer.getTextWidth(SMALL_FONT_ID, carouselPosition);
-      renderer.drawText(SMALL_FONT_ID, x + cw - 13 - posW, y + 14, carouselPosition, true);
-    }
     const int titleFont = fontForText(UI_12_FONT_ID, renderReadingSnapshot.title);
     const int titleAdvance = renderer.getLineHeight(titleFont) + 2;
     const int authorFont = fontForText(SMALL_FONT_ID, renderReadingSnapshot.author);
     const int authorH = renderReadingSnapshot.author[0] ? renderer.getLineHeight(authorFont) + 5 : 0;
-    const int textTop = y + 14 + renderer.getLineHeight(labelFont) + 10;
+    const int textTop = y + 12;
     const int textBottom = wideBottom - (renderReadingSnapshot.percent >= 0 ? line12 + 36 : 14);
     const int maxTitleLines = std::max(1, std::min(4, (textBottom - textTop - authorH) / titleAdvance));
     const int titleLines = HomeDraw::measureWrappedFixed(renderer, titleFont, renderReadingSnapshot.title, textW,
@@ -361,21 +746,43 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   };
 
   const int primaryGap = 8;
-  const int availableH = hintTop - contentTop;
+  const bool eventBand =
+      readingPage && view.profile.nextEvent && view.profile.weather == DailyProfile::WeatherPanel::Off;
+  const int eventHeight = eventBand ? line12 + 22 : 0;
+  const int availableH = hintTop - contentTop - eventHeight;
   int primaryX = pad;
   int primaryY = contentTop;
   int primaryW = w - pad * 2;
   int primaryH = availableH;
   auto drawPrimary = [&](int x, int y, int cw, int ch) {
-    if (n > 0 && rows[selectedIndex].reading)
+    if (n > 0 && (rows[selectedIndex].reading || rows[selectedIndex].shelfIndex >= 0)) {
+      if (view.profile.shows(DailyProfile::HomeItem::ClockCompact)) {
+        char time[8] = "--:--";
+        if (view.clock.minute < 1440)
+          snprintf(time, sizeof(time), "%02u:%02u", view.clock.minute / 60u, view.clock.minute % 60u);
+        const int height = line12 + 12;
+        centeredIn(UI_12_FONT_ID, x, cw, y + 4, time, EpdFontFamily::BOLD);
+        y += height;
+        ch -= height;
+      }
+    }
+    if (n > 0 && rows[selectedIndex].shelfIndex >= 0) {
+      if (view.profile.shows(DailyProfile::HomeItem::ReadingList))
+        drawRecentBooks(renderer, view, env, x, y, cw, ch, rows[selectedIndex].shelfIndex);
+      else
+        drawReading(x, y, cw, ch);
+    } else if (n > 0 && rows[selectedIndex].calendarPage) {
+      drawCalendar(renderer, view, env, x, y, cw, ch);
+    } else if (n > 0 && rows[selectedIndex].reading) {
       drawReading(x, y, cw, ch);
-    else
+    } else {
       drawStudy(x, y, cw, ch);
+    }
   };
   // Weather/forecast panel placement from the profile; Off gives its space to
   // the primary item.
   const auto weatherPanel = view.profile.weather;
-  if (weatherPanel == PocketDaily::DailyProfile::WeatherPanel::Off) {
+  if (weatherPanel == PocketDaily::DailyProfile::WeatherPanel::Off || (n > 0 && rows[selectedIndex].calendarPage)) {
     drawPrimary(primaryX, primaryY, primaryW, primaryH);
   } else if (portrait) {
     // Recovered chrome space belongs to the hero. This still fits the full
@@ -396,14 +803,24 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     drawUtilities(primaryX + primaryW + colGap, primaryY, w - pad - (primaryX + primaryW + colGap), primaryH);
   }
 
+  if (eventBand) {
+    char event[112]{};
+    if (view.glance->eventCount)
+      GlanceFormat::formatEventLine(event, sizeof(event), view.glance->events[0]);
+    else
+      snprintf(event, sizeof(event), "%s", s.noEvents);
+    const int y = hintTop - eventHeight + 6;
+    renderer.drawLine(pad, y - 6, w - pad, y - 6);
+    const int font = env.text.resolve(event, UI_12_FONT_ID);
+    renderer.drawText(font, pad, y, renderer.truncatedText(font, event, w - 2 * pad).c_str(), true);
+  }
   if (sidePaging) HomeDraw::drawPocketSideChevrons(renderer, view.isX3);
 
   // Confirm selects the current carousel item. Left opens the Articles library;
   // Right opens Pocket's account-free nearby transport, where the companion
   // sends cards and the glance.
   HomeDraw::drawPocketActionStrip(renderer, view.isX3, env.labels, s.home,
-                                  n > 0 && rows[selectedIndex].reading && !view.reading.valid ? s.library : s.select,
-                                  s.articles, s.sync);
+                                  readingPage && !renderReadingSnapshot.valid ? s.library : s.select, s.views, s.sync);
 }
 
 void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
@@ -432,6 +849,14 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   using HomeDraw::formatWeatherSnapshotDate;
 
   renderer.clearScreen();
+  // A reading-only sleep layout uses the whole panel for the cover. Keep the
+  // ordinary Brief when no artwork is available or more sections are selected.
+  using PocketDaily::DailyProfile::SleepSection;
+  const auto& profile = view.profile;
+  if (isSleep && view.fullScreenCover && view.sleepCover && renderReadingSnapshot.valid && profile.sleepCount == 1 &&
+      profile.sleeps(SleepSection::Reading) && env.drawCover && env.drawCover(env.context, renderer, 0, 0, w, pageH)) {
+    return;
+  }
   if (env.drawHeader)
     env.drawHeader(env.context, renderer, 0, m.topPadding, w, m.headerHeight, s.pocketDaily, view.headerMeta);
 
@@ -655,8 +1080,6 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   // book, one carried study item, weather and today's schedule.
   // Sleep sections and their order come from the profile (defaults: reading,
   // study, weather, today). Study stays a fallback while a book is shown.
-  using PocketDaily::DailyProfile::SleepSection;
-  const auto& profile = view.profile;
   const bool studyShown = !renderReadingSnapshot.valid || !profile.sleeps(SleepSection::Reading);
   if (isSleep && pageH > w) {
     // The retained portrait is a glance, not a dashboard; sections that no

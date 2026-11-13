@@ -55,6 +55,37 @@ void registerUiFonts(GfxRenderer& renderer) {
   renderer.insertFont(SMALL_FONT_ID, smallFamily);
 }
 
+namespace {
+// Original geometric demo artwork, never attached to a connected-reader snapshot.
+bool drawSampleCover(void*, GfxRenderer& r, unsigned index, int x, int y, int width, int height) {
+  const int ch = std::min(height, width * 3 / 2), cw = ch * 2 / 3;
+  if (cw < 24 || ch < 36) return false;
+  x += (width - cw) / 2;
+  r.drawRect(x, y, cw, ch, 2, true);
+  const int inset = std::max(6, cw / 9), step = std::max(6, cw / 10);
+  const int top = y + inset, bottom = y + ch * 3 / 4;
+  for (int offset = 0; offset < cw - 2 * inset; offset += step) {
+    if (index % 2 == 0)
+      r.drawLine(x + inset + offset, top, x + cw - inset - offset, bottom, 2, true);
+    else
+      r.drawLine(x + inset + offset, top, x + inset + offset, bottom, true);
+  }
+  if (index % 2)
+    for (int py = top; py <= bottom; py += step) r.drawLine(x + inset, py, x + cw - inset, py, true);
+  char volume[12];
+  snprintf(volume, sizeof(volume), "%02u", index + 1);
+  r.drawText(UI_12_FONT_ID, x + inset, y + ch - r.getLineHeight(UI_12_FONT_ID) - inset, volume, true,
+             EpdFontFamily::BOLD);
+  return true;
+}
+}  // namespace
+void attachSampleCovers(PocketDaily::Home::Env& env) {
+  env.drawRecentCover = drawSampleCover;
+  env.drawCover = [](void* c, GfxRenderer& r, int x, int y, int w, int h) {
+    return drawSampleCover(c, r, 0, x, y, w, h);
+  };
+}
+
 PocketDaily::Home::Env hostEnv(GfxRenderer& renderer, const UserCards& cards) {
   PocketDaily::Home::Env env;
   env.context = const_cast<UserCards*>(&cards);
@@ -161,6 +192,18 @@ Sample buildSample(uint32_t samples) {
     copy(s.card.question, sizeof(s.card.question), "What is one thing from yesterday's reading you want to keep?");
   }
   s.reading = {(samples & SampleBook) != 0, "Pride and Prejudice", "Jane Austen", 42};
+  if (samples & SampleBook) {
+    static constexpr const char* titles[] = {"Pride and Prejudice", "A Small Garden", "Night Letters", "Along the Sea"};
+    static constexpr const char* authors[] = {"Jane Austen", "J. Green", "S. Moon", "R. Shore"};
+    static constexpr int8_t progress[] = {42, 18, 67, 5};
+    s.recentCount = 4;
+    for (int i = 0; i < 4; ++i) {
+      copy(s.recentBooks[i].title, sizeof(s.recentBooks[i].title), titles[i]);
+      copy(s.recentBooks[i].author, sizeof(s.recentBooks[i].author), authors[i]);
+      s.recentBooks[i].valid = true;
+      s.recentBooks[i].percent = progress[i];
+    }
+  }
   return s;
 }
 
@@ -179,6 +222,13 @@ int buildRows(const PocketDaily::DailyProfile::Profile& profile, const Sample& s
       case RowSource::Reading:
         rows[n++] = {true, false, false, false, false, "", "Continue Reading", "Pride and Prejudice"};
         break;
+      case RowSource::RecentBooks:
+        for (uint8_t index = 0; index < std::max<int>(1, sample.recentCount) && n < cap; ++index)
+          rows[n++] = {.shelfIndex = static_cast<int8_t>(index)};
+        break;
+      case RowSource::Calendar:
+        rows[n++] = {.calendarPage = true};
+        break;
       case RowSource::AppCards:
         if (cards.empty()) {
           rows[n++] = {false, true, true, false, false, sample.card.cardId, sample.card.title, sample.card.question};
@@ -193,6 +243,9 @@ int buildRows(const PocketDaily::DailyProfile::Profile& profile, const Sample& s
                        cards[i].card.cardId,
                        cards[i].card.title,
                        cards[i].summary.c_str()};
+        break;
+      case RowSource::DeskClock:
+        rows[n++] = {.clockPage = true};
         break;
       case RowSource::DailyWord:
         rows[n++] = {false, true, false, true, false, sample.word.cardId, sample.word.title, sample.word.question};

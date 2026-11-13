@@ -41,9 +41,8 @@ bool Profile::sleeps(const SleepSection section) const {
 
 Profile defaults() {
   Profile p;
-  p.homeItems[0] = HomeItem::Reading;
-  p.homeItems[1] = HomeItem::Study;
-  p.homeCount = 2;
+  p.homeItems[0] = HomeItem::ReadingShelf;
+  p.homeCount = 1;
   p.sleepSections[0] = SleepSection::Reading;
   p.sleepCount = 1;
   return p;
@@ -61,7 +60,14 @@ bool operator==(const Profile& a, const Profile& b) {
 }
 
 bool valid(const Profile& p) {
-  return distinctKnown(p.homeItems, p.homeCount, HOME_ITEM_CAP, HOME_ITEM_MAX_ID) &&
+  if (!distinctKnown(p.homeItems, p.homeCount, HOME_ITEM_CAP, HOME_ITEM_MAX_ID)) return false;
+  unsigned clockPages = 0;
+  unsigned readingPages = 0;
+  for (uint8_t i = 0; i < p.homeCount; ++i)
+    if (isReading(p.homeItems[i])) ++readingPages;
+  for (uint8_t i = 0; i < p.homeCount; ++i)
+    if (isDeskClock(p.homeItems[i])) ++clockPages;
+  return clockPages <= 1 && readingPages <= 1 && (!p.shows(HomeItem::ClockCompact) || readingPages == 1) &&
          distinctKnown(p.sleepSections, p.sleepCount, SLEEP_SECTION_CAP, SLEEP_SECTION_MAX_ID) &&
          static_cast<uint8_t>(p.weather) <= 2 && static_cast<uint8_t>(p.sleepMode) <= 1;
 }

@@ -72,6 +72,7 @@ class ScreenPresentation {
   // Cold, bounded header receipt only while this Sync presentation exists.
   // No framebuffer, cards or full scene remain resident after painting.
   std::unique_ptr<HeaderPainter::Inputs> presentedHeader_;
+  bool presentedHeaderDrawn_ = false;
   int font_ = 0;  // bounded CJK UI font, 0 when every drawn string is Latin
   // <=24B activity-owned request metadata; retained after failure so a lost
   // POST is recoverable by GET.

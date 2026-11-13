@@ -6,6 +6,7 @@
 #include <HalSystem.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Utf8.h>
 
 #include <cstdio>
@@ -17,6 +18,7 @@
 #include "pocket_daily/ContentImageRenderer.h"
 #include "pocket_daily/ContentPage.h"
 #include "pocket_daily/ContentViewState.h"
+#include "pocket_daily/PocketReadingShelf.h"
 #include "pocket_daily/home/GlanceFormat.h"
 
 namespace PocketDaily::Home {
@@ -30,6 +32,34 @@ void copyBookText(char (&out)[N], const char* text) {
   out[utf8SafeTruncateBuffer(out, static_cast<int>(length))] = '\0';
 }
 }  // namespace
+
+DeskClock readDeskClock(const AppGlance::Snapshot& glance, const time_t now, const int16_t companionOffset) {
+  DeskClock clock;
+  if (now < AppGlance::MIN_EPOCH) return clock;
+  struct tm local{};
+  if (companionOffset != INT16_MIN || glance.savedEpoch) {
+    const int16_t offset = companionOffset != INT16_MIN ? companionOffset : glance.utcOffsetMinutes;
+    const time_t adjusted = now + offset * 60;
+    if (!gmtime_r(&adjusted, &local)) return clock;
+  } else if (!localtime_r(&now, &local)) {
+    return clock;
+  }
+  clock.date = (local.tm_year + 1900) * 10000u + (local.tm_mon + 1) * 100u + local.tm_mday;
+  clock.minute = local.tm_hour * 60 + local.tm_min;
+  const char* line = tr(STR_POCKET_CLOCK_LINE_PROMISE);
+  switch (local.tm_yday % 3) {
+    case 1:
+      line = tr(STR_POCKET_CLOCK_LINE_PAGES);
+      break;
+    case 2:
+      line = tr(STR_POCKET_CLOCK_LINE_PAUSE);
+      break;
+    default:
+      break;
+  }
+  snprintf(clock.line, sizeof(clock.line), "%s", line);
+  return clock;
+}
 
 Strings deviceStrings() {
   Strings s;
@@ -52,6 +82,13 @@ Strings deviceStrings() {
   s.library = tr(STR_LIBRARY);
   s.articles = tr(STR_ARTICLES);
   s.sync = tr(STR_POCKET_SYNC);
+  s.recentBooks = tr(STR_POCKET_RECENT_BOOKS);
+  s.views = tr(STR_POCKET_VIEWS);
+  s.reading = tr(STR_POCKET_READING_LABEL);
+  s.back = tr(STR_BACK);
+  s.clock = tr(STR_CLOCK);
+  s.calendar = tr(STR_POCKET_CALENDAR);
+  s.weekdays = tr(STR_POCKET_WEEKDAYS);
   return s;
 }
 
@@ -109,6 +146,86 @@ const RecentBook* readOpenBook(OpenBook& out) {
   if (progressFile.read(progressData, sizeof(progressData)) == (int)sizeof(progressData) && progressData[6] <= 100)
     out.percent = (int8_t)progressData[6];
   return found;
+}
+
+bool resolveBookCoverPath(const RecentBook& book, char* path, const size_t capacity) {
+  if (!path || !capacity) return false;
+  path[0] = 0;
+  if (book.coverBmpPath.empty()) return false;
+  const auto accept = [&](const std::string& candidate) {
+    if (candidate.empty() || candidate.size() >= capacity) return false;
+    HalFile file;
+    if (!Storage.openFileForRead("POCKET", candidate.c_str(), file) || !file.size() || file.size() > 131072)
+      return false;
+    memcpy(path, candidate.c_str(), candidate.size() + 1);
+    return true;
+  };
+  std::string full = book.coverBmpPath;
+  const auto thumb = full.rfind("/thumb_");
+  if (thumb != std::string::npos) {
+    full.replace(thumb, std::string::npos, "/cover.bmp");
+    if (accept(full)) return true;
+  }
+  return accept(UITheme::getCoverThumbPath(book.coverBmpPath, UITheme::getInstance().getMetrics().homeCoverHeight));
+}
+
+uint8_t readRecentBookEntries(const RecentBook* (&entries)[RECENT_CAP]) {
+  memset(entries, 0, sizeof(entries));
+  auto selection = makeUniqueNoThrow<ReadingShelf::Selection>();
+  if (!selection) return 0;
+  ReadingShelf::load(*selection);
+  uint8_t count = 0;
+  const auto append = [&](const RecentBook& book) {
+    if (count < RECENT_CAP && !book.path.empty() && book.path.size() < RECENT_PATH_BYTES &&
+        Storage.exists(book.path.c_str()))
+      entries[count++] = &book;
+  };
+  if (selection->automatic) {
+    for (const auto& book : RECENT_BOOKS.getBooks()) append(book);
+  } else {
+    for (uint8_t i = 0; i < selection->count; ++i) {
+      for (const auto& book : RECENT_BOOKS.getBooks()) {
+        if (book.path == selection->paths[i]) {
+          append(book);
+          break;
+        }
+      }
+    }
+  }
+  return count;
+}
+
+uint8_t readRecentBooks(BookSummary (&books)[RECENT_CAP], char (*paths)[RECENT_PATH_BYTES],
+                        char (*covers)[RECENT_PATH_BYTES]) {
+  for (auto& book : books) book.clear();
+  if (paths) memset(paths, 0, RECENT_CAP * RECENT_PATH_BYTES);
+  if (covers) memset(covers, 0, RECENT_CAP * RECENT_PATH_BYTES);
+  uint8_t count = 0;
+  const RecentBook* entries[RECENT_CAP]{};
+  const auto entryCount = readRecentBookEntries(entries);
+  for (uint8_t i = 0; i < entryCount; ++i) {
+    const auto& recent = *entries[i];
+    auto& book = books[count];
+    book.valid = true;
+    const char* slash = strrchr(recent.path.c_str(), '/');
+    copyBookText(book.title, recent.title.empty() ? (slash ? slash + 1 : recent.path.c_str()) : recent.title.c_str());
+    copyBookText(book.author, recent.author.c_str());
+    if (paths) memcpy(paths[count], recent.path.c_str(), recent.path.size() + 1);
+    // Preserve the exact cache association; never substitute another book's art.
+    if (covers) resolveBookCoverPath(recent, covers[count], RECENT_PATH_BYTES);
+    if (FsHelpers::hasEpubExtension(recent.path)) {
+      char progressPath[64];
+      snprintf(progressPath, sizeof(progressPath), "/.crosspoint/epub_%u/progress.bin",
+               static_cast<unsigned>(std::hash<std::string>{}(recent.path)));
+      HalFile file;
+      uint8_t bytes[7];
+      if (Storage.openFileForRead("POCKET", progressPath, file) && file.read(bytes, sizeof(bytes)) == sizeof(bytes) &&
+          bytes[6] <= 100)
+        book.percent = static_cast<int8_t>(bytes[6]);
+    }
+    ++count;
+  }
+  return count;
 }
 
 int drawContentCardImage(GfxRenderer& renderer, const PocketDaily::Content::ContentViewState& content,

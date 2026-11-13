@@ -51,6 +51,7 @@ inline int loads = 0;
 inline PocketDaily::Screen::Surface loadedSurface = PocketDaily::Screen::Surface::None;
 inline std::vector<std::string> texts;
 inline bool drawSucceeds = true;
+inline bool drawsHeader = true;
 inline int draws = 0;
 inline int drawnFont = -1;
 inline uint8_t drawOrientation = 0xFF;
@@ -79,11 +80,12 @@ bool visitFrameText(const Frame&, void* context, bool (*visit)(void*, const char
     if (!visit(context, text.c_str())) return false;
   return true;
 }
-bool drawFrame(GfxRenderer&, const Frame&, int cjkFont, HeaderPainter::Inputs* header) {
+bool drawFrame(GfxRenderer&, const Frame&, int cjkFont, HeaderPainter::Inputs* header, bool* headerDrawn) {
+  if (headerDrawn) *headerDrawn = ScreenFake::drawsHeader;
   ++ScreenFake::draws;
   ScreenFake::drawnFont = cjkFont;
   ScreenFake::drawOrientation = PresentationFake::orientation;
-  if (header) {
+  if (header && ScreenFake::drawsHeader) {
     header->batteryPercent = 91;
     strcpy(header->batteryLabel, "91%");
     strcpy(header->clock, "12:59");
@@ -140,6 +142,7 @@ class ScreenPresentationTest : public testing::Test {
     ScreenFake::loadedSurface = Surface::None;
     ScreenFake::texts = {"Pocket Daily", "Library", "Continue Reading"};
     ScreenFake::drawSucceeds = true;
+    ScreenFake::drawsHeader = true;
     ScreenFake::drawnFont = -1;
     ScreenFake::drawOrientation = 0xFF;
     ScreenFake::duringDraw = {};
@@ -251,6 +254,29 @@ TEST_F(ScreenPresentationTest, HeaderReceiptExistsOnlyForTheSuccessfullyPresente
   ScreenFake::drawSucceeds = false;
   ASSERT_TRUE(screen.render(renderer));
   EXPECT_FALSE(screen.copyPresentedHeader(header, 7));
+}
+
+TEST_F(ScreenPresentationTest, HeaderlessCompactClockKeepsFreshPreviewMetadataAndLaterHeaderStillPublishes) {
+  HeaderPainter::Inputs fresh;
+  fresh.fonts[0] = 12;
+  fresh.batteryPercent = 73;
+  strcpy(fresh.clock, "10:08");
+  ScreenFake::drawsHeader = false;  // Compact-clock Home intentionally omits the header painter.
+  ASSERT_TRUE(screen.enqueue(Surface::Home, 7));
+  ASSERT_TRUE(screen.service(renderer, 20000, 8000));
+  ASSERT_TRUE(screen.render(renderer));
+  EXPECT_EQ(screen.receipt().phase, PresentationPhase::Rendered);
+  EXPECT_FALSE(screen.copyPresentedHeader(fresh, 7));
+  EXPECT_EQ(fresh.fonts[0], 12);
+  EXPECT_EQ(fresh.batteryPercent, 73);
+  EXPECT_STREQ(fresh.clock, "10:08");
+  screen.hide(renderer);
+  ScreenFake::drawsHeader = true;
+  ASSERT_TRUE(screen.enqueue(Surface::Home, 7));
+  ASSERT_TRUE(screen.service(renderer, 20000, 8000));
+  ASSERT_TRUE(screen.render(renderer));
+  ASSERT_TRUE(screen.copyPresentedHeader(fresh, 7));
+  EXPECT_EQ(fresh.batteryPercent, 91);
 }
 
 TEST_F(ScreenPresentationTest, CjkFrameLoadsBoundedFontOnceAndChecksEveryStringInBothStyles) {

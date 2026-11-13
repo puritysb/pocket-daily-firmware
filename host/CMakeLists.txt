@@ -7,6 +7,7 @@ add_library(pdui_host STATIC
   ${REPO_ROOT}/src/components/themes/HeaderPainter.cpp
   ${REPO_ROOT}/src/pocket_daily/preview/LayoutInputs.cpp
   ${REPO_ROOT}/src/pocket_daily/PocketGlance.cpp
+  ${REPO_ROOT}/src/pocket_daily/PocketAgenda.cpp
   ${REPO_ROOT}/freeink-sdk/libs/ui/FreeInkUI/src/FreeInkUI.cpp
   ${REPO_ROOT}/src/pocket_daily/home/HomeDrawing.cpp
   ${REPO_ROOT}/src/pocket_daily/home/HomeRenderer.cpp

@@ -2,10 +2,12 @@
 
 #include <Bitmap.h>
 #include <EpdFontFamily.h>
+#include <HalClock.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <WiFi.h>
 
 #include <algorithm>
@@ -23,6 +25,7 @@
 #include "components/UITheme.h"  // GUI (theme) + ThemeMetrics + Rect
 #include "fontIds.h"
 #include "pocket_daily/ContentActiveStore.h"
+#include "pocket_daily/PocketAgendaStore.h"
 #include "pocket_daily/PocketGlanceStore.h"
 #include "pocket_daily/PocketProfileStore.h"
 #include "pocket_daily/home/DailyWord.h"
@@ -125,6 +128,7 @@ void PocketDailyActivity::onEnter() {
 
   exitToNearbySync = false;
   viewMode = ViewMode::Overview;
+  choosingView = false;
   glanceReason = GlanceReason::Ambient;
   sleepFramePending = false;
 
@@ -144,14 +148,65 @@ void PocketDailyActivity::onEnter() {
   }
   localStudyOffset = 0;
   const auto& profile = PocketDaily::DailyProfile::current();
+  if (profile.shows(PocketDaily::DailyProfile::HomeItem::Calendar)) {
+    // A bounded ~1.4 KB snapshot belongs to the calendar activity, not its stack.
+    agendaSnapshot = makeUniqueNoThrow<PocketDaily::Agenda::Snapshot>();
+    if (agendaSnapshot)
+      PocketDaily::Agenda::load(*agendaSnapshot);
+    else
+      LOG_ERR("POCKET", "Agenda allocation failed");
+  }
+
+  if (profile.shows(PocketDaily::DailyProfile::HomeItem::ReadingShelf) ||
+      profile.shows(PocketDaily::DailyProfile::HomeItem::ReadingList)) {
+    // Larger than a task frame; allocate once before rendering, and release on exit.
+    recentShelf = makeUniqueNoThrow<RecentShelf>();
+    if (recentShelf)
+      recentShelf->count =
+          PocketDaily::Home::readRecentBooks(recentShelf->books, recentShelf->paths, recentShelf->covers);
+    else
+      LOG_ERR("POCKET", "Recent shelf allocation failed; Library remains available");
+  }
   if (profile.dailyWord || profile.shows(PocketDaily::DailyProfile::HomeItem::Word)) buildLocalStudyCard();
 
+  // Restore the open book's position in a manually ordered shelf without writing SD.
+  overviewCursor = 0;
+  const int initialCount = collectOverview(inputRows, kOverviewCap);
+  for (int i = 0; recentShelf && i < initialCount; ++i) {
+    const auto& row = inputRows[i];
+    if (row.shelfPage && row.shelfIndex < recentShelf->count && continuePath == recentShelf->paths[row.shelfIndex]) {
+      overviewCursor = i;
+      break;
+    }
+  }
+  readingCursor = overviewCursor;
   LOG_INF("POCKET", "Pocket reader onEnter (glance %s)", glanceSnapshot.savedEpoch ? "saved" : "none");
   // Paint Pocket immediately — local reading and carried cards need nothing.
   requestUpdate();
 }
 
-void PocketDailyActivity::loop() { handleButtons(); }
+namespace {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+constexpr time_t kDeskClockInterval = 1;
+#else
+constexpr time_t kDeskClockInterval = 2;
+#endif
+}  // namespace
+
+void PocketDailyActivity::loop() {
+  const auto refresh = clockRefresh.load();
+  if (refresh != ClockRefresh::Off) {
+    const time_t interval = refresh == ClockRefresh::Minute ? 60 : kDeskClockInterval;
+    const time_t now = halClock.companionTime(time(nullptr)).epoch;
+    const time_t tick = now >= PocketDaily::AppGlance::MIN_EPOCH ? now / interval : 0;
+    if (refresh != lastClockRefresh || tick != deskClockTick) {
+      deskClockTick = tick;
+      requestUpdate();
+    }
+  }
+  lastClockRefresh = refresh;
+  handleButtons();
+}
 
 void PocketDailyActivity::resumeReading() {
   // Leaving the book returns here (ActivityManager::leaveReader).
@@ -161,6 +216,8 @@ void PocketDailyActivity::resumeReading() {
 void PocketDailyActivity::onExit() {
   Activity::onExit();
   appContent.reset();
+  recentShelf.reset();
+  agendaSnapshot.reset();
 
   // Pocket Daily's reader/font lifetime fragments the X3's internal heap even
   // after every reloadable owner is released. Starting NimBLE in the same
@@ -267,11 +324,26 @@ int PocketDailyActivity::collectOverview(OverviewRow* out, int cap) const {
       case PocketDaily::Home::RowSource::Reading:
         appendReading();
         break;
+      case PocketDaily::Home::RowSource::RecentBooks:
+        for (uint8_t index = 0; index < std::max<int>(1, recentShelf ? recentShelf->count : 0) && n < cap; ++index) {
+          out[n] = {};
+          out[n].shelfPage = true;
+          out[n++].shelfIndex = index;
+        }
+        break;
+      case PocketDaily::Home::RowSource::Calendar:
+        out[n] = {};
+        out[n++].calendarPage = true;
+        break;
       case PocketDaily::Home::RowSource::AppCards:
         appendAppCards();
         break;
       case PocketDaily::Home::RowSource::DailyWord:
         appendDailyWord();
+        break;
+      case PocketDaily::Home::RowSource::DeskClock:
+        out[n] = {};
+        out[n++].clockPage = true;
         break;
     }
   }
@@ -353,20 +425,98 @@ void PocketDailyActivity::handleButtons() {
   const int n = collectOverview(rows, kOverviewCap);
   const int selected = overviewCursor >= 0 && overviewCursor < n ? overviewCursor : 0;
 
+  uint8_t groups[kOverviewCap]{};
+  for (int i = 0; i < n; ++i)
+    groups[i] = static_cast<uint8_t>(
+        PocketDaily::Home::homeSection(rows[i].reading, rows[i].shelfPage, rows[i].clockPage, rows[i].calendarPage));
+  uint8_t starts[4]{};
+  const int sections = PocketDaily::Home::homeSectionStarts(groups, n, starts, 4);
+  if (n > 0 && groups[selected] == static_cast<uint8_t>(PocketDaily::Home::Section::Reading)) readingCursor = selected;
+  if (choosingView) {
+    if (mappedInput.wasReleased(Btn::Up) || mappedInput.wasReleased(Btn::Down)) {
+      viewChoice = (viewChoice + (mappedInput.wasReleased(Btn::Up) ? sections : 1)) % (sections + 1);
+      requestUpdate();
+      return;
+    }
+    if (gpio.wasReleased(HalGPIO::BTN_CONFIRM)) {
+      choosingView = false;
+      browsingCalendar = false;
+      calendarSelection = 0;
+      if (viewChoice >= sections) {
+        activityManager.goToArticles();
+        return;
+      }
+      overviewCursor = starts[viewChoice];
+      if (groups[overviewCursor] == static_cast<uint8_t>(PocketDaily::Home::Section::Reading) && readingCursor >= 0 &&
+          readingCursor < n && groups[readingCursor] == groups[overviewCursor])
+        overviewCursor = readingCursor;
+      requestUpdate();
+      return;
+    }
+    if (gpio.wasReleased(HalGPIO::BTN_BACK) || gpio.wasReleased(HalGPIO::BTN_LEFT)) {
+      choosingView = false;
+      requestUpdate();
+      return;
+    }
+  }
+  if (gpio.wasReleased(HalGPIO::BTN_LEFT)) {
+    choosingView = true;
+    viewChoice = 0;
+    for (int i = 0; i < sections; ++i)
+      if (groups[starts[i]] == groups[selected]) viewChoice = i;
+    requestUpdate();
+    return;
+  }
+  if (n > 0 && rows[selected].calendarPage && browsingCalendar) {
+    const bool previous = mappedInput.wasReleased(Btn::Up);
+    const bool next = mappedInput.wasReleased(Btn::Down);
+    if (previous || next) {
+      RenderLock lock(*this);
+      calendarSelection = PocketDaily::Agenda::shiftDate(calendarSelection, next ? 1 : -1);
+      requestUpdate();
+      return;
+    }
+    if ((gpio.wasReleased(HalGPIO::BTN_BACK) && backPressMs != 0) || gpio.wasReleased(HalGPIO::BTN_CONFIRM)) {
+      RenderLock lock(*this);
+      browsingCalendar = false;
+      calendarOffset = 0;
+      calendarSelection = 0;
+      requestUpdate();
+      return;
+    }
+  }
   // Reading and Study are one content carousel. The side keys move through
   // it; Confirm always opens exactly what the panel currently shows.
   if (mappedInput.wasReleased(Btn::Up) && n > 1) {
-    overviewCursor = (selected - 1 + n) % n;
+    overviewCursor = PocketDaily::Home::stepHomeSection(groups, n, selected, -1);
     requestUpdate();
     return;
   }
   if (mappedInput.wasReleased(Btn::Down) && n > 1) {
-    overviewCursor = (selected + 1) % n;
+    overviewCursor = PocketDaily::Home::stepHomeSection(groups, n, selected, 1);
     requestUpdate();
     return;
   }
   if (gpio.wasReleased(HalGPIO::BTN_CONFIRM) && n > 0) {
-    if (rows[selected].reading) {
+    if (rows[selected].shelfPage) {
+      const auto index = rows[selected].shelfIndex;
+      if (recentShelf && index < recentShelf->count && Storage.exists(recentShelf->paths[index]))
+        activityManager.goToReaderFrom(ReaderReturn::PocketDaily, recentShelf->paths[index]);
+      else
+        activityManager.goToLibrary();
+      return;
+    }
+    if (rows[selected].calendarPage) {
+      RenderLock lock(*this);
+      browsingCalendar = true;
+      const auto clock = halClock.companionTime(time(nullptr));
+      calendarSelection = PocketDaily::Home::readDeskClock(glanceSnapshot, clock.epoch, clock.offsetMinutes).date;
+      if (!calendarSelection && agendaSnapshot && agendaSnapshot->dayCount)
+        calendarSelection = agendaSnapshot->days[0].date;
+      requestUpdate();
+      return;
+    }
+    if (rows[selected].reading || rows[selected].clockPage) {
       if (continuePath.empty())
         activityManager.goToLibrary();
       else
@@ -377,11 +527,6 @@ void PocketDailyActivity::handleButtons() {
       viewMode = ViewMode::Card;
       requestUpdate();
     }
-    return;
-  }
-  // Saved articles remain available beside the reading carousel.
-  if (gpio.wasReleased(HalGPIO::BTN_LEFT)) {
-    activityManager.goToArticles();
     return;
   }
   // Sync opens Pocket Nearby Sync, where the companion sends cards, the
@@ -522,6 +667,11 @@ PocketDaily::Home::Env PocketDailyActivity::homeEnv() const {
   env.drawCover = [](void* self, GfxRenderer&, int x, int y, int width, int height) {
     return static_cast<PocketDailyActivity*>(self)->drawReadingCover(x, y, width, height);
   };
+  env.drawRecentCover = [](void* self, GfxRenderer& r, unsigned index, int x, int y, int w, int h) {
+    const auto* activity = static_cast<PocketDailyActivity*>(self);
+    return activity->recentShelf && index < activity->recentShelf->count &&
+           PocketDaily::Home::drawCachedCover(r, activity->recentShelf->covers[index], x, y, w, h);
+  };
   env.drawCardImage = [](void* self, GfxRenderer&, const char* cardId, int x, int y, int width, int height) {
     return static_cast<PocketDailyActivity*>(self)->drawAppCardImage(cardId, x, y, width, height);
   };
@@ -532,26 +682,89 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n) {
 #ifdef ENABLE_DEV_REMOTE_FLASH
   const uint32_t composeStart = millis();
 #endif
-  preparePersonalSnapshot();
+  const auto& profile = PocketDaily::DailyProfile::current();
+  const time_t systemTime = time(nullptr);
+  const int selected = overviewCursor >= 0 && overviewCursor < n ? overviewCursor : 0;
+  const bool fullClock = n > 0 && rows[selected].clockPage;
+  const bool compactClock = n > 0 && (rows[selected].reading || rows[selected].shelfPage) &&
+                            profile.shows(PocketDaily::DailyProfile::HomeItem::ClockCompact);
+  const bool calendarPage = n > 0 && rows[selected].calendarPage;
+  clockRefresh.store(fullClock                        ? ClockRefresh::Animated
+                     : (compactClock || calendarPage) ? ClockRefresh::Minute
+                                                      : ClockRefresh::Off);
+  const auto clock = fullClock || compactClock || calendarPage
+                         ? halClock.companionTime(systemTime)
+                         : HalClock::CompanionTime{systemTime, HalClock::UNSPECIFIED_OFFSET};
+  const time_t now = clock.epoch;
+  if (fullClock) {
+    // Clock ticks use RAM inputs and the book route resolved on entry.
+    PocketDaily::Home::rollGlanceToToday(glanceSnapshot, now);
+  } else {
+    preparePersonalSnapshot();
+  }
 #ifdef ENABLE_DEV_REMOTE_FLASH
   Pocket::NearbySync::Window::noteHomeDetail(Pocket::NearbySync::Stats::PaintDetail::Snapshot, millis() - composeStart);
 #endif
   // Drawing is shared with the host preview (pocket_daily/home/HomeRenderer).
   PocketDaily::Home::Row homeRows[kOverviewCap];
   for (int i = 0; i < n && i < kOverviewCap; ++i)
-    homeRows[i] = {rows[i].reading,  rows[i].pocket, rows[i].mine,    rows[i].word,
-                   rows[i].hasImage, rows[i].sid,    rows[i].project, rows[i].activity};
+    homeRows[i] = {rows[i].reading,     rows[i].pocket,
+                   rows[i].mine,        rows[i].word,
+                   rows[i].hasImage,    rows[i].sid,
+                   rows[i].project,     rows[i].activity,
+                   rows[i].clockPage,   static_cast<int8_t>(rows[i].shelfPage ? rows[i].shelfIndex : -1),
+                   rows[i].calendarPage};
   PocketDaily::Home::HomeView view;
   view.isX3 = gpio.deviceIsX3();
   view.rows = homeRows;
   view.count = std::min(n, kOverviewCap);
   view.selected = overviewCursor;
+  view.choosingView = choosingView;
+  view.viewChoice = viewChoice;
+  view.recentBooks = recentShelf ? recentShelf->books : nullptr;
+  view.recentCount = recentShelf ? recentShelf->count : 0;
+  view.calendarOffset = calendarOffset;
+  view.calendarBrowsing = browsingCalendar;
+  view.calendarSelection = calendarSelection;
+  view.agenda = agendaSnapshot.get();
   view.reading = {renderReadingSnapshot.valid, renderReadingSnapshot.title, renderReadingSnapshot.author,
                   renderReadingSnapshot.percent};
   view.glance = &glanceSnapshot.glance;
-  view.snapshotStale = PocketDaily::HomeDraw::snapshotIsStale(glanceSnapshot.savedEpoch, time(nullptr));
-  view.profile = PocketDaily::DailyProfile::current();
+  view.snapshotStale = PocketDaily::HomeDraw::snapshotIsStale(glanceSnapshot.savedEpoch, now);
+  view.profile = profile;
   view.strings = homeStrings();
+  if (fullClock || compactClock || calendarPage)
+    view.clock = PocketDaily::Home::readDeskClock(glanceSnapshot, now, clock.offsetMinutes);
+  if (fullClock) {
+    view.reading.valid = !continuePath.empty();
+    view.clock.hideColon = view.clock.minute < 1440 && (now / kDeskClockInterval) % 2 != 0;
+    const auto minute = view.clock.minute;
+    const bool minuteAdvanced = lastDeskMinute < 1440 && minute == (lastDeskMinute + 1) % 1440;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    // Developer panel trial: show real seconds with a fixed separator.
+    const bool clockValid = minute < 1440;
+    view.clock.hideColon = false;
+    if (clockValid) view.clock.second = now % 60;
+    const bool secondAdvanced = clockValid && lastDeskSecondEpoch > 0 && now == lastDeskSecondEpoch + 1;
+    lastDeskSecondEpoch = clockValid ? now : 0;
+    if (secondAdvanced) view.clock.foldingFromSecond = (now - 1) % 60;
+#else
+    constexpr bool secondAdvanced = false;
+#endif
+    if (minuteAdvanced || secondAdvanced) {
+      if (minuteAdvanced) view.clock.foldingFromMinute = lastDeskMinute;
+      PocketDaily::Home::renderHome(renderer, view, homeEnv());
+      renderer.displayBuffer();
+      view.clock.foldingFromMinute = 1440;
+      view.clock.foldingFromSecond = 60;
+    }
+    lastDeskMinute = minute;
+  } else {
+    lastDeskMinute = 1440;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    lastDeskSecondEpoch = 0;
+#endif
+  }
   PocketDaily::Home::renderHome(renderer, view, homeEnv());
 #ifdef ENABLE_DEV_REMOTE_FLASH
   const uint32_t refreshStart = millis();
@@ -672,6 +885,7 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
   view.glance = &g;
   view.reading = {renderReadingSnapshot.valid, renderReadingSnapshot.title, renderReadingSnapshot.author,
                   renderReadingSnapshot.percent};
+  view.fullScreenCover = isSleep;
   view.sleepCover = SETTINGS.pocketDailySleepCover;
   view.pocketCard = &renderPocketSnapshot;
   // The companion's first card stays in appContent for the whole paint.
@@ -724,6 +938,7 @@ void PocketDailyActivity::render(RenderLock&&) {
   // position, carried card, the saved weather and schedule), so the retained
   // panel remains useful and truthful without a network.
   if (sleepFramePending) {
+    clockRefresh.store(ClockRefresh::Off);
     renderGlance(glanceReason);
     return;
   }
@@ -731,6 +946,7 @@ void PocketDailyActivity::render(RenderLock&&) {
   // Cards are local and remain valid offline. The render-owned card buffer
   // keeps the ~700 B copy off the render stack.
   if (viewMode == ViewMode::Card && findPocketCard(cardSid, renderPocketSnapshot)) {
+    clockRefresh.store(ClockRefresh::Off);
     renderPocketCard(renderPocketSnapshot);
     return;
   }
@@ -744,6 +960,7 @@ void PocketDailyActivity::render(RenderLock&&) {
   // an offline face (weather/today). It never outranks items that can be
   // opened.
   if (n == 0 && (glanceSnapshot.glance.valid || !continuePath.empty())) {
+    clockRefresh.store(ClockRefresh::Off);
     renderGlance(GlanceReason::Ambient);
     ambientGlanceShown = true;
     return;

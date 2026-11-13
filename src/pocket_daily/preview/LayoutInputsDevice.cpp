@@ -33,9 +33,17 @@ bool captureLayoutInputs(const GfxRenderer& renderer, LayoutInputs& out) {
   out.metrics = Home::deviceMetrics();
   if (!BaseTheme::captureHeaderInputs(renderer, out.header)) return false;
   out.book = frame->book;
+  out.recentCount = frame->recentCount;
+  out.agenda = frame->agenda;
+  for (uint8_t i = 0; i < out.recentCount; ++i) {
+    auto& c = out.recentCovers[i];
+    if (frame->recentCovers[i][0]) Home::coverMetadataForPath(frame->recentCovers[i], c.key, c.size, c.crc);
+  }
+  for (uint8_t i = 0; i < Home::RECENT_CAP; ++i) out.recentBooks[i] = frame->recentBooks[i];
   out.glance = frame->glance;
   out.glanceStale = frame->glanceStale;
   out.word = frame->word;
+  out.clock = frame->clock;
   snprintf(out.fontFamily, sizeof(out.fontFamily), "PocketSansWorld");
   // Registry lookup only. Do not load a font, trigger a scan or change the
   // renderer's font state merely to inspect a proposed profile.

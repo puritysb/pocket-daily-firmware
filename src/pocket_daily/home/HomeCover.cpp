@@ -1,5 +1,7 @@
 #include "HomeCover.h"
 
+#include <Bitmap.h>
+#include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <RecentBooksStore.h>
 
@@ -28,10 +30,8 @@ bool openBookCoverPath(char* path, size_t capacity) {
 uint32_t coverPathKey(const char* path) {
   return ~Content::contentCrcUpdate(UINT32_MAX, reinterpret_cast<const uint8_t*>(path), strlen(path));
 }
-bool coverMetadata(uint32_t& key, uint32_t& size, uint32_t& crc) {
+bool coverMetadataForPath(const char* path, uint32_t& key, uint32_t& size, uint32_t& crc) {
   // Cold read-only query. Stream64B; no image-sized allocation or persistent scene.
-  char path[160];
-  if (!openBookCoverPath(path, sizeof(path))) return false;
   HalFile file = Storage.open(path);
   if (!file || !file.size() || file.size() > 131072) return false;
   const uint32_t length = file.size();
@@ -47,5 +47,32 @@ bool coverMetadata(uint32_t& key, uint32_t& size, uint32_t& crc) {
   size = length;
   crc = ~sum;
   return key != 0;
+}
+bool recentBookCoverPath(unsigned index, char* path, size_t capacity) {
+  if (capacity) path[0] = 0;
+  const RecentBook* entries[RECENT_CAP]{};
+  if (index >= readRecentBookEntries(entries)) return false;
+  return resolveBookCoverPath(*entries[index], path, capacity);
+}
+bool coverMetadata(uint32_t& key, uint32_t& size, uint32_t& crc) {
+  char path[160];
+  return openBookCoverPath(path, sizeof(path)) && coverMetadataForPath(path, key, size, crc);
+}
+bool recentCoverMetadata(unsigned index, uint32_t& key, uint32_t& size, uint32_t& crc) {
+  char path[RECENT_PATH_BYTES];
+  return recentBookCoverPath(index, path, sizeof(path)) && coverMetadataForPath(path, key, size, crc);
+}
+bool drawCachedCover(GfxRenderer& r, const char* path, int x, int y, int width, int height) {
+  if (!path || !path[0] || width <= 4 || height <= 4) return false;
+  HalFile file = Storage.open(path, O_RDONLY);
+  if (!file) return false;
+  Bitmap bitmap(file);
+  if (bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0 ||
+      bitmap.getWidth() > 2048 || bitmap.getHeight() > 2048)
+    return false;
+  const float scale = std::min(float(width - 4) / bitmap.getWidth(), float(height - 4) / bitmap.getHeight());
+  const int dw = std::max(1, int(bitmap.getWidth() * scale)), dh = std::max(1, int(bitmap.getHeight() * scale));
+  r.drawBitmap(bitmap, x + (width - dw) / 2, y + (height - dh) / 2, dw, dh, 0, 0, true);
+  return true;
 }
 }  // namespace PocketDaily::Home

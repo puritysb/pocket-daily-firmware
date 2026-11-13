@@ -12,7 +12,10 @@ struct Name {
   const char* text;
   uint8_t value;
 };
-constexpr Name kHomeItems[] = {{"reading", 1}, {"study", 2}, {"provider", 3}, {"monitor", 4}, {"word", 5}};
+constexpr Name kHomeItems[] = {{"reading", 1},      {"study", 2},           {"provider", 3},      {"monitor", 4},
+                               {"word", 5},         {"clockEvent", 6},      {"clockWeather", 7},  {"clockLine", 8},
+                               {"clockCompact", 9}, {"clockLandscape", 10}, {"readingShelf", 11}, {"readingList", 12},
+                               {"calendar", 13}};
 // `provider` and `monitor` were fed only by the retired AgentDeck daemon. Stored
 // profiles and documents naming them stay valid (and round-trip), but the
 // reader no longer advertises them and never shows them.

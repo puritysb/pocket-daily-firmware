@@ -21,10 +21,15 @@ namespace PocketDaily::Screen {
 struct Frame {
   Surface surface = Surface::None;
   DailyProfile::Profile profile{};
+  Agenda::Snapshot agenda{};
   AppGlance::Snapshot glance{};  // rolled to today
   bool glanceStale = false;
+  Home::DeskClock clock;
   Content::ContentViewState cards;  // separate <=2400 B snapshot when cards exist
   Home::OpenBook book{};
+  Home::BookSummary recentBooks[Home::RECENT_CAP]{};
+  char recentCovers[Home::RECENT_CAP][Home::RECENT_PATH_BYTES]{};
+  uint8_t recentCount = 0;
   // The daily word when it is drawn; otherwise only a placeholder id that
   // keeps the Home row count (carousel position, chevrons) right.
   PocketDaily::Card word{};
@@ -55,5 +60,6 @@ bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* conte
 // Render task, RenderLock held: draws the frame without presenting it. Text
 // that needs CJK uses `cjkFont` (0: built-in fonts only). False when the frame
 // cannot be certified (a header whose font is no longer the checked one).
-bool drawFrame(GfxRenderer& renderer, const Frame& frame, int cjkFont, HeaderPainter::Inputs* header = nullptr);
+bool drawFrame(GfxRenderer& renderer, const Frame& frame, int cjkFont, HeaderPainter::Inputs* header = nullptr,
+               bool* headerDrawn = nullptr);
 }  // namespace PocketDaily::Screen

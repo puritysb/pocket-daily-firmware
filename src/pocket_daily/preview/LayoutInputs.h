@@ -3,12 +3,13 @@
 #include <cstdint>
 
 #include "components/themes/HeaderPainter.h"
+#include "pocket_daily/PocketAgenda.h"
 #include "pocket_daily/PocketGlance.h"
 #include "pocket_daily/home/HomeInputs.h"
 
 namespace PocketDaily::Preview {
 inline constexpr size_t MAX_BYTES = 8192;
-inline constexpr size_t LABEL_COUNT = 22;
+inline constexpr size_t LABEL_COUNT = 25;
 inline constexpr size_t LABEL_BYTES = 192;
 // Cold request-scoped input only; never retained on device, never contains a
 // framebuffer, path, credential or the proposed profile. Cards are associated
@@ -31,8 +32,16 @@ struct LayoutInputs {
   Home::Metrics metrics{};
   HeaderPainter::Inputs header{};
   Home::OpenBook book{};
+  Home::BookSummary recentBooks[Home::RECENT_CAP]{};
+  uint8_t recentCount = 0;
+  struct Cover {
+    uint32_t key = 0, size = 0, crc = 0;
+  };
+  Cover recentCovers[Home::RECENT_CAP]{};
+  Agenda::Snapshot agenda{};
   AppGlance::Snapshot glance{};
   Card word{};
+  Home::DeskClock clock;
   char labels[LABEL_COUNT][LABEL_BYTES]{};
 };
 // Strict bounded versioned little-endian codec. No alignment casts, allocation,

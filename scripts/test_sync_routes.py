@@ -9,6 +9,23 @@ from pathlib import Path
 
 
 class SyncRoutesTest(unittest.TestCase):
+    def test_empty_articles_cleanup_is_dev_only_fixed_and_admitted(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'src/pocket_daily/web/PocketEndpoints.cpp').read_text()
+        start = source.index('  routes.on("/api/pocket/v1/dev/empty-articles", HTTP_POST,')
+        end = source.index('  routes.on("/api/pocket/v1/dev/fresh-start"', start)
+        route = source[start:end]
+        guard = source.rfind('#ifdef ENABLE_DEV_REMOTE_FLASH', 0, start)
+        self.assertGreater(guard, source.rfind('#endif', 0, start))
+        for required in ['admitContentOperation', 'parseGeneration', '|| !run',
+                         'RenderLock::Mode::Try', 'lock.ownsLock()', 'removeEmptyArticles(Storage)']:
+            self.assertIn(required, route)
+        self.assertNotIn('arg("path")', route)
+        helper = (root / 'src/pocket_daily/web/EmptyArticles.h').read_text()
+        self.assertIn('"/Articles"', helper)
+        self.assertIn('storage.rmdir(path)', helper)
+        self.assertNotIn('removeRecursive', helper)
+
     def test_games_are_not_part_of_the_reader_surface(self):
         root = Path(__file__).resolve().parents[1]
         for path in ("src/activities/ActivityManager.cpp", "src/activities/ActivityManager.h",
@@ -289,7 +306,7 @@ class SyncRoutesTest(unittest.TestCase):
 
     def test_reader_file_download_is_sync_only_and_advertised(self):
         # docs/reader-files.md: piece download is a Sync route next to the file
-        # listing, advertised as readerFiles: 2, one bounded write per request.
+        # listing, advertised as readerFiles: 3, one bounded write per request.
         root = Path(__file__).resolve().parents[1]
         source = (root / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
         body = source[source.index("void configurePocketRoutes("):source.index("void registerPocketRoutes(")]
@@ -304,7 +321,21 @@ class SyncRoutesTest(unittest.TestCase):
         self.assertIn("readDownloadPiece(file, offset, body, piece.length)", handler)
         self.assertNotIn("CONTENT_LENGTH_UNKNOWN", handler)
         status = (root / "src/pocket_daily/web/PocketStatus.cpp").read_text()
-        self.assertIn('doc["readerFiles"] = 2;', status)
+        self.assertIn('doc["readerFiles"] = 4;', status)
+
+    def test_reader_move_is_identity_checked_sync_only_and_preserves_state(self):
+        source = (Path(__file__).resolve().parents[1] / "src/pocket_daily/web/PocketEndpoints.cpp").read_text()
+        body = source[source.index("void configurePocketRoutes("):source.index("void registerPocketRoutes(")]
+        sync = body[body.rindex("if (isSyncProfile(d.profile)) {"):]
+        self.assertIn('routes.on("/api/pocket/v1/files/move", HTTP_POST', sync)
+        handler = source[source.index("void handleReaderFileMove("):source.index("enum class ReaderFileAction")]
+        self.assertLess(handler.index("admitContentOperation"), handler.index("Storage.open"))
+        self.assertIn("file.fileSize64() != expected", handler)
+        self.assertIn("readerFileMovePath", handler)
+        self.assertIn("moveFileWithState", handler)
+        self.assertIn("RECENT_BOOKS.updatePath", handler)
+        self.assertNotIn("clearBookCache", handler)
+        self.assertNotIn("Storage.remove", handler)
 
     def test_live_frame_capture_is_not_part_of_the_firmware(self):
         # The companion dropped reader-screen capture on 2026-09-25; the render

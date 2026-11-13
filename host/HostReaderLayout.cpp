@@ -19,15 +19,17 @@ struct DrawContext {
   bool failed = false;
   const uint8_t* cover = nullptr;
   size_t coverSize = 0;
+  const RecentCovers* recent = nullptr;
 };
 }  // namespace
 
 bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::LayoutInputs& in,
                         const PocketDaily::DailyProfile::Profile& profile, const UserCards& cards, const bool brief,
                         const bool sleepCover, const bool actual, const bool wakeIndicator, const uint8_t* cover,
-                        const size_t coverSize) {
+                        const size_t coverSize, const bool fullScreenCover, const RecentCovers* recent,
+                        const uint32_t selected, const uint32_t date) {
   using namespace PocketDaily;
-  DrawContext context{in, hostEnv(renderer, cards), false, cover, coverSize};
+  DrawContext context{in, hostEnv(renderer, cards), false, cover, coverSize, recent};
   Home::Env env;
   env.context = &context;
   env.metrics = in.metrics;
@@ -69,6 +71,21 @@ bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::Layou
     }
     return false;  // the shared renderer draws the title card
   };
+  env.drawRecentCover = [](void* value, GfxRenderer& r, unsigned index, int x, int y, int w, int h) {
+    auto& d = *static_cast<DrawContext*>(value);
+    if (!d.recent || index >= 4 || !d.recent->sizes[index] || w <= 4 || h <= 4) return false;
+    HalFile file({d.recent->bytes[index], d.recent->sizes[index]});
+    Bitmap bitmap(file);
+    if (bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0 ||
+        bitmap.getWidth() > 2048 || bitmap.getHeight() > 2048) {
+      d.failed = true;
+      return false;
+    }
+    const float scale = std::min(float(w - 4) / bitmap.getWidth(), float(h - 4) / bitmap.getHeight());
+    const int dw = std::max(1, int(bitmap.getWidth() * scale)), dh = std::max(1, int(bitmap.getHeight() * scale));
+    r.drawBitmap(bitmap, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh, 0, 0, true);
+    return true;
+  };
   env.drawCardImage = [](void* value, GfxRenderer& r, const char* id, int x, int y, int w, int h) {
     auto& d = *static_cast<DrawContext*>(value);
     const int drawn = d.imageEnv.drawCardImage(d.imageEnv.context, r, id, x, y, w, h);
@@ -80,6 +97,7 @@ bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::Layou
     Home::BriefView view;
     view.isSleep = true;
     if (actual && wakeIndicator) view.contentTopInset = PowerWakeCue::portraitContentTop(in.isX3);
+    view.fullScreenCover = actual && fullScreenCover;
     view.sleepCover = sleepCover;
     view.glance = &in.glance.glance;
     view.reading = reading;
@@ -107,6 +125,13 @@ bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::Layou
         case Home::RowSource::Reading:
           rows[n++] = {true, false, false, false, false, "local:reading", "", ""};
           break;
+        case Home::RowSource::RecentBooks:
+          for (uint8_t index = 0; index < std::max<int>(1, in.recentCount) && n < Home::ROW_CAP; ++index)
+            rows[n++] = {.shelfIndex = static_cast<int8_t>(index)};
+          break;
+        case Home::RowSource::Calendar:
+          rows[n++] = {.calendarPage = true};
+          break;
         case Home::RowSource::AppCards:
           for (const auto& card : cards) {
             if (n >= Home::ROW_CAP) break;
@@ -114,6 +139,9 @@ bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::Layou
             if (n == 0) firstCard = &card.card;
             rows[n++] = {false, true, true, false, !card.image.empty(), card.card.cardId, "", ""};
           }
+          break;
+        case Home::RowSource::DeskClock:
+          rows[n++] = {.clockPage = true};
           break;
         case Home::RowSource::DailyWord:
           if (n == 0) firstCard = &in.word;
@@ -133,12 +161,18 @@ bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::Layou
     view.isX3 = in.isX3;
     view.rows = rows;
     view.count = n;
-    view.selected = 0;
+    if (selected >= static_cast<uint32_t>(std::max(1, n))) return false;
+    view.selected = selected;
+    view.calendarSelection = date;
     view.reading = reading;
+    view.recentBooks = in.recentBooks;
+    view.recentCount = in.recentCount;
+    view.agenda = in.schema >= 5 ? &in.agenda : nullptr;
     view.glance = &in.glance.glance;
     view.snapshotStale = in.glanceStale;
     view.profile = profile;
     view.strings = Preview::layoutStrings(in);
+    view.clock = in.clock;
     Home::renderHome(renderer, view, env);
   }
   if (brief && actual && wakeIndicator) PowerWakeCue::draw(renderer, in.isX3, in.labels[21]);

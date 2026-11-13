@@ -187,11 +187,43 @@ void fields(IO& io, S& s) {
   io.text(s.word.question);
   io.text(s.word.context);
   // Choices are not drawn by Home/Brief and never copied into the snapshot.
-  for (size_t i = 0; i < (s.schema == 1 ? 20u : LABEL_COUNT); ++i) io.text(s.labels[i]);
-  if (s.schema == 2) {
+  for (size_t i = 0; i < (s.schema == 1 ? 20u : s.schema >= 4 ? LABEL_COUNT : 22u); ++i) io.text(s.labels[i]);
+  if (s.schema >= 2) {
     io.number(s.coverKey);
     io.number(s.coverSize);
     io.number(s.coverCrc);
+  }
+  if (s.schema >= 3) {
+    io.number(s.clock.date);
+    io.number(s.clock.minute);
+    io.text(s.clock.line);
+  }
+  if (s.schema >= 4) {
+    io.number(s.recentCount);
+    for (auto& book : s.recentBooks) {
+      io.text(book.title);
+      io.text(book.author);
+      io.number(book.percent);
+      io.flag(book.valid);
+    }
+  }
+  if (s.schema >= 5) {
+    for (auto& cover : s.recentCovers) {
+      io.number(cover.key);
+      io.number(cover.size);
+      io.number(cover.crc);
+    }
+    io.number(s.agenda.dayCount);
+    for (auto& agendaDay : s.agenda.days) {
+      io.number(agendaDay.date);
+      io.number(agendaDay.omittedEventCount);
+      io.number(agendaDay.eventCount);
+      for (auto& event : agendaDay.events) {
+        io.text(event.startHm);
+        io.text(event.endHm);
+        io.text(event.title);
+      }
+    }
   }
 }
 bool hex(const char* value, size_t length, bool upper) {
@@ -220,9 +252,31 @@ void clearLayoutInputs(LayoutInputs& out) {
 }
 
 bool validLayoutInputs(const LayoutInputs& s) {
-  if ((s.schema != 1 && s.schema != 2) || s.coverSize > 131072 || (!s.coverSize && (s.coverKey || s.coverCrc)) ||
+  if ((s.schema < 1 || s.schema > 5) || s.coverSize > 131072 || (!s.coverSize && (s.coverKey || s.coverCrc)) ||
       (s.coverSize && !s.coverKey))
     return false;
+  if (s.schema >= 3) {
+    const auto date = s.clock.date;
+    const auto month = date / 100 % 100;
+    const auto day = date % 100;
+    if (s.clock.minute > 1440 || (s.clock.minute == 1440) != (date == 0)) return false;
+    if (date && (date < 20231114 || date > 99991231 || month < 1 || month > 12 || day < 1 || day > 31)) return false;
+  }
+  if (s.schema >= 4) {
+    if (s.recentCount > Home::RECENT_CAP) return false;
+    for (uint8_t i = 0; i < Home::RECENT_CAP; ++i) {
+      const auto& book = s.recentBooks[i];
+      if (book.percent < -1 || book.percent > 100 || book.valid != (i < s.recentCount)) return false;
+      if (i >= s.recentCount && (book.title[0] || book.author[0] || book.percent != -1)) return false;
+    }
+  }
+  if (s.schema >= 5) {
+    if (!Agenda::valid(s.agenda)) return false;
+    for (unsigned i = 0; i < Home::RECENT_CAP; ++i) {
+      const auto& c = s.recentCovers[i];
+      if (c.size > 131072 || (!c.size && (c.key || c.crc)) || (c.size && (!c.key || i >= s.recentCount))) return false;
+    }
+  }
   // Encoding is also our complete bounded-string validator.
   Writer strings{nullptr, MAX_BYTES};
   fields(strings, s);
@@ -278,7 +332,7 @@ size_t encodeLayoutInputs(const LayoutInputs& in, uint8_t* bytes, size_t capacit
 
 bool decodeLayoutInputs(const uint8_t* bytes, size_t size, LayoutInputs& out) {
   clearLayoutInputs(out);
-  if (!bytes || size < 12 || size > MAX_BYTES || memcmp(bytes, "PDLI", 4) != 0 || (bytes[4] != 1 && bytes[4] != 2) ||
+  if (!bytes || size < 12 || size > MAX_BYTES || memcmp(bytes, "PDLI", 4) != 0 || (bytes[4] < 1 || bytes[4] > 5) ||
       bytes[5] || bytes[6] || bytes[7])
     return false;
   Reader checksum{bytes + size - 4, 4};
@@ -297,16 +351,23 @@ bool decodeLayoutInputs(const uint8_t* bytes, size_t size, LayoutInputs& out) {
 
 Home::Strings layoutStrings(const LayoutInputs& in) {
   const auto& l = in.labels;
-  return {l[0],  l[1],  l[2],  l[3],  l[4],  l[5],  l[6],  l[7],  l[8], l[9],
-          l[10], l[11], l[12], l[13], l[14], l[15], l[16], l[17], l[18]};
+  Home::Strings strings{l[0],  l[1],  l[2],  l[3],  l[4],  l[5],  l[6],  l[7],  l[8], l[9],
+                        l[10], l[11], l[12], l[13], l[14], l[15], l[16], l[17], l[18]};
+  if (in.schema >= 4) {
+    strings.recentBooks = l[22];
+    strings.calendar = l[23];
+    strings.weekdays = l[24];
+  }
+  return strings;
 }
 // Mutates in.labels through its indexed elements; cppcheck misses this write.
 // cppcheck-suppress constParameterReference
 bool setLayoutStrings(LayoutInputs& in, const Home::Strings& s, const char* sleepPreview) {
   const char* const labels[] = {
-      s.pocketDaily, s.continueReading, s.noOpenBook,  s.startReading, s.study, s.myCards,  s.word, s.empty,
-      s.weather,     s.noWeather,       s.weatherHint, s.nextEvent,    s.today, s.noEvents, s.home, s.select,
-      s.library,     s.articles,        s.sync,        sleepPreview,   "",      ""};
+      s.pocketDaily, s.continueReading, s.noOpenBook,  s.startReading, s.study, s.myCards,  s.word,        s.empty,
+      s.weather,     s.noWeather,       s.weatherHint, s.nextEvent,    s.today, s.noEvents, s.home,        s.select,
+      s.library,     s.articles,        s.sync,        sleepPreview,   "",      "",         s.recentBooks, s.calendar,
+      s.weekdays};
   static_assert(sizeof(labels) / sizeof(labels[0]) == LABEL_COUNT);
   for (size_t i = 0; i < LABEL_COUNT; ++i) {
     if (!labels[i] || strlen(labels[i]) >= LABEL_BYTES) return false;

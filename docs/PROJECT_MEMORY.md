@@ -1,18 +1,31 @@
 # Pocket Daily Firmware Project Memory
 
-Current source/release records override dated observations. Details: cited docs.
-Pre-2026-10-13 archive: `docs/history/PROJECT_MEMORY-to-2026-10-13.md`.
-2026-11-04: owner-authorized OPDS origin safety repair; GET Basic/custom headers bind to configured origin, HTTPS downgrade rejected. Host1194/default+gh_release warning0/strict cppcheck/app image validator pass. Frozen local1.0.0 SHA d2aeaed3…e606f53e, build/release-security-20261104/. Not flashed or hardware-accepted; docs/http-credential-origin.md. Existing storage SDK patch preserved.
+Current source/release records override dated observations. Older device/release
+baselines: `docs/history/PROJECT_MEMORY-before-rich-home-20261113.md`.
+2026-11-13: capability 3 presents one-book covers, compact clock/agenda/weather,
+reading list and explicit Calendar selection. Page keys stay within groups;
+Views selects a different group. PDLI5/ABI1 and shelf/agenda records are unchanged.
+Undrawn-header receipts no longer overwrite valid preview metadata. Host 1,289,
+Python 331 theme-baseline checks, warning-free default build and strict cppcheck
+pass. All 88 public native frames remain byte-identical after the receipt fix.
+Both readers run developer w433a8042 (`build/themes-clock-fix-20261113`).
+Mac suites: X3 `20261112T231224-f5044f`, X4 `20261113T000253-eede89`; twelve exact
+native comparisons, reboot persistence, original records and inventory restored.
+Apple package `build/apple-host-qtwpwtry` is accepted by the sibling app.
+The user’s actual books/dates remain configured; both devices left Sync for Home.
+Sibling CURRENT_HANDOFF records hashes, physical evidence and verification limits.
+Public fixture evidence: `build/themes-20261113/public`; the later receipt-only
+correction has an 88-frame equivalence record under `build/themes-clock-fix-20261113`.
 
-2026-11-05 owner-install: original slots/known SD state preserved in
-`build/owner-install-20261105/`. Owner resumed all three devices after the earlier
-X4-only pause. X3 fresh reading/raw-state backup, same-path Sync resume (offset0),
-atomic commit and entire /update.bin readback now match frozen candidate SHA.
-Native X3 confirmation remains pending. X4 owner reported install/reconnect done,
-but fresh identity-bound status remains developer wdd553a3b; owner did not observe
-progress and requested retry. Both native confirmations remain required; no remote
-flash/trial/acceptance. Production --flash guards retained; no USB reader enumerated.
-App handoff owns iPhone TestFlight and full setup status.
+## Main integration handoff — 2026-11-13
+
+All accumulated reader-interface work is recorded on product `main`; preserve the
+installed/tested w433a8042 image and its acceptance evidence when starting the next
+change. Repository cleanup does not install another firmware image or tag a release.
+The SDK working change is generated from tracked `scripts/storage_sdk.patch`;
+reverse only that exact patch after validation. The next build reapplies it.
+Retired PageLink work is already merged as upstream PR3813 and independently
+covered by the product fix/tests; do not merge its old upstream snapshot again.
 
 ## Repositories and collaboration
 
@@ -163,8 +176,8 @@ App handoff owns iPhone TestFlight and full setup status.
   per SD-accepted block, `Resume: 1` → `RESUME <n>`; resume state is RAM-only.
   `publicationReceipt:1` is a bounded latest-only SD receipt with idempotent
   commit; a missing receipt stays unknown. Not general SD atomicity.
-- `transferControl:1` (`docs/transfer-control-v1.md`), `readerFiles:1`
-  (`docs/reader-files.md`), `readingProgress:1` (`docs/reading-progress-v1.md`,
+- `transferControl:1` (`docs/transfer-control-v1.md`), `readerFiles:4`
+  (Nov9 ordinary-file moves/deletion, protected paths retained; installed X3/X4 receipts above; `docs/reader-files.md`), `readingProgress:1` (`docs/reading-progress-v1.md`,
   app `docs/READING_PROGRESS.md`), BLE reading sync READ1
   (`docs/reading-sync-ble-v1.md`), `pocketProfile:1`
   (`docs/pocket-profile-v1.md`), `pocketGlance:1` (`docs/pocket-glance-v1.md`),

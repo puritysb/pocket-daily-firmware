@@ -1,3 +1,6 @@
+#include "EmptyArticles.h"
+#include "pocket_daily/PocketAgendaStore.h"
+#include "pocket_daily/PocketReadingShelf.h"
 #ifdef ENABLE_RTC_PROBE_ARENA
 #include <esp_heap_caps.h>
 
@@ -6,8 +9,10 @@ extern uint8_t _rtc_probe_start[], _rtc_probe_end[], _rtc_force_slow_end[];
 #endif
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <HalClock.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
+#include <LibraryBuilder.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <WebServer.h>
@@ -20,6 +25,7 @@ extern uint8_t _rtc_probe_start[], _rtc_probe_end[], _rtc_force_slow_end[];
 #include <ctime>
 
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "DevNetworkFault.h"
 #include "RecentBooksStore.h"
 #include "articles/ArticleStorage.h"
@@ -55,9 +61,11 @@ extern uint8_t _rtc_probe_start[], _rtc_probe_end[], _rtc_force_slow_end[];
 #include "pocket_daily/web/PocketEndpoints.h"
 #include "pocket_daily/web/PocketStatus.h"
 #include "pocket_daily/web/PreferencesUpdate.h"
+#include "pocket_daily/web/ReaderFileMove.h"
 #include "pocket_daily/web/ReaderFilesPolicy.h"
 #include "pocket_daily/web/TcpCensus.h"
 #include "util/BookCacheUtils.h"
+#include "util/BookmarkUtil.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include <HalDisplay.h>
 #include <HalPowerManager.h>
@@ -271,8 +279,19 @@ void handleLayoutCover(WebServer& server, const RouteDeps& d) {
     server.send(400, "text/plain", "Invalid cover request");
     return;
   }
-  char path[160];
-  if (!Home::openBookCoverPath(path, sizeof(path)) || Home::coverPathKey(path) != key) {
+  char path[Home::RECENT_PATH_BYTES];
+  bool found = false;
+  if (server.hasArg("book")) {
+    uint32_t index = 0;
+    const String book = server.arg("book");
+    if (!parseGeneration({book.c_str(), book.length()}, index) || index >= Home::RECENT_CAP) {
+      server.send(400, "text/plain", "Invalid book index");
+      return;
+    }
+    found = Home::recentBookCoverPath(index, path, sizeof(path));
+  } else
+    found = Home::openBookCoverPath(path, sizeof(path));
+  if (!found || Home::coverPathKey(path) != key) {
     server.send(409, "text/plain", "Book cover changed");
     return;
   }
@@ -319,6 +338,10 @@ void handleLayoutInputs(WebServer& server, const RouteDeps& d) {
     server.send(503, "text/plain", "Reader layout inputs are unavailable");
     return;
   }
+  // Keep the default response readable by older companions.
+  if (server.arg("schema") == "3") inputs->schema = 3;
+  if (server.arg("schema") == "4") inputs->schema = 4;
+  if (server.arg("schema") == "5") inputs->schema = 5;
   const size_t count = Preview::encodeLayoutInputs(*inputs, nullptr, Preview::MAX_BYTES);
   if (!count) {
     server.send(503, "text/plain", "Reader layout inputs cannot be encoded");
@@ -399,6 +422,129 @@ void handlePostProfile(WebServer& server, const RouteDeps& d) {
       break;
   }
   server.send(500, "text/plain", "Profile could not be stored; the previous profile is still in use");
+}
+
+void handleDeskClockSync(WebServer& server, const RouteDeps& d) {
+  char deviceId[9];
+  if (!admitContentOperation(server, d, deviceId)) return;
+  const String& body = server.arg("plain");
+  JsonDocument doc;
+  if (body.length() > 96 || deserializeJson(doc, body) || !doc.is<JsonObject>() || doc.size() != 2 ||
+      !doc["utcEpoch"].is<uint32_t>() || !doc["utcOffsetMinutes"].is<int16_t>()) {
+    server.send(400, "text/plain", "Invalid clock time");
+    return;
+  }
+  const uint32_t epoch = doc["utcEpoch"].as<uint32_t>();
+  const int16_t offset = doc["utcOffsetMinutes"].as<int16_t>();
+  if (epoch < HalClock::COMPANION_MIN_EPOCH || epoch >= HalClock::COMPANION_MAX_EPOCH ||
+      offset < AppGlance::MIN_UTC_OFFSET_MINUTES || offset > AppGlance::MAX_UTC_OFFSET_MINUTES) {
+    server.send(400, "text/plain", "Clock time or offset out of range");
+    return;
+  }
+  if (!halClock.setCompanionTime(epoch, offset)) {
+    server.send(503, "text/plain", "Reader clock could not be synchronized");
+    return;
+  }
+  server.send(204, "text/plain", "");
+}
+
+// Date-indexed, bounded agenda; the stored record is atomically replaced.
+void handleReadingShelf(WebServer& server, const RouteDeps& d, const bool write) {
+  char identity[9];
+  if (!admitContentOperation(server, d, identity)) return;
+  // 1026-byte selection cannot fit a small task frame. One cold request allocation.
+  auto selection = makeUniqueNoThrow<ReadingShelf::Selection>();
+  if (!selection) {
+    LOG_ERR("SHELF", "Selection allocation failed");
+    server.send(503, "text/plain", "Reader memory is too low for shelf settings");
+    return;
+  }
+  if (write) {
+    const String& body = server.arg("plain");
+    if (!body.length() || body.length() > 8192) {
+      server.send(400, "text/plain", "Shelf settings exceed the size limit");
+      return;
+    }
+    bool outOfMemory = false;
+    if (!ReadingShelf::parseJson(body.c_str(), body.length(), *selection, outOfMemory)) {
+      server.send(outOfMemory ? 503 : 400, "text/plain",
+                  "Choose automatic with no paths or one to four distinct books");
+      return;
+    }
+    for (uint8_t i = 0; i < selection->count; ++i) {
+      const char* path = selection->paths[i];
+      bool known = false;
+      for (const auto& book : RECENT_BOOKS.getBooks())
+        if (book.path == path) {
+          known = true;
+          break;
+        }
+      if (!known || !Storage.exists(path)) {
+        server.send(409, "text/plain", "A selected recent book is unavailable; refresh the book list");
+        return;
+      }
+    }
+    const auto saved = ReadingShelf::save(*selection);
+    if (saved != ReadingShelf::SaveResult::Ok) {
+      server.send(saved == ReadingShelf::SaveResult::OutOfMemory ? 503 : 500, "text/plain",
+                  "Shelf settings could not be saved");
+      return;
+    }
+    server.send(204, "text/plain", "");
+    return;
+  }
+  ReadingShelf::load(*selection);
+  JsonDocument doc;
+  doc["schema"] = 1;
+  doc["automatic"] = selection->automatic;
+  auto paths = doc["paths"].to<JsonArray>();
+  for (uint8_t i = 0; i < selection->count; ++i) paths.add(selection->paths[i]);
+  if (doc.overflowed()) {
+    server.send(503, "text/plain", "Reader memory is too low for shelf settings");
+    return;
+  }
+  String body;
+  serializeJson(doc, body);
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", body);
+}
+
+void handleAgenda(WebServer& server, const RouteDeps& d, bool write) {
+  char identity[9];
+  if (!admitContentOperation(server, d, identity)) return;
+  // 1.4 KB snapshot is request-scoped; too large for the network task stack.
+  auto snapshot = makeUniqueNoThrow<Agenda::Snapshot>();
+  if (!snapshot) {
+    server.send(503, "text/plain", "Reader memory is too low for agenda");
+    return;
+  }
+  if (write) {
+    const String& body = server.arg("plain");
+    const char* error = nullptr;
+    bool oom = false;
+    if (!Agenda::parseJson(body.c_str(), body.length(), *snapshot, error, oom)) {
+      server.send(oom ? 503 : 400, "text/plain", error ? error : "Invalid agenda");
+      return;
+    }
+    const auto saved = Agenda::save(*snapshot);
+    if (saved != Agenda::SaveResult::Ok) {
+      server.send(saved == Agenda::SaveResult::OutOfMemory ? 503 : 500, "text/plain",
+                  "Agenda could not be stored; previous agenda retained");
+      return;
+    }
+    server.send(204, "text/plain", "");
+    return;
+  }
+  Agenda::load(*snapshot);
+  // JSON serialization owns one bounded response buffer, never a framebuffer.
+  auto response = makeUniqueNoThrow<char[]>(Agenda::MAX_BODY_BYTES + 1);
+  size_t size = 0;
+  if (!response || !Agenda::writeJson(*snapshot, response.get(), Agenda::MAX_BODY_BYTES + 1, size)) {
+    server.send(503, "text/plain", "Agenda could not be read");
+    return;
+  }
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", response.get());
 }
 
 // App-provided weather and today's events (docs/pocket-glance-v1.md). Same
@@ -847,7 +993,7 @@ void handleReaderFileContent(WebServer& server, const RouteDeps& d) {
   const String path = server.arg("path");
   const std::string_view pathView{path.c_str(), path.length()};
   if (!downloadableReaderFile(pathView)) {
-    server.send(403, "text/plain", "Only EPUB, TXT and MD reading files can be downloaded");
+    server.send(403, "text/plain", "This file type cannot be previewed");
     return;
   }
   uint64_t expectedSize = 0;
@@ -892,6 +1038,104 @@ void handleReaderFileContent(WebServer& server, const RouteDeps& d) {
   feedLoopWDT();
 }
 
+// Cold explicit file management only. Reuse the existing path-hash cache and
+// bookmark conventions so moving a book preserves its reading place.
+std::string readerMoveCache(const std::string& path) {
+  if (!bookReaderFile(path)) return "";
+  const auto ext = std::string_view(path).substr(path.rfind('.'));
+  const char* prefix = sameAscii(ext, ".epub") ? "epub_" : sameAscii(ext, ".xtc") ? "xtc_" : "txt_";
+  return std::string("/.crosspoint/") + prefix + std::to_string(std::hash<std::string>{}(path));
+}
+
+void handleReaderFileMove(WebServer& server, const RouteDeps& d) {
+  char deviceId[9];
+  if (!admitContentOperation(server, d, deviceId)) return;
+  if (ESP.getFreeHeap() < 16384 || ESP.getMaxAllocHeap() < 4096) {
+    server.send(503, "text/plain", "Reader is busy; retry moving shortly");
+    return;
+  }
+  const String source = server.arg("path"), target = server.arg("destination"), size = server.arg("size");
+  uint64_t expected = 0;
+  if (!readerFileMovePath({source.c_str(), source.length()}, {target.c_str(), target.length()}) ||
+      !parseByteCount({size.c_str(), size.length()}, expected)) {
+    server.send(400, "text/plain", "Invalid or protected move path");
+    return;
+  }
+  {
+    auto file = Storage.open(source.c_str());
+    if (!file || file.isDirectory()) {
+      server.send(404, "text/plain", "File not found");
+      return;
+    }
+    if (file.fileSize64() != expected) {
+      server.send(409, "text/plain", "File changed; refresh before moving");
+      return;
+    }
+    const String folder = target.substring(0, target.lastIndexOf('/'));
+    auto directory = Storage.open(folder.isEmpty() ? "/" : folder.c_str());
+    if (!directory || !directory.isDirectory()) {
+      server.send(404, "text/plain", "Destination folder not found");
+      return;
+    }
+  }
+  // Bounded cold-path strings (<1.5 KiB payload total) plus their owners are
+  // request-local. A fallible owner keeps the function's stack under 256 B.
+  struct MoveWork {
+    std::string source, target, oldCache, newCache, oldBookmark, newBookmark;
+    MoveStatePath paths[2];
+  };
+  auto work = makeUniqueNoThrow<MoveWork>();
+  if (!work) {
+    LOG_ERR("Files", "Move workspace unavailable");
+    server.send(503, "text/plain", "Reader is busy");
+    return;
+  }
+  work->source = source.c_str();
+  work->target = target.c_str();
+  work->oldCache = readerMoveCache(work->source);
+  work->newCache = readerMoveCache(work->target);
+  const auto dot = work->source.rfind('.');
+  if (dot != std::string::npos && sameAscii(std::string_view(work->source).substr(dot), ".epub")) {
+    work->oldBookmark = BookmarkUtil::getBookmarkPath(work->source);
+    work->newBookmark = BookmarkUtil::getBookmarkPath(work->target);
+  }
+  work->paths[0] = {work->oldCache.c_str(), work->newCache.c_str()};
+  work->paths[1] = {work->oldBookmark.c_str(), work->newBookmark.c_str()};
+  const auto result = moveFileWithState(Storage, source.c_str(), target.c_str(), work->paths, 2);
+  switch (result) {
+    case MoveResult::Conflict:
+      server.send(409, "text/plain", "Destination file or reading state already exists");
+      return;
+    case MoveResult::Failed:
+      server.send(500, "text/plain", "Move failed; original file was kept");
+      return;
+    case MoveResult::RollbackFailed:
+      LOG_ERR("Files", "Move state rollback failed");
+      server.send(500, "text/plain", "Move interrupted; check the card before retrying");
+      return;
+    case MoveResult::Moved:
+      break;
+  }
+  if (bookReaderFile(work->source)) {
+    RECENT_BOOKS.updatePath(work->source, work->target, work->oldCache, work->newCache);
+    if (APP_STATE.openEpubPath == work->source) {
+      APP_STATE.openEpubPath = work->target;
+      if (!APP_STATE.saveToFile()) LOG_ERR("Files", "Could not save moved open-book path");
+    }
+    library::markLibraryIndexDirty();
+  }
+  JsonDocument doc;
+  doc["deviceID"] = deviceId;
+  doc["moved"] = true;
+  doc["path"] = source;
+  doc["destination"] = target;
+  doc["size"] = expected;
+  String response;
+  serializeJson(doc, response);
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", response);
+}
+
 enum class ReaderFileAction { List, Remove, Space };
 void handleReaderFiles(WebServer& server, const RouteDeps& d, ReaderFileAction action) {
   char deviceId[9];
@@ -934,7 +1178,7 @@ void handleReaderFiles(WebServer& server, const RouteDeps& d, ReaderFileAction a
     }
     if (action == ReaderFileAction::Remove) {
       if (file.isDirectory() || !deletableReaderFile({path.c_str(), path.length()})) {
-        server.send(403, "text/plain", "Only reading files can be deleted here");
+        server.send(403, "text/plain", "This file is protected; use its dedicated management flow");
         return;
       }
       const String size = server.arg("size");
@@ -949,9 +1193,11 @@ void handleReaderFiles(WebServer& server, const RouteDeps& d, ReaderFileAction a
         server.send(500, "text/plain", "Could not delete file; retry");
         return;
       }
-      clearBookCache(path.c_str());
-      RECENT_BOOKS.removeByPath(path.c_str());
-      if (Articles::isPath(path.c_str())) Storage.remove(Articles::donePath(path.c_str()).c_str());
+      if (bookReaderFile({path.c_str(), path.length()})) {
+        clearBookCache(path.c_str());
+        RECENT_BOOKS.removeByPath(path.c_str());
+        if (Articles::isPath(path.c_str())) Storage.remove(Articles::donePath(path.c_str()).c_str());
+      }
       doc["deleted"] = true;
     } else {
       if (!file.isDirectory() || cursor % 32 != 0 || cursor > 8U * 1024U * 1024U || !file.seekSet(cursor)) {
@@ -2269,6 +2515,14 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
   }
   // Home / Daily Brief share the content slot; Sync profiles only.
   if (isSyncProfile(d.profile) && d.screen.enqueue && d.screen.state && d.screen.busy) {
+    routes.on("/api/pocket/v1/reading-shelf", HTTP_GET,
+              [server = &server, deps = &d] { handleReadingShelf(*server, *deps, false); });
+    routes.on("/api/pocket/v1/reading-shelf", HTTP_POST,
+              [server = &server, deps = &d] { handleReadingShelf(*server, *deps, true); });
+    routes.on("/api/pocket/v1/agenda", HTTP_GET,
+              [server = &server, deps = &d] { handleAgenda(*server, *deps, false); });
+    routes.on("/api/pocket/v1/agenda", HTTP_POST,
+              [server = &server, deps = &d] { handleAgenda(*server, *deps, true); });
     routes.on("/api/pocket/v1/layout-cover", HTTP_GET, [server = &server, deps = &d] {
       note(*deps);
       handleLayoutCover(*server, *deps);
@@ -2288,6 +2542,11 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     });
   }
   if (isSyncProfile(d.profile)) {
+    if (HalClock::supportsCompanionTime())
+      routes.on("/api/pocket/v1/clock", HTTP_POST, [server = &server, deps = &d] {
+        note(*deps);
+        handleDeskClockSync(*server, *deps);
+      });
     routes.on("/api/pocket/v1/wifi/setup", HTTP_POST, [server = &server, deps = &d] {
       char deviceId[9];
       const String claimed = server->arg("deviceID");
@@ -2332,6 +2591,10 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     routes.on("/api/pocket/v1/files", HTTP_DELETE, [server = &server, deps = &d] {
       note(*deps);
       handleReaderFiles(*server, *deps, ReaderFileAction::Remove);
+    });
+    routes.on("/api/pocket/v1/files/move", HTTP_POST, [server = &server, deps = &d] {
+      note(*deps);
+      handleReaderFileMove(*server, *deps);
     });
     routes.on("/api/pocket/v1/files/content", HTTP_GET, [server = &server, deps = &d] {
       note(*deps);
@@ -2427,6 +2690,25 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
     snprintf(line, sizeof(line), "heap=%u block=%u timeWaitPurged=%u %s\n", static_cast<unsigned>(heap),
              static_cast<unsigned>(block), static_cast<unsigned>(purged), census);
     server->send(200, "text/plain", line);
+  });
+  routes.on("/api/pocket/v1/dev/empty-articles", HTTP_POST, [server = &server, deps = &d] {
+    note(*deps);
+    char identity[9];
+    if (!admitContentOperation(*server, *deps, identity)) return;
+    uint32_t run = 0;
+    const String runArg = server->arg("run");
+    if (!parseGeneration({runArg.c_str(), runArg.length()}, run) || !run) {
+      server->send(400, "text/plain", "run must be a nonzero uint32");
+      return;
+    }
+    RenderLock lock(RenderLock::Mode::Try);
+    if (!lock.ownsLock()) {
+      server->send(409, "text/plain", "Reader is drawing; directory unchanged");
+      return;
+    }
+    const int status = removeEmptyArticles(Storage);
+    lock.unlock();
+    server->send(status, "text/plain", status == 204 ? "" : "Empty Articles recovery was not performed");
   });
   routes.on("/api/pocket/v1/dev/fresh-start", HTTP_POST,
             [server = &server, deps = &d] { handleDevFreshStart(*server, *deps); });

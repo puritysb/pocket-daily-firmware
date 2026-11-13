@@ -1,5 +1,6 @@
 #include "PocketUIHost.h"
 
+#include <Bitmap.h>
 #include <GfxRenderer.h>
 #include <SdCardFont.h>
 
@@ -92,6 +93,8 @@ struct pdui_context {
   HalDisplay panel;
   GfxRenderer renderer;
   PocketUIHost::UserCards cards;
+  std::vector<uint8_t> recentCovers[4];
+  uint32_t selectedHomeRow = 0, selectedCalendarDate = 0;
   bool frameValid = false;
   SdCardFont* boundFont = nullptr;
   pdui_context(uint32_t width, uint32_t height, const uint8_t* bytes, size_t size)
@@ -335,17 +338,24 @@ int32_t pdui_render_home(pdui_context* context, const pdui_profile* profile, uin
     const PocketUIHost::AssetScope scope(context->assetSpan());
     selectFontMode(*context, false);
     const auto sample = PocketUIHost::buildSample(samples);
-    PocketDaily::Home::Row rows[PocketDaily::DailyProfile::HOME_ITEM_CAP];
+    PocketDaily::Home::Row rows[PocketDaily::Home::RECENT_CAP + 2 + PocketDaily::CARD_CAP];
     PocketDaily::Home::HomeView view;
     view.isX3 = isX3Panel(context->panel);
     view.rows = rows;
-    view.count = PocketUIHost::buildRows(parsed, sample, samples, context->cards, rows,
-                                         PocketDaily::DailyProfile::HOME_ITEM_CAP);
+    view.count =
+        PocketUIHost::buildRows(parsed, sample, samples, context->cards, rows, static_cast<int>(std::size(rows)));
     view.selected = view.count ? static_cast<int>(std::min<uint32_t>(selected, view.count - 1)) : 0;
     view.reading = sample.reading;
+    view.recentBooks = sample.recentBooks;
+    view.recentCount = sample.recentCount;
     view.glance = &sample.glance;
     view.profile = parsed;
-    PocketDaily::Home::renderHome(context->renderer, view, PocketUIHost::hostEnv(context->renderer, context->cards));
+    view.clock.date = 20261110;
+    view.clock.minute = 9 * 60 + 41;
+    snprintf(view.clock.line, sizeof(view.clock.line), "Keep one small promise today.");
+    auto sampleEnv = PocketUIHost::hostEnv(context->renderer, context->cards);
+    if (samples & PDUI_SAMPLE_BOOK) PocketUIHost::attachSampleCovers(sampleEnv);
+    PocketDaily::Home::renderHome(context->renderer, view, sampleEnv);
     if (context->activeFont().boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
     context->frameValid = true;
     return PDUI_OK;
@@ -452,7 +462,8 @@ int32_t renderReaderLayout(pdui_context* context, const pdui_profile* profile, c
   PocketDaily::Preview::LayoutInputs in;
   if (!profile || !toProfile(*profile, parsed) || !PocketDaily::Preview::decodeLayoutInputs(bytes, size, in) ||
       !revision || strnlen(revision, 65) > 64 || strcmp(revision, in.contentRevision) != 0 ||
-      context->cards.size() != in.cardCount || (options & ~(actual ? PDUI_SLEEP_ALL : PDUI_SLEEP_BOOK_COVER)) ||
+      context->cards.size() != in.cardCount ||
+      (options & ~(actual ? (PDUI_SLEEP_ALL | PDUI_SLEEP_FULL_SCREEN_COVER) : PDUI_SLEEP_BOOK_COVER)) ||
       context->renderer.getOrientation() != GfxRenderer::Orientation::Portrait ||
       context->panel.getDisplayWidth() != in.physicalWidth || context->panel.getDisplayHeight() != in.physicalHeight ||
       (brief && parsed.sleepMode != PocketDaily::DailyProfile::SleepMode::Brief))
@@ -464,13 +475,27 @@ int32_t renderReaderLayout(pdui_context* context, const pdui_profile* profile, c
   // maps in a destructor: map insertion can throw and a noexcept destructor
   // would terminate. Every sample/content render selects its own mode too.
   if (actual &&
-      (in.schema != 2 || coverSize != in.coverSize ||
+      (in.schema < 2 || coverSize != in.coverSize ||
        (coverSize && (!cover || ~PocketDaily::Content::contentCrcUpdate(UINT32_MAX, cover, coverSize) != in.coverCrc))))
     return PDUI_INVALID_IMAGE;
+  PocketUIHost::RecentCovers recent;
+  if (!brief && parsed.shows(PocketDaily::DailyProfile::HomeItem::ReadingShelf) && in.schema >= 5) {
+    for (unsigned i = 0; i < 4; ++i) {
+      const auto& bytes = context->recentCovers[i];
+      const auto& expected = in.recentCovers[i];
+      if (bytes.size() != expected.size ||
+          (expected.size &&
+           ~PocketDaily::Content::contentCrcUpdate(UINT32_MAX, bytes.data(), bytes.size()) != expected.crc))
+        return PDUI_INVALID_IMAGE;
+      recent.bytes[i] = bytes.data();
+      recent.sizes[i] = bytes.size();
+    }
+  }
   selectFontMode(*context, !actual);
-  if (!PocketUIHost::renderReaderLayout(context->renderer, in, parsed, context->cards, brief,
-                                        (options & PDUI_SLEEP_BOOK_COVER) != 0, actual,
-                                        (options & PDUI_SLEEP_WAKE_INDICATOR) != 0, cover, coverSize) ||
+  if (!PocketUIHost::renderReaderLayout(
+          context->renderer, in, parsed, context->cards, brief, (options & PDUI_SLEEP_BOOK_COVER) != 0, actual,
+          (options & PDUI_SLEEP_WAKE_INDICATOR) != 0, cover, coverSize, (options & PDUI_SLEEP_FULL_SCREEN_COVER) != 0,
+          &recent, context->selectedHomeRow, context->selectedCalendarDate) ||
       context->font.boundedReadFailed() || !context->panel.guardsIntact())
     return PDUI_RENDER_FAILED;
   context->frameValid = true;
@@ -519,4 +544,46 @@ int32_t pdui_render_reader_device(pdui_context* context, const pdui_profile* pro
   } catch (...) {
     return PDUI_INTERNAL_ERROR;
   }
+}
+
+int32_t pdui_get_recent_cover_info(const uint8_t* snapshot, size_t size, uint32_t index,
+                                   pdui_layout_asset_info* output) noexcept {
+  if (!output || index >= 4) return PDUI_INVALID_ARGUMENT;
+  PocketDaily::Preview::LayoutInputs in;
+  if (!PocketDaily::Preview::decodeLayoutInputs(snapshot, size, in) || in.schema < 5) return PDUI_INVALID_ARGUMENT;
+  const auto& c = in.recentCovers[index];
+  *output = {in.schema, c.key, c.size, c.crc};
+  return PDUI_OK;
+}
+int32_t pdui_set_recent_cover(pdui_context* context, uint32_t index, const uint8_t* bytes, size_t size) noexcept {
+  if (!context || index >= 4 || (bytes == nullptr) != (size == 0) || size > 131072) return PDUI_INVALID_ARGUMENT;
+  try {
+    const std::lock_guard<std::mutex> lock(renderMutex);
+    context->frameValid = false;
+    if (!size) {
+      context->recentCovers[index].clear();
+      return PDUI_OK;
+    }
+    HalFile file({bytes, size});
+    Bitmap bitmap(file);
+    if (bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0 ||
+        bitmap.getWidth() > 2048 || bitmap.getHeight() > 2048)
+      return PDUI_INVALID_IMAGE;
+    context->recentCovers[index].assign(bytes, bytes + size);
+    return PDUI_OK;
+  } catch (const std::bad_alloc&) {
+    return PDUI_OUT_OF_MEMORY;
+  } catch (...) {
+    return PDUI_INTERNAL_ERROR;
+  }
+}
+
+int32_t pdui_set_home_selection(pdui_context* context, uint32_t row, uint32_t date) noexcept {
+  if (!context || row >= PocketDaily::Home::ROW_CAP || (date && PocketDaily::Agenda::shiftDate(date, 0) != date))
+    return PDUI_INVALID_ARGUMENT;
+  const std::lock_guard<std::mutex> lock(renderMutex);
+  context->frameValid = false;
+  context->selectedHomeRow = row;
+  context->selectedCalendarDate = date;
+  return PDUI_OK;
 }

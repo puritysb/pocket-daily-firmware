@@ -31,9 +31,8 @@ std::string replaced(std::string text, const std::string& from, const std::strin
 TEST(PocketProfile, DefaultsKeepReadingFirstAndOptionalContentOff) {
   const auto p = defaults();
   ASSERT_TRUE(valid(p));
-  ASSERT_EQ(p.homeCount, 2);
-  EXPECT_EQ(p.homeItems[0], HomeItem::Reading);
-  EXPECT_EQ(p.homeItems[1], HomeItem::Study);
+  ASSERT_EQ(p.homeCount, 1);
+  EXPECT_EQ(p.homeItems[0], HomeItem::ReadingShelf);
   EXPECT_FALSE(p.shows(HomeItem::Provider));
   EXPECT_FALSE(p.shows(HomeItem::Monitor));
   EXPECT_FALSE(p.dailyWord);
@@ -77,7 +76,10 @@ TEST(PocketProfile, AcceptsTheDailyWordItemAndThePinnedCardSection) {
   char out[1024];
   const std::string json(out, writeJson(p, 2, "5B09AF70", out, sizeof(out)));
   EXPECT_NE(json.find(R"("items":["word","study"])"), std::string::npos);
-  EXPECT_NE(json.find(R"("homeItems":["reading","study","word"])"), std::string::npos);
+  EXPECT_NE(
+      json.find(
+          R"("homeItems":["reading","study","word","clockEvent","clockWeather","clockLine","clockCompact","clockLandscape","readingShelf","readingList","calendar"])"),
+      std::string::npos);
   EXPECT_NE(json.find(R"("sleepSections":["reading","study","weather","today","card"])"), std::string::npos);
   // Still at most four Home items and four sleep sections.
   EXPECT_FALSE(
@@ -125,7 +127,10 @@ TEST(PocketProfile, ResponseRoundTripsAndAdvertisesAcceptedIds) {
   const std::string json(out, n);
   EXPECT_NE(json.find(R"("generation":7)"), std::string::npos);
   EXPECT_NE(json.find(R"("deviceID":"5B09AF70")"), std::string::npos);
-  EXPECT_NE(json.find(R"("homeItems":["reading","study","word"])"), std::string::npos);
+  EXPECT_NE(
+      json.find(
+          R"("homeItems":["reading","study","word","clockEvent","clockWeather","clockLine","clockCompact","clockLandscape","readingShelf","readingList","calendar"])"),
+      std::string::npos);
   EXPECT_NE(json.find(R"("maxHomeItems":4)"), std::string::npos);
   // The profile part of the response is itself an accepted document.
   const auto home = json.find(R"("home":)");
@@ -260,4 +265,65 @@ TEST_F(PocketProfileStoreTest, InvalidProfileIsRejectedBeforeStorage) {
   empty.homeCount = 0;
   EXPECT_EQ(save(empty, 0), SaveResult::Invalid);
   EXPECT_TRUE(FakeSD::files.empty());
+}
+
+TEST(PocketProfile, ClockVariantsRoundTripAlongsideReading) {
+  for (const auto item :
+       {HomeItem::ClockEvent, HomeItem::ClockWeather, HomeItem::ClockLine, HomeItem::ClockLandscape}) {
+    auto original = defaults();
+    original.homeCount = 1;
+    original.homeItems[0] = item;
+    ASSERT_TRUE(original.deskClock());
+    uint8_t bytes[RECORD_BYTES];
+    ASSERT_TRUE(encodeRecord(original, 42, bytes));
+    Profile loaded;
+    uint32_t generation = 0;
+    ASSERT_TRUE(decodeRecord(bytes, sizeof(bytes), loaded, generation));
+    EXPECT_EQ(loaded, original);
+    EXPECT_EQ(generation, 42u);
+    original.homeCount = 3;
+    original.homeItems[0] = HomeItem::Reading;
+    original.homeItems[1] = item;
+    original.homeItems[2] = HomeItem::ClockCompact;
+    ASSERT_TRUE(encodeRecord(original, 43, bytes));
+    ASSERT_TRUE(decodeRecord(bytes, sizeof(bytes), loaded, generation));
+    EXPECT_EQ(loaded, original);
+    EXPECT_EQ(loaded.clockPage(), item);
+    original.homeItems[0] = HomeItem::Study;
+    EXPECT_FALSE(valid(original));
+    original.homeItems[0] = HomeItem::Reading;
+    original.homeItems[2] = HomeItem::ClockEvent;
+    EXPECT_FALSE(valid(original));
+  }
+  bool ok = false;
+  const auto parsed = parse(
+      R"({"schema":1,"home":{"items":["clockWeather"],"dailyWord":false,"weather":"off","nextEvent":false},"sleep":{"mode":"brief","sections":["reading"]}})",
+      ok);
+  ASSERT_TRUE(ok);
+  EXPECT_EQ(parsed.homeItems[0], HomeItem::ClockWeather);
+}
+
+TEST(PocketProfile, ReadingInterfacesRoundTripAndRejectCompetingReadingModes) {
+  for (const auto item : {HomeItem::ReadingShelf, HomeItem::ReadingList}) {
+    auto p = defaults();
+    p.homeItems[0] = item;
+    p.homeItems[1] = HomeItem::Calendar;
+    p.homeItems[2] = HomeItem::ClockCompact;
+    p.homeCount = 3;
+    ASSERT_TRUE(valid(p));
+    uint8_t bytes[RECORD_BYTES];
+    ASSERT_TRUE(encodeRecord(p, 31, bytes));
+    Profile decoded;
+    uint32_t generation = 0;
+    ASSERT_TRUE(decodeRecord(bytes, sizeof(bytes), decoded, generation));
+    EXPECT_EQ(decoded, p);
+    EXPECT_EQ(generation, 31u);
+    p.homeItems[1] = HomeItem::Reading;
+    EXPECT_FALSE(valid(p));
+  }
+  bool ok = false;
+  const auto p = parse(replaced(kValid, "\"monitor\",\"reading\",\"study\"", "\"readingList\",\"calendar\""), ok);
+  ASSERT_TRUE(ok);
+  EXPECT_EQ(p.homeItems[0], HomeItem::ReadingList);
+  EXPECT_EQ(p.homeItems[1], HomeItem::Calendar);
 }

@@ -22,11 +22,12 @@ class ContentViewState;
 // host-compiled in HomeRenderer/HomeDrawing.
 namespace PocketDaily::Home {
 
-// The local book plus up to CARD_CAP companion cards.
-inline constexpr int ROW_CAP = 1 + PocketDaily::CARD_CAP;
+// The local book, daily word, full-screen clock and up to CARD_CAP companion cards.
+inline constexpr int ROW_CAP = RECENT_CAP + 2 + PocketDaily::CARD_CAP;
 
 // tr() values for the painters' labels.
 Strings deviceStrings();
+DeskClock readDeskClock(const AppGlance::Snapshot& glance, time_t now, int16_t companionOffset = INT16_MIN);
 // The active theme's metrics.
 Metrics deviceMetrics();
 
@@ -38,16 +39,14 @@ void rollGlanceToToday(PocketDaily::AppGlance::Snapshot& snapshot, time_t now);
 // The open book's Home/Brief text: title and author from RECENT_BOOKS (the
 // file name when there is no title) and the whole-book percent from the
 // seventh byte of its progress.bin (-1 when absent). No allocation.
-struct OpenBook {
-  char title[96];
-  char author[80];
-  int8_t percent;
-  bool valid;
-  void clear() {
-    memset(this, 0, sizeof(*this));
-    percent = -1;
-  }
-};
+using OpenBook = BookSummary;
+inline constexpr size_t RECENT_PATH_BYTES = 256;
+// Resolves the cache template to a bounded existing full cover or themed thumbnail.
+bool resolveBookCoverPath(const RecentBook& book, char* path, size_t capacity);
+uint8_t readRecentBookEntries(const RecentBook* (&entries)[RECENT_CAP]);
+// Reads bounded metadata only; optional paths stay exact or the entry is omitted.
+uint8_t readRecentBooks(BookSummary (&books)[RECENT_CAP], char (*paths)[RECENT_PATH_BYTES] = nullptr,
+                        char (*covers)[RECENT_PATH_BYTES] = nullptr);
 // Fills `out` (cleared first); returns the RECENT_BOOKS entry, or nullptr.
 // The book Continue Reading resumes: the open book, otherwise the most recent
 // book still on the card (what stock Home shows first). Empty when none.

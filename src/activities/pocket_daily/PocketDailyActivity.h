@@ -10,7 +10,9 @@
 // Concurrency: input runs on the loop task and paints on the render task. The
 // render lock (RenderLock) guards the few members both touch after onEnter.
 //
+#include <atomic>
 #include <cstring>
+#include <memory>
 #include <string>
 
 #include "activities/Activity.h"
@@ -39,6 +41,21 @@ class PocketDailyActivity final : public Activity {
   // The book Continue Reading resumes (PocketDaily::Home::continueReadingPath),
   // resolved on entry; empty when no book on the card has been read.
   std::string continuePath;
+  struct RecentShelf {
+    PocketDaily::Home::BookSummary books[PocketDaily::Home::RECENT_CAP]{};
+    char paths[PocketDaily::Home::RECENT_CAP][PocketDaily::Home::RECENT_PATH_BYTES]{};
+    char covers[PocketDaily::Home::RECENT_CAP][PocketDaily::Home::RECENT_PATH_BYTES]{};
+    uint8_t count = 0;
+  };
+  // ~1.8 KB only for a selected multi-book layout; no second cover framebuffer.
+  std::unique_ptr<RecentShelf> recentShelf;
+  int8_t calendarOffset = 0;
+  bool browsingCalendar = false;
+  bool choosingView = false;
+  uint8_t viewChoice = 0;
+  int readingCursor = 0;
+  uint32_t calendarSelection = 0;
+  std::unique_ptr<PocketDaily::Agenda::Snapshot> agendaSnapshot;
 
   // Compact row for the local book, one of the companion's cards or the daily
   // word. Fixed buffers keep the render-task stack bounded on the no-PSRAM C3.
@@ -48,13 +65,16 @@ class PocketDailyActivity final : public Activity {
     char activity[192];
     bool pocket;
     bool reading;
-    bool mine;      // one of the companion's cards
-    bool word;      // the firmware daily word
+    bool mine;  // one of the companion's cards
+    bool word;  // the firmware daily word
+    bool clockPage;
+    bool calendarPage;
+    bool shelfPage;
+    uint8_t shelfIndex;
     bool hasImage;  // mine: the card carries an image
   };
 
-  // Local reading + three card slots. The profile orders these sources; a
-  // later source is dropped when full.
+  // Room for all Home sources, including the local word and companion cards.
   static constexpr int kOverviewCap = PocketDaily::Home::ROW_CAP;
   // Scratch lives in the heap-allocated Activity object, not either task stack.
   // Separate render/loop copies prevent cross-task races.
@@ -87,7 +107,7 @@ class PocketDailyActivity final : public Activity {
     // loading/parsing the EPUB or allocating a second RecentBook vector.
     char coverBmpPath[160];
     void clear() {
-      OpenBook::clear();
+      PocketDaily::Home::OpenBook::clear();
       coverBmpPath[0] = '\0';
     }
   } renderReadingSnapshot{};
@@ -128,6 +148,14 @@ class PocketDailyActivity final : public Activity {
   static constexpr uint32_t kDecisionCooldownMs = 400;  // debounce a card choice
 
   ViewMode viewMode = ViewMode::Overview;
+  enum class ClockRefresh : uint8_t { Off, Minute, Animated };
+  std::atomic<ClockRefresh> clockRefresh{ClockRefresh::Off};
+  ClockRefresh lastClockRefresh = ClockRefresh::Off;  // loop task only
+  time_t deskClockTick = 0;
+  uint16_t lastDeskMinute = 1440;  // render task only
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  time_t lastDeskSecondEpoch = 0;  // render task only
+#endif
   int overviewCursor = 0;  // selected Reading/Study item in the Home carousel
   // Returns a script-appropriate SD CJK font id when available, else the given
   // UI font. The shared selector validates real glyph coverage, which matters

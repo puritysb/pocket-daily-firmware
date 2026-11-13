@@ -137,7 +137,8 @@ bool ScreenPresentation::render(GfxRenderer& renderer) {
   // Pocket Daily paints in portrait; restore the transfer view's orientation.
   const auto orientation = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
-  bool drawn = drawFrame(renderer, *frame_, font_, presentedHeader_.get());
+  presentedHeaderDrawn_ = false;
+  bool drawn = drawFrame(renderer, *frame_, font_, presentedHeader_.get(), &presentedHeaderDrawn_);
   // A bounded read failure while drawing latches; never certify that frame.
   if (font_ && !sdFontSystem.boundedUiFontReady(font_)) drawn = false;
   renderer.setOrientation(orientation);
@@ -175,7 +176,7 @@ Receipt ScreenPresentation::receipt() const {
 
 bool ScreenPresentation::copyPresentedHeader(HeaderPainter::Inputs& out, const uint32_t generation) const {
   if (phase_.load(std::memory_order_acquire) != PresentationPhase::Rendered || requested_.generation != generation ||
-      !presentedHeader_)
+      !presentedHeader_ || !presentedHeaderDrawn_)
     return false;
   out = *presentedHeader_;
   return true;

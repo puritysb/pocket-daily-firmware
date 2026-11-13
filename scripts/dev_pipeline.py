@@ -70,9 +70,11 @@ def source_state(root):
             'workingChangesSHA256': digest.hexdigest()}
 
 
+# Mounted-SD folder copy was removed from the app; require every remaining
+# current-network case on both platforms (ReaderInterfaceSuite.caseIDs).
 INTERFACE_CASES = {'identity-rejection', 'storage-usage', 'preferences-roundtrip', 'profile-roundtrip-conflict',
                    'batch-article-download', 'downloaded-book-reading', 'pause-resume', 'pause-discard',
-                   'folder-copy', 'inventory-preservation'}
+                   'inventory-preservation'}
 
 
 # Seed, the unarmed control, then per round: app offer, post-acceptance list and reader offer.
@@ -227,6 +229,30 @@ def check_x4_continuity_bitmaps(destination, captures):
             raise RuntimeError('X4 continuity capture does not have native 480x800 dimensions')
 
 
+def check_home_interfaces(detail):
+    if not isinstance(detail, dict):
+        raise RuntimeError('invalid rich Home evidence')
+    books, covers = detail.get('bookCount'), detail.get('downloadedCoverCount')
+    comparisons = detail.get('nativeRenderComparisons')
+    version = detail.get('homeInterfaceVersion', 2)
+    layouts = {'readingShelf', 'readingList', 'calendar'}
+    if version == 3:
+        layouts |= {'readingShelfClock', 'readingShelfAgenda', 'readingShelfWeather'}
+    if (type(books) is not int or not 1 <= books <= 4
+            or type(covers) is not int or not 1 <= covers <= books
+            or type(detail.get('snapshotSchema')) is not int or detail['snapshotSchema'] != 5
+            or detail.get('datedAgendaReadback') is not True
+            or detail.get('orderedShelfReadback') is not True
+            or detail.get('originalRecordsAndReadingRestored') is not True
+            or type(version) is not int or version not in (2, 3)
+            or not isinstance(comparisons, list) or len(comparisons) != len(layouts)
+            or any(not isinstance(item, dict) for item in comparisons)
+            or {item.get('layout') for item in comparisons} != layouts
+            or any(type(item.get('pixelDifferences')) is not int or item['pixelDifferences'] != 0
+                   for item in comparisons)):
+        raise RuntimeError('missing actual covers, exact native comparisons or restored rich Home state')
+
+
 def hardware_evidence(log, run, version, standby, platform, interface=False, wifi_setup=False, screens=False, standby_seconds=90, battery_only=False, delayed_advertising=False, wake_control=False, network_faults=False, continuity=False, real_epub=False, ble_continuity=False):
     records = []
     for line in log.splitlines():
@@ -239,6 +265,8 @@ def hardware_evidence(log, run, version, standby, platform, interface=False, wif
             or record.get('passed') is not True or record.get('initialConnection') is not True
             or record.get('platform') != platform):
         raise RuntimeError('hardware result failed or does not match this run/artifact/platform')
+    if 'homeInterfaces' in record:
+        check_home_interfaces(record['homeInterfaces'])
     if continuity:
         reading = record.get('continuityValidation', {})
         cases = reading.get('cases', [])
@@ -311,8 +339,7 @@ def hardware_evidence(log, run, version, standby, platform, interface=False, wif
         if len(cases) != len(INTERFACE_CASES) or {c.get('id') for c in cases} != INTERFACE_CASES:
             raise RuntimeError('missing or duplicated interface cases')
         for case in cases:
-            expected = 'not-applicable' if platform == 'iOS-device' and case['id'] == 'folder-copy' else 'passed'
-            if case.get('state') != expected:
+            if case.get('state') != 'passed':
                 raise RuntimeError('interface case did not pass: ' + case['id'])
         if record.get('transferFeedbackRecovery') != 'passed':
             raise RuntimeError('interface suite requires firmware feedback recovery')
@@ -599,8 +626,78 @@ def install_only_argument_error(args):
     return None
 
 
+def hardware_run_id(args):
+    reserve = 512 if getattr(args, 'interface_suite', False) else 20 if getattr(args, 'x4_continuity', False) else 16
+    return secrets.randbelow(0xffffffff - reserve) + 1
+
+
+def interface_recovery_argument_error(args):
+    root = getattr(args, 'interface_recover_from', None)
+    if root is None:
+        return None
+    if (args.action != 'run' or not getattr(args, 'interface_suite', False)
+            or not isinstance(root, str) or not root.strip() or not root.startswith('/') or '\x00' in root):
+        return '--interface-recover-from requires run --interface-suite and an absolute recovery path'
+    conflicts = ('install_only', 'ios_device', 'x4_continuity', 'x4_sleep', 'x4_starters',
+                 'x4_settings', 'x4_layout_only', 'x4_typography_only',
+                 'x4_recover_from', 'x4_recover_empty_revision')
+    if any(getattr(args, name, False) for name in conflicts):
+        return '--interface-recover-from is only for the macOS interface suite'
+    return None
+
+
+def rich_profile_recovery_argument_error(args):
+    root = getattr(args, 'rich_profile_recover_from', None)
+    if root is None:
+        return None
+    if (args.action != 'run' or not getattr(args, 'interface_suite', False)
+            or not isinstance(root, str) or not root.strip() or not root.startswith('/') or '\x00' in root):
+        return '--rich-profile-recover-from requires run --interface-suite and an absolute recovery path'
+    conflicts = ('install_only', 'ios_device', 'x4_continuity', 'x4_sleep', 'x4_starters',
+                 'x4_settings', 'x4_layout_only', 'x4_typography_only',
+                 'x4_recover_from', 'x4_recover_empty_revision')
+    if any(getattr(args, name, False) for name in conflicts):
+        return '--rich-profile-recover-from is only for the macOS interface suite'
+    return None
+
+
+def rich_profile_recovery_environment(args, platform):
+    # Only the sandboxed app inspects the retained private profile and identity.
+    root = getattr(args, 'rich_profile_recover_from', None)
+    if root is not None and platform == 'macOS':
+        return {'TEST_RUNNER_POCKET_HARDWARE_RICH_PROFILE_RECOVERY_ROOT': root}
+    return {}
+
+
+def check_rich_profile_recovery(evidence):
+    if evidence.get('richProfileRecoveryRestored') is not True:
+        raise RuntimeError('requested rich Home profile recovery was not proved')
+
+
+def interface_recovery_environment(args, platform, verified_artifact=None):
+    # The sandboxed app owns inspection and proof; do not resolve/read this path.
+    root = getattr(args, 'interface_recover_from', None)
+    if root is not None and platform == 'macOS':
+        env = {'TEST_RUNNER_POCKET_HARDWARE_INVENTORY_RECOVERY_ROOT': root}
+        if getattr(args, 'firmware', None):
+            # This receipt comes from the explicit artifact already frozen and
+            # developer-version validated in run(), never an ambient file/stat.
+            artifact = verified_artifact or {}
+            size, version = artifact.get('bytes'), artifact.get('version')
+            if type(size) is not int or size <= 0 or not isinstance(version, str) or '-dev-' not in version:
+                raise ValueError('recovery firmware transition requires the verified explicit artifact')
+            env['TEST_RUNNER_POCKET_HARDWARE_RECOVERY_FIRMWARE_BYTES'] = str(size)
+        return env
+    return {}
+
+
+def check_interface_recovery(evidence):
+    if evidence.get('inventoryRecoveryRestored') is not True:
+        raise RuntimeError('requested owned inventory recovery was not proved')
+
+
 def run(args, config, job):
-    scope_error = x4_continuity_argument_error(args) or install_only_argument_error(args)
+    scope_error = rich_profile_recovery_argument_error(args) or interface_recovery_argument_error(args) or x4_continuity_argument_error(args) or install_only_argument_error(args)
     if scope_error:
         raise ValueError(scope_error)
     job.stage('exclusive-app-preflight', require_companion_stopped)
@@ -705,9 +802,8 @@ def run(args, config, job):
         return
     for platform, command, target in platforms:
         for index in range(args.cycles):
-            reserve = 20 if getattr(args, 'x4_continuity', False) else 16
-            run_id = secrets.randbelow(0xffffffff - reserve) + 1  # reserve capture sequence IDs
-            env = {key: value for key, value in os.environ.items() if not key.startswith('TEST_RUNNER_POCKET_HARDWARE_')}
+            run_id = hardware_run_id(args)  # reserve capture and reboot sequence IDs
+            env = {key: value for key, value in os.environ.items() if not key.startswith(('TEST_RUNNER_POCKET_HARDWARE_', 'POCKET_HARDWARE_'))}
             for key, value in {'ENABLED': '1', 'HOST': host, 'DEVICE_ID': identity, 'VERSION': version,
                                'X4_CONTINUITY': '1' if getattr(args, 'x4_continuity', False) else '0',
                                'MODEL': 'X4' if getattr(args, 'x4_continuity', False) else '',
@@ -728,6 +824,8 @@ def run(args, config, job):
                                'WIFI_SETUP': '1' if getattr(args, 'wifi_setup', False) else '0',
                                'INTERFACE': '1' if getattr(args, 'interface_suite', False) else '0'}.items():
                 env['TEST_RUNNER_POCKET_HARDWARE_' + key] = value
+            env.update(interface_recovery_environment(args, platform, job.report.get('artifact')))
+            env.update(rich_profile_recovery_environment(args, platform))
             if getattr(args, 'x4_recover_empty_revision', None):
                 env['TEST_RUNNER_POCKET_HARDWARE_X4_EMPTY_REVISION'] = args.x4_recover_empty_revision
             if getattr(args, 'x4_recover_from', None):
@@ -753,6 +851,10 @@ def run(args, config, job):
                 raise
             evidence = job.stage(label + '-evidence', lambda: hardware_evidence(
                 log.read_text(), run_id, version, args.standby, platform, getattr(args, 'interface_suite', False), getattr(args, 'wifi_setup', False), getattr(args, 'screen_suite', False) and platform == 'macOS', getattr(args, 'standby_seconds', 90), getattr(args, 'battery_only', False), getattr(args, 'delayed_advertising', False), getattr(args, 'wake_control', False), getattr(args, 'network_faults', False), (getattr(args, 'continuity_suite', False) or getattr(args, 'x4_continuity', False)) and platform == 'macOS', getattr(args, 'real_epub', False) and platform == 'macOS', getattr(args, 'ble_continuity', False) and platform == 'macOS'))
+            if getattr(args, 'rich_profile_recover_from', None) and platform == 'macOS':
+                job.stage(label + '-rich-profile-recovery-evidence', lambda: check_rich_profile_recovery(evidence))
+            if getattr(args, 'interface_recover_from', None) and platform == 'macOS':
+                job.stage(label + '-inventory-recovery-evidence', lambda: check_interface_recovery(evidence))
             if getattr(args, 'x4_continuity', False):
                 job.stage(label + '-x4-continuity-evidence', lambda: check_x4_continuity(evidence))
             if getattr(args, 'x4_sleep', False):
@@ -830,6 +932,8 @@ def main():
     parser.add_argument('--ble-continuity', action='store_true', help='exchange every reading position over the bonded BLE standby window only; requires --continuity-suite (X3 ble_standby)')
     parser.add_argument('--screen-suite', action='store_true', help='physical X3 Home/Brief/cards/EPUB captures and actual deep-sleep validation')
     parser.add_argument('--interface-suite', action='store_true', help='full app interface scenarios with owned fixtures and restoration')
+    parser.add_argument('--interface-recover-from', help='app-owned prior inventory proof directory; macOS interface suite only')
+    parser.add_argument('--rich-profile-recover-from', help='app-owned retained rich Home profile directory; macOS interface suite only')
     parser.add_argument('--network-faults', action='store_true', help='actual X3 Wi-Fi outage during upload and after publication; requires --interface-suite')
     parser.add_argument('--checks', action='store_true', help='full firmware host/analysis/default-build gates')
     parser.add_argument('--cppcheck', default='build/cppcheck-source/cppcheck')
@@ -842,7 +946,7 @@ def main():
     parser.add_argument('--ios-simulator', help='simulator UDID for protocol regression/build validation')
     parser.add_argument('--ios-device', help='physical iPhone UDID; already paired/permissioned Debug app required')
     args = parser.parse_args()
-    scope_error = x4_continuity_argument_error(args) or install_only_argument_error(args)
+    scope_error = rich_profile_recovery_argument_error(args) or interface_recovery_argument_error(args) or x4_continuity_argument_error(args) or install_only_argument_error(args)
     if scope_error:
         parser.error(scope_error)
     if args.x4_layout_only and not args.x4_starters:

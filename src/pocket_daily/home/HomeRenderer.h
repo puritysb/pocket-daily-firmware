@@ -1,3 +1,4 @@
+#include "pocket_daily/PocketAgenda.h"
 #pragma once
 
 #include <cstddef>
@@ -18,7 +19,7 @@ namespace PocketDaily::Home {
 // the firmware daily word when there are none and the profile keeps it. The
 // retired `provider` and `monitor` profile items (AgentDeck daemon data) still
 // parse but resolve to no source.
-enum class RowSource : uint8_t { Reading, AppCards, DailyWord };
+enum class RowSource : uint8_t { Reading, AppCards, DailyWord, DeskClock, RecentBooks, Calendar };
 
 // Reading retains its empty-state page; optional sources need content.
 struct RowAvailability {
@@ -54,8 +55,31 @@ struct Row {
   const char* cardId = "";    // mine: identifies the card for Env::drawCardImage
   const char* project = "";   // item title
   const char* activity = "";  // item body text
+  bool clockPage = false;
+  int8_t shelfIndex = -1;
+  bool calendarPage = false;
 };
 
+enum class Section : uint8_t { Reading, Study, Clock, Calendar };
+constexpr Section homeSection(bool reading, bool shelf, bool clock, bool calendar) {
+  return calendar ? Section::Calendar : clock ? Section::Clock : (reading || shelf) ? Section::Reading : Section::Study;
+}
+// Same-section navigation wraps without crossing into another content type.
+int stepHomeSection(const uint8_t* groups, int count, int selected, int direction);
+int homeSectionStarts(const uint8_t* groups, int count, uint8_t* starts, int capacity);
+
+inline constexpr uint8_t RECENT_CAP = 4;
+struct BookSummary {
+  char title[96]{};
+  char author[80]{};
+  int8_t percent = -1;
+  bool valid = false;
+  void clear() { *this = {}; }
+};
+// Pure calendar geometry; Monday is column zero. Zero date means unset.
+int calendarDays(int year, int month);
+int calendarWeekday(int year, int month);
+uint32_t calendarMonth(uint32_t date, int offset);
 struct Reading {
   bool valid = false;
   const char* title = "";
@@ -84,6 +108,13 @@ struct Strings {
   const char* library = "Library";
   const char* articles = "Articles";
   const char* sync = "Sync";
+  const char* recentBooks = "Recent books";
+  const char* views = "Views";
+  const char* reading = "Reading";
+  const char* back = "Back";
+  const char* clock = "Clock";
+  const char* calendar = "Calendar";
+  const char* weekdays = "Mon|Tue|Wed|Thu|Fri|Sat|Sun";
 };
 
 struct Metrics {
@@ -102,22 +133,51 @@ struct Env {
   void (*drawHeader)(void* context, const GfxRenderer& renderer, int x, int y, int width, int height, const char* title,
                      const char* subtitle) = nullptr;
   bool (*drawCover)(void* context, GfxRenderer& renderer, int x, int y, int width, int height) = nullptr;
+  bool (*drawRecentCover)(void* context, GfxRenderer& renderer, unsigned index, int x, int y, int width,
+                          int height) = nullptr;
   // Draws the image of one of the companion's cards fitted into the box (shrunk,
   // never enlarged) and returns the height used; 0 when nothing was drawn.
   int (*drawCardImage)(void* context, GfxRenderer& renderer, const char* cardId, int x, int y, int width,
                        int height) = nullptr;
 };
 
+struct DeskClock {
+  uint32_t date = 0;       // YYYYMMDD in the clock's local zone
+  uint16_t minute = 1440;  // unset
+  char line[96]{};
+  bool hideColon = false;
+  uint16_t foldingFromMinute = 1440;  // awake device transition only
+  uint8_t second = 60;                // unset outside the seconds trial
+  uint8_t foldingFromSecond = 60;     // awake device transition only
+};
+
+struct ClockDetail {
+  const char* label;
+  char text[112]{};
+};
+
+ClockDetail clockDetail(const DailyProfile::Profile& profile, const DeskClock& clock, const Glance& glance,
+                        const Strings& strings);
+
 struct HomeView {
   bool isX3 = true;
   const Row* rows = nullptr;
   int count = 0;
   int selected = 0;
+  bool choosingView = false;
+  uint8_t viewChoice = 0;
   Reading reading;
+  const BookSummary* recentBooks = nullptr;
+  uint8_t recentCount = 0;
+  int8_t calendarOffset = 0;
+  bool calendarBrowsing = false;
+  uint32_t calendarSelection = 0;
+  const Agenda::Snapshot* agenda = nullptr;
   const PocketDaily::Glance* glance = nullptr;  // required
   bool snapshotStale = false;
   DailyProfile::Profile profile = DailyProfile::defaults();
   Strings strings;
+  DeskClock clock;
 };
 
 // Clears the framebuffer and draws the whole Home face.
@@ -130,6 +190,7 @@ struct BriefView {
   const char* headerMeta = nullptr;             // snapshot date/sync, nullptr when powered off
   const PocketDaily::Glance* glance = nullptr;  // required
   Reading reading;
+  bool fullScreenCover = false;
   bool sleepCover = true;                         // SETTINGS.pocketDailySleepCover
   const PocketDaily::Card* pocketCard = nullptr;  // required; empty cardId = none
   const PocketDaily::Card* pinnedCard = nullptr;  // first of the companion's cards, or nullptr

@@ -1,4 +1,4 @@
-# Connected layout inputs v1/v2
+# Connected layout inputs v1–v5
 
 Working-tree implementation; hardware acceptance belongs to the parent app run.
 
@@ -10,7 +10,7 @@ render-busy and heap admission apply. No paint, activation, settings write,
 font load or framebuffer copy occurs. `Cache-Control: no-store`.
 
 Success is `application/octet-stream`, at most 8192 bytes. PDLI header is
-`50 44 4c 49 01 00 00 00` (magic, little-endian u16 version 1, u16 reserved 0).
+magic `50 44 4c 49`, little-endian u16 version (1–5), and u16 reserved zero.
 The field sequence is `preview/LayoutInputs.cpp::fields`: explicit-width
 little-endian integers, canonical u8 booleans, strings prefixed by a u16 UTF-8
 byte count excluding NUL. Tail is the little-endian CRC32 of every preceding
@@ -21,8 +21,8 @@ source of truth. No C++ struct bytes or pointers are serialized.
 
 ## Schema 2: ordinary Home and powered-off Brief
 
-The current device encodes PDLI version 2 (`50 44 4c 49 02 00 00 00`), still
-bounded to8192 bytes. The decoder retains version1 support. After the original
+The default response encodes PDLI version 2 (`50 44 4c 49 02 00 00 00`), still
+bounded to8192 bytes. The decoder retains versions 1–5; newer schemas require an explicit request. After the original
 20 strings, v2 adds localized asleep and wake-tab labels, then three u32 values:
 `coverKey`, `coverSize`, `coverCrc`. The key identifies the currently selected
 open-book cached cover; size is0 for the placeholder or1..131072 bytes. CRC32
@@ -56,6 +56,92 @@ metadata returns space to the cover. This is shared rendering code, not a PDLI
 schema or C ABI change; rebuild/reimport the companion's host renderer together
 with the firmware. The app defaults to the Sync face and labels ordinary
 Home/powered-off Brief as the separate After Sync preview.
+
+## Opt-in schemas 3 and 4
+
+Schema 3 adds the local clock date (u32 YYYYMMDD), minute (u16, 1440 unset),
+and bounded daily-line string after the schema 2 cover descriptor. Clients
+request `schema=3`; the default response remains schema 2.
+
+Readers with this extension advertise `homeInterfaces: 1` in `/api/status`
+without changing `layoutInputs: 2`. Clients request `schema=4`
+with that capability, and rejects an older response to that request. Schema 4
+uses 25 labels rather than 22: recent books, calendar, and seven weekday names
+separated by `|` are appended to the labels block. After the schema 3 clock
+fields come a u8 recent count and exactly four records: length-prefixed UTF-8
+title (at most 95 bytes), author (79 bytes), i8 percent (-1 or 0–100), and a
+canonical boolean valid flag. Records below count must be valid; the rest
+have empty text, percent -1, and valid false. No path or cover art is included.
+The 8192-byte cap and CRC32 still apply. Versions 1–3 keep their exact field
+order and remain decodable by the same host library; public C ABI stays 1.
+
+Hidden recent-book metadata is captured for proposed-layout previews, just
+as hidden daily-word data was already captured. The native painter and host
+preview share the shelf, list, and calendar functions. This is a snapshot of
+inputs, not proof of pixels on an installed reader or a new event-sync API.
+
+A presented-header receipt is reused only when that frame actually drew its
+header. Headerless compact-clock layouts retain the freshly captured valid
+theme metadata for encoding; default, undrawn header font IDs never replace it.
+This does not loosen schema validation or add a visible header to those layouts.
+
+## Opt-in schema 5: multiple cover assets and dated agenda
+
+Readers advertising `homeInterfaces: 2` or `3` accept `schema=5`; the default remains
+schema 2. Version 3 changes the hero, explicit Views navigation and standalone
+next-event composition without changing these fields. Schema 5 preserves the schema 4 prefix and appends these fields before
+the final document CRC32, in this exact order:
+
+1. Four cover descriptors in recent-book index order, each `key u32`, `size u32`,
+   `crc u32` (48 bytes total). An absent cover has all three fields zero; present
+   covers have a nonzero key and size 1–131072. Entries beyond recent count are
+   zero. A valid book with no cached art remains selectable and shows its title.
+2. `agenda.dayCount u8` (0–7).
+3. Exactly seven day records, each `date u32` (YYYYMMDD),
+   `omittedEventCount u16`, `eventCount u8` (0–3), followed by exactly three
+   event records. Each event contains `startHm`, `endHm`, `title`, in that order,
+   using the existing u16-length-prefixed UTF-8 encoding. This is variable-size
+   wire data, not the agenda store's fixed-size record.
+
+Active dates are valid Gregorian dates in strictly increasing order. Unused
+records are canonical zero/empty values. A present day with zero events means
+no scheduled events; a date absent from the snapshot means not synchronized.
+The complete document remains capped at 8192 bytes. Schemas 1–4 are unchanged.
+Agenda write/storage semantics are defined in [pocket-agenda-v1.md](pocket-agenda-v1.md).
+
+`GET /api/pocket/v1/layout-cover?deviceID=...&book=0..3&key=...&size=...&offset=...`
+resolves the currently configured shelf entry, keeping the existing identity,
+key/size, chunk and admission checks. Omitting `book` retains the open-book
+cover behavior. Stored recent-book paths may contain `thumb_[HEIGHT].bmp`.
+The shared resolver first chooses a nonempty full `cover.bmp` within 128 KiB,
+then expands the thumbnail template using the active theme's cover height.
+Metadata capture, device painting and indexed HTTP access use that same resolved
+path; a template string is never treated as an existing bitmap filename.
+The app checks the complete cover CRC against its descriptor;
+a shelf change during retrieval rejects stale assets instead of showing another
+book's art. Neither endpoint accepts arbitrary filesystem paths.
+
+Additive ABI 1 calls expose each descriptor and copy bounded cover assets into
+the host context. Set all four slots for each new snapshot, clearing unused
+slots with null/zero. Both Sync and ordinary Home renders validate the schema 5
+shelf assets against their size and CRC before drawing:
+
+```c
+int32_t pdui_get_recent_cover_info(const uint8_t *snapshot, size_t snapshot_size,
+                                 uint32_t index, pdui_layout_asset_info *output);
+int32_t pdui_set_recent_cover(pdui_context *context, uint32_t index,
+                            const uint8_t *bytes, size_t size);
+int32_t pdui_set_home_selection(pdui_context *context, uint32_t row, uint32_t date);
+```
+
+`row` indexes the expanded Home rows, including each selected book. `date` is
+YYYYMMDD or zero for today. Setters invalidate the previous frame; bad indices,
+invalid calendar dates and invalid bitmap headers fail. The host copies assets,
+while snapshot input remains borrowed. Firmware caches only bounded paths and
+streams cached bitmaps through the shared painter, without another framebuffer.
+Developer retained-input captures use schema 5 so their asset and agenda inputs
+can accompany an actual screen comparison. This does not claim that a later
+ordinary refresh captures the same battery/time/selection as an earlier paint.
 
 ## Frozen additive C ABI (ABI version remains 1)
 
@@ -111,9 +197,9 @@ credential or document body is included.
 
 Both device BaseTheme and native host call `components/themes/HeaderPainter.cpp`, which
 uses the same FreeInkUI header/battery components and built-in UI fonts. Home
-and Brief use the production HomeRenderer and card summary helpers. Actual
-Sync book covers are placeholders; the preview deliberately uses those same
-placeholders. Brief says the resolved sleep-preview label and has no WAKE cue.
+and Brief use the production HomeRenderer and card summary helpers. The single-book Sync face retains its placeholder. Schema 5 multi-book shelves
+use actual cached covers on both Sync and ordinary Home; unavailable art uses
+title/author/progress. Brief says the resolved sleep-preview label and has no WAKE cue.
 This is the canonical Sync Apply frame, not a mirror of decoded book covers,
 an arbitrary current physical screen or deep sleep. Snapshot time is fixed.
 When a successful Sync presentation for the current profile generation still

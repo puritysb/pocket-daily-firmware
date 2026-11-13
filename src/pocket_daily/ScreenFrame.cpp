@@ -1,6 +1,7 @@
 #include "ScreenFrame.h"
 
 #include <GfxRenderer.h>
+#include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalSystem.h>
 #include <I18n.h>
@@ -15,9 +16,11 @@
 #include "CrossPointSettings.h"
 #include "SdCardFontSystem.h"
 #include "components/UITheme.h"
+#include "pocket_daily/PocketAgendaStore.h"
 #include "pocket_daily/PocketGlanceStore.h"
 #include "pocket_daily/home/DailyWord.h"
 #include "pocket_daily/home/GlanceFormat.h"
+#include "pocket_daily/home/HomeCover.h"
 #include "util/CjkScript.h"
 
 namespace PocketDaily::Screen {
@@ -63,12 +66,22 @@ bool buildHomeRows(Frame& frame) {
         // renderHome draws the reading row from HomeView::reading.
         append({true, false, false, false, false, "local:reading", "", ""});
         break;
+      case Home::RowSource::RecentBooks:
+        for (uint8_t index = 0; index < std::max<int>(1, frame.recentCount); ++index)
+          append({.shelfIndex = static_cast<int8_t>(index)});
+        break;
+      case Home::RowSource::Calendar:
+        append({.calendarPage = true});
+        break;
       case Home::RowSource::AppCards:
         for (uint8_t i = 0; appCards && i < appCards->count && n < Home::ROW_CAP; ++i) {
           const auto& card = appCards->cards[i];
           if (!card.card.cardId[0]) continue;
           append({false, true, true, false, card.imagePath[0] != '\0', card.card.cardId, "", ""});
         }
+        break;
+      case Home::RowSource::DeskClock:
+        append({.clockPage = true});
         break;
       case Home::RowSource::DailyWord:
         if (n == 0) firstIsWord = true;
@@ -103,6 +116,7 @@ struct DrawContext {
   int font;
   bool refused;
   HeaderPainter::Inputs* header;
+  bool* headerDrawn;
 };
 
 // FontResolver::pick is a fixed `void*` callback type shared with the host
@@ -133,6 +147,7 @@ static LoadResult loadFrameInputs(const Surface surface, const DailyProfile::Pro
   }
   frame->surface = surface;
   frame->profile = profile;
+  if (includeHiddenWord || profile.shows(DailyProfile::HomeItem::Calendar)) Agenda::load(frame->agenda);
 
   // The stored app glance (+404 B record while loading), rolled to today as
   // the Pocket activity does before every paint. Missing = no weather yet.
@@ -140,6 +155,11 @@ static LoadResult loadFrameInputs(const Surface surface, const DailyProfile::Pro
   const time_t now = time(nullptr);
   Home::rollGlanceToToday(frame->glance, now);
   frame->glanceStale = HomeDraw::snapshotIsStale(frame->glance.savedEpoch, now);
+  if (isDeskClock(profile.clockPage()) || profile.shows(DailyProfile::HomeItem::ClockCompact) ||
+      profile.shows(DailyProfile::HomeItem::Calendar) || includeHiddenWord) {
+    const auto clock = halClock.companionTime(now);
+    frame->clock = Home::readDeskClock(frame->glance, clock.epoch, clock.offsetMinutes);
+  }
 
   // Active My cards: the same verified snapshot the reader loads on entry.
   switch (frame->cards.load(nullptr, HalSystem::feedWatchdogIfRegistered)) {
@@ -157,6 +177,9 @@ static LoadResult loadFrameInputs(const Surface surface, const DailyProfile::Pro
   }
 
   Home::readOpenBook(frame->book);
+  if (includeHiddenWord || profile.shows(DailyProfile::HomeItem::ReadingShelf) ||
+      profile.shows(DailyProfile::HomeItem::ReadingList))
+    frame->recentCount = Home::readRecentBooks(frame->recentBooks, nullptr, frame->recentCovers);
 
   // The daily word only when it is the drawn page; otherwise a placeholder.
   bool wordDrawn = false;
@@ -170,7 +193,7 @@ static LoadResult loadFrameInputs(const Surface surface, const DailyProfile::Pro
     case Surface::None:
       break;
   }
-  if (wordDrawn || includeHiddenWord) {
+  if (wordDrawn || profile.shows(DailyProfile::HomeItem::Calendar) || includeHiddenWord) {
     const uint32_t day =
         Home::dailyWordDay(Home::dailyWordEpoch(now, frame->glance.savedEpoch), frame->glance.utcOffsetMinutes);
     if (Home::lightDailyWord(day, frame->word) == Home::WordSource::OutOfMemory) return LoadResult::OutOfMemory;
@@ -204,8 +227,23 @@ bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* conte
       return false;
     case Surface::Home: {
       if (!visitStrings(context, visit, {s.home, s.select, s.articles, s.sync})) return false;
+      if (frame.rowCount > 0 && frame.rows[0].clockPage) {
+        const auto detail = Home::clockDetail(profile, frame.clock, g, s);
+        return visitStrings(context, visit, {s.library, detail.label, detail.text});
+      }
       const Home::Row* first = frame.rowCount ? &frame.rows[0] : nullptr;
-      if (first && first->reading) {
+      if (first && first->shelfIndex >= 0) {
+        if (!visitStrings(context, visit, {s.recentBooks, s.startReading})) return false;
+        for (uint8_t i = 0; i < frame.recentCount; ++i)
+          if (!visitStrings(context, visit, {frame.recentBooks[i].title, frame.recentBooks[i].author})) return false;
+      } else if (first && first->calendarPage) {
+        if (!visitStrings(context, visit, {s.calendar, s.weekdays, s.today, s.noEvents})) return false;
+        for (uint8_t i = 0; i < g.eventCount; ++i)
+          if (!visitStrings(context, visit, {g.events[i].title})) return false;
+        for (uint8_t i = 0; i < frame.agenda.dayCount; ++i)
+          for (uint8_t j = 0; j < frame.agenda.days[i].eventCount; ++j)
+            if (!visitStrings(context, visit, {frame.agenda.days[i].events[j].title})) return false;
+      } else if (first && first->reading) {
         if (!visitStrings(context, visit, {s.continueReading, frame.book.title, frame.book.author})) return false;
       } else if (first && first->pocket) {
         const char* label = first->mine ? s.myCards : first->word ? s.word : s.study;
@@ -257,8 +295,10 @@ bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* conte
   return false;
 }
 
-bool drawFrame(GfxRenderer& renderer, const Frame& frame, const int cjkFont, HeaderPainter::Inputs* header) {
-  DrawContext context{&frame, cjkFont, false, header};
+bool drawFrame(GfxRenderer& renderer, const Frame& frame, const int cjkFont, HeaderPainter::Inputs* header,
+               bool* headerDrawn) {
+  if (headerDrawn) *headerDrawn = false;
+  DrawContext context{&frame, cjkFont, false, header, headerDrawn};
   Home::Env env;
   env.metrics = Home::deviceMetrics();
   // Latin text keeps the built-in fonts; CJK text uses the one preflighted
@@ -286,9 +326,17 @@ bool drawFrame(GfxRenderer& renderer, const Frame& frame, const int cjkFont, Hea
       GUI.drawHeaderAndDescribe(r, Rect{x, y, width, height}, title, subtitle, true, *d.header);
     else
       GUI.drawHeader(r, Rect{x, y, width, height}, title, subtitle);
+    if (d.headerDrawn) *d.headerDrawn = true;
   };
   // Covers are never decoded here: the shared renderer draws the title card.
   env.drawCover = [](void*, GfxRenderer&, int, int, int, int) { return false; };
+  env.drawRecentCover = [](void* self, GfxRenderer& r, unsigned index, int x, int y, int w, int h) {
+    auto& d = *static_cast<DrawContext*>(self);
+    if (index >= d.frame->recentCount || !d.frame->recentCovers[index][0]) return false;
+    const bool drawn = Home::drawCachedCover(r, d.frame->recentCovers[index], x, y, w, h);
+    if (!drawn) d.refused = true;
+    return drawn;
+  };
   env.drawCardImage = [](void* self, GfxRenderer& r, const char* cardId, int x, int y, int width, int height) {
     auto& d = *static_cast<DrawContext*>(self);
     const int drawn = Home::drawContentCardImage(r, d.frame->cards, cardId, x, y, width, height);
@@ -306,12 +354,16 @@ bool drawFrame(GfxRenderer& renderer, const Frame& frame, const int cjkFont, Hea
       view.isX3 = gpio.deviceIsX3();
       view.rows = frame.rows;
       view.count = frame.rowCount;
+      view.recentBooks = frame.recentBooks;
+      view.recentCount = frame.recentCount;
+      view.agenda = &frame.agenda;
       view.selected = 0;  // the reader enters Pocket Daily on the first row
       view.reading = {frame.book.valid, frame.book.title, frame.book.author, frame.book.percent};
       view.glance = &frame.glance.glance;
       view.snapshotStale = frame.glanceStale;
       view.profile = frame.profile;
       view.strings = Home::deviceStrings();
+      view.clock = frame.clock;
       Home::renderHome(renderer, view, env);
       break;
     }

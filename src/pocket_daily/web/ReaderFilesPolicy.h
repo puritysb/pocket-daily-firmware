@@ -31,7 +31,14 @@ inline bool readerFilePath(std::string_view path) {
   }
   return false;
 }
-inline bool deletableReaderFile(std::string_view path) {
+inline bool imageReaderFile(std::string_view path) {
+  if (!readerFilePath(path)) return false;
+  const auto dot = path.rfind('.');
+  if (dot == path.npos) return false;
+  const auto ext = path.substr(dot);
+  return sameAscii(ext, ".png") || sameAscii(ext, ".jpg") || sameAscii(ext, ".jpeg") || sameAscii(ext, ".bmp");
+}
+inline bool bookReaderFile(std::string_view path) {
   if (!readerFilePath(path)) return false;
   const auto dot = path.rfind('.');
   if (dot == path.npos) return false;
@@ -39,13 +46,35 @@ inline bool deletableReaderFile(std::string_view path) {
   return sameAscii(ext, ".epub") || sameAscii(ext, ".txt") || sameAscii(ext, ".md") || sameAscii(ext, ".xtc");
 }
 
-// Reader -> app download (docs/reader-files.md): only formats the app reads.
+// Deletion is a live per-file permission, independent of preview support.
+// No new buffers or retained state: the existing identity/size-checked route
+// removes ordinary SD files, while dedicated system/font/package flows stay protected.
+inline bool deletableReaderFile(std::string_view path) {
+  if (path == "/" || !readerFilePath(path)) return false;
+  if (sameAscii(path, "/crash_report.1.txt") || sameAscii(path, "/crash_report.2.txt") ||
+      sameAscii(path, "/crash_report.3.txt") || sameAscii(path, "/nearby_ap_log.txt"))
+    return false;
+  const auto dot = path.rfind('.');
+  if (dot == path.npos) return true;
+  const auto ext = path.substr(dot);
+  return !sameAscii(ext, ".bin") && !sameAscii(ext, ".cpfont") && !sameAscii(ext, ".ttf") && !sameAscii(ext, ".otf") &&
+         !sameAscii(ext, ".pdl");
+}
+
+// Move only ordinary files to a different safe folder, retaining the filename.
+inline bool readerFileMovePath(std::string_view source, std::string_view destination) {
+  if (!deletableReaderFile(source) || !deletableReaderFile(destination)) return false;
+  if (source == destination) return false;
+  return source.substr(source.rfind('/') + 1) == destination.substr(destination.rfind('/') + 1);
+}
+
+// readerFiles3 adds user images; the existing bounded transport and path protections apply.
 inline bool downloadableReaderFile(std::string_view path) {
   if (!readerFilePath(path)) return false;
   const auto dot = path.rfind('.');
   if (dot == path.npos) return false;
   const auto ext = path.substr(dot);
-  return sameAscii(ext, ".epub") || sameAscii(ext, ".txt") || sameAscii(ext, ".md");
+  return sameAscii(ext, ".epub") || sameAscii(ext, ".txt") || sameAscii(ext, ".md") || imageReaderFile(path);
 }
 
 // Unsigned decimal without sign, spaces or overflow (offset and size queries).
