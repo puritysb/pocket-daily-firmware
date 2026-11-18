@@ -32,7 +32,7 @@ TEST(PocketProfile, DefaultsKeepReadingFirstAndOptionalContentOff) {
   const auto p = defaults();
   ASSERT_TRUE(valid(p));
   ASSERT_EQ(p.homeCount, 1);
-  EXPECT_EQ(p.homeItems[0], HomeItem::ReadingShelf);
+  EXPECT_EQ(p.homeItems[0], HomeItem::ReadingDashboard);
   EXPECT_FALSE(p.shows(HomeItem::Provider));
   EXPECT_FALSE(p.shows(HomeItem::Monitor));
   EXPECT_FALSE(p.dailyWord);
@@ -78,9 +78,11 @@ TEST(PocketProfile, AcceptsTheDailyWordItemAndThePinnedCardSection) {
   EXPECT_NE(json.find(R"("items":["word","study"])"), std::string::npos);
   EXPECT_NE(
       json.find(
-          R"("homeItems":["reading","study","word","clockEvent","clockWeather","clockLine","clockCompact","clockLandscape","readingShelf","readingList","calendar"])"),
+          R"("homeItems":["reading","study","word","clockEvent","clockWeather","clockLine","clockCompact","clockLandscape","readingShelf","readingList","calendar","readingDashboard"])"),
       std::string::npos);
-  EXPECT_NE(json.find(R"("sleepSections":["reading","study","weather","today","card"])"), std::string::npos);
+  EXPECT_NE(json.find(R"("sleepSections":["reading","study","weather","today","card",)"
+                      R"("sleepWoodcut","sleepObservatory","sleepRail","sleepAlmanac"])"),
+            std::string::npos);
   // Still at most four Home items and four sleep sections.
   EXPECT_FALSE(
       parse(replaced(kValid, R"("monitor","reading","study")", R"("monitor","reading","study","provider","word")"), ok)
@@ -129,7 +131,7 @@ TEST(PocketProfile, ResponseRoundTripsAndAdvertisesAcceptedIds) {
   EXPECT_NE(json.find(R"("deviceID":"5B09AF70")"), std::string::npos);
   EXPECT_NE(
       json.find(
-          R"("homeItems":["reading","study","word","clockEvent","clockWeather","clockLine","clockCompact","clockLandscape","readingShelf","readingList","calendar"])"),
+          R"("homeItems":["reading","study","word","clockEvent","clockWeather","clockLine","clockCompact","clockLandscape","readingShelf","readingList","calendar","readingDashboard"])"),
       std::string::npos);
   EXPECT_NE(json.find(R"("maxHomeItems":4)"), std::string::npos);
   // The profile part of the response is itself an accepted document.
@@ -304,13 +306,18 @@ TEST(PocketProfile, ClockVariantsRoundTripAlongsideReading) {
 }
 
 TEST(PocketProfile, ReadingInterfacesRoundTripAndRejectCompetingReadingModes) {
-  for (const auto item : {HomeItem::ReadingShelf, HomeItem::ReadingList}) {
+  for (const auto item : {HomeItem::ReadingShelf, HomeItem::ReadingList, HomeItem::ReadingDashboard}) {
     auto p = defaults();
     p.homeItems[0] = item;
     p.homeItems[1] = HomeItem::Calendar;
     p.homeItems[2] = HomeItem::ClockCompact;
     p.homeCount = 3;
+    if (item == HomeItem::ReadingDashboard) {
+      EXPECT_FALSE(valid(p));
+      --p.homeCount;
+    }
     ASSERT_TRUE(valid(p));
+    EXPECT_TRUE(p.usesRecentBooks());
     uint8_t bytes[RECORD_BYTES];
     ASSERT_TRUE(encodeRecord(p, 31, bytes));
     Profile decoded;
@@ -326,4 +333,80 @@ TEST(PocketProfile, ReadingInterfacesRoundTripAndRejectCompetingReadingModes) {
   ASSERT_TRUE(ok);
   EXPECT_EQ(p.homeItems[0], HomeItem::ReadingList);
   EXPECT_EQ(p.homeItems[1], HomeItem::Calendar);
+}
+
+TEST(PocketProfile, SleepArtworkListRoundTripsAndCannotMixWithOtherSections) {
+  const auto artwork = replaced(replaced(kValid, R"("mode":"reader")", R"("mode":"brief")"), R"(["weather","reading"])",
+                                R"(["sleepWoodcut","sleepRail","sleepAlmanac"])");
+  bool ok = false;
+  const auto profile = parse(artwork, ok);
+  ASSERT_TRUE(ok);
+  EXPECT_TRUE(profile.usesSleepArtwork());
+  EXPECT_EQ(profile.sleepSections[1], SleepSection::Rail);
+
+  uint8_t record[RECORD_BYTES];
+  ASSERT_TRUE(encodeRecord(profile, 2, record));
+  Profile restored;
+  uint32_t generation = 0;
+  ASSERT_TRUE(decodeRecord(record, sizeof(record), restored, generation));
+  EXPECT_EQ(restored, profile);
+  EXPECT_EQ(generation, 2u);
+
+  parse(replaced(artwork, "sleepRail", "reading"), ok);
+  EXPECT_FALSE(ok);
+  parse(replaced(artwork, R"("mode":"brief")", R"("mode":"reader")"), ok);
+  EXPECT_FALSE(ok);
+}
+
+TEST(PocketProfile, CatalogArtworkFitsExistingSlotsAndCanonicalizesSubmissionOrder) {
+  auto document = replaced(replaced(kValid, R"("mode":"reader")", R"("mode":"brief")"),
+                           R"("sections":["weather","reading"])", R"("sections":["reading"],"artwork":[79,0,5,19,62])");
+  bool ok = false;
+  const auto profile = parse(document, ok);
+  ASSERT_TRUE(ok);
+  EXPECT_EQ(profile.sleepArtworkCount(), 4);
+  EXPECT_EQ(profile.sleepArtworkAt(0), 0);
+  EXPECT_EQ(profile.sleepArtworkAt(1), 5);
+  EXPECT_EQ(profile.sleepArtworkAt(3), 79);
+  EXPECT_EQ(profile.sleepArtworkAt(4), NO_SLEEP_ARTWORK);
+
+  uint8_t bytes[RECORD_BYTES];
+  ASSERT_TRUE(encodeRecord(profile, 81, bytes));
+  EXPECT_EQ(bytes[8], 2);
+  Profile restored;
+  uint32_t generation = 0;
+  ASSERT_TRUE(decodeRecord(bytes, sizeof(bytes), restored, generation));
+  EXPECT_EQ(restored, profile);
+  EXPECT_EQ(generation, 81u);
+
+  char out[1024];
+  const std::string json(out, writeJson(restored, generation, "5B09AF70", out, sizeof(out)));
+  EXPECT_NE(json.find(R"("artwork":[0,5,19,62,79])"), std::string::npos);
+  EXPECT_NE(json.find(R"("sleepArtwork":80)"), std::string::npos);
+  for (const auto* malformed : {"[]", "[79,79]", "[-1]", "[80]", "[256]", "[\"1\"]", "{}", "null"}) {
+    parse(replaced(document, "[79,0,5,19,62]", malformed), ok);
+    EXPECT_FALSE(ok) << malformed;
+  }
+  parse(replaced(document, R"("mode":"brief")", R"("mode":"reader")"), ok);
+  EXPECT_FALSE(ok);
+  parse(replaced(document, R"("sections":["reading"])", R"("sections":["reading","today"])"), ok);
+  EXPECT_FALSE(ok);
+}
+
+TEST(PocketProfile, StoredClockAndDateArtworkFallBackWithoutChangingTheRecord) {
+  auto profile = defaults();
+  for (const uint8_t id : {1, 2, 3, 19, 44}) {
+    ASSERT_TRUE(profile.sleepArtwork.insert(id));
+  }
+  EXPECT_EQ(profile.sleepArtworkCount(), 1);
+  EXPECT_EQ(profile.sleepArtworkAt(0), 0);
+  ASSERT_TRUE(profile.sleepArtwork.contains(44));
+  ASSERT_TRUE(profile.sleepArtwork.insert(79));
+  EXPECT_EQ(profile.sleepArtworkCount(), 1);
+  EXPECT_EQ(profile.sleepArtworkAt(0), 79);
+
+  auto legacy = defaults();
+  legacy.sleepSections[0] = SleepSection::Rail;
+  EXPECT_EQ(legacy.sleepArtworkCount(), 1);
+  EXPECT_EQ(legacy.sleepArtworkAt(0), 0);
 }

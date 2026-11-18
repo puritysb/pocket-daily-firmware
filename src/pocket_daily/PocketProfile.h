@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -25,11 +26,13 @@ enum class HomeItem : uint8_t {
   ClockLandscape = 10,
   ReadingShelf = 11,
   ReadingList = 12,
-  Calendar = 13
+  Calendar = 13,
+  ReadingDashboard = 14
 };
-constexpr bool isReading(const HomeItem item) {
-  return item == HomeItem::Reading || item == HomeItem::ReadingShelf || item == HomeItem::ReadingList;
+constexpr bool usesRecentBooks(const HomeItem item) {
+  return item == HomeItem::ReadingShelf || item == HomeItem::ReadingList || item == HomeItem::ReadingDashboard;
 }
+constexpr bool isReading(const HomeItem item) { return item == HomeItem::Reading || usesRecentBooks(item); }
 constexpr bool isDeskClock(const HomeItem item) {
   return item == HomeItem::ClockEvent || item == HomeItem::ClockWeather || item == HomeItem::ClockLine ||
          item == HomeItem::ClockLandscape;
@@ -38,12 +41,36 @@ enum class WeatherPanel : uint8_t { Bottom = 0, Top = 1, Off = 2 };
 enum class SleepMode : uint8_t { Brief = 0, Reader = 1 };
 // Card is the first of the companion's cards, shown whether or not a book is
 // open (for example contact details for a lost reader, with its image).
-enum class SleepSection : uint8_t { Reading = 1, Study = 2, Weather = 3, Today = 4, Card = 5 };
-inline constexpr uint8_t HOME_ITEM_MAX_ID = 13;
-inline constexpr uint8_t SLEEP_SECTION_MAX_ID = 5;
+enum class SleepSection : uint8_t {
+  Reading = 1,
+  Study = 2,
+  Weather = 3,
+  Today = 4,
+  Card = 5,
+  Woodcut = 6,
+  Observatory = 7,
+  Rail = 8,
+  Almanac = 9
+};
+constexpr bool isSleepArtwork(SleepSection section) {
+  return section >= SleepSection::Woodcut && section <= SleepSection::Almanac;
+}
+inline constexpr uint8_t HOME_ITEM_MAX_ID = static_cast<uint8_t>(HomeItem::ReadingDashboard);
+inline constexpr uint8_t SLEEP_SECTION_MAX_ID = static_cast<uint8_t>(SleepSection::Almanac);
 
 inline constexpr uint8_t HOME_ITEM_CAP = 4;
 inline constexpr uint8_t SLEEP_SECTION_CAP = 4;
+inline constexpr uint8_t SLEEP_ARTWORK_COUNT = 80;
+inline constexpr uint8_t NO_SLEEP_ARTWORK = SLEEP_ARTWORK_COUNT;
+
+struct SleepArtworkSelection {
+  std::array<uint8_t, SLEEP_ARTWORK_COUNT / 8> bits{};
+  bool insert(uint8_t id);
+  bool contains(uint8_t id) const;
+  uint8_t count() const;
+  uint8_t at(uint8_t rank) const;
+  bool operator==(const SleepArtworkSelection&) const = default;
+};
 
 struct Profile {
   HomeItem homeItems[HOME_ITEM_CAP]{};
@@ -54,6 +81,7 @@ struct Profile {
   SleepMode sleepMode = SleepMode::Brief;
   SleepSection sleepSections[SLEEP_SECTION_CAP]{};
   uint8_t sleepCount = 0;
+  SleepArtworkSelection sleepArtwork;
 
   HomeItem clockPage() const {
     for (uint8_t i = 0; i < homeCount && i < HOME_ITEM_CAP; ++i)
@@ -62,7 +90,11 @@ struct Profile {
   }
   bool deskClock() const { return homeCount == 1 && isDeskClock(homeItems[0]); }
   bool shows(HomeItem item) const;
+  bool usesRecentBooks() const;
   bool sleeps(SleepSection section) const;
+  uint8_t sleepArtworkCount() const;
+  uint8_t sleepArtworkAt(uint8_t rank) const;
+  bool usesSleepArtwork() const { return sleepArtworkCount() > 0; }
 };
 
 // Reading first, then user-authored cards. Learning, weather and schedule are

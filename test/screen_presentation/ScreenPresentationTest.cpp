@@ -501,7 +501,7 @@ TEST_F(PresentationSlotTest, NavigationNeedsADrawEvenWithoutDeferredPreparation)
   EXPECT_TRUE(rendered(slot));
 }
 
-TEST_F(PresentationSlotTest, BackDismissesEitherKindAndCardNavigationNeedsAVisibleCardPage) {
+TEST_F(PresentationSlotTest, HomeExitsSyncButBriefAndCardsKeepTheirOwnNavigation) {
   PocketDaily::Content::ContentSessionInput session;
   using Action = PocketDaily::Content::ContentSessionInput::Action;
   ASSERT_TRUE(slot.enqueueScreen(Surface::Home, 7, renderer));
@@ -509,8 +509,10 @@ TEST_F(PresentationSlotTest, BackDismissesEitherKindAndCardNavigationNeedsAVisib
   slot.render(renderer, input);
   // Page buttons do nothing on a presented Home frame.
   EXPECT_EQ(session.update(slot.visible(), slot.busy(), slot.navigationAvailable(), false, true, false), Action::None);
-  EXPECT_EQ(session.update(slot.visible(), slot.busy(), slot.navigationAvailable(), true, false, false),
-            Action::DismissView);
+  ASSERT_TRUE(slot.screen.isHomePreview());
+  EXPECT_EQ(session.update(slot.visible(), slot.busy(), slot.navigationAvailable(), true, false, false,
+                           slot.screen.isHomePreview()),
+            Action::ExitSession);
   slot.hide(renderer);
   EXPECT_FALSE(slot.visible());
   EXPECT_EQ(session.update(slot.visible(), slot.busy(), slot.navigationAvailable(), true, false, false),
@@ -529,6 +531,24 @@ TEST_F(PresentationSlotTest, BackDismissesEitherKindAndCardNavigationNeedsAVisib
   ASSERT_TRUE(slot.service(renderer, 20000, 8000));
   slot.render(renderer, input);
   EXPECT_EQ(session.update(slot.visible(), slot.busy(), slot.navigationAvailable(), false, true, false), Action::Next);
+}
+
+TEST_F(PresentationSlotTest, HomeActionWaitsForPaintAndThenExitsExactlyOnce) {
+  PocketDaily::Content::ContentSessionInput session;
+  using Action = PocketDaily::Content::ContentSessionInput::Action;
+  ASSERT_TRUE(slot.enqueueScreen(Surface::Home, 7, renderer));
+  ASSERT_TRUE(slot.service(renderer, 20000, 8000));
+  ASSERT_TRUE(slot.screen.isHomePreview());
+  EXPECT_EQ(session.update(slot.visible(), slot.busy(), slot.navigationAvailable(), true, false, false,
+                           slot.screen.isHomePreview()),
+            Action::None);
+  ASSERT_TRUE(slot.render(renderer, input));
+  EXPECT_EQ(session.update(slot.visible(), slot.busy(), slot.navigationAvailable(), false, false, false,
+                           slot.screen.isHomePreview()),
+            Action::ExitSession);
+  EXPECT_EQ(session.update(slot.visible(), slot.busy(), slot.navigationAvailable(), false, false, false,
+                           slot.screen.isHomePreview()),
+            Action::None);
 }
 
 TEST_F(PresentationSlotTest, HideReleasesBothKindsAndCaptureFollowsTheVisibleKind) {

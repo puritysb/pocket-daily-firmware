@@ -1844,7 +1844,7 @@ void GfxRenderer::drawIcon(const uint8_t bitmap[], const int x, const int y, con
 
 bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
                              const float cropX, const float cropY, const bool allowUpscale1Bit,
-                             const bool whiteAsTransparent) const {
+                             const bool whiteAsTransparent, const bool upscaleColorInBW) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return false;
   // For 1-bit bitmaps, use optimized 1-bit rendering path (no crop support for 1-bit)
   if (bitmap.is1Bit() && cropX == 0.0f && cropY == 0.0f) {
@@ -1874,7 +1874,7 @@ bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
     hasTargetBounds = true;
   }
 
-  if (hasTargetBounds && fitScale < 1.0f) {
+  if (hasTargetBounds && (fitScale < 1.0f || (upscaleColorInBW && renderMode == BW))) {
     scale = fitScale;
     isScaled = true;
   }
@@ -1912,7 +1912,7 @@ bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       return false;
     }
 
-    if (screenY < 0) {
+    if (screenY < 0 && scale <= 1.0f) {
       continue;
     }
 
@@ -1930,7 +1930,7 @@ bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       if (screenX >= getScreenWidth()) {
         break;
       }
-      if (screenX < 0) {
+      if (screenX < 0 && scale <= 1.0f) {
         continue;
       }
 
@@ -1938,7 +1938,15 @@ bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       if (whiteAsTransparent && val == 3) continue;
 
       if (renderMode == BW && val < 3) {
-        drawPixel(screenX, screenY);
+        if (scale > 1.0f) {
+          const int nextX = x + static_cast<int>(std::floor((bmpX - cropPixX + 1) * scale));
+          const int nextY =
+              y + static_cast<int>(std::floor(
+                      (bitmap.isTopDown() ? bmpY + 1 - cropPixY : bitmap.getHeight() - bmpY - cropPixY) * scale));
+          fillRect(screenX, screenY, std::max(1, nextX - screenX), std::max(1, nextY - screenY), true);
+        } else {
+          drawPixel(screenX, screenY);
+        }
       } else if (renderMode == GRAYSCALE_LSB || renderMode == GRAYSCALE_MSB) {
         const auto pixel = grayPlanePixel(val, renderMode == GRAYSCALE_MSB, absoluteGrayPlanes);
         if (pixel.write) drawPixel(screenX, screenY, pixel.black);
@@ -2006,7 +2014,7 @@ bool GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
     if (screenY >= getScreenHeight()) {
       continue;  // Continue reading to keep row counter in sync
     }
-    if (screenY < 0) {
+    if (screenY < 0 && scale <= 1.0f) {
       continue;
     }
 
@@ -2015,7 +2023,7 @@ bool GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
       if (screenX >= getScreenWidth()) {
         break;
       }
-      if (screenX < 0) {
+      if (screenX < 0 && scale <= 1.0f) {
         continue;
       }
 

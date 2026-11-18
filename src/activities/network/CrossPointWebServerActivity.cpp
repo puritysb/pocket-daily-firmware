@@ -760,8 +760,9 @@ void CrossPointWebServerActivity::loop() {
 
   // Handle different states
   if (state == WebServerActivityState::SERVER_RUNNING) {
-    // Consume each GPIO edge once. Waiting to dismiss a drawing view must not
-    // skip handleClient below or turn that same Back edge into session exit.
+    // Consume each GPIO edge once. A Home preview's Home button ends Sync;
+    // Back from a card or Daily Brief dismisses only that presentation.
+    // A queued action keeps serving clients until its paint has finished.
     using ContentAction = PocketDaily::Content::ContentSessionInput::Action;
     const auto contentAction =
         contentInput.update(presentation.visible(), presentation.busy(),
@@ -770,7 +771,8 @@ void CrossPointWebServerActivity::loop() {
                             mappedInput.wasPressed(MappedInputManager::Button::Right) ||
                                 mappedInput.wasPressed(MappedInputManager::Button::PageForward),
                             mappedInput.wasPressed(MappedInputManager::Button::Left) ||
-                                mappedInput.wasPressed(MappedInputManager::Button::PageBack));
+                                mappedInput.wasPressed(MappedInputManager::Button::PageBack),
+                            presentation.screen.isHomePreview());
     switch (contentAction) {
       case ContentAction::None:
         break;

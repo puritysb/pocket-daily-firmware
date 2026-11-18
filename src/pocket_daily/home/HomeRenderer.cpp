@@ -1,14 +1,27 @@
 #include "HomeRenderer.h"
 
+#include <Bitmap.h>
 #include <EpdFontFamily.h>
 #include <GfxRenderer.h>
 
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <string_view>
 
 #include "fontIds.h"
 #include "pocket_daily/home/GlanceFormat.h"
+
+namespace PocketDaily::Home::SleepArtwork {
+struct Panel {
+  int width;
+  int height;
+  std::string_view artwork[4];
+};
+}  // namespace PocketDaily::Home::SleepArtwork
+
+#include "pocket_daily/home/SleepArtworkData.h"
+#include "pocket_daily/home/SleepArtworkGalleryData.h"
 
 namespace PocketDaily::Home {
 using OverviewRow = Row;
@@ -27,6 +40,7 @@ int homeRowSources(const DailyProfile::Profile& profile, const RowAvailability& 
         break;
       case HomeItem::ReadingShelf:
       case HomeItem::ReadingList:
+      case HomeItem::ReadingDashboard:
         out[n++] = RowSource::RecentBooks;
         break;
       case HomeItem::Calendar:
@@ -165,38 +179,32 @@ constexpr uint8_t kDigits[10][7] = {
     {2, 6, 10, 18, 31, 2, 2},     {31, 16, 16, 30, 1, 1, 30}, {14, 16, 16, 30, 17, 17, 14}, {31, 1, 2, 4, 8, 8, 8},
     {14, 17, 17, 14, 17, 17, 14}, {14, 17, 17, 15, 1, 1, 14}};
 
-void drawDeskClock(GfxRenderer& r, const HomeView& view, const Env& env, const int headerHeight) {
-  const int w = r.getScreenWidth();
-  const int h = r.getScreenHeight();
-  const int pad = env.metrics.contentSidePadding;
-  const int digitCount = view.clock.second < 60 ? 6 : 4;
+// Draws the same split-flap numerals on the standalone clock and Home.
+int drawFlipClock(const GfxRenderer& r, const DeskClock& clock, int x, int top, int width, int height) {
+  const int digitCount = clock.second < 60 ? 6 : 4;
   const int widthInUnits = digitCount * 10 - 3;
-  const int unit = std::max(1, std::min((w - 2 * pad) / widthInUnits, h / (w > h ? 31 : 25)));
+  const int unit = std::max(1, std::min(width / widthInUnits, height / 11));
   const int tile = 8 * unit;
-  const int top = w > h ? h / 5 : h * 3 / 10;
-  const int left = (w - widthInUnits * unit) / 2;
-  const bool valid = view.clock.minute < 1440;
-  const int hour = view.clock.minute / 60;
-  const int minute = view.clock.minute % 60;
-  const int second = view.clock.second;
+  const int left = x + (width - widthInUnits * unit) / 2;
+  const bool valid = clock.minute < 1440;
+  const int hour = clock.minute / 60;
+  const int minute = clock.minute % 60;
+  const int second = clock.second;
   const int numbers[] = {hour / 10, hour % 10, minute / 10, minute % 10, second / 10, second % 10};
-  const int priorHour = view.clock.foldingFromMinute / 60;
-  const int priorMinute = view.clock.foldingFromMinute % 60;
-  const int priorSecond = view.clock.foldingFromSecond;
+  const int priorHour = clock.foldingFromMinute / 60;
+  const int priorMinute = clock.foldingFromMinute % 60;
+  const int priorSecond = clock.foldingFromSecond;
   const int prior[] = {priorHour / 10,   priorHour % 10,   priorMinute / 10,
                        priorMinute % 10, priorSecond / 10, priorSecond % 10};
 
-  r.clearScreen();
-  if (env.drawHeader)
-    env.drawHeader(env.context, r, 0, env.metrics.topPadding, w, headerHeight, view.strings.pocketDaily, nullptr);
   for (int index = 0; index < digitCount; ++index) {
-    const int x = left + (index * 9 + index / 2 * 2) * unit;
-    const bool hasPrevious = index < 4 ? view.clock.foldingFromMinute < 1440 : priorSecond < 60;
+    const int tileX = left + (index * 9 + index / 2 * 2) * unit;
+    const bool hasPrevious = index < 4 ? clock.foldingFromMinute < 1440 : priorSecond < 60;
     const bool folding = hasPrevious && prior[index] != numbers[index];
-    const int glyphX = x + (tile - 5 * unit) / 2;
+    const int glyphX = tileX + (tile - 5 * unit) / 2;
     const int glyphY = top + 2 * unit;
     const int hinge = top + 11 * unit / 2;
-    r.fillRect(x, top, tile, 11 * unit);
+    r.fillRect(tileX, top, tile, 11 * unit);
     if (valid) {
       for (int row = 0; row < 7; ++row) {
         // The new upper leaf is exposed first. The lower leaf still carries
@@ -211,18 +219,33 @@ void drawDeskClock(GfxRenderer& r, const HomeView& view, const Env& env, const i
     }
     if (folding) {
       const int flapDepth = std::max(2, unit / 2);
-      r.fillRect(x + 1, hinge + 1, tile - 2, flapDepth);
-      r.drawLine(x + unit, hinge + flapDepth, x + tile - unit - 1, hinge + flapDepth, false);
+      r.fillRect(tileX + 1, hinge + 1, tile - 2, flapDepth);
+      r.drawLine(tileX + unit, hinge + flapDepth, tileX + tile - unit - 1, hinge + flapDepth, false);
     }
-    r.fillRect(x, hinge, tile, 1, false);
+    r.fillRect(tileX, hinge, tile, 1, false);
   }
-  if (!view.clock.hideColon) {
+  if (!clock.hideColon) {
     for (int group = 1; group < digitCount / 2; ++group) {
       const int center = left + (group * 20 - 2) * unit;
       r.fillRect(center, top + 4 * unit, unit, unit);
       r.fillRect(center, top + 7 * unit, unit, unit);
     }
   }
+  return 11 * unit;
+}
+
+void drawDeskClock(GfxRenderer& r, const HomeView& view, const Env& env, const int headerHeight) {
+  const int w = r.getScreenWidth();
+  const int h = r.getScreenHeight();
+  const int pad = env.metrics.contentSidePadding;
+  const int top = w > h ? h / 5 : h * 3 / 10;
+  const bool valid = view.clock.minute < 1440;
+
+  r.clearScreen();
+  if (env.drawHeader)
+    env.drawHeader(env.context, r, 0, env.metrics.topPadding, w, headerHeight, view.strings.pocketDaily, nullptr);
+  const int tileHeight = drawFlipClock(r, view.clock, pad, top, w - 2 * pad, 11 * (h / (w > h ? 31 : 25)));
+  const int unit = tileHeight / 11;
 
   char calendar[18]{};
   const unsigned value = view.clock.date;
@@ -346,6 +369,53 @@ void drawRecentBooks(GfxRenderer& r, const HomeView& view, const Env& env, const
     }
   }
 }
+int drawMonthGrid(const GfxRenderer& r, const HomeView& view, const Env& env, const int x, const int gridTop,
+                  const int gridWidth, const int cellH, const uint32_t date, const unsigned highlightedDay,
+                  const bool markEvents) {
+  const int year = date / 10000, month = date / 100 % 100;
+  const int lineH = r.getLineHeight(UI_12_FONT_ID), smallH = r.getLineHeight(SMALL_FONT_ID);
+  const int cellW = gridWidth / 7;
+  const char* weekday = view.strings.weekdays;
+  for (int i = 0; i < 7; ++i) {
+    char name[24]{};
+    size_t n = 0;
+    while (weekday[n] && weekday[n] != '|' && n < sizeof(name) - 1) {
+      name[n] = weekday[n];
+      ++n;
+    }
+    const int font = env.labels.resolve(name, SMALL_FONT_ID);
+    r.drawText(font, x + i * cellW + (cellW - r.getTextWidth(font, name)) / 2, gridTop, name, true);
+    weekday += n;
+    if (*weekday == '|') ++weekday;
+  }
+  const int first = calendarWeekday(year, month), days = calendarDays(year, month);
+  for (int d = 1; d <= days; ++d) {
+    const int index = first + d - 1, bx = x + (index % 7) * cellW, by = gridTop + smallH + 8 + (index / 7) * cellH;
+    const bool today = static_cast<unsigned>(d) == highlightedDay;
+    if (today) r.fillRect(bx + 2, by - 3, cellW - 4, lineH + 6, true);
+    char number[4];
+    snprintf(number, sizeof(number), "%d", d);
+    r.drawText(UI_12_FONT_ID, bx + (cellW - r.getTextWidth(UI_12_FONT_ID, number)) / 2, by, number, !today,
+               EpdFontFamily::BOLD);
+    const auto* agendaDay = markEvents && view.agenda ? Agenda::findDay(*view.agenda, date + d - 1) : nullptr;
+    if (agendaDay && (agendaDay->eventCount || agendaDay->omittedEventCount))
+      r.fillRect(bx + cellW / 2 - 2, by + lineH + 4, 4, 3, true);
+  }
+  return (first + days + 6) / 7;
+}
+
+void drawDashboardMonth(const GfxRenderer& r, const HomeView& view, const Env& env, int x, int y, int width,
+                        int cellH) {
+  const auto date = calendarMonth(view.clock.date, 0);
+  char label[16] = "---- / --";
+  if (date) snprintf(label, sizeof(label), "%04u / %02u", unsigned(date / 10000), unsigned(date / 100 % 100));
+  const int labelWidth = r.getTextWidth(UI_12_FONT_ID, label, EpdFontFamily::BOLD);
+  r.drawText(UI_12_FONT_ID, x + (width - labelWidth) / 2, y, label, true, EpdFontFamily::BOLD);
+  if (date)
+    drawMonthGrid(r, view, env, x, y + r.getLineHeight(UI_12_FONT_ID) + 10, width, cellH, date, view.clock.date % 100,
+                  false);
+}
+
 void drawCalendar(const GfxRenderer& r, const HomeView& view, const Env& env, const int x, const int y, const int width,
                   const int height) {
   const uint32_t selectedDate = view.calendarSelection ? view.calendarSelection : view.clock.date;
@@ -368,35 +438,9 @@ void drawCalendar(const GfxRenderer& r, const HomeView& view, const Env& env, co
   if (view.calendarBrowsing) r.drawRect(labelX - 5, y - 5, x + gridWidth - labelX + 10, lineH + 10, 2, true);
   r.drawText(UI_12_FONT_ID, labelX, y, label, true, EpdFontFamily::BOLD);
   const int gridTop = y + lineH + 16;
-  const int cellW = gridWidth / 7;
   const int cellH = std::max(lineH + 8, std::min(lineH + 22, (height - lineH * 5) / 7));
-  const char* weekday = view.strings.weekdays;
-  for (int i = 0; i < 7; ++i) {
-    char name[24]{};
-    size_t n = 0;
-    while (weekday[n] && weekday[n] != '|' && n < sizeof(name) - 1) {
-      name[n] = weekday[n];
-      ++n;
-    }
-    const int font = env.labels.resolve(name, SMALL_FONT_ID);
-    r.drawText(font, x + i * cellW + (cellW - r.getTextWidth(font, name)) / 2, gridTop, name, true);
-    weekday += n;
-    if (*weekday == '|') ++weekday;
-  }
-  const int first = calendarWeekday(year, month), days = calendarDays(year, month);
-  for (int d = 1; d <= days; ++d) {
-    const int index = first + d - 1, bx = x + (index % 7) * cellW, by = gridTop + smallH + 8 + (index / 7) * cellH;
-    const bool today = view.calendarOffset == 0 && static_cast<unsigned>(d) == selectedDate % 100;
-    if (today) r.fillRect(bx + 2, by - 3, cellW - 4, lineH + 6, true);
-    char number[4];
-    snprintf(number, sizeof(number), "%d", d);
-    r.drawText(UI_12_FONT_ID, bx + (cellW - r.getTextWidth(UI_12_FONT_ID, number)) / 2, by, number, !today,
-               EpdFontFamily::BOLD);
-    const auto* agendaDay = view.agenda ? Agenda::findDay(*view.agenda, date + d - 1) : nullptr;
-    if (agendaDay && (agendaDay->eventCount || agendaDay->omittedEventCount))
-      r.fillRect(bx + cellW / 2 - 2, by + lineH + 4, 4, 3, true);
-  }
-  const int weeks = (first + days + 6) / 7;
+  const int weeks = drawMonthGrid(r, view, env, x, gridTop, gridWidth, cellH, date,
+                                  view.calendarOffset == 0 ? selectedDate % 100 : 0, true);
   int ey = split ? gridTop : gridTop + smallH + 8 + weeks * cellH + 12;
   if (ey + smallH + lineH + 18 > y + height) return;
   r.drawLine(detailsX, ey, detailsX + detailsWidth, ey, 2, true);
@@ -433,6 +477,8 @@ void drawCalendar(const GfxRenderer& r, const HomeView& view, const Env& env, co
   }
 }
 }  // namespace
+
+void drawBatteryBadge(const GfxRenderer& renderer, int batteryPercent, int right, int top);
 
 void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   const auto& m = env.metrics;
@@ -472,6 +518,8 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   const PocketDaily::Glance& renderGlanceSnapshot = *view.glance;
   Reading renderReadingSnapshot = view.reading;
   const int selectedShelf = n > 0 ? rows[cursor].shelfIndex : -1;
+  const bool dashboard = selectedShelf >= 0 && view.profile.shows(DailyProfile::HomeItem::ReadingDashboard);
+  if (dashboard) renderReadingSnapshot = {};
   if (selectedShelf >= 0 && view.recentBooks && selectedShelf < view.recentCount) {
     const auto& book = view.recentBooks[selectedShelf];
     renderReadingSnapshot = {book.valid, book.title, book.author, book.percent};
@@ -516,7 +564,7 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     return;
   }
   const bool readingPage = n > 0 && (rows[cursor].reading || selectedShelf >= 0);
-  const int headerHeight = readingPage && view.profile.shows(DailyProfile::HomeItem::ClockCompact)
+  const int headerHeight = readingPage && (dashboard || view.profile.shows(DailyProfile::HomeItem::ClockCompact))
                                ? 0
                                : std::min(m.headerHeight, line12 + (readingPage ? 4 : m.verticalSpacing * 2));
   const int selectedIndex = view.selected >= 0 && view.selected < n ? view.selected : 0;
@@ -745,6 +793,34 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     }
   };
 
+  if (dashboard) {
+    const int width = w - pad * 2;
+    const int height = hintTop - contentTop;
+    const int spacing = std::max(10, m.verticalSpacing);
+    const int clockY = contentTop + spacing + (env.batteryPercent >= 0 ? renderer.getLineHeight(SMALL_FONT_ID) : 0);
+    drawBatteryBadge(renderer, env.batteryPercent, w - pad, headerY);
+    const int clockHeight = drawFlipClock(renderer, view.clock, pad, clockY, width, height / (portrait ? 4 : 3));
+    const int monthY = clockY + clockHeight + spacing * 2;
+    const int cellH = line12 + 6;
+    const int monthHeight = line12 + renderer.getLineHeight(SMALL_FONT_ID) + 18 + cellH * 6;
+    if (portrait) {
+      const int monthW = width * 9 / 10;
+      drawDashboardMonth(renderer, view, env, pad + (width - monthW) / 2, monthY, monthW, cellH);
+      const int bookY = monthY + monthHeight + spacing;
+      renderer.drawLine(pad, bookY - spacing / 2, w - pad, bookY - spacing / 2);
+      drawReading(pad, bookY, width, hintTop - bookY);
+    } else {
+      const int monthW = width / 2 - 20;
+      drawDashboardMonth(renderer, view, env, pad, monthY, monthW, cellH);
+      const int bookX = pad + monthW + 32;
+      drawReading(bookX, monthY, w - pad - bookX, hintTop - monthY);
+    }
+    if (sidePaging) HomeDraw::drawPocketSideChevrons(renderer, view.isX3);
+    HomeDraw::drawPocketActionStrip(renderer, view.isX3, env.labels, s.home,
+                                    renderReadingSnapshot.valid ? s.select : s.library, s.views, s.sync);
+    return;
+  }
+
   const int primaryGap = 8;
   const bool eventBand =
       readingPage && view.profile.nextEvent && view.profile.weather == DailyProfile::WeatherPanel::Off;
@@ -823,6 +899,76 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
                                   readingPage && !renderReadingSnapshot.valid ? s.library : s.select, s.views, s.sync);
 }
 
+bool drawFullCover(const GfxRenderer& renderer, const Bitmap& bitmap, int width, int height) {
+  const int sourceWidth = bitmap.getWidth(), sourceHeight = bitmap.getHeight();
+  if (sourceWidth <= 0 || sourceHeight <= 0 || sourceWidth > 2048 || sourceHeight > 2048) return false;
+  // Size the shorter axis to the panel and let the framebuffer clip the
+  // excess equally on either side. The bitmap painter uses row scratch only.
+  const int drawWidth = std::max(width, (height * sourceWidth + sourceHeight - 1) / sourceHeight);
+  const int drawHeight = std::max(height, (width * sourceHeight + sourceWidth - 1) / sourceWidth);
+  return renderer.drawBitmap(bitmap, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight, 0, 0,
+                             true, false, true);
+}
+
+void drawBatteryBadge(const GfxRenderer& renderer, int batteryPercent, int right, int top) {
+  if (batteryPercent < 0 || batteryPercent > 100) return;
+  char label[5];
+  snprintf(label, sizeof(label), "%d%%", batteryPercent);
+  const int width = renderer.getTextWidth(SMALL_FONT_ID, label, EpdFontFamily::BOLD) + 12;
+  const int height = renderer.getLineHeight(SMALL_FONT_ID) + 8;
+  renderer.fillRect(right - width, top, width, height, false);
+  renderer.drawRect(right - width, top, width, height, 1, true);
+  renderer.drawText(SMALL_FONT_ID, right - width + 6, top + 4, label, true, EpdFontFamily::BOLD);
+}
+
+namespace {
+bool drawSleepArtwork(const GfxRenderer& renderer, const uint8_t id) {
+  const int width = renderer.getScreenWidth();
+  const int height = renderer.getScreenHeight();
+  const auto& panel = width == SleepArtwork::x3.width ? SleepArtwork::x3 : SleepArtwork::x4;
+  if (width != panel.width || height != panel.height || id >= DailyProfile::SLEEP_ARTWORK_COUNT) return false;
+
+  static_assert(std::size(SleepArtwork::x3.artwork) + std::size(SleepArtwork::Gallery) ==
+                DailyProfile::SLEEP_ARTWORK_COUNT);
+  const bool legacy = id < std::size(panel.artwork);
+  const int sourceWidth = legacy ? width : SleepArtwork::GalleryWidth;
+  const int sourceHeight = legacy ? height : SleepArtwork::GalleryHeight;
+  const auto packed = legacy ? panel.artwork[id] : SleepArtwork::Gallery[id - std::size(panel.artwork)];
+  const auto scale = [](int position, int target, int source) { return (position * target + source - 1) / source; };
+
+  // The assets encode alternating white and black runs as unsigned LEB128.
+  // Split black runs at row boundaries and draw directly into the framebuffer.
+  int position = 0;
+  int length = 0;
+  int shift = 0;
+  bool black = false;
+  for (const unsigned char byte : packed) {
+    if (shift > 14) return false;
+    length |= (byte & 0x7f) << shift;
+    if (byte & 0x80) {
+      shift += 7;
+      continue;
+    }
+    const int end = position + length;
+    if (end > sourceWidth * sourceHeight) return false;
+    while (black && position < end) {
+      const int x = position % sourceWidth;
+      const int y = position / sourceWidth;
+      const int span = std::min(end - position, sourceWidth - x);
+      const int left = scale(x, width, sourceWidth);
+      const int top = scale(y, height, sourceHeight);
+      renderer.fillRect(left, top, scale(x + span, width, sourceWidth) - left,
+                        scale(y + 1, height, sourceHeight) - top);
+      position += span;
+    }
+    position = end;
+    length = shift = 0;
+    black = !black;
+  }
+  return position == sourceWidth * sourceHeight && shift == 0;
+}
+}  // namespace
+
 void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   const bool isSleep = view.isSleep;
   const auto& m = env.metrics;
@@ -850,12 +996,28 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
 
   renderer.clearScreen();
   // A reading-only sleep layout uses the whole panel for the cover. Keep the
-  // ordinary Brief when no artwork is available or more sections are selected.
+  // ordinary Brief for layouts with additional sections.
   using PocketDaily::DailyProfile::SleepSection;
   const auto& profile = view.profile;
+  if (isSleep && profile.usesSleepArtwork()) {
+    const auto id = profile.sleepArtworkAt(view.sleepArtworkIndex);
+    if (drawSleepArtwork(renderer, id)) {
+      drawBatteryBadge(renderer, env.batteryPercent, w - pad, pageH - lineS - 16);
+      return;
+    }
+    renderer.clearScreen();
+  }
   if (isSleep && view.fullScreenCover && view.sleepCover && renderReadingSnapshot.valid && profile.sleepCount == 1 &&
-      profile.sleeps(SleepSection::Reading) && env.drawCover && env.drawCover(env.context, renderer, 0, 0, w, pageH)) {
-    return;
+      profile.sleeps(SleepSection::Reading)) {
+    if (env.drawFullCover) {
+      if (!env.drawFullCover(env.context, renderer, w, pageH)) {
+        renderer.clearScreen();
+        drawTitleCover(renderer, env, renderReadingSnapshot, 0, 0, w, pageH);
+      }
+      drawBatteryBadge(renderer, env.batteryPercent, w - pad, pageH - lineS - 16);
+      return;
+    }
+    if (env.drawCover && env.drawCover(env.context, renderer, 0, 0, w, pageH)) return;
   }
   if (env.drawHeader)
     env.drawHeader(env.context, renderer, 0, m.topPadding, w, m.headerHeight, s.pocketDaily, view.headerMeta);
@@ -1106,6 +1268,11 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
           break;
         case SleepSection::Card:
           y = drawPinned(pad, y, w - pad * 2, statusY - 8);
+          break;
+        case SleepSection::Woodcut:
+        case SleepSection::Observatory:
+        case SleepSection::Rail:
+        case SleepSection::Almanac:
           break;
       }
     }

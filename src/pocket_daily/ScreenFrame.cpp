@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <HalGPIO.h>
+#include <HalPowerManager.h>
 #include <HalSystem.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -156,7 +157,8 @@ static LoadResult loadFrameInputs(const Surface surface, const DailyProfile::Pro
   Home::rollGlanceToToday(frame->glance, now);
   frame->glanceStale = HomeDraw::snapshotIsStale(frame->glance.savedEpoch, now);
   if (isDeskClock(profile.clockPage()) || profile.shows(DailyProfile::HomeItem::ClockCompact) ||
-      profile.shows(DailyProfile::HomeItem::Calendar) || includeHiddenWord) {
+      profile.shows(DailyProfile::HomeItem::Calendar) || profile.shows(DailyProfile::HomeItem::ReadingDashboard) ||
+      includeHiddenWord) {
     const auto clock = halClock.companionTime(now);
     frame->clock = Home::readDeskClock(frame->glance, clock.epoch, clock.offsetMinutes);
   }
@@ -177,8 +179,7 @@ static LoadResult loadFrameInputs(const Surface surface, const DailyProfile::Pro
   }
 
   Home::readOpenBook(frame->book);
-  if (includeHiddenWord || profile.shows(DailyProfile::HomeItem::ReadingShelf) ||
-      profile.shows(DailyProfile::HomeItem::ReadingList))
+  if (includeHiddenWord || profile.usesRecentBooks())
     frame->recentCount = Home::readRecentBooks(frame->recentBooks, nullptr, frame->recentCovers);
 
   // The daily word only when it is the drawn page; otherwise a placeholder.
@@ -264,6 +265,7 @@ bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* conte
     }
     case Surface::Brief: {
       using DailyProfile::SleepSection;
+      if (profile.usesSleepArtwork()) return true;
       if (!visitStrings(context, visit, {tr(STR_POCKET_SLEEP_PREVIEW)})) return false;
       if (profile.sleeps(SleepSection::Reading) && frame.book.valid &&
           !visitStrings(context, visit, {s.continueReading, frame.book.title, frame.book.author}))
@@ -330,6 +332,7 @@ bool drawFrame(GfxRenderer& renderer, const Frame& frame, const int cjkFont, Hea
   };
   // Covers are never decoded here: the shared renderer draws the title card.
   env.drawCover = [](void*, GfxRenderer&, int, int, int, int) { return false; };
+  env.batteryPercent = std::min<int>(100, powerManager.getBatteryPercentage());
   env.drawRecentCover = [](void* self, GfxRenderer& r, unsigned index, int x, int y, int w, int h) {
     auto& d = *static_cast<DrawContext*>(self);
     if (index >= d.frame->recentCount || !d.frame->recentCovers[index][0]) return false;

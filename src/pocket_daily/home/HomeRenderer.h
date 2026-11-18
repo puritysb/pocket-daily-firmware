@@ -9,6 +9,7 @@
 #include "pocket_daily/models.h"
 
 class GfxRenderer;
+class Bitmap;
 
 // Pocket Daily Home and Daily Brief painters shared by the device activity and
 // the host preview (P1-3, docs/pocket-profile-v1.md). They draw from a plain
@@ -133,6 +134,8 @@ struct Env {
   void (*drawHeader)(void* context, const GfxRenderer& renderer, int x, int y, int width, int height, const char* title,
                      const char* subtitle) = nullptr;
   bool (*drawCover)(void* context, GfxRenderer& renderer, int x, int y, int width, int height) = nullptr;
+  bool (*drawFullCover)(void* context, GfxRenderer& renderer, int width, int height) = nullptr;
+  int batteryPercent = -1;
   bool (*drawRecentCover)(void* context, GfxRenderer& renderer, unsigned index, int x, int y, int width,
                           int height) = nullptr;
   // Draws the image of one of the companion's cards fitted into the box (shrunk,
@@ -191,6 +194,7 @@ struct BriefView {
   const PocketDaily::Glance* glance = nullptr;  // required
   Reading reading;
   bool fullScreenCover = false;
+  uint8_t sleepArtworkIndex = 0;
   bool sleepCover = true;                         // SETTINGS.pocketDailySleepCover
   const PocketDaily::Card* pocketCard = nullptr;  // required; empty cardId = none
   const PocketDaily::Card* pinnedCard = nullptr;  // first of the companion's cards, or nullptr
@@ -204,4 +208,5 @@ struct BriefView {
 // Clears the framebuffer and draws the Daily Brief including its status line;
 // the caller adds the wake cue or button hints and presents the frame.
 void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env);
+bool drawFullCover(const GfxRenderer& renderer, const Bitmap& bitmap, int width, int height);
 }  // namespace PocketDaily::Home

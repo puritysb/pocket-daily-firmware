@@ -67,13 +67,14 @@ int32_t pdui_copy_frame(const pdui_context* context, uint8_t* output, size_t cap
 // * provider and monitor were retired with the AgentDeck daemon: a profile may
 //   still name them, and they never produce a Home page.
 typedef struct {
-  uint8_t home_items[4];      // 1 reading, 2 my cards, 3 provider*, 4 monitor*, 5 daily word, 6–8 desk clock variants
+  uint8_t home_items[4];  // 1 reading, 2 my cards, 3 provider*, 4 monitor*, 5 daily word, 6–8 desk clock variants
+  // 9 compact clock, 10 landscape clock, 11 shelf, 12 list, 13 calendar, 14 reading dashboard.
   uint8_t home_count;         // 1..4, distinct
   uint8_t daily_word;         // 0/1
   uint8_t weather;            // 0 bottom, 1 top, 2 off
   uint8_t next_event;         // 0/1
   uint8_t sleep_mode;         // 0 Daily Brief, 1 reader's sleep screen
-  uint8_t sleep_sections[4];  // 1 reading, 2 study, 3 weather, 4 today, 5 first of my cards
+  uint8_t sleep_sections[4];  // 1..9 sections, 10+ artwork ID when count is one
   uint8_t sleep_count;        // 1..4, distinct
 } pdui_profile;
 enum {
@@ -91,6 +92,9 @@ int32_t pdui_render_home(pdui_context* context, const pdui_profile* profile, uin
 // Daily Brief (powered-off sleep frame) sections in profile order.
 int32_t pdui_render_brief(pdui_context* context, const pdui_profile* profile, uint32_t samples) PDUI_NOEXCEPT;
 
+// A single sleep section PDUI_SLEEP_ARTWORK_BASE + id previews a catalog
+// image. The reader profile endpoint separately stores the full selection.
+enum { PDUI_SLEEP_ARTWORK_BASE = 10 };
 // Version 1 additive: sleep preferences. Existing render_brief keeps its old
 // cover-on, cue-off behavior. options: bit 0 WAKE cue, bit 1 book cover.
 // The cue uses the same portrait-anchored painter as the physical reader.
@@ -98,7 +102,8 @@ enum {
   PDUI_SLEEP_WAKE_INDICATOR = 1u,
   PDUI_SLEEP_BOOK_COVER = 2u,
   PDUI_SLEEP_ALL = 3u,
-  PDUI_SLEEP_FULL_SCREEN_COVER = 4u
+  PDUI_SLEEP_FULL_SCREEN_COVER = 4u,
+  PDUI_COVER_FILL_AND_BATTERY = 8u
 };
 int32_t pdui_render_sleep_brief(pdui_context* context, const pdui_profile* profile, uint32_t samples,
                                 uint32_t options) PDUI_NOEXCEPT;

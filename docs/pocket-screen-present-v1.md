@@ -88,8 +88,10 @@ the routes. Both routes check `deviceID` first (409 on mismatch), accept only
   The Daily Brief is drawn as a sleep frame without the wake cue; its bottom
   status line says it is a sleep-screen preview and that Back returns to Sync,
   so the panel never claims the reader is powered off while its radio is on.
-- Back returns to the transfer view without ending the session; RSSI updates
-  do not redraw the presented frame. No navigation within the frame.
+- The Home button on a Home preview ends Sync and opens live Pocket Daily
+  Home. Back on a Daily Brief or card preview closes that preview and returns
+  to the transfer view. A press during drawing waits for the paint to finish.
+  RSSI updates do not redraw a preview.
 - No new task, server, framebuffer, resident buffer, radio change, reboot or
   Wi-Fi reassociation. A failed paint emits a `failed` receipt, keeps the
   last good panel frame and does not retry.
@@ -114,6 +116,7 @@ the routes. Both routes check `deviceID` first (409 on mismatch), accept only
   font coverage and paint failures (no display call on failure, no retry,
   fonts and writer gate released).
 - X3 on same Wi-Fi: three consecutive Applies in one session each reach
-  `rendered` with the heap and block samples recorded, Back returns to Sync,
-  and a card presentation still succeeds afterwards; then a 30-minute idle
-  without a lasting drop in free heap. X4 and direct connection separately.
+  `rendered` with the heap and block samples recorded. Back from Daily Brief
+  returns to Sync and card presentation still works. From the Home preview,
+  Home exits Sync. Measure a separate 30-minute idle period for lasting heap
+  loss. Check X4 and direct connection separately.

@@ -26,8 +26,8 @@ struct DrawContext {
 bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::LayoutInputs& in,
                         const PocketDaily::DailyProfile::Profile& profile, const UserCards& cards, const bool brief,
                         const bool sleepCover, const bool actual, const bool wakeIndicator, const uint8_t* cover,
-                        const size_t coverSize, const bool fullScreenCover, const RecentCovers* recent,
-                        const uint32_t selected, const uint32_t date) {
+                        const size_t coverSize, const bool fullScreenCover, const bool coverFillAndBattery,
+                        const RecentCovers* recent, const uint32_t selected, const uint32_t date) {
   using namespace PocketDaily;
   DrawContext context{in, hostEnv(renderer, cards), false, cover, coverSize, recent};
   Home::Env env;
@@ -71,6 +71,16 @@ bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::Layou
     }
     return false;  // the shared renderer draws the title card
   };
+  if (coverFillAndBattery) {
+    env.batteryPercent = in.header.batteryPercent;
+    env.drawFullCover = [](void* value, GfxRenderer& r, int width, int height) {
+      const auto& d = *static_cast<DrawContext*>(value);
+      if (!d.coverSize) return false;
+      HalFile file({d.cover, d.coverSize});
+      Bitmap bitmap(file);
+      return bitmap.parseHeaders() == BmpReaderError::Ok && Home::drawFullCover(r, bitmap, width, height);
+    };
+  }
   env.drawRecentCover = [](void* value, GfxRenderer& r, unsigned index, int x, int y, int w, int h) {
     auto& d = *static_cast<DrawContext*>(value);
     if (!d.recent || index >= 4 || !d.recent->sizes[index] || w <= 4 || h <= 4) return false;

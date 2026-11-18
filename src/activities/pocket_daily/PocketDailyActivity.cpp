@@ -1,8 +1,10 @@
 #include "PocketDailyActivity.h"
 
+#include <Arduino.h>
 #include <Bitmap.h>
 #include <EpdFontFamily.h>
 #include <HalClock.h>
+#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <I18n.h>
@@ -157,8 +159,7 @@ void PocketDailyActivity::onEnter() {
       LOG_ERR("POCKET", "Agenda allocation failed");
   }
 
-  if (profile.shows(PocketDaily::DailyProfile::HomeItem::ReadingShelf) ||
-      profile.shows(PocketDaily::DailyProfile::HomeItem::ReadingList)) {
+  if (profile.usesRecentBooks()) {
     // Larger than a task frame; allocate once before rendering, and release on exit.
     recentShelf = makeUniqueNoThrow<RecentShelf>();
     if (recentShelf)
@@ -186,6 +187,7 @@ void PocketDailyActivity::onEnter() {
 }
 
 namespace {
+constexpr time_t kDashboardClockInterval = 2;
 #ifdef ENABLE_DEV_REMOTE_FLASH
 constexpr time_t kDeskClockInterval = 1;
 #else
@@ -196,7 +198,9 @@ constexpr time_t kDeskClockInterval = 2;
 void PocketDailyActivity::loop() {
   const auto refresh = clockRefresh.load();
   if (refresh != ClockRefresh::Off) {
-    const time_t interval = refresh == ClockRefresh::Minute ? 60 : kDeskClockInterval;
+    const time_t interval = refresh == ClockRefresh::Minute      ? 60
+                            : refresh == ClockRefresh::Dashboard ? kDashboardClockInterval
+                                                                 : kDeskClockInterval;
     const time_t now = halClock.companionTime(time(nullptr)).epoch;
     const time_t tick = now >= PocketDaily::AppGlance::MIN_EPOCH ? now / interval : 0;
     if (refresh != lastClockRefresh || tick != deskClockTick) {
@@ -667,6 +671,16 @@ PocketDaily::Home::Env PocketDailyActivity::homeEnv() const {
   env.drawCover = [](void* self, GfxRenderer&, int x, int y, int width, int height) {
     return static_cast<PocketDailyActivity*>(self)->drawReadingCover(x, y, width, height);
   };
+  env.drawFullCover = [](void* self, GfxRenderer& r, int width, int height) {
+    const auto* activity = static_cast<PocketDailyActivity*>(self);
+    const char* path = activity->renderReadingSnapshot.coverBmpPath;
+    if (!path[0]) return false;
+    HalFile file = Storage.open(path, O_RDONLY);
+    if (!file) return false;
+    Bitmap bitmap(file);
+    return bitmap.parseHeaders() == BmpReaderError::Ok && PocketDaily::Home::drawFullCover(r, bitmap, width, height);
+  };
+  env.batteryPercent = std::min<int>(100, powerManager.getBatteryPercentage());
   env.drawRecentCover = [](void* self, GfxRenderer& r, unsigned index, int x, int y, int w, int h) {
     const auto* activity = static_cast<PocketDailyActivity*>(self);
     return activity->recentShelf && index < activity->recentShelf->count &&
@@ -686,17 +700,20 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n) {
   const time_t systemTime = time(nullptr);
   const int selected = overviewCursor >= 0 && overviewCursor < n ? overviewCursor : 0;
   const bool fullClock = n > 0 && rows[selected].clockPage;
-  const bool compactClock = n > 0 && (rows[selected].reading || rows[selected].shelfPage) &&
-                            profile.shows(PocketDaily::DailyProfile::HomeItem::ClockCompact);
+  using PocketDaily::DailyProfile::HomeItem;
+  const bool dashboard = n > 0 && rows[selected].shelfPage && profile.shows(HomeItem::ReadingDashboard);
+  const bool compactClock = dashboard || (n > 0 && (rows[selected].reading || rows[selected].shelfPage) &&
+                                          profile.shows(HomeItem::ClockCompact));
   const bool calendarPage = n > 0 && rows[selected].calendarPage;
   clockRefresh.store(fullClock                        ? ClockRefresh::Animated
+                     : dashboard                      ? ClockRefresh::Dashboard
                      : (compactClock || calendarPage) ? ClockRefresh::Minute
                                                       : ClockRefresh::Off);
   const auto clock = fullClock || compactClock || calendarPage
                          ? halClock.companionTime(systemTime)
                          : HalClock::CompanionTime{systemTime, HalClock::UNSPECIFIED_OFFSET};
   const time_t now = clock.epoch;
-  if (fullClock) {
+  if (fullClock || dashboard) {
     // Clock ticks use RAM inputs and the book route resolved on entry.
     PocketDaily::Home::rollGlanceToToday(glanceSnapshot, now);
   } else {
@@ -735,6 +752,7 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n) {
   view.strings = homeStrings();
   if (fullClock || compactClock || calendarPage)
     view.clock = PocketDaily::Home::readDeskClock(glanceSnapshot, now, clock.offsetMinutes);
+  if (dashboard && view.clock.minute < 1440) view.clock.hideColon = (now / kDashboardClockInterval) % 2 != 0;
   if (fullClock) {
     view.reading.valid = !continuePath.empty();
     const auto minute = view.clock.minute;
@@ -897,6 +915,10 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
   view.status = status;
   view.profile = PocketDaily::DailyProfile::current();
   view.strings = homeStrings();
+  if (isSleep) {
+    const auto artworkCount = view.profile.sleepArtworkCount();
+    if (artworkCount > 1) view.sleepArtworkIndex = static_cast<uint8_t>(random(artworkCount));
+  }
   PocketDaily::Home::renderBrief(renderer, view, homeEnv());
   if (isSleep) {
     if (SETTINGS.sleepWakeIndicator) PowerWakeCue::draw(renderer, gpio.deviceIsX3(), tr(STR_POCKET_WAKE_READ));

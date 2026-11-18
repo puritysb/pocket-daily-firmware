@@ -319,6 +319,10 @@ bool toProfile(const pdui_profile& in, PocketDaily::DailyProfile::Profile& out) 
   p.sleepMode = static_cast<SleepMode>(in.sleep_mode);
   p.sleepCount = in.sleep_count;
   for (uint8_t i = 0; i < in.sleep_count; ++i) p.sleepSections[i] = static_cast<SleepSection>(in.sleep_sections[i]);
+  if (p.sleepCount == 1 && in.sleep_sections[0] >= PDUI_SLEEP_ARTWORK_BASE) {
+    if (!p.sleepArtwork.insert(in.sleep_sections[0] - PDUI_SLEEP_ARTWORK_BASE)) return false;
+    p.sleepSections[0] = SleepSection::Reading;
+  }
   if (!valid(p)) return false;
   out = p;
   return true;
@@ -355,6 +359,7 @@ int32_t pdui_render_home(pdui_context* context, const pdui_profile* profile, uin
     snprintf(view.clock.line, sizeof(view.clock.line), "Keep one small promise today.");
     auto sampleEnv = PocketUIHost::hostEnv(context->renderer, context->cards);
     if (samples & PDUI_SAMPLE_BOOK) PocketUIHost::attachSampleCovers(sampleEnv);
+    sampleEnv.batteryPercent = 67;
     PocketDaily::Home::renderHome(context->renderer, view, sampleEnv);
     if (context->activeFont().boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
     context->frameValid = true;
@@ -399,7 +404,11 @@ int32_t pdui_render_sleep_brief(pdui_context* context, const pdui_profile* profi
     view.pinnedHasImage = first && !context->cards.front().image.empty();
     view.status = "Sleeping";
     view.profile = parsed;
-    PocketDaily::Home::renderBrief(context->renderer, view, PocketUIHost::hostEnv(context->renderer, context->cards));
+    auto env = PocketUIHost::hostEnv(context->renderer, context->cards);
+    env.batteryPercent = 67;
+    view.fullScreenCover = true;
+    if (samples & PDUI_SAMPLE_BOOK) PocketUIHost::attachSampleCovers(env);
+    PocketDaily::Home::renderBrief(context->renderer, view, env);
     if (options & PDUI_SLEEP_WAKE_INDICATOR) PowerWakeCue::draw(context->renderer, isX3Panel(context->panel), "WAKE");
     if (context->activeFont().boundedReadFailed() || !context->panel.guardsIntact()) return PDUI_RENDER_FAILED;
     context->frameValid = true;
@@ -463,7 +472,8 @@ int32_t renderReaderLayout(pdui_context* context, const pdui_profile* profile, c
   if (!profile || !toProfile(*profile, parsed) || !PocketDaily::Preview::decodeLayoutInputs(bytes, size, in) ||
       !revision || strnlen(revision, 65) > 64 || strcmp(revision, in.contentRevision) != 0 ||
       context->cards.size() != in.cardCount ||
-      (options & ~(actual ? (PDUI_SLEEP_ALL | PDUI_SLEEP_FULL_SCREEN_COVER) : PDUI_SLEEP_BOOK_COVER)) ||
+      (options & ~(actual ? (PDUI_SLEEP_ALL | PDUI_SLEEP_FULL_SCREEN_COVER | PDUI_COVER_FILL_AND_BATTERY)
+                          : PDUI_SLEEP_BOOK_COVER)) ||
       context->renderer.getOrientation() != GfxRenderer::Orientation::Portrait ||
       context->panel.getDisplayWidth() != in.physicalWidth || context->panel.getDisplayHeight() != in.physicalHeight ||
       (brief && parsed.sleepMode != PocketDaily::DailyProfile::SleepMode::Brief))
@@ -479,7 +489,9 @@ int32_t renderReaderLayout(pdui_context* context, const pdui_profile* profile, c
        (coverSize && (!cover || ~PocketDaily::Content::contentCrcUpdate(UINT32_MAX, cover, coverSize) != in.coverCrc))))
     return PDUI_INVALID_IMAGE;
   PocketUIHost::RecentCovers recent;
-  if (!brief && parsed.shows(PocketDaily::DailyProfile::HomeItem::ReadingShelf) && in.schema >= 5) {
+  if (!brief && in.schema >= 5 &&
+      (parsed.shows(PocketDaily::DailyProfile::HomeItem::ReadingShelf) ||
+       parsed.shows(PocketDaily::DailyProfile::HomeItem::ReadingDashboard))) {
     for (unsigned i = 0; i < 4; ++i) {
       const auto& bytes = context->recentCovers[i];
       const auto& expected = in.recentCovers[i];
@@ -495,7 +507,8 @@ int32_t renderReaderLayout(pdui_context* context, const pdui_profile* profile, c
   if (!PocketUIHost::renderReaderLayout(
           context->renderer, in, parsed, context->cards, brief, (options & PDUI_SLEEP_BOOK_COVER) != 0, actual,
           (options & PDUI_SLEEP_WAKE_INDICATOR) != 0, cover, coverSize, (options & PDUI_SLEEP_FULL_SCREEN_COVER) != 0,
-          &recent, context->selectedHomeRow, context->selectedCalendarDate) ||
+          (options & PDUI_COVER_FILL_AND_BATTERY) != 0, &recent, context->selectedHomeRow,
+          context->selectedCalendarDate) ||
       context->font.boundedReadFailed() || !context->panel.guardsIntact())
     return PDUI_RENDER_FAILED;
   context->frameValid = true;

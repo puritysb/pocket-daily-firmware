@@ -74,10 +74,10 @@ String buildStatusJson(const StatusInputs& in) {
   if (in.screenPresentation) doc["screenPresentation"] = 1;
   if (in.layoutInputs && isSyncProfile(in.profile)) {
     doc["layoutInputs"] = 2;
-    doc["homeInterfaces"] = 3;
+    doc["homeInterfaces"] = 4;
     doc["agenda"] = 1;
     doc["readingShelf"] = 1;
-    doc["fullScreenSleepCover"] = 1;
+    doc["fullScreenSleepCover"] = 2;
   }
   // Pocket Daily profile endpoints (docs/pocket-profile-v1.md) exist on Sync.
   if (isSyncProfile(in.profile)) {

@@ -848,6 +848,59 @@ TEST_P(HomePreview, RecentBooksSelectDifferentRowsAndKeepOtherPagesReachable) {
   EXPECT_NE(home(p, PDUI_SAMPLE_ALL, 0), home(p, 0, 0));
 }
 
+TEST_P(HomePreview, ReadingDashboardRendersSelectedBookInEveryOrientation) {
+  auto p = defaults();
+  p.home_count = 1;
+  p.home_items[0] = static_cast<uint8_t>(PocketDaily::DailyProfile::HomeItem::ReadingDashboard);
+  p.weather = 2;
+  p.next_event = 0;
+  const auto font = tinyFont();
+  for (uint32_t orientation = 0; orientation < 4; ++orientation) {
+    pdui_context* raw = nullptr;
+    ASSERT_EQ(pdui_create(GetParam().first, GetParam().second, orientation, font.data(), font.size(), &raw), PDUI_OK);
+    context.reset(raw);
+    const auto empty = home(p, 0);
+    const auto first = home(p, PDUI_SAMPLE_BOOK, 0);
+    EXPECT_GT(ink(empty), 1000u);
+    EXPECT_NE(first, empty);
+    EXPECT_NE(first, home(p, PDUI_SAMPLE_BOOK, 3));
+    EXPECT_EQ(first, home(p, PDUI_SAMPLE_BOOK, 0));
+  }
+}
+
+TEST(HomeDashboard, BlinkOnlyChangesTheTwoSeparatorDots) {
+  using namespace PocketDaily;
+  for (const bool x3 : {false, true}) {
+    HalDisplay panel(x3 ? 792 : 800, x3 ? 528 : 480);
+    GfxRenderer renderer(panel);
+    renderer.begin();
+    PocketUIHost::registerUiFonts(renderer);
+    Glance glance{};
+    const Home::Row row{.shelfIndex = 0};
+    Home::HomeView view{};
+    view.isX3 = x3;
+    view.glance = &glance;
+    view.rows = &row;
+    view.count = 1;
+    view.profile = DailyProfile::defaults();
+    view.clock.date = 20261115;
+    view.clock.minute = 581;
+    const Home::Env env{};
+    Home::renderHome(renderer, view, env);
+    const std::vector<uint8_t> visible(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize());
+    view.clock.hideColon = true;
+    Home::renderHome(renderer, view, env);
+    size_t changed = 0;
+    for (size_t i = 0; i < visible.size(); ++i)
+      changed += __builtin_popcount(static_cast<unsigned>(visible[i] ^ panel.getFrameBuffer()[i]));
+    // Two solid squares change; the book, calendar and tile outlines stay put.
+    const int unit = (renderer.getScreenWidth() - 2 * env.metrics.contentSidePadding) / 37;
+    EXPECT_GE(unit, 9);
+    EXPECT_EQ(changed, 2u * unit * unit);
+    EXPECT_TRUE(panel.guardsIntact());
+  }
+}
+
 TEST(HomeCalendar, LeapYearsWeekStartAndMonthRollover) {
   using namespace PocketDaily::Home;
   EXPECT_EQ(calendarDays(2028, 2), 29);

@@ -15,6 +15,25 @@ Contract between this repository and the companion app (`pocket-daily`).
 > monitoring card and the AgentDeck toggles are historical.
 
 
+## Clock, Calendar & Book (2026-11-15)
+
+Firmware advertises `readingDashboard` in `capabilities.homeItems` when it
+supports this reading layout. It uses Home item ID 14 in the existing profile
+record and the existing PDLI5 clock and recent-book inputs. The app offers the
+preset when the capability is advertised. Apps and firmware that predate
+the new item need an update to consume profiles that select it.
+
+A new profile opens with a large split-flap HH:MM clock, the current month
+with today highlighted, and one recent book with its cover and saved progress.
+Existing saved profiles keep their selected Home items. It uses the same up-to-four-book shelf and
+button navigation as Reading Focus. Page buttons stay within that shelf.
+Confirm opens the selected book, or Library when the shelf is empty. The
+colon toggles every two seconds while this Home view is open. The month
+grid uses the same local clock and weekday labels as Calendar and works without
+an agenda download. A separate Calendar view remains available for dated events
+when configured. The compact clock cannot be added to this layout because its
+clock is built in.
+
 ## Reading interfaces and explicit views (2026-11-13)
 
 `homeInterfaces: 3` keeps profile schema 1, the 32-byte record, generation checks,
@@ -22,8 +41,8 @@ and the four-item limit unchanged. `readingShelf` (ID 11) now shows one large
 cover with title, author and progress; side keys cycle within the selected books.
 It retains all selected books, up to four. `readingList` (12) uses compact rows;
 `reading` remains the compatible single current-book layout. At most one of
-these reading layouts is allowed. A new unsaved profile defaults to
-`[readingShelf]`; existing saved profiles are not rewritten.
+these reading layouts is allowed. The current default is `[readingDashboard]`;
+existing saved profiles retain their Home items.
 
 The left front button is labelled **Views**. It opens an explicit chooser for
 configured Reading, Calendar, Study and Clock sections, plus Articles. Side
@@ -48,12 +67,27 @@ Downloaded empty dates and unavailable dates remain distinct. Book order is
 stored separately under [pocket-reading-shelf-v1.md](pocket-reading-shelf-v1.md).
 Actual cached covers resolve either the full cover or the theme-sized thumbnail.
 
-Connected previews use unchanged PDLI schema 5; `homeInterfaces: 3` signals the
+Connected previews use unchanged PDLI schema 5; `homeInterfaces: 4` signals this
+Home layout revision. `homeInterfaces: 3` signals the prior dashboard artwork
+and the same underlying layout inputs. The app can use the unchanged inputs
+for the other layouts. The capability originally signalled the
 new presentation and navigation semantics, not a new binary layout. Host
 sample previews use original geometric demo covers only; connected snapshots
 never invent cover artwork. Native fixtures cover both panel sizes in all four
 orientations. Physical button and installed-frame validation are separate
 hardware evidence recorded by the developer runner.
+
+## Full-screen sleep cover
+
+`fullScreenSleepCover: 2` indicates that the reading-only Pocket Daily sleep
+face scales cached book artwork to cover the panel, crops centered overflow and
+draws a small battery-percentage badge. Without cached artwork the same layout
+shows a full-screen typeset title. The artwork uses the existing asset route and
+row-buffered bitmap decoder. The connected preview and physical sleep face are
+separate surfaces. The battery badge represents the charge at sleep entry.
+The default awake dashboard also shows the charge while it refreshes.
+A retained sleep frame does not update as the clock runs or as the battery
+charges. X4 drops CPU power on battery in deep sleep.
 
 ## Desk Clock Home extension (2026-11-10)
 
@@ -178,6 +212,31 @@ theme is Lyra (spacing 16), so the "exact" canvas differed on default readers.
   not). `card` (added 2026-09-25, additive) is the first of My cards with its
   image, shown whether or not a book is open, for example contact details or
   a QR code for a lost reader.
+- Legacy artwork IDs `sleepWoodcut`, `sleepObservatory`, `sleepRail` and
+  `sleepAlmanac` remain readable and writable in `brief` mode, without other
+  sections. Firmware with the expanded gallery advertises
+  `capabilities.sleepArtwork: 80`. A catalog selection is stored separately
+  as `sleep.artwork`, an array of 1–80 distinct integer IDs in 0…79, with
+  `sleep.mode: "brief"` and `sleep.sections: ["reading"]`. The response
+  returns the IDs in catalog order. The first four IDs preserve the original
+  artwork. IDs 4…79 follow the stable order in the app's `SleepArtwork.swift`.
+- For a catalog selection, the two existing 32-byte profile slots use PDP1
+  record version 2. Bytes 18…27 are an 80-bit selection, byte 17 is zero and
+  the CRC is unchanged. Normal sections and legacy artwork continue to write
+  version 1. A firmware downgrade can read only the previous version-1 slot,
+  if available. The wire document stays at schema 1.
+- Artwork IDs 1, 2, 3, 19 and 44 remain readable in saved profiles.
+  The app omits them from the gallery and both renderers skip them because
+  they contain fixed clocks or dates. A selection with only these IDs shows
+  Woodcut (ID 0).
+- The app and Sync previews show the first eligible image. When Pocket Daily Home
+  enters sleep, the reader chooses one of the selected images, paints the
+  battery badge and optional wake cue, then retains the frame. The reader's
+  own Custom image files are unaffected. The new images share a 400×624
+  one-bit master and paint at the panel's resolution without a frame-sized
+  allocation. Regenerate the native data with
+  `python3 scripts/generate_sleep_artwork.py ../pocket-daily/Sources/Assets.xcassets`
+  and rebuild the firmware and Apple host renderer.
 - A sleep section that cannot fit its header and first line is skipped rather
   than drawn over the status line.
 - Readers advertise the IDs they offer in `capabilities` (`homeItems` is

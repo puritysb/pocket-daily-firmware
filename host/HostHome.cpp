@@ -81,6 +81,11 @@ bool drawSampleCover(void*, GfxRenderer& r, unsigned index, int x, int y, int wi
 }  // namespace
 void attachSampleCovers(PocketDaily::Home::Env& env) {
   env.drawRecentCover = drawSampleCover;
+  env.drawFullCover = [](void*, GfxRenderer& r, int w, int h) {
+    const int coverHeight = std::max(h, (w * 3 + 1) / 2);
+    const int coverWidth = coverHeight * 2 / 3;
+    return drawSampleCover(nullptr, r, 0, (w - coverWidth) / 2, (h - coverHeight) / 2, coverWidth, coverHeight);
+  };
   env.drawCover = [](void* c, GfxRenderer& r, int x, int y, int w, int h) {
     return drawSampleCover(c, r, 0, x, y, w, h);
   };

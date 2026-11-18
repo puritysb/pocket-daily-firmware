@@ -148,7 +148,7 @@ class PocketDailyActivity final : public Activity {
   static constexpr uint32_t kDecisionCooldownMs = 400;  // debounce a card choice
 
   ViewMode viewMode = ViewMode::Overview;
-  enum class ClockRefresh : uint8_t { Off, Minute, Animated };
+  enum class ClockRefresh : uint8_t { Off, Minute, Animated, Dashboard };
   std::atomic<ClockRefresh> clockRefresh{ClockRefresh::Off};
   ClockRefresh lastClockRefresh = ClockRefresh::Off;  // loop task only
   time_t deskClockTick = 0;

@@ -416,7 +416,7 @@ class GfxRenderer {
   void drawImage(const uint8_t bitmap[], int x, int y, int width, int height) const;
   void drawIcon(const uint8_t bitmap[], int x, int y, int width, int height) const;
   bool drawBitmap(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, float cropX = 0, float cropY = 0,
-                  bool allowUpscale1Bit = false, bool whiteAsTransparent = false) const;
+                  bool allowUpscale1Bit = false, bool whiteAsTransparent = false, bool upscaleColorInBW = false) const;
   bool drawBitmap1Bit(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, bool allowUpscale = false) const;
   void drawIcon(const uint8_t bitmap[], int x, int y, int size) const;
   // Counter-invert content images in the logical framebuffer so output-level

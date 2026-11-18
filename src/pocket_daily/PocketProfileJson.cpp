@@ -12,10 +12,10 @@ struct Name {
   const char* text;
   uint8_t value;
 };
-constexpr Name kHomeItems[] = {{"reading", 1},      {"study", 2},           {"provider", 3},      {"monitor", 4},
-                               {"word", 5},         {"clockEvent", 6},      {"clockWeather", 7},  {"clockLine", 8},
-                               {"clockCompact", 9}, {"clockLandscape", 10}, {"readingShelf", 11}, {"readingList", 12},
-                               {"calendar", 13}};
+constexpr Name kHomeItems[] = {
+    {"reading", 1},       {"study", 2},        {"provider", 3},  {"monitor", 4},          {"word", 5},
+    {"clockEvent", 6},    {"clockWeather", 7}, {"clockLine", 8}, {"clockCompact", 9},     {"clockLandscape", 10},
+    {"readingShelf", 11}, {"readingList", 12}, {"calendar", 13}, {"readingDashboard", 14}};
 // `provider` and `monitor` were fed only by the retired AgentDeck daemon. Stored
 // profiles and documents naming them stay valid (and round-trip), but the
 // reader no longer advertises them and never shows them.
@@ -24,7 +24,9 @@ constexpr bool retiredHomeItem(const uint8_t id) {
 }
 constexpr Name kWeather[] = {{"bottom", 0}, {"top", 1}, {"off", 2}};
 constexpr Name kSleepModes[] = {{"brief", 0}, {"reader", 1}};
-constexpr Name kSleepSections[] = {{"reading", 1}, {"study", 2}, {"weather", 3}, {"today", 4}, {"card", 5}};
+constexpr Name kSleepSections[] = {{"reading", 1},     {"study", 2},        {"weather", 3},          {"today", 4},
+                                   {"card", 5},        {"sleepWoodcut", 6}, {"sleepObservatory", 7}, {"sleepRail", 8},
+                                   {"sleepAlmanac", 9}};
 
 template <size_t N>
 bool lookup(const Name (&names)[N], const char* text, uint8_t& value) {
@@ -87,6 +89,7 @@ bool parseJson(const char* json, const size_t length, Profile& out, const char*&
   static constexpr const char* rootKeys[] = {"schema", "home", "sleep"};
   static constexpr const char* homeKeys[] = {"items", "dailyWord", "weather", "nextEvent"};
   static constexpr const char* sleepKeys[] = {"mode", "sections"};
+  static constexpr const char* artKeys[] = {"mode", "sections", "artwork"};
   const auto root = doc.as<JsonObjectConst>();
   if (!exactKeys(root, rootKeys) || !root["schema"].is<int>() || root["schema"].as<int>() != 1) {
     error = "schema 1 with exactly home and sleep is required";
@@ -97,7 +100,8 @@ bool parseJson(const char* json, const size_t length, Profile& out, const char*&
   if (!homeValue.is<JsonObjectConst>() || !sleepValue.is<JsonObjectConst>()) return false;
   const auto home = homeValue.as<JsonObjectConst>();
   const auto sleep = sleepValue.as<JsonObjectConst>();
-  if (!exactKeys(home, homeKeys) || !exactKeys(sleep, sleepKeys)) {
+  const bool catalogArtwork = sleep.size() == std::size(artKeys);
+  if (!exactKeys(home, homeKeys) || !(catalogArtwork ? exactKeys(sleep, artKeys) : exactKeys(sleep, sleepKeys))) {
     error = "unknown or missing home/sleep field";
     return false;
   }
@@ -118,6 +122,14 @@ bool parseJson(const char* json, const size_t length, Profile& out, const char*&
     return false;
   }
   parsed.sleepMode = static_cast<SleepMode>(id);
+  if (catalogArtwork) {
+    error = "invalid sleep artwork selection";
+    const auto selection = sleep["artwork"].as<JsonArrayConst>();
+    if (selection.size() == 0 || selection.size() > SLEEP_ARTWORK_COUNT) return false;
+    for (const auto value : selection) {
+      if (!value.is<uint8_t>() || !parsed.sleepArtwork.insert(value.as<uint8_t>())) return false;
+    }
+  }
   if (!valid(parsed)) {
     error = "items and sections must be distinct and non-empty";
     return false;
@@ -143,7 +155,13 @@ size_t writeJson(const Profile& p, const uint32_t generation, const char* device
   auto sections = sleep["sections"].to<JsonArray>();
   for (uint8_t i = 0; i < p.sleepCount; ++i)
     sections.add(nameOf(kSleepSections, static_cast<uint8_t>(p.sleepSections[i])));
+  if (p.sleepArtwork.count()) {
+    auto artwork = sleep["artwork"].to<JsonArray>();
+    for (uint8_t id = 0; id < SLEEP_ARTWORK_COUNT; ++id)
+      if (p.sleepArtwork.contains(id)) artwork.add(id);
+  }
   auto caps = doc["capabilities"].to<JsonObject>();
+  caps["sleepArtwork"] = SLEEP_ARTWORK_COUNT;
   auto homeIds = caps["homeItems"].to<JsonArray>();
   for (const auto& name : kHomeItems)
     if (!retiredHomeItem(name.value)) homeIds.add(name.text);

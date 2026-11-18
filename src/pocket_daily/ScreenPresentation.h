@@ -52,6 +52,8 @@ class ScreenPresentation {
   // Render task with RenderLock. True when this view owns the panel.
   bool render(GfxRenderer& renderer);
   bool visible() const { return phase_.load(std::memory_order_acquire) != Content::PresentationPhase::Idle; }
+  // Main-task input only. The request identity is written on the main task.
+  bool isHomePreview() const { return visible() && requested_.surface == Surface::Home; }
   bool busy() const { return drawing_.load(std::memory_order_acquire); }
   void hide(GfxRenderer& renderer);
   Receipt receipt() const;
