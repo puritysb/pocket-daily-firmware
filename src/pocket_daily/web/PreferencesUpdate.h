@@ -16,6 +16,8 @@ struct PreferenceLimits {
   uint8_t lineSpacingCount = 4;
   uint8_t minScreenMargin = 5;
   uint8_t maxScreenMargin = 40;
+  // Stock SLEEP_SCREEN_MODE count; 0 keeps the key unsupported (ignored).
+  uint8_t sleepScreenCount = 0;
 };
 
 struct PreferencesUpdate {
@@ -42,6 +44,8 @@ struct PreferencesUpdate {
   uint8_t sideButtonLayout = 0;
   bool hasFrontButtonFollowOrientation = false;
   uint8_t frontButtonFollowOrientation = 0;
+  bool hasSleepScreen = false;
+  uint8_t sleepScreen = 0;
 };
 
 // Integers must be JSON integers (a string is not 0). pocketDailySleepCover and

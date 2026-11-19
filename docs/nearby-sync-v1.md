@@ -333,7 +333,7 @@ integers:
 ```json
 {"startupApp":0,"pocketDailySleepCover":1,"sleepTimeoutMinutes":10,"fontSize":1,
  "sideButtonLayout":0,"frontButtonFollowOrientation":0,"sleepWakeIndicator":1,
- "orientation":0,"lineSpacing":1,"screenMargin":5}
+ "orientation":0,"lineSpacing":1,"screenMargin":5,"sleepScreen":1}
 ```
 
 | Key | POST accepts | Meaning |
@@ -347,6 +347,7 @@ integers:
 | `orientation` | integer 0..3 | portrait, landscape clockwise, inverted portrait, landscape counter-clockwise |
 | `lineSpacing` | integer 0..3 | tight, normal, wide, extra wide |
 | `screenMargin` | integer 5..40 | reading margin in pixels |
+| `sleepScreen` | integer 0..7 | the reader's own Sleep Screen mode (stock `SLEEP_SCREEN_MODE`): 0 dark, 1 light, 2 custom picture, 3 book cover, 4 cover while reading else custom, 5 blank, 6 quick resume, 7 transparent custom. Used only when the Pocket profile hands sleep to the reader (`sleep.mode = "reader"`) or a book is open |
 | `sideButtonLayout` | integer 0..2 | 0 side Up = previous page, Down = next; 1 swapped; 2 side buttons do not turn pages |
 | `frontButtonFollowOrientation` | boolean, or integer (non-zero = on) | when on, the front navigation axis flips while the screen renders inverted portrait or landscape counter-clockwise, so it matches the rotated hint labels |
 
@@ -361,6 +362,15 @@ Companions omit absent keys, since older readers ignore unknown keys. These
 settings affect the next book render. Saving does not open a book or replace the
 Sync screen. The app's reading preview is illustrative; screen presentation
 continues to accept only `home` and `brief`.
+
+`sleepScreen` (2026-11-19) lets the companion choose the reader's custom
+sleep pictures: the app writes uncompressed BMP files (2-bit, palette 0/85/170/255,
+panel-sized) into `/sleep/` through the normal verified transfer and then sets
+`sleepScreen` 2 (custom) together with the profile's `sleep.mode = "reader"`.
+Custom mode picks `/sleep.bmp` first, then a random valid BMP from `/.sleep/`,
+then from `/sleep/`; PNG is read only by the transparent overlay mode. Without a
+valid file it draws the stock default screen. Readers without the key in GET do
+not support the write.
 
 `pocketAppConnection` (2026-11-02) is advertised only when the image and HAL
 support retained-screen BLE idle. Unsupported images/boards reject an explicit

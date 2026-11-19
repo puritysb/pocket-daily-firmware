@@ -94,6 +94,13 @@ bool parsePreferences(const char* json, const size_t length, const PreferenceLim
     error = "Invalid screenMargin";
     return false;
   }
+  // The reader's own Sleep Screen mode (stock SLEEP_SCREEN_MODE). Used when the
+  // Pocket profile hands sleep to the reader (`sleep.mode = reader`).
+  if (limits.sleepScreenCount > 0 &&
+      !readRange(doc["sleepScreen"], 0, limits.sleepScreenCount - 1, parsed.hasSleepScreen, parsed.sleepScreen)) {
+    error = "Invalid sleepScreen";
+    return false;
+  }
   out = parsed;
   return true;
 }
