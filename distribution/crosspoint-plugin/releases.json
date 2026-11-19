@@ -1,3 +1,15 @@
 {
-  "releases": []
+  "releases": [
+    {
+      "version": "1.2.0",
+      "title": "Pocket Daily 1.2.0",
+      "subtitle": "X3 and X4",
+      "url": "https://github.com/puritysb/pocket-daily-firmware/releases/download/pocket-v1.2.0/firmware.bin",
+      "notes": "Home and Sleep layouts. Update the Pocket Daily app to 1.2.0 before installing the firmware.",
+      "compatibility": {
+        "firmware_family": "crosspoint",
+        "plugin_api_min": 1
+      }
+    }
+  ]
 }
