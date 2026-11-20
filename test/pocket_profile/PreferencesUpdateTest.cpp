@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstring>
 #include <string>
 
 #include "src/pocket_daily/web/PreferencesUpdate.h"
@@ -193,4 +194,30 @@ TEST(PreferencesUpdate, HomeAppConnectionRequiresExplicitBooleanOrZeroOrOne) {
     EXPECT_FALSE(parse(std::string("{\"pocketAppConnection\":") + value + ",\"fontSize\":1}", u));
     EXPECT_EQ(u.appConnection, 0) << "Rejected document must not partially apply";
   }
+}
+
+TEST(PreferencesUpdate, SleepScreenIsOptionalBoundedAndIgnoredWithoutALimit) {
+  PreferenceLimits limits = kLimits;
+  limits.sleepScreenCount = 8;
+  const char* error = nullptr;
+  for (const int mode : {0, 2, 7}) {
+    const std::string json = "{\"sleepScreen\":" + std::to_string(mode) + "}";
+    PreferencesUpdate u;
+    ASSERT_TRUE(parsePreferences(json.data(), json.size(), limits, u, error));
+    EXPECT_TRUE(u.hasSleepScreen);
+    EXPECT_EQ(u.sleepScreen, mode);
+    EXPECT_FALSE(u.hasSleepCover);
+  }
+  for (const char* invalid : {R"({"sleepScreen":8})", R"({"sleepScreen":-1})", R"({"sleepScreen":"2"})",
+                              R"({"fontSize":1,"sleepScreen":true})"}) {
+    PreferencesUpdate u;
+    EXPECT_FALSE(parsePreferences(invalid, strlen(invalid), limits, u, error)) << invalid;
+    EXPECT_STREQ(error, "Invalid sleepScreen");
+    EXPECT_FALSE(u.hasFontSize);
+  }
+  // Without a declared mode count the key is unknown and stays ignored.
+  PreferencesUpdate u;
+  ASSERT_TRUE(parse(R"({"sleepScreen":2,"fontSize":1})", u));
+  EXPECT_FALSE(u.hasSleepScreen);
+  EXPECT_TRUE(u.hasFontSize);
 }

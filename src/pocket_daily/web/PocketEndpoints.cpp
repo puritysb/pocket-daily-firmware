@@ -1589,13 +1589,14 @@ void handleGetPreferences(WebServer& server) {
       json.get(), 320,
       "{\"startupApp\":%u,\"pocketDailySleepCover\":%u,\"sleepTimeoutMinutes\":%u,\"fontSize\":%u,"
       "\"sideButtonLayout\":%u,\"frontButtonFollowOrientation\":%u,\"sleepWakeIndicator\":%u,\"orientation\":%u,"
-      "\"lineSpacing\":%u,\"screenMargin\":%u%s}",
+      "\"lineSpacing\":%u,\"screenMargin\":%u,\"sleepScreen\":%u%s}",
       static_cast<unsigned>(SETTINGS.startupApp), static_cast<unsigned>(SETTINGS.pocketDailySleepCover),
       static_cast<unsigned>(SETTINGS.sleepTimeoutMinutes),
       static_cast<unsigned>(LegacyFontSize::fromPoints(SETTINGS.fontPointSize)),
       static_cast<unsigned>(SETTINGS.sideButtonLayout), static_cast<unsigned>(SETTINGS.frontButtonFollowOrientation),
       static_cast<unsigned>(SETTINGS.sleepWakeIndicator), static_cast<unsigned>(SETTINGS.orientation),
-      static_cast<unsigned>(SETTINGS.lineSpacing), static_cast<unsigned>(SETTINGS.screenMargin), appConnection);
+      static_cast<unsigned>(SETTINGS.lineSpacing), static_cast<unsigned>(SETTINGS.screenMargin),
+      static_cast<unsigned>(SETTINGS.sleepScreen), appConnection);
   if (written <= 0 || static_cast<size_t>(written) >= 320) {
     server.send(500, "text/plain", "Could not encode Pocket preferences");
     return;
@@ -1617,7 +1618,7 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
       CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES, LegacyFontSize::COUNT,
       CrossPointSettings::SIDE_BUTTON_LAYOUT_COUNT,  CrossPointSettings::ORIENTATION_COUNT,
       CrossPointSettings::LINE_COMPRESSION_COUNT,    CrossPointSettings::SCREEN_MARGIN_MIN,
-      CrossPointSettings::SCREEN_MARGIN_MAX};
+      CrossPointSettings::SCREEN_MARGIN_MAX,         CrossPointSettings::SLEEP_SCREEN_MODE_COUNT};
   PreferencesUpdate update;
   const char* error = nullptr;
   if (!parsePreferences(body.c_str(), body.length(), limits, update, error)) {
@@ -1632,11 +1633,11 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
     server.send(400, "text/plain", "App connection is unavailable on this firmware or board");
     return;
   }
-  const uint8_t previous[11] = {
+  const uint8_t previous[12] = {
       SETTINGS.startupApp,         SETTINGS.pocketDailySleepCover, SETTINGS.sleepTimeoutMinutes,
       SETTINGS.fontPointSize,      SETTINGS.sideButtonLayout,      SETTINGS.frontButtonFollowOrientation,
       SETTINGS.sleepWakeIndicator, SETTINGS.orientation,           SETTINGS.lineSpacing,
-      SETTINGS.screenMargin,       SETTINGS.pocketAppConnection};
+      SETTINGS.screenMargin,       SETTINGS.pocketAppConnection,   SETTINGS.sleepScreen};
   if (update.hasAppConnection) SETTINGS.pocketAppConnection = update.appConnection;
   if (update.hasStartupApp) SETTINGS.startupApp = update.startupApp;
   if (update.hasSleepWakeIndicator) SETTINGS.sleepWakeIndicator = update.sleepWakeIndicator;
@@ -1649,6 +1650,7 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
   if (update.hasOrientation) SETTINGS.orientation = update.orientation;
   if (update.hasLineSpacing) SETTINGS.lineSpacing = update.lineSpacing;
   if (update.hasScreenMargin) SETTINGS.screenMargin = update.screenMargin;
+  if (update.hasSleepScreen) SETTINGS.sleepScreen = update.sleepScreen;
   if (update.hasSideButtonLayout) SETTINGS.sideButtonLayout = update.sideButtonLayout;
   if (update.hasFrontButtonFollowOrientation) {
     SETTINGS.frontButtonFollowOrientation = update.frontButtonFollowOrientation;
@@ -1660,7 +1662,7 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
                        previous[5] != SETTINGS.frontButtonFollowOrientation ||
                        previous[6] != SETTINGS.sleepWakeIndicator || previous[7] != SETTINGS.orientation ||
                        previous[8] != SETTINGS.lineSpacing || previous[9] != SETTINGS.screenMargin ||
-                       previous[10] != SETTINGS.pocketAppConnection;
+                       previous[10] != SETTINGS.pocketAppConnection || previous[11] != SETTINGS.sleepScreen;
   if (changed && !SETTINGS.saveToFile()) {
     SETTINGS.startupApp = previous[0];
     SETTINGS.pocketDailySleepCover = previous[1];
@@ -1673,6 +1675,7 @@ void handlePostPreferences(WebServer& server, const RouteDeps& d) {
     SETTINGS.lineSpacing = previous[8];
     SETTINGS.screenMargin = previous[9];
     SETTINGS.pocketAppConnection = previous[10];
+    SETTINGS.sleepScreen = previous[11];
     server.send(500, "text/plain", "Could not save Pocket preferences");
     return;
   }
