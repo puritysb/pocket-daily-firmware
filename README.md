@@ -111,11 +111,10 @@ Pocket Daily releases are published at
 [github.com/puritysb/pocket-daily-firmware/releases](https://github.com/puritysb/pocket-daily-firmware/releases).
 One `firmware.bin` serves the supported ESP32-C3 X3 and X4 models.
 
-As checked on 2026-10-25, the first product release `pocket-v1.0.0` has not
-been published. GitHub's latest release is the historical `v1.6.6`; the current
-app excludes it and the retired pre-reset betas. The update instructions below
-require a supported `pocket-v…` release. Local-image selection belongs to the
-Debug-only development path below; a local build is not a published release.
+The current stable release is [Pocket Daily firmware 1.2.0](https://github.com/puritysb/pocket-daily-firmware/releases/tag/pocket-v1.2.0),
+published on 2026-11-19. Update the Pocket Daily app to 1.2.0 on iPhone, iPad
+or Mac before installing this firmware so you can read and edit the new
+Home and Sleep layouts.
 
 ### Update a reader that already runs Pocket Daily
 
@@ -130,9 +129,8 @@ Debug-only development path below; a local build is not a published release.
   Settings). The reader joins a saved Wi-Fi network and installs only after you
   confirm. This path still needs acceptance on the exact release image.
 - **On X3:** use the app or SD-card update. Reader-native HTTPS update checks
-  and downloads are outside the current 0.x support scope because the stock
-  TLS buffers exceed available memory. The reader explains the memory failure
-  and points to the app; this is not a successful on-reader update check.
+  and downloads are unsupported on X3 because the TLS buffers exceed available
+  memory. The reader explains the memory failure and points to the app.
 
 Nothing installs automatically after a transfer. After confirming installation
 on the reader, reconnect to the same reader and check its reported version.
