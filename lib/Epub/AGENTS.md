@@ -10,8 +10,8 @@ stale layout instead of failing loudly.
 
 **Layout**: `.crosspoint/epub_<hash>/{book.bin, progress.bin, cover.bmp, html/*.html, sections/*.bin}`
 
-**Hash**: `std::hash<std::string>{}(filepath)` — so moving or renaming a book yields a new
-hash, a new cache, and **lost reading progress**. That is expected behaviour, not a bug.
+**Hash**: `std::hash<std::string>{}(filepath)` — so a renamed book looks up a different cache directory. The finished-book move
+in `EpubReaderActivity.cpp` also attempts to move the cache to preserve progress.
 
 ## File format versioning
 
@@ -19,7 +19,7 @@ hash, a new cache, and **lost reading progress**. That is expected behaviour, no
 
 | File | Version |
 |---|---|
-| `book.bin` | **7** (metadata structure) |
+| `book.bin` | `BOOK_CACHE_VERSION` in `BookMetadataCache.cpp` (currently **10**) |
 | `section.bin` — incremental upstream baseline | **44** (CrossPoint 1.6.5) |
 | `section.bin` — **this fork** | **138** |
 
@@ -81,19 +81,12 @@ the `0xFF` partial sentinel.
 2. **Render settings change** — `SETTINGS.fontFamily`, `fontSize`, `lineSpacing`,
    `extraParagraphSpacing`, `screenMargin`
 3. **Viewport dimensions change** — orientation or display resolution
-4. **Book file modified** — moved, renamed, or content changed (new hash)
+4. **Book path change** — a changed path selects a new directory. Editing bytes in place keeps the same path hash.
 
-## Clearing by hand
+## Testing cache invalidation
 
-```bash
-rm -rf /path/to/sd/.crosspoint/                          # all caches
-rm -rf /path/to/sd/.crosspoint/epub_<hash>/              # one book
-rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/     # keep progress, drop layout
-```
-
-Clear the cache when: EPUB parsing breaks after changes under `lib/Epub/`; rendering is
-corrupt (missing text, wrong layout); you are testing cache generation itself; or you touched
-`Section.cpp`, `BookMetadataCache.cpp`, or render settings in `CrossPointSettings`.
-
-**Flag this for the user** — you cannot clear an SD card they have not mounted. If a change
-here needs a cache wipe to test, say so explicitly rather than assuming a clean re-parse.
+Exercise the format mismatch with an older cache and verify regeneration before
+clearing any files. For a clean layout test, use a test-owned book and remove
+only its generated sections if needed. The per-book directory also contains
+reading progress, and the wider `.crosspoint/` tree contains reader state.
+Preserve existing user data and record which cache the test actually used.

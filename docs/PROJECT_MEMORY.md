@@ -2,31 +2,13 @@
 
 Current source/release records override dated observations. Older device/release
 baselines: `docs/history/PROJECT_MEMORY-before-rich-home-20261113.md`.
-2026-11-13: capability 3 presents one-book covers, compact clock/agenda/weather,
-reading list and explicit Calendar selection. Page keys stay within groups;
-Views selects a different group. PDLI5/ABI1 and shelf/agenda records are unchanged.
-Undrawn-header receipts no longer overwrite valid preview metadata. Host 1,289,
-Python 331 theme-baseline checks, warning-free default build and strict cppcheck
-pass. All 88 public native frames remain byte-identical after the receipt fix.
-Both readers run developer w433a8042 (`build/themes-clock-fix-20261113`).
-Mac suites: X3 `20261112T231224-f5044f`, X4 `20261113T000253-eede89`; twelve exact
-native comparisons, reboot persistence, original records and inventory restored.
-Apple package `build/apple-host-qtwpwtry` is accepted by the sibling app.
-The user’s actual books/dates remain configured; both devices left Sync for Home.
-Sibling CURRENT_HANDOFF records hashes, physical evidence and verification limits.
-Public fixture evidence: `build/themes-20261113/public`; the later receipt-only
-correction has an 88-frame equivalence record under `build/themes-clock-fix-20261113`.
-
-## Main integration handoff — completed 2026-11-14
-
-All accumulated reader-interface work is recorded on local/origin `main`; preserve the
-installed/tested w433a8042 image and its acceptance evidence when starting the next
-change. Repository cleanup does not install another firmware image or tag a release.
-The SDK working change is generated from tracked `scripts/storage_sdk.patch`;
-reverse only that exact patch after validation. The next build reapplies it.
-Retired PageLink work is already merged as upstream PR3813 and independently
-covered by the product fix/tests; do not merge its old upstream snapshot again. The owner authorized origin push and deletion of
-the four retired branches on November 14; only main remains locally and on origin.
+The November 19 production-device observations are recorded under Versions
+and releases below. For earlier theme trials and integration results see the
+[sibling app archive](../../pocket-daily/docs/history/HANDOFF-integration-and-themes-20261114.md).
+Retain the original fixture evidence in `build/themes-20261113/public` and
+`build/themes-clock-fix-20261113`. The tracked `scripts/storage_sdk.patch`
+reproduces SDK changes. Inspect a dirty submodule before attributing its diff
+to that patch.
 
 ## Repositories and collaboration
 
@@ -39,7 +21,7 @@ the four retired branches on November 14; only main remains locally and on origi
   from the `upstream/master` line. The [fork-sync procedure](../.claude/skills/fork-sync/SKILL.md)
   covers urgent backports and reconciliation at the next release.
 - Agents share `AGENTS.md` and this memory. Scoped guides/skills are indexed
-  there; never add `CLAUDE.md`, which would hide that guide from Claude Code.
+  there. Keep the shared root guide as the project instruction source.
 - Upstream sync hazard (#3058, 2026-08-15): upstream made `AGENTS.md` real,
   `CLAUDE.md` a symlink, and moved skills to `.skills/`. On merge keep the fork's
   `AGENTS.md`, port rule changes into it or `docs/embedded-reference.md`, keep
@@ -79,7 +61,7 @@ the four retired branches on November 14; only main remains locally and on origi
 - Upstream PR rules live in the `fork-sync` skill. Lessons from #3813/#3814
   (2026-10-01): never argue heap safety without an allocation measurement,
   state "not verified on hardware" when true, and keep the AI-usage line
-  accurate. Status 2026-10-05: #3813 open; #3814 Draft at `236cde79`
+  accurate. PR #3813 later merged. On 2026-10-05 #3814 was a draft at `236cde79`
   (32-entry `int16_t` gap window); the reviewer's X3 run covered the earlier
   64-entry revision, so the final revision still needs device acceptance.
 - Owner decisions 2026-10-01: Pocket Daily's first button reads Home and the
@@ -100,15 +82,15 @@ the four retired branches on November 14; only main remains locally and on origi
 
 ## Versions and releases
 
-- Owner decision 2026-11-01: the first release is 1.0.0 (0.x never published);
-  only release (`1.0.0`, shown "Pocket 1.0.0") and developer builds
-  (`1.0.0-dev-…`, shown "Pocket 1.0.0 dev <commit>") exist. `firmwareLineage` 2
-  (lineage 1 = old `1.0.0-beta.*`, never reused). Contract: `docs/product-versioning.md`.
-- Releases are normal (latest) GitHub releases tagged `pocket-v<version>`, so
-  `/releases/latest` never resolves to historical `v1.6.6`. Checked 2026-10-25: no `pocket-v` release is published;
-  latest is `v1.6.6`, excluded by current product update parsing. No current
-  app channel offers a supported image; old betas remain historical.
-  Tagging needs the owner's direct confirmation and exact-image device pass.
+- The first public release was 1.0.0. Firmware uses lineage 2. The retired
+  `1.0.0-beta.*` versions belong to lineage 1. See
+  [product versioning](product-versioning.md) for tag and version rules.
+- GitHub's latest stable release as of 2026-11-20 is
+  [`pocket-v1.2.0`](https://github.com/puritysb/pocket-daily-firmware/releases/tag/pocket-v1.2.0),
+  published on 2026-11-19. The companion validated the published image, and
+  both X3 and X4 ran the matching image. X4's update check against the
+  published release is still unverified. See the sibling app's
+  `docs/CURRENT_HANDOFF.md` for release evidence.
 - GitHub releases are the production OTA source; the asset name must be exactly
   `firmware.bin`. Stable release requires exact-artifact X3/X4 sign-off in
   `docs/release-checklist.md`. `firmware/LATEST_BUILD.txt` names the locally
@@ -125,7 +107,7 @@ the four retired branches on November 14; only main remains locally and on origi
   tests never satisfy hardware sign-off.
 - X3 GPIO13 is SD power in `BoardConfig`; on X4 it is the battery latch. Do not
   generalize the HAL comment into a claim that the X3 CPU loses power.
-- X3 STA has no mDNS: find it by probing `/api/status` across the /24.
+- X3 STA has no mDNS: find it by probing `/api/status` through the enrolled-reader discovery flow.
 - Private AP (softAP + DHCP) costs ~53 KB and is weak-signal sensitive; every
   crash/disconnect in the 2026-09 transport work occurred on it. STA (Same
   Wi-Fi) is the primary path (100-240 KB/s historically); AP is a fallback.
@@ -183,7 +165,7 @@ the four retired branches on November 14; only main remains locally and on origi
   `publicationReceipt:1` is a bounded latest-only SD receipt with idempotent
   commit; a missing receipt stays unknown. Not general SD atomicity.
 - `transferControl:1` (`docs/transfer-control-v1.md`), `readerFiles:4`
-  (Nov9 ordinary-file moves/deletion, protected paths retained; installed X3/X4 receipts above; `docs/reader-files.md`), `readingProgress:1` (`docs/reading-progress-v1.md`,
+  (Nov9 ordinary-file moves/deletion, protected paths retained; `docs/reader-files.md`), `readingProgress:1` (`docs/reading-progress-v1.md`,
   app `docs/READING_PROGRESS.md`), BLE reading sync READ1
   (`docs/reading-sync-ble-v1.md`), `pocketProfile:1`
   (`docs/pocket-profile-v1.md`), `pocketGlance:1` (`docs/pocket-glance-v1.md`),
@@ -210,12 +192,12 @@ the four retired branches on November 14; only main remains locally and on origi
 
 - 2026-11-03: default-OFF Home app connection passed Mac/X3/X4. Resumable panel
   restoration, release-before-repaint and bounded actual-style SD title warming
-  fixed the regression; X4 physical Back7172→1910ms (owner1–2s). Latest developer
-  wdd553a3b is installed on both: automatic Home X3 1006/X4 1071ms, original state
+  fixed the regression; X4 physical Back7172→1910ms (owner1–2s). On that date developer
+  wdd553a3b ran on both: automatic Home X3 1006/X4 1071ms, original state
   and staging restored. Owner reports strong overall improvement; per-menu results
   remain unspecified. Keep phase-specific memory gates/shaping/pinned ownership.
   Lessons/evidence: `docs/menu-navigation-audit.md` (Lessons learned) and
-  `build/home-connect-20261102/`. No extra wall-clock/battery claim; release held.
+  `build/home-connect-20261102/`. No extra wall-clock/battery claim.
 
 - `scripts/pio_ble_standby.sh` builds env `ble_standby` (extends `default`, adds
   PM/tickless/BT modem sleep in an isolated SDK copy). It is SDK automatic light
@@ -265,7 +247,7 @@ the four retired branches on November 14; only main remains locally and on origi
   `build/dev-pipeline-runs/<run>/report.json`. Pass `--app` explicitly.
 - Stale addresses are recovered through the app's normal discovery with an
   enrolled-identity gate. Close normal companion instances before a run.
-- Owner authorization covers automatic developer flashing inside this pipeline.
+- Use `--flash` for a developer installation authorized in the active task.
   Developer routes (`dev/flash`, `dev/ble-cycle`, `dev/network-fault`, capture,
   reset) exist only with `ENABLE_DEV_REMOTE_FLASH`/dev flags; `gh_release`
   strings must contain none of them. Shipping installation always needs the
@@ -281,12 +263,6 @@ the four retired branches on November 14; only main remains locally and on origi
   `python3 scripts/pocket_put.py firmware/update.bin --target update.bin --host
   <ip>` with `--dev-flash` for developer images. `platformio.local.ini` is
   machine-local.
-
-## Current 1.0.0 preparation
-
-- The 1.6.5-base candidate (`6025da03`, `docs/release-1.0.0-candidate.md`) is
-  superseded by the 2.0.0 base; its gates must be re-run on a new 2.0.0-base
-  image. Archived: `docs/history/PROJECT_MEMORY-before-2.0.0-2026-11-06.md`.
 
 ## Open limitations
 

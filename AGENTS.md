@@ -1,11 +1,7 @@
 # Pocket Daily Firmware Agent Guide
 
-This is the only project instruction file for every coding agent working in
-this repository — Claude Code, Codex, OpenCode, the GitHub coding agent, and
-any model they drive (GLM included). It holds the always-applicable embedded
-rules and the operational workflow. Mechanisms, measurements, and code
-examples behind these rules live in `docs/embedded-reference.md`; durable
-repository and release context lives in `docs/PROJECT_MEMORY.md`.
+This guide applies throughout this repository. When a task crosses into the sibling
+checkout, read its root guide and any instructions scoped to the files you edit.
 
 Project: Pocket Daily firmware, a fork of the open-source CrossPoint e-reader
 firmware for Xteink X3/X4 (ESP32-C3). Mission: a lightweight, stable reading
@@ -15,25 +11,15 @@ improving reading is out of scope.
 
 ## Instruction files and shared memory
 
-- `AGENTS.md` is read natively by Codex, OpenCode, the GitHub coding agent, and
-  Claude Code (2.1.277 or later). Do not add `CLAUDE.md`, `.claude/CLAUDE.md`,
-  or `CLAUDE.local.md` at the root or in any parent directory: Claude Code
-  reads those *instead of* `AGENTS.md`. `*.local*` is gitignored, so a stray
-  `CLAUDE.local.md` would silently drop this guide without showing in
-  `git status`.
-- Keep this file portable plain Markdown and well under 32 KiB, Codex's default
-  limit for all `AGENTS.md` files combined. Refer to other documents by path;
-  do not rely on `@path` imports, which only Claude Code expands. Before adding
-  to this file, ask whether the rule is needed on every task; otherwise it
-  belongs in the reference, a skill, or a scoped `AGENTS.md`.
-- Directory-scoped rules live in nested `AGENTS.md` files. Claude Code loads
-  them when it opens a file there, but Codex only loads those on the path to
-  its working directory, so **read the scoped file before editing that
-  subtree**:
+- Maintain one shared root guide in portable Markdown. Instruction discovery
+  depends on the tool, its settings and the session's working directory.
+  If this guide was not loaded, open it directly. Check for nested guides
+  along the path to each file you edit. Keep repository instructions in
+  `AGENTS.md` files rather than adding a second tool-specific root guide.
+- The following subtree has its own guide:
   - `lib/Epub/AGENTS.md` — cache formats, version bytes, invalidation.
-- Task procedures live in `.claude/skills/<name>/SKILL.md`. Claude Code
-  discovers them automatically; every other agent reads the matching file
-  directly when the task fits:
+- The tracked procedures in `.claude/skills/<name>/SKILL.md` are canonical.
+  Open the matching tracked file even if a local skill copy has the same name.
 
   | Skill | Read when you are… |
   |---|---|
@@ -70,7 +56,8 @@ improving reading is out of scope.
    you need the mechanism or example behind a rule.
 4. `docs/PROJECT_MEMORY.md` for repository boundaries and durable state.
    `docs/history/` is a dated archive; read it only when tracing why something
-   changed, and prefer current code and docs when they disagree.
+   changed. Verify dated observations against current code or release records.
+   Past authorization in memory does not extend the current task.
 5. `docs/release-checklist.md` before declaring a release complete.
 6. For live-studio or live sync work, `docs/live-studio-v1.md` and
    the companion design `docs/LIVE_STUDIO_DESIGN.md` in the sibling app
@@ -99,9 +86,7 @@ improving reading is out of scope.
 
 - Repository: `puritysb/pocket-daily-firmware`; default product branch `main`.
 - Foundation remote: `upstream` → `crosspoint-reader/crosspoint-reader`.
-- App repository: sibling `pocket-daily` directory next to this clone (on this
-  host `/Users/puritysb/git/pocket-daily`). Absolute `~/github/` paths in older
-  notes are stale; resolve the sibling relative to this checkout.
+- App repository: resolve `../pocket-daily` relative to this checkout.
 
 This repository owns reader behavior, device endpoints, on-device validation,
 and flashing. The app repository owns iOS/iPadOS/macOS code and App Store
@@ -209,9 +194,9 @@ only content source. Being far ahead of `upstream/master` is expected.
   next free number are in `lib/Epub/AGENTS.md`.
 - Run output under `build/<topic>-<date>/` holds evidence (logs, JSON, BINs,
   receipts), not extra toolchain or derived trees. Reuse `.pio/` and the shared
-  host-test folders. Before a hand-off, run the companion checkout's
-  `scripts/prune_local_artifacts.py`: it prunes folders here that no tracked
-  file or local memory names and clones identical reader SD backups.
+  host-test folders. For artifact maintenance, preview candidates with the
+  sibling app's `scripts/prune_local_artifacts.py`. Review both checkouts'
+  active work and backups before applying an authorized cleanup.
 - `platformio.local.ini` holds per-machine settings and is never committed;
   never put serial ports or credentials in `platformio.ini`. Extend flags with
   `${base.build_flags}`.
@@ -255,33 +240,29 @@ ctest --test-dir build/host-tests --output-on-failure -j
 - Generated content: edit its source, run the relevant generator, and follow
   `generated-content`.
 - Release changes: validate `gh_release`, obtain X3 and X4 hardware sign-off,
-  merge with green CI, then create the release tag.
+  check green CI and obtain explicit authorization before tagging.
 
-Run formatting with `./bin/clang-format-fix`, then inspect the diff. Do not
+For task-owned C/C++ files use `./bin/clang-format-fix --files <paths...>`
+and inspect the diff. For documentation-only edits check links and run
+`git diff --check`. Do not
 silence cppcheck broadly. A narrow suppression must explain the embedded-system
 reason and preserve meaningful defect detection. Fix CI failures before asking
 for review.
 
-Flag for the user what an agent cannot verify: behavior on hardware, all four
-orientations, heap (`ESP.getFreeHeap()` above 50 KB, no leaks), and cache
-re-parse after EPUB changes. Do not claim Bluetooth, Wi-Fi handoff, local
+Report which hardware behaviors, orientations and cache re-parses were tested.
+For heap claims, compare free bytes and the largest contiguous block against
+the phase-specific gates in `docs/nearby-sync-v1.md`. Do not claim Bluetooth, Wi-Fi handoff, local
 HTTP, SD-card, OTA, recovery, watchdog, or heap behavior from a host build.
 
 ## Hardware deployment
 
-Use `firmware-deploy` for deployment. An agent may stage an artifact, but the
-user installs it and confirms physical-device results. For iteration, prefer
-the reader's File Transfer → Join a Network mode plus `scripts/pocket_put.py`
-over SD-card swapping; the user has asked that hardware tests go through that
-path. Serial monitoring: `python3 scripts/debugging_monitor.py`.
-
-Developer flash loop (`ENABLE_DEV_REMOTE_FLASH`; default and experimental
-sta_recovery builds, never gh_release):
-after `./scripts/pio.sh run` and a `scripts/pocket_put.py` push of
-`firmware/update.bin`, `curl -X POST http://<reader>/api/pocket/v1/dev/flash`
-validates and flashes the staged image and reboots the reader into a one-shot
-saved-network reconnect (failure falls back to the Wi-Fi chooser). The endpoint
-and its boot marker are compiled out of `gh_release` builds.
+Read [the developer pipeline](docs/developer-pipeline.md) and the
+[deployment procedure](.claude/skills/firmware-deploy/SKILL.md). Use the
+enrolled reader on Same Wi-Fi and pass the intended app checkout with
+`--app`. Building, transferring, installing and verifying the running version
+are separate steps. Use `--flash` only when the current task authorizes
+developer installation on that reader. Production installation requires the
+reader's physical confirmation. Report the tested image, device and limits.
 
 ## Git and release hygiene
 

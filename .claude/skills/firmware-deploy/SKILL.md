@@ -5,9 +5,12 @@ description: Getting a built firmware image onto the device. Use when flashing, 
 
 # Firmware Deploy
 
-Two paths onto the device: USB (`./scripts/pio.sh run -t upload`) and SD card. The SD path exists because
-USB iteration is slow and the cable is often not where the device is — prefer it once the
-build is stable.
+For routine iteration, follow the [developer pipeline](../../../docs/developer-pipeline.md).
+Reuse the enrolled reader on Same Wi-Fi and pass the intended companion checkout
+with `--app`. Authorize installation for the target reader before selecting
+`--flash`. A production reader requires physical installation confirmation
+before it can run a development image. USB and SD recovery are alternatives
+when the task calls for them.
 
 ## USB
 
@@ -24,7 +27,7 @@ Every successful `./scripts/pio.sh run` auto-stages the binary via `scripts/stag
 ```
 firmware/                                      # gitignored
   update.bin                                   # always latest — copy this to SD card
-  crosspoint-<version>-<env>-<sha>-<date>.bin  # versioned archive (keeps last 5)
+  pocket-daily-<version>-<env>-<sha>-<date>.bin  # versioned archive (keeps last 5)
   LATEST_BUILD.txt                             # version, commit, size, install steps
 ```
 
@@ -52,18 +55,8 @@ The reader's own transfer path is the fastest way to get a build onto it and
 doubles as a transport test. Card swapping is the fallback, not the default.
 
 1. On the reader: File Transfer → Join a Network (STA on the home Wi-Fi).
-   The X3 profile has no mDNS, so find it by probing `/api/status`:
-   ```bash
-   python3 - <<'EOF'
-   import concurrent.futures, urllib.request
-   def p(ip):
-       try: return ip, urllib.request.urlopen(f"http://{ip}/api/status", timeout=1.2).read(200)
-       except Exception: return None
-   hosts=[f"192.168.{n}.{i}" for n in (68,69,70,71) for i in range(1,255)]
-   with concurrent.futures.ThreadPoolExecutor(256) as ex:
-       print([r for r in ex.map(p, hosts) if r])
-   EOF
-   ```
+   Use the enrolled reader's verified address. If it changed, the developer
+   pipeline can rediscover the reader through the signed app and check its identity.
 2. Push and commit the staged image with the repository tool, which prints
    every reader reply verbatim (`RESUME`, `OK`, `ERROR`, commit JSON):
    ```bash
@@ -81,8 +74,8 @@ doubles as a transport test. Card swapping is the fallback, not the default.
    next window still waits for the reader's SD ACK. Keep status/preview probes
    out of the active payload phase. CLI pacing is opt-in, not a throughput claim.
 3. On the reader: Settings → System → Update firmware, then reboot.
-4. Verify: `/api/status` `version` must end with the `-w<fingerprint>` of the
-   image you pushed (`strings firmware/update.bin | rg 'CrossPoint version'`).
+4. After reconnecting, verify the enrolled reader identity and compare the exact
+   reported version with the staged image. Developer versions include a worktree fingerprint.
 
 ### Explicit developer iteration (not production auto-flashing)
 
@@ -119,5 +112,5 @@ fetches tripped the task watchdog (`nearby:screen-preview`).
 - Did the build actually succeed? A stale `update.bin` from a previous run looks identical.
 - Building a release image? Use the right env (`gh_release`, `gh_release_rc`) — the default
   env ships serial logging at `LOG_LEVEL=2`.
-- Flashing is a hardware action with a failure mode you cannot see from here. State plainly
-  which artifact you staged and let the user do the install and confirm.
+- Report the staged artifact separately from any same-reader version readback.
+  Record owner-observed physical checks with their date and scope.

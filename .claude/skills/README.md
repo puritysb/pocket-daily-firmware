@@ -24,7 +24,7 @@ rules. These skills load on demand.
 | `scope-discipline` | adding a feature, activity, lib, setting, or dependency |
 | `refactor-for-review` | refactoring, cleaning up, or preparing a change for PR |
 | `debug-crashes` | chasing a panic, reboot, hang, or watchdog timeout |
-| `firmware-deploy` | getting a build onto the device, over USB or SD card |
+| `firmware-deploy` | staging or installing on a reader over Same Wi-Fi, USB or SD |
 | `fork-sync` | pulling upstream, opening or answering an upstream PR |
 | `generated-content` | changing i18n YAML, HTML pages, or fonts — anything a build script emits |
 
@@ -50,5 +50,6 @@ remove a skill, update the table in the root `AGENTS.md` too.
 Before adding to `AGENTS.md`, ask whether the content is needed on every task;
 if it is a procedure for one task or one directory, it belongs in a skill or a
 scoped `AGENTS.md`, and background belongs in `docs/embedded-reference.md`.
-Never add a `CLAUDE.md` or `CLAUDE.local.md`: Claude Code would read it instead
-of `AGENTS.md`.
+Maintain the shared rules in the root `AGENTS.md`. If the client did not load
+it, open it directly. For local skill discovery, point the client at these
+tracked procedures so future edits reach the next session.
