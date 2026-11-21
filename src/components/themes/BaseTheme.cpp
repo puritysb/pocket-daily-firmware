@@ -475,7 +475,7 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
 }
 
 void BaseTheme::drawHeaderAndDescribe(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
-                                      const bool backButton, HeaderPainter::Inputs& inputs) const {
+                                      const bool backButton, HeaderPainter::Inputs& inputs, const bool branded) const {
   namespace fui = freeink::ui;
   const auto spec = uiScaleSpec();
   fui::GfxRendererTarget target(renderer);
@@ -486,12 +486,12 @@ void BaseTheme::drawHeaderAndDescribe(const GfxRenderer& renderer, Rect rect, co
   const auto& tokens = refreshSharedUiThemeTokens(target);
   captureHeaderStatus(renderer, inputs);
   captureHeaderStyle(inputs, tokens);
-  inputs.showBack = inputs.showBack && backButton && title;
+  inputs.showBack = inputs.showBack && backButton && title && !branded;
   if (inputs.showBack)
     HeaderBackTapTarget::set(rect.x + 4, rect.y + 4 + inputs.actionOffsetY, 48, 48);
   else
     HeaderBackTapTarget::clear();
-  HeaderPainter::paintHeader(renderer, inputs, rect.x, rect.y, rect.width, rect.height, title, subtitle);
+  HeaderPainter::paintHeader(renderer, inputs, rect.x, rect.y, rect.width, rect.height, title, subtitle, branded);
 }
 
 void BaseTheme::drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label, const char* rightLabel) const {
@@ -858,7 +858,8 @@ void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
 
 void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
                               const int pageCount, std::string title, const int paddingBottom, const int textYOffset,
-                              const bool fillMargin, const bool isPageBookmarked, const bool pageCountEstimated) {
+                              const bool fillMargin, const bool isPageBookmarked, const bool pageCountEstimated,
+                              int readerTitleFont) {
   auto metrics = UITheme::getInstance().getMetrics();
   int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
@@ -990,7 +991,8 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     int titleMarginLeftAdjusted = std::max(titleMarginLeft, titleMarginRight);
     int availableTitleSpace = rendererableScreenWidth - 2 * titleMarginLeftAdjusted;
 
-    const int titleFont = UiCjkFont::fontForText(renderer, title.c_str(), SMALL_FONT_ID);
+    const int titleFont =
+        readerTitleFont ? readerTitleFont : UiCjkFont::fontForText(renderer, title.c_str(), SMALL_FONT_ID);
     // A CJK title may come in the reader's SD font, taller than this lane: fit it (StatusBarTitle).
     const StatusBarTitle::Placement fit = StatusBarTitle::place(renderer, titleFont, SMALL_FONT_ID, textY);
     int titleWidth = StatusBarTitle::width(renderer, titleFont, title.c_str(), fit);

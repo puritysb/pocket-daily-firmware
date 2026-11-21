@@ -468,7 +468,8 @@ uint8_t* ZipFile::readFileToMemory(const char* filename, size_t* size, const boo
   return data;
 }
 
-bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t chunkSize, const bool allowEarlyStop) {
+bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t chunkSize, const bool allowEarlyStop,
+                               const size_t singlePassLimit) {
   lastStreamError_ = StreamError::None;
   const ScopedOpenClose zip{*this};
   if (!zip) return streamFailed(StreamError::Open);
@@ -519,7 +520,17 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
       return streamFailed(StreamError::ReadBuffer);
     }
 
-    auto* outputBuffer = static_cast<uint8_t*>(malloc(chunkSize));
+    // Chapter extraction can use the complete destination as the DEFLATE
+    // dictionary. Keep input reads bounded independently of that destination.
+    size_t outputSize = chunkSize;
+    if (inflatedDataSize >= chunkSize && inflatedDataSize < singlePassLimit) {
+      outputSize = static_cast<size_t>(inflatedDataSize) + 1;  // room to consume the end marker
+    }
+    auto* outputBuffer = static_cast<uint8_t*>(malloc(outputSize));
+    if (!outputBuffer && outputSize != chunkSize) {
+      outputSize = chunkSize;  // the streaming ring may fit in a borrowed framebuffer
+      outputBuffer = static_cast<uint8_t*>(malloc(outputSize));
+    }
     if (!outputBuffer) {
       LOG_ERR("ZIP", "Failed to allocate memory for output buffer");
       free(fileReadBuffer);
@@ -535,7 +546,7 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
     // A small entry fits entirely in the existing output chunk. Keep one byte
     // of slack for the end marker; exact-sized and larger entries still need
     // the streaming ring because their destination buffer is reused.
-    const bool streaming = static_cast<size_t>(inflatedDataSize) >= chunkSize;
+    const bool streaming = static_cast<size_t>(inflatedDataSize) >= outputSize;
     InflateStream inflate;
     if (!inflate.init(streaming)) {
       LOG_ERR("ZIP", "Failed to init inflate stream for %s", filename);
@@ -551,7 +562,7 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
 
     while (true) {
       size_t produced;
-      const InflateStream::Status status = inflate.readAtMost(outputBuffer, chunkSize, &produced);
+      const InflateStream::Status status = inflate.readAtMost(outputBuffer, outputSize, &produced);
 
       // Non-wrapping output must never reuse the buffer start for another call.
       // Validate the whole small entry before a header probe can short-write:

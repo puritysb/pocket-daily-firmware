@@ -41,7 +41,7 @@ Stats::HomePaintRecord homePaintStatistics();
 // (time up, a button press, or a gate refused it). Extends an open window.
 void runBeforeDeepSleep(uint32_t renderCount, const GfxRenderer& renderer);
 
-enum class StandbyExit : uint8_t { DeepSleep, Reader, SameWifi };
+enum class StandbyExit : uint8_t { DeepSleep, Reader, SameWifi, HomeTimeout };
 bool standbyEligible();
 bool homeConnectionEligible();
 // Framebuffer must already be released. HOME_CONNECT keeps the panel resumable;

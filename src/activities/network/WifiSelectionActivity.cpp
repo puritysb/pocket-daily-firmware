@@ -554,11 +554,10 @@ void WifiSelectionActivity::checkConnectionStatus() {
       return;
     }
 
-    // Sync RTC from NTP on the first successful WiFi connection only. The DS3231
-    // drifts ~2 ppm so one sync is enough; users can force a re-sync from
-    // Settings > System > Clock > Sync clock now.
-    if (halClock.isAvailable() && !SETTINGS.clockHasBeenSynced) {
-      if (halClock.syncFromNTP()) {
+    // A power loss can reset the external clock while the saved sync flag survives.
+    struct tm rtcLocal{};
+    if (halClock.isAvailable() && (!SETTINGS.clockHasBeenSynced || !halClock.localTime(rtcLocal))) {
+      if (halClock.syncFromNTP() && !SETTINGS.clockHasBeenSynced) {
         SETTINGS.clockHasBeenSynced = 1;
         SETTINGS.saveToFile();
       }

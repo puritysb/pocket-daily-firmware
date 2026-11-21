@@ -123,14 +123,17 @@ bool HalClock::localTime(struct tm& out) const {
   const unsigned long now = millis();
   if (_lastPollMs == 0 || (now - _lastPollMs) >= CLOCK_POLL_MS) {
     Rtc::DateTime dt;
-    if (_sdkRtc.now(dt)) {
+    if (_sdkRtc.now(dt) && dt.year >= 2025 && dt.year < 2100) {
       _cachedUtc = epochFromUtc(dt);
       _hasCachedTime = true;
-    } else if (!_hasCachedTime) {
+    } else {
+      _hasCachedTime = false;
+      _lastPollMs = now;
       return false;
     }
     _lastPollMs = now != 0 ? now : 1;  // 0 doubles as the invalidation sentinel
   }
+  if (!_hasCachedTime) return false;
   localtime_r(&_cachedUtc, &out);
   return true;
 }
@@ -191,7 +194,10 @@ bool HalClock::syncFromNTP() {
       dt.minute = static_cast<uint8_t>(timeinfo.tm_min);
       dt.second = static_cast<uint8_t>(timeinfo.tm_sec);
       dt.weekday = static_cast<uint8_t>(timeinfo.tm_wday);
-      const bool ok = _sdkRtc.set(dt);
+      Rtc::DateTime readback{};
+      const bool wrote = _sdkRtc.set(dt) && _sdkRtc.now(readback);
+      const time_t observed = wrote ? epochFromUtc(readback) : 0;
+      const bool ok = wrote && observed >= now && observed - now <= 1;
       if (ok) {
         _cachedUtc = epochFromUtc(dt);
         _hasCachedTime = true;

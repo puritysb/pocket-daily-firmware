@@ -41,7 +41,7 @@ namespace {
 // v137: the bilingual view-mode header byte is removed (the header is one byte shorter).
 // v138: bytes unchanged; built-in reader fonts no longer carry a bold-italic face, so
 // bold-italic runs measure with the bold face and cached layouts must be rebuilt.
-constexpr uint8_t SECTION_FILE_VERSION = 138;
+constexpr uint8_t SECTION_FILE_VERSION = 139;
 
 // Written into the version field while a build is in progress and replaced only after
 // every table has been committed. A crash-interrupted .part file is therefore rejected.
@@ -349,7 +349,9 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
       // buffers on the next attempt. Keep the fast path (and other retries) at 8KB; the decoder
       // still needs its contiguous 32KB window, and the existing three-attempt bound is unchanged.
       const size_t chunkBytes = attempt > 0 && streamError == ZipFile::StreamError::Window ? 1024 : 8192;
-      streamed = epub->readItemContentsToStream(localPath, tmpHtml, chunkBytes);
+      // Below the 32 KiB DEFLATE window size the whole chapter is a smaller dictionary.
+      // Larger chapters keep the bounded streaming and retry path.
+      streamed = epub->readItemContentsToStream(localPath, tmpHtml, chunkBytes, false, 32 * 1024);
       streamError = ZipFile::lastStreamError();
       fileSize = tmpHtml.size();
       // Explicitly close() file before calling Storage.remove()

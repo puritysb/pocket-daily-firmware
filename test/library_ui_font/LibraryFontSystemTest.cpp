@@ -173,6 +173,70 @@ TEST_F(LibraryFontSystem, ChosenSdFamilyWinsOverAutomaticWorldFace) {
   std::memset(SETTINGS.sdFontFamilyName, 0, sizeof(SETTINGS.sdFontFamilyName));
 }
 
+TEST_F(LibraryFontSystem, SelectedReaderFaceBorrowsHangulAndKeepsSymbolFallback) {
+  std::strcpy(SETTINGS.sdFontFamilyName, "SavedReader");
+  savedSettings.assign(reinterpret_cast<const uint8_t*>(&SETTINGS),
+                       reinterpret_cast<const uint8_t*>(&SETTINGS) + sizeof(SETTINGS));
+  system.ensureLoaded(renderer);
+  const int readerId = system.currentLoadedFontId();
+  ASSERT_NE(readerId, 0);
+  constexpr char mixed[] = "Z한✅";
+  EXPECT_EQ(renderer.ensureSdCardFontReady(readerId, mixed, 0x01), 1);
+  ASSERT_EQ(system.ensureAutomaticReaderFontLoaded(renderer), readerId);
+  EXPECT_EQ(renderer.ensureSdCardFontReady(readerId, mixed, 0x01), 0);
+  EXPECT_EQ(renderer.getTextAdvanceX(readerId, mixed, EpdFontFamily::REGULAR), 18);
+  auto page = FontCacheManager(renderer.getFontMap(), renderer.getSdCardFonts());
+  renderer.setFontCacheManager(&page);
+  {
+    auto prewarm = page.createPrewarmScope();
+    renderer.drawText(readerId, 10, 10, mixed);
+    prewarm.endScanAndPrewarm();
+    HalStorage::readOpenCount = 0;
+    renderer.drawText(readerId, 10, 10, mixed);
+    EXPECT_EQ(HalStorage::readOpenCount, 0u);
+  }
+  renderer.setFontCacheManager(nullptr);
+  system.releaseLoaded(renderer);
+  EXPECT_EQ(system.loadedFallbackFont(), nullptr);
+  EXPECT_EQ(renderer.worldFallbackFont(false), nullptr);
+}
+
+TEST_F(LibraryFontSystem, ReaderResolvesMissingKanjiAndBoxDrawingFromWorld) {
+  std::strcpy(SETTINGS.sdFontFamilyName, "SavedReader");
+  savedSettings.assign(reinterpret_cast<const uint8_t*>(&SETTINGS),
+                       reinterpret_cast<const uint8_t*>(&SETTINGS) + sizeof(SETTINGS));
+  for (auto [cp, text] : {std::pair{0x80C3, "胃"}, std::pair{0x2500, "─"}}) {
+    const auto alternate = fontBytes(cp, 0xA5);
+    const PocketUIHost::Asset files[]{
+        {"/world.cpfont", alternate}, {"/symbols.cpfont", symbols}, {"/reader.cpfont", reader}};
+    const PocketUIHost::AssetScope fixture{files};
+    const int id = system.ensureAutomaticReaderFontLoaded(renderer);
+    ASSERT_EQ(renderer.ensureSdCardFontReady(id, text, 1), 0);
+    ASSERT_NE(renderer.fallbackForCodepoint(cp), nullptr);
+    EXPECT_EQ(renderer.fallbackForCodepoint(cp), renderer.worldFallbackFont(false));
+    EXPECT_EQ(renderer.getTextAdvanceX(id, text, EpdFontFamily::REGULAR), 6);
+    system.releaseLoaded(renderer);
+  }
+}
+
+TEST_F(LibraryFontSystem, TransientWorldReadFailureRecoversOnNextReaderRender) {
+  std::strcpy(SETTINGS.sdFontFamilyName, "SavedReader");
+  savedSettings.assign(reinterpret_cast<const uint8_t*>(&SETTINGS),
+                       reinterpret_cast<const uint8_t*>(&SETTINGS) + sizeof(SETTINGS));
+  const int id = system.ensureAutomaticReaderFontLoaded(renderer);
+  {
+    const PocketUIHost::Asset onlyReader[]{{"/reader.cpfont", reader}, {"/symbols.cpfont", symbols}};
+    const PocketUIHost::AssetScope temporaryFailure{onlyReader};
+    ASSERT_EQ(renderer.fallbackForCodepoint(0xD55C), nullptr);
+  }
+  const auto opens = HalStorage::readOpenCount;
+  EXPECT_EQ(renderer.fallbackForCodepoint(0xD55C), nullptr);
+  EXPECT_EQ(HalStorage::readOpenCount, opens);
+  EXPECT_EQ(system.ensureAutomaticReaderFontLoaded(renderer), id);
+  ASSERT_NE(renderer.fallbackForCodepoint(0xD55C), nullptr);
+  EXPECT_EQ(renderer.getTextAdvanceX(id, "한", EpdFontFamily::REGULAR), 6);
+}
+
 TEST_F(LibraryFontSystem, MissingFamilyFailsClosedAndCanRecoverOnNextDiscovery) {
   const Bytes missing = draw("한");
   ASSERT_TRUE(system.ensureLibraryUiFont(renderer));
@@ -430,7 +494,13 @@ std::vector<uint8_t> SdCardFontFamilyInfo::availableSizes() const {
   return files.empty() ? std::vector<uint8_t>{} : std::vector<uint8_t>{files.front().pointSize};
 }
 HalMemory::HeapStats HalMemory::getPsramHeap() { return {}; }
-int CrossPointSettings::getReaderFontId() const { return NOTOSERIF_18_FONT_ID; }
+int CrossPointSettings::getReaderFontId() const {
+  if (sdFontFamilyName[0] && sdFontIdResolver) {
+    const int id = sdFontIdResolver(sdFontResolverCtx, sdFontFamilyName, fontPointSize);
+    if (id) return id;
+  }
+  return NOTOSERIF_18_FONT_ID;
+}
 void CrossPointSettings::clearSdFontFamily() {
   sdFontFamilyName[0] = '\0';
   saveToFile();

@@ -85,6 +85,11 @@ void ActivityManager::renderTaskLoop() {
     // Acquire the lock before reading currentActivity to avoid a TOCTOU race
     // where the main task deletes the activity between the null-check and render().
     RenderLock lock;
+    // Only a render that starts after the request can satisfy a synchronous
+    // waiter. A request made during render() belongs to the next notification.
+    taskENTER_CRITICAL(&activityManagerSpinlock);
+    const TaskHandle_t waiter = waitingTaskHandle;
+    taskEXIT_CRITICAL(&activityManagerSpinlock);
     // A terminal sleep transition can return the framebuffer to the radio.
     // Test under the same lock as its release, including queued notifications.
     if (currentActivity && (renderer.hasFrameBuffer() || Pocket::KeyboardRemote::streaming())) {
@@ -110,19 +115,20 @@ void ActivityManager::renderTaskLoop() {
       paintedVisit.store(renderingVisit, std::memory_order_release);
     }
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
-    TaskHandle_t waiter = nullptr;
-    taskENTER_CRITICAL(&activityManagerSpinlock);
-    waiter = waitingTaskHandle;
-    waitingTaskHandle = nullptr;
-    taskEXIT_CRITICAL(&activityManagerSpinlock);
     if (waiter) {
+      taskENTER_CRITICAL(&activityManagerSpinlock);
+      waitingTaskHandle = nullptr;
+      taskEXIT_CRITICAL(&activityManagerSpinlock);
       xTaskNotify(waiter, 1, eIncrement);
     }
   }
 }
 
 void ActivityManager::loop() {
-  if (mappedInput.consumeSuppressedRelease()) return;
+  // goToSleep() uses this loop to install SleepActivity synchronously. Input
+  // must not discard that transition or replace it with a navigation action.
+  const bool enteringSleep = pendingAction == PendingAction::ReplaceForSleep;
+  if (!enteringSleep && mappedInput.consumeSuppressedRelease()) return;
 
   if (currentActivity && currentActivity->requiresExclusiveStorageLoop()) {
     currentActivity->loop();
@@ -135,7 +141,7 @@ void ActivityManager::loop() {
     return;
   }
 
-  if (currentActivity) {
+  if (!enteringSleep && currentActivity) {
     if (!currentActivity->isHomeActivity() && mappedInput.wasHomeGesture()) {
       if (currentActivity->handleHomeGesture()) {
         return;
@@ -484,6 +490,8 @@ bool ActivityManager::allowsAppConnection() const {
   return allowsExchangeWindow() && currentActivity->allowsAppConnection();
 }
 
+bool ActivityManager::hasLiveHomeClock() const { return currentActivity && currentActivity->hasLiveHomeClock(); }
+
 void ActivityManager::closeExchangeWindowFor(const Activity& next) {
   if (next.allowsExchangeWindow()) return;
   using Pocket::NearbySync::Window::CloseReason;
@@ -507,6 +515,10 @@ bool ActivityManager::isReaderActivity() const {
                      [](const auto& activity) { return activity->isReaderActivity(); }) ||
          (currentActivity && currentActivity->isReaderActivity());
 }
+
+#ifdef ENABLE_DEV_REMOTE_FLASH
+bool ActivityManager::isForegroundHome() const { return currentActivity && currentActivity->isHomeActivity(); }
+#endif
 
 bool ActivityManager::isForegroundReader() const {
   return pendingAction == PendingAction::None && currentActivity && currentActivity->isReaderActivity();

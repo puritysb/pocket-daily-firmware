@@ -267,7 +267,7 @@ class BaseTheme {
   // Same paint with its exact resolved inputs returned to an explicit owner.
   // No global observer or retained screen data in the theme.
   void drawHeaderAndDescribe(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
-                             bool backButton, HeaderPainter::Inputs& described) const;
+                             bool backButton, HeaderPainter::Inputs& described, bool branded = false) const;
   // Fill the battery/clock status chrome (settings + theme metrics) into
   // header props, so FUI-native screens drawing their own interactive header
   // carry the same band as drawHeader. Status text is styled with the
@@ -300,7 +300,7 @@ class BaseTheme {
   static void drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage, const int pageCount,
                             std::string title, const int paddingBottom = 0, const int textYOffset = 0,
                             const bool fillMargin = true, const bool isPageBookmarked = false,
-                            const bool pageCountEstimated = false);
+                            const bool pageCountEstimated = false, int readerTitleFont = 0);
   static void drawHelpText(const GfxRenderer& renderer, Rect rect, const char* label);
   virtual void drawTextField(const GfxRenderer& renderer, Rect rect, const int textWidth, bool cursorMode = false,
                              int contentStartX = 0, int contentWidth = 0) const;

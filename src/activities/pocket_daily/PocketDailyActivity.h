@@ -29,7 +29,8 @@ class PocketDailyActivity final : public Activity {
 
   void onEnter() override;
   bool allowsExchangeWindow() const override { return true; }
-  bool allowsAppConnection() const override { return viewMode == ViewMode::Overview; }
+  bool allowsAppConnection() const override { return viewMode == ViewMode::Overview && !choosingView; }
+  bool hasLiveHomeClock() const override { return clockRefresh.load() != ClockRefresh::Off; }
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
@@ -167,14 +168,13 @@ class PocketDailyActivity final : public Activity {
   uint32_t lastDecisionMs = 0;
   char cardSid[72] = {0};  // card the Card view is showing
 
-  // Which Daily Brief variant render() should paint. PoweredOff means this
-  // frame is the one the panel keeps through sleep.
-  GlanceReason glanceReason = GlanceReason::Ambient;
   // True while the Ambient Daily Brief is the face on screen. Written by
   // render() (render task), read by handleButtons() (loop task) to give Confirm
   // its "resume reading" meaning only when that face is displayed — a stale
   // read is benign (one inert or late press), so no lock.
   bool ambientGlanceShown = false;
   bool exitToNearbySync = false;
-  bool sleepFramePending = false;  // render() must paint the sleep Daily Brief
+  // RenderLock serializes the terminal paint with Home clock updates.
+  enum class SleepFrame : uint8_t { Awake, Pending, Painted };
+  SleepFrame sleepFrame = SleepFrame::Awake;
 };

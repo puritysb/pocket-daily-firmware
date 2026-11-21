@@ -1,3 +1,6 @@
+#ifdef ENABLE_DEV_REMOTE_FLASH
+#include <DevButtonTrace.h>
+#endif
 #include "BootActivity.h"
 
 #include <GfxRenderer.h>
@@ -18,4 +21,7 @@ void BootActivity::onEnter() {
   renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, tr(STR_BOOTING));
   renderer.drawCenteredText(SMALL_FONT_ID, pageHeight - 30, CROSSPOINT_VERSION);
   renderer.displayBuffer();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  DevButtonTrace::checkpoint(DevButtonTrace::BootLogoPainted);
+#endif
 }

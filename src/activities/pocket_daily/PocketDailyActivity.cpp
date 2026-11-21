@@ -1,9 +1,12 @@
+#include "pocket_daily/dev/WakeClockTrace.h"
 #include "PocketDailyActivity.h"
 
 #include <Arduino.h>
 #include <Bitmap.h>
+#include <DevButtonTrace.h>
 #include <EpdFontFamily.h>
 #include <HalClock.h>
+#include <HalDisplay.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
@@ -131,8 +134,7 @@ void PocketDailyActivity::onEnter() {
   exitToNearbySync = false;
   viewMode = ViewMode::Overview;
   choosingView = false;
-  glanceReason = GlanceReason::Ambient;
-  sleepFramePending = false;
+  sleepFrame = SleepFrame::Awake;
 
   // Local books, cards and the daily word are the product. Pocket Daily never
   // holds the radio; the companion reaches the reader through Sync.
@@ -436,9 +438,10 @@ void PocketDailyActivity::handleButtons() {
   uint8_t starts[4]{};
   const int sections = PocketDaily::Home::homeSectionStarts(groups, n, starts, 4);
   if (n > 0 && groups[selected] == static_cast<uint8_t>(PocketDaily::Home::Section::Reading)) readingCursor = selected;
+  if (choosingView && sections < 2) choosingView = false;
   if (choosingView) {
     if (mappedInput.wasReleased(Btn::Up) || mappedInput.wasReleased(Btn::Down)) {
-      viewChoice = (viewChoice + (mappedInput.wasReleased(Btn::Up) ? sections : 1)) % (sections + 1);
+      viewChoice = (viewChoice + (mappedInput.wasReleased(Btn::Up) ? sections - 1 : 1)) % sections;
       requestUpdate();
       return;
     }
@@ -446,11 +449,7 @@ void PocketDailyActivity::handleButtons() {
       choosingView = false;
       browsingCalendar = false;
       calendarSelection = 0;
-      if (viewChoice >= sections) {
-        activityManager.goToArticles();
-        return;
-      }
-      overviewCursor = starts[viewChoice];
+      overviewCursor = starts[std::min<int>(viewChoice, sections - 1)];
       if (groups[overviewCursor] == static_cast<uint8_t>(PocketDaily::Home::Section::Reading) && readingCursor >= 0 &&
           readingCursor < n && groups[readingCursor] == groups[overviewCursor])
         overviewCursor = readingCursor;
@@ -464,6 +463,10 @@ void PocketDailyActivity::handleButtons() {
     }
   }
   if (gpio.wasReleased(HalGPIO::BTN_LEFT)) {
+    if (sections < 2) {
+      activityManager.goToLibrary();
+      return;
+    }
     choosingView = true;
     viewChoice = 0;
     for (int i = 0; i < sections; ++i)
@@ -492,16 +495,25 @@ void PocketDailyActivity::handleButtons() {
   // Reading and Study are one content carousel. The side keys move through
   // it; Confirm always opens exactly what the panel currently shows.
   if (mappedInput.wasReleased(Btn::Up) && n > 1) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    DevButtonTrace::action(DevButtonTrace::HomePrev);
+#endif
     overviewCursor = PocketDaily::Home::stepHomeSection(groups, n, selected, -1);
     requestUpdate();
     return;
   }
   if (mappedInput.wasReleased(Btn::Down) && n > 1) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    DevButtonTrace::action(DevButtonTrace::HomeNext);
+#endif
     overviewCursor = PocketDaily::Home::stepHomeSection(groups, n, selected, 1);
     requestUpdate();
     return;
   }
   if (gpio.wasReleased(HalGPIO::BTN_CONFIRM) && n > 0) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    DevButtonTrace::action(DevButtonTrace::HomeSelect);
+#endif
     if (rows[selected].shelfPage) {
       const auto index = rows[selected].shelfIndex;
       if (recentShelf && index < recentShelf->count && Storage.exists(recentShelf->paths[index]))
@@ -657,13 +669,19 @@ PocketDaily::Home::Env PocketDailyActivity::homeEnv() const {
   env.labels = deviceFonts(renderer);
   env.context = const_cast<PocketDailyActivity*>(this);
   env.drawHeader = [](void* self, const GfxRenderer& renderer, int x, int y, int width, int height, const char* title,
-                      const char* subtitle) {
+                      const char* subtitle, bool branded) {
     (void)self;
     // Product identity is Pocket itself.
 #ifdef ENABLE_DEV_REMOTE_FLASH
     const uint32_t started = millis();
 #endif
-    GUI.drawHeader(renderer, Rect{x, y, width, height}, title, subtitle);
+    const Rect rect{x, y, width, height};
+    if (branded) {
+      HeaderPainter::Inputs inputs;
+      GUI.drawHeaderAndDescribe(renderer, rect, title, subtitle, false, inputs, true);
+    } else {
+      GUI.drawHeader(renderer, rect, title, subtitle);
+    }
 #ifdef ENABLE_DEV_REMOTE_FLASH
     Pocket::NearbySync::Window::noteHomeDetail(Pocket::NearbySync::Stats::PaintDetail::Header, millis() - started);
 #endif
@@ -789,6 +807,7 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n) {
 #endif
   renderer.displayBuffer();
 #ifdef ENABLE_DEV_REMOTE_FLASH
+  PocketDaily::WakeClockTrace::firstHome(view.clock.date, view.clock.minute);
   Pocket::NearbySync::Window::noteHomePaint(refreshStart - composeStart, millis() - refreshStart);
 #endif
 }
@@ -922,13 +941,13 @@ void PocketDailyActivity::renderGlance(GlanceReason reason) {
   PocketDaily::Home::renderBrief(renderer, view, homeEnv());
   if (isSleep) {
     if (SETTINGS.sleepWakeIndicator) PowerWakeCue::draw(renderer, gpio.deviceIsX3(), tr(STR_POCKET_WAKE_READ));
-    // The panel holds this frame for hours or days: always clear the ghosting
-    // with a full waveform (it is painted once, at power-off).
-    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+    // X4's HALF is its native absolute clean waveform, also used by the
+    // stock Sleep Cover. X3 uses FULL to erase the prior image.
+    renderer.displayBuffer(gpio.deviceIsX3() ? HalDisplay::FULL_REFRESH : HalDisplay::HALF_REFRESH);
   } else {
     // The empty carousel routes physical Confirm to Sync. These four actions
     // use physical buttons, so applying the logical reader remap mislabels them.
-    GUI.drawButtonHints(renderer, tr(STR_POCKET_HOME), tr(STR_POCKET_SYNC), tr(STR_ARTICLES), tr(STR_POCKET_SYNC));
+    GUI.drawButtonHints(renderer, tr(STR_POCKET_HOME), tr(STR_POCKET_SYNC), tr(STR_LIBRARY), tr(STR_POCKET_SYNC));
     renderer.displayBuffer();
   }
 }
@@ -937,13 +956,12 @@ bool PocketDailyActivity::paintSleepFrame() {
   // Profile sleep mode "reader": hand the power-off frame to the reader's own
   // Sleep Screen setting (SleepActivity) instead of the Daily Brief.
   if (PocketDaily::DailyProfile::current().sleepMode == PocketDaily::DailyProfile::SleepMode::Reader) return false;
-  // Pocket Daily owns its retained e-ink frame. Delegating to SleepActivity
-  // redraws the last book cover over the dashboard just before the panel powers
-  // down, which looks like Pocket Daily disappeared. Paint the powered-off
-  // Daily Brief instead; it promises no next sync time and stays truthful if
-  // the device remains off for days.
-  glanceReason = GlanceReason::PoweredOff;
-  sleepFramePending = true;
+  // Finish any in-flight Home refresh before arming the retained picture.
+  {
+    RenderLock lock(*this);
+    clockRefresh.store(ClockRefresh::Off);
+    sleepFrame = SleepFrame::Pending;
+  }
   requestUpdateAndWait();
   LOG_INF("POCKET", "retaining powered-off Daily Brief frame");
   return true;
@@ -959,9 +977,12 @@ void PocketDailyActivity::render(RenderLock&&) {
   // power-off. It deliberately uses only persisted device state (book
   // position, carried card, the saved weather and schedule), so the retained
   // panel remains useful and truthful without a network.
-  if (sleepFramePending) {
-    clockRefresh.store(ClockRefresh::Off);
-    renderGlance(glanceReason);
+  if (sleepFrame == SleepFrame::Painted) return;
+  if (sleepFrame == SleepFrame::Pending) {
+    // Retained covers and briefs are in normal polarity, like SleepActivity.
+    display.setInverted(false);
+    renderGlance(GlanceReason::PoweredOff);
+    sleepFrame = SleepFrame::Painted;
     return;
   }
 

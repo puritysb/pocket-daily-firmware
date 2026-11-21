@@ -8,8 +8,23 @@
 #include "fontIds.h"
 
 namespace HeaderPainter {
+namespace {
+constexpr int BRAND_LOGO_WIDTH = 21;
+
+// Monochrome Pocket Daily reader mark.
+void drawBrandLogo(const GfxRenderer& renderer, const int x, const int y) {
+  renderer.fillRoundedRect(x, y, BRAND_LOGO_WIDTH, BRAND_LOGO_HEIGHT, 5, Color::Black);
+  renderer.fillRoundedRect(x + 2, y + 3, 17, 19, 2, Color::White);
+  renderer.fillRect(x + 5, y + 7, 11, 1, true);
+  renderer.fillRect(x + 5, y + 10, 8, 1, true);
+  renderer.fillRect(x + 5, y + 13, 10, 1, true);
+  renderer.fillRect(x + 5, y + 18, 6, 1, true);
+  renderer.fillRect(x + 7, y + 24, 7, 1, false);
+}
+}  // namespace
+
 void paintHeader(const GfxRenderer& renderer, const Inputs& in, const int x, const int y, const int width,
-                 const int height, const char* title, const char* subtitle) {
+                 const int height, const char* title, const char* subtitle, const bool branded) {
   namespace fui = freeink::ui;
   // Existing BaseTheme passive frame/props stack, now shared with the host.
   // No new resident theme/framebuffer allocation or settings access.
@@ -46,7 +61,15 @@ void paintHeader(const GfxRenderer& renderer, const Inputs& in, const int x, con
   status.stripHeight = in.stripHeight;
   status.clockCentered = in.clockCentered;
   status.clockText = in.clock[0] ? in.clock : nullptr;
-  if (in.showBack && title) {
+  if (branded) {
+    props.titleText.align = fui::TextAlign::Left;
+    props.titleOffsetY = 0;
+    props.leftReserve = BRAND_LOGO_WIDTH + 8;
+    status.batteryLeft = false;
+    status.stripHeight = static_cast<int16_t>(height);
+    // The dashboard already has a large clock immediately below this row.
+    status.clockText = nullptr;
+  } else if (in.showBack && title) {
     props.leadingIcon = fui::bitmapFromIcon(icon_header_back_32);
     props.leadingAction = 1;
   }
@@ -54,5 +77,6 @@ void paintHeader(const GfxRenderer& renderer, const Inputs& in, const int x, con
       ui.frame,
       {static_cast<int16_t>(x), static_cast<int16_t>(y), static_cast<int16_t>(width), static_cast<int16_t>(height)},
       props);
+  if (branded) drawBrandLogo(renderer, x + in.sidePadding, y + (height - BRAND_LOGO_HEIGHT) / 2);
 }
 }  // namespace HeaderPainter

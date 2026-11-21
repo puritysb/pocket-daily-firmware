@@ -1,4 +1,5 @@
 #include <BatteryMonitor.h>
+#include <DevButtonTrace.h>
 #include <HalGPIO.h>
 #include <Logging.h>
 #include <PowerManager.h>
@@ -159,9 +160,26 @@ void HalGPIO::begin() {
 
 void HalGPIO::update() {
   inputMgr.update();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  DevButtonTrace::sample(inputMgr.sampledButtonMask(), inputMgr.debouncedButtonMask());
+#endif
   const uint8_t pageButtons = inputMgr.capacitivePageButtonMask();
   capacitivePagePressed = (pageButtons & ~previousCapacitivePageButtons) != 0;
   previousCapacitivePageButtons = pageButtons;
+  // X3 infers USB power from the I2C fuel gauge. Only the USB-change
+  // notification needs polling here. Give a pending contact and its edge
+  // priority over the bus transaction before dispatching this input frame.
+  if (deviceIsX3()) {
+    constexpr unsigned long usbPollIntervalMs = 1000;
+    const unsigned long now = millis();
+    if (inputMgr.isDebouncePending() || inputMgr.wasAnyPressed() || inputMgr.wasAnyReleased() ||
+        (x3UsbPolled && now - lastX3UsbPollMs < usbPollIntervalMs)) {
+      usbStateChanged = false;
+      return;
+    }
+    lastX3UsbPollMs = now;
+    x3UsbPolled = true;
+  }
   const bool connected = isUsbConnected();
   usbStateChanged = (connected != lastUsbConnected);
   lastUsbConnected = connected;

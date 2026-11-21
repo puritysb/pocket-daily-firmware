@@ -74,7 +74,7 @@ constexpr UiFontSize kUiFontSizes[] = {
 void SdCardFontSystem::begin(GfxRenderer& renderer) {
   registry_.discover();
   renderer_ = &renderer;
-  renderer.setFallbackFontProvider(&SdCardFontSystem::provideFallback, this);
+  renderer.setFallbackFontProvider(&SdCardFontSystem::provideFallback, this, &SdCardFontSystem::provideWorldFallback);
   publishFallbackLayoutKey();
 
   // Register this system as the SD font ID resolver in settings.
@@ -547,6 +547,8 @@ int SdCardFontSystem::ensureUiFamilyLoaded(GfxRenderer& renderer, const char* fa
   if (!familyName || !familyName[0]) return 0;
 
   refreshIfDirty();
+  worldFallback_.reset();
+  worldReaderFallbackEnabled_ = false;
   // Live network-mode views use BoundedUI and must not pull in a second font.
   setFallbackEnabled(mode == SdCardFont::LoadMode::Cached);
 
@@ -604,6 +606,7 @@ uint32_t SdCardFontSystem::beginReaderOverlayUiFont(GfxRenderer& renderer) {
   // state is <=2816 B (HAL handles excluded), and 8 bitmap slots cap at 256 B.
   // Allocate once per overlay lifetime; Symbols and World never coexist here.
   dropFallback();
+  worldFallback_.reset();
   fallbackUnavailable_ = false;
   auto font = makeUniqueNoThrow<SdCardFont>();
   if (!font || !font->load(selected->path.c_str(), SdCardFont::LoadMode::BoundedUI)) {
@@ -637,9 +640,16 @@ int SdCardFontSystem::ensureAutomaticReaderFontLoaded(GfxRenderer& renderer) {
   const auto* family = registry_.findFamily(automaticFamily);
   if (!family || (chosen[0] != '\0' && std::strcmp(chosen, automaticFamily) != 0 && registry_.findFamily(chosen))) {
     ensureLoaded(renderer);
+    // A temporary SD or allocation failure applies only to this render. Keep
+    // per-glyph misses cheap, but let the next page reopen a healthy face.
+    if (worldFallback_ && worldFallback_->boundedReadFailed()) worldFallback_.reset();
+    worldFallbackUnavailable_ = false;
+    worldReaderFallbackEnabled_ = family && SETTINGS.sdFontFamilyName[0];
     return SETTINGS.getReaderFontId();
   }
 
+  worldReaderFallbackEnabled_ = false;
+  worldFallback_.reset();
   const uint8_t sizeEnum = SETTINGS.fontPointSize;
   const auto* selected = family->findNearestSize(sizeEnum);
   const uint8_t wantedPt = selected ? selected->pointSize : 0;
@@ -675,6 +685,35 @@ int SdCardFontSystem::currentLoadedFontId() const {
 
 SdCardFont* SdCardFontSystem::provideFallback(void* context, const bool load) {
   return static_cast<SdCardFontSystem*>(context)->fallbackFont(load);
+}
+
+SdCardFont* SdCardFontSystem::provideWorldFallback(void* context, const bool load) {
+  return static_cast<SdCardFontSystem*>(context)->worldFallbackFont(load);
+}
+
+SdCardFont* SdCardFontSystem::worldFallbackFont(const bool load) {
+  static constexpr char familyName[] = "PocketSansWorld";
+  if (!load) return worldFallback_.get();
+  if (fallbackMode_ != FallbackMode::Symbols || !worldReaderFallbackEnabled_) return nullptr;
+  if (worldFallback_ || worldFallbackUnavailable_) return worldFallback_.get();
+
+  const auto* family = registry_.findFamily(familyName);
+  const auto* file = family ? family->findNearestSize(manager_.currentPointSize()) : nullptr;
+  if (!file) {
+    worldFallbackUnavailable_ = true;
+    return nullptr;
+  }
+  auto font = makeUniqueNoThrow<SdCardFont>();
+  // A busy chapter can leave too little contiguous RAM for the interval
+  // tables. The bounded face reads those intervals from SD on demand.
+  if (!font || (!font->load(file->path.c_str(), SdCardFont::LoadMode::Cached) &&
+                !font->load(file->path.c_str(), SdCardFont::LoadMode::BoundedUI))) {
+    worldFallbackUnavailable_ = true;
+    LOG_ERR("SDFS", "World fallback unavailable for this render");
+    return nullptr;
+  }
+  worldFallback_ = std::move(font);
+  return worldFallback_.get();
 }
 
 SdCardFont* SdCardFontSystem::fallbackFont(const bool load) {
@@ -747,12 +786,17 @@ SdCardFont* SdCardFontSystem::fallbackFont(const bool load) {
 
 void SdCardFontSystem::setFallbackEnabled(const bool enabled) {
   const auto wanted = enabled ? FallbackMode::Symbols : FallbackMode::Disabled;
+  if (!enabled) worldReaderFallbackEnabled_ = false;
   if (wanted == fallbackMode_) return;
   const bool endingOverlay = fallbackMode_ == FallbackMode::ReaderOverlay;
   fallbackMode_ = wanted;
   fallbackUnavailable_ = false;
   readerOverlayOwners_ = 0;
-  if (!enabled || endingOverlay) dropFallback();
+  if (!enabled || endingOverlay) {
+    dropFallback();
+    worldFallback_.reset();
+    worldFallbackUnavailable_ = false;
+  }
 }
 
 void SdCardFontSystem::dropFallback() {
@@ -763,6 +807,8 @@ void SdCardFontSystem::dropFallback() {
 
 void SdCardFontSystem::rediscover() {
   dropFallback();
+  worldFallback_.reset();
+  worldFallbackUnavailable_ = false;
   fallbackUnavailable_ = false;
   registry_.discover();
   publishFallbackLayoutKey();
@@ -775,10 +821,10 @@ void SdCardFontSystem::rediscover() {
 // is not detected); 0 when no fallback family is installed.
 void SdCardFontSystem::publishFallbackLayoutKey() {
   if (!renderer_) return;
-  const auto* family = registry_.fallbackFamily();
   uint32_t key = 0;
-  if (family) {
-    key = 2166136261u;
+  for (const auto* family : {registry_.fallbackFamily(), registry_.findFamily("PocketSansWorld")}) {
+    if (!family) continue;
+    if (key == 0) key = 2166136261u;
     for (const auto& file : family->files) {
       for (const char c : file.path) {
         key ^= static_cast<uint8_t>(c);
@@ -789,5 +835,6 @@ void SdCardFontSystem::publishFallbackLayoutKey() {
     }
     if (key == 0) key = 1;
   }
-  renderer_->setGlyphLayoutKey(key);
+  // World coverage now participates in advances beyond Hangul. Reflow existing book caches.
+  renderer_->setGlyphLayoutKey(key ? (key ^ 0x574c4432u) : 0);
 }

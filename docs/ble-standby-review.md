@@ -1,3 +1,13 @@
+# Home-only BLE in release builds (2026-11-21)
+
+Default and release builds now include Home app connection. Existing saved
+preferences are preserved. The Home listener uses the auto-sleep deadline or
+a 30-minute idle limit with Never sleep. Its deadline survives the minute
+clock repaint. The separate `ble_standby` environment retains the terminal
+standby experiment. Repeat hardware tests and measure battery-side current
+for the new behavior before interpreting the historical timings below as a
+release result.
+
 # C3 X3/X4 BLE standby extension — 2026-11-02
 
 The opt-in `ble_standby` image now admits original ESP32-C3 X3 and X4 through

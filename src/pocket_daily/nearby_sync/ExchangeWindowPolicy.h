@@ -23,8 +23,19 @@ inline bool homeMemoryAllowed(uint32_t freeHeap, uint32_t largestBlock) {
   return freeHeap > 50U * 1024U && largestBlock >= 8U * 1024U;
 }
 
+inline constexpr uint32_t HOME_IDLE_MIN_MS = 3000;
+inline constexpr uint32_t HOME_IDLE_NO_SLEEP_LIMIT_MS = 30 * 60 * 1000;
+
+inline constexpr uint32_t homeConnectionRemainingMs(uint32_t sleepTimeoutMs, uint32_t idleMs) {
+  const uint32_t limit = sleepTimeoutMs ? sleepTimeoutMs : HOME_IDLE_NO_SLEEP_LIMIT_MS;
+  return idleMs < limit ? limit - idleMs : 0;
+}
+
+// E-paper only needs a new Home frame when the displayed minute changes.
+inline constexpr uint32_t homeClockRefreshDelayMs(uint32_t seconds) { return (60 - seconds % 60) * 1000; }
+
 inline bool homeIdleAllowed(bool home, bool inputActive, uint32_t idleMs) {
-  return home && !inputActive && idleMs >= 3000;
+  return home && !inputActive && idleMs >= HOME_IDLE_MIN_MS;
 }
 
 inline constexpr uint32_t BOOK_CLOSED_MS = 45000;

@@ -161,11 +161,21 @@ bool GfxRenderer::fontCovers(const int fontId, const EpdFontFamily& font, const 
   return font.findGlyph(cp, style) != nullptr;  // flash font: interval lookup, no I/O
 }
 
+SdCardFont* GfxRenderer::fallbackForCodepoint(const uint32_t cp, const uint8_t style) const {
+  const auto covers = [cp, style](SdCardFont* face) { return face && face->hasGlyph(cp, style); };
+  if (utf8IsCjkBreakable(cp) || utf8IsHangul(cp)) {
+    if (auto* world = worldFallbackFont(true); covers(world)) return world;
+  }
+  if (auto* symbols = fallbackFont(true); covers(symbols)) return symbols;
+  auto* world = worldFallbackFont(true);
+  return covers(world) ? world : nullptr;
+}
+
 GfxRenderer::GlyphRef GfxRenderer::resolveGlyph(const EpdFontFamily& font, const uint32_t cp,
                                                 const EpdFontFamily::Style style, const bool allowFallback) const {
   if (const EpdGlyph* glyph = font.findGlyph(cp, style)) return {glyph, font.getData(style), true};
   if (!allowFallback) return {};
-  SdCardFont* fallback = fallbackFont(true);
+  SdCardFont* fallback = fallbackForCodepoint(cp, static_cast<uint8_t>(style));
   if (!fallback) return {};
   const uint8_t fallbackStyle = fallback->resolveStyle(static_cast<uint8_t>(style) & 0x03);
   const EpdFont* fallbackFace = fallback->getEpdFont(fallbackStyle);
@@ -184,7 +194,7 @@ int32_t GfxRenderer::missingGlyphAdvanceFP(const EpdFontData* data) {
 int32_t GfxRenderer::fallbackAdvanceFP(const uint32_t cp, const EpdFontFamily::Style style, const bool allowFallback,
                                        const EpdFontData* primaryData) const {
   if (allowFallback) {
-    if (SdCardFont* fallback = fallbackFont(true)) {
+    if (SdCardFont* fallback = fallbackForCodepoint(cp, static_cast<uint8_t>(style))) {
       const uint8_t fallbackStyle = fallback->resolveStyle(static_cast<uint8_t>(style) & 0x03);
       uint16_t advance = 0;
       if (fallback->lookupAdvance(cp, fallbackStyle, &advance)) return advance;
@@ -245,11 +255,25 @@ int GfxRenderer::prepareFallbackAdvances(const int fontId, const std::vector<std
         text, [&](uint32_t cp) { return fontCovers(fontId, font, cp, EpdFontFamily::REGULAR); }, missing, count);
   }
   if (count == 0) return 0;
-  SdCardFont* fallback = fallbackFont(true);
-  if (!fallback) return static_cast<int>(count);
-  // One batched metric read for every uncovered codepoint of the paragraph;
-  // codepoints the fallback lacks are answered from its resident intervals.
-  return fallback->buildAdvanceTable(missing.get(), count, 0x01);
+  int missed = 0;
+  auto* remaining = missing.get();
+  if (worldFallbackProvider_) {
+    auto* const other = std::partition(remaining, remaining + count, [&](uint32_t cp) {
+      auto* chosen = fallbackForCodepoint(cp);
+      return chosen && chosen == worldFallbackFont(false);
+    });
+    const auto worldCount = static_cast<uint32_t>(other - remaining);
+    if (worldCount) {
+      missed = worldFallbackFont(false)->buildAdvanceTable(remaining, worldCount, 0x03);
+      if (missed < 0) return missed;
+      count -= worldCount;
+      remaining = other;
+    }
+  }
+  if (count == 0) return missed;
+  auto* fallback = fallbackFont(true);
+  const int otherMissed = fallback ? fallback->buildAdvanceTable(remaining, count, 0x01) : static_cast<int>(count);
+  return otherMissed < 0 ? otherMissed : missed + otherMissed;
 }
 
 void GfxRenderer::appendFallbackCodepoints(const int fontId, const char* text, std::string& out) const {
@@ -270,13 +294,23 @@ void GfxRenderer::appendFallbackCodepoints(const int fontId, const char* text, s
 
 int GfxRenderer::prewarmFallbackFont(const char* utf8Text) const {
   if (!utf8Text || !*utf8Text) return 0;
-  SdCardFont* fallback = fallbackFont(true);
-  if (!fallback) return 0;
-  return fallback->prewarm(utf8Text, 0x01, /*metadataOnly=*/false);
+  std::string worldText;
+  std::string symbolText;
+  const auto* p = reinterpret_cast<const unsigned char*>(utf8Text);
+  while (*p) {
+    const auto cp = utf8NextCodepoint(&p);
+    if (auto* chosen = fallbackForCodepoint(cp)) {
+      utf8AppendCodepoint(cp, chosen == worldFallbackFont(false) ? worldText : symbolText);
+    }
+  }
+  if (!worldText.empty())
+    worldFallbackFont(false)->prewarm(worldText.c_str(), 0x03, /*metadataOnly=*/false, /*loadKernLig=*/false);
+  return symbolText.empty() ? 0 : fallbackFont(false)->prewarm(symbolText.c_str(), 0x01, /*metadataOnly=*/false);
 }
 
 void GfxRenderer::clearFallbackCache() const {
   if (SdCardFont* fallback = fallbackFont(false)) fallback->clearCache();
+  if (SdCardFont* hangul = worldFallbackFont(false)) hangul->clearCache();
 }
 
 int GfxRenderer::prewarmSdCardFont(int fontId, const char* utf8Text, uint8_t styleMask) const {
@@ -2646,7 +2680,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
       } else if (sdFont.hasGlyph(cp, styleIdx)) {
         // Present but not prepared (request limit exceeded): exact per-glyph load.
         const EpdGlyph* glyph = font.findGlyph(cp, style);
-        advFP = glyph ? glyph->advanceX : 0;
+        advFP = glyph ? glyph->advanceX : fallbackAdvanceFP(cp, style, allowFallback, primaryData);
       } else {
         advFP = fallbackAdvanceFP(cp, style, allowFallback, primaryData);
       }

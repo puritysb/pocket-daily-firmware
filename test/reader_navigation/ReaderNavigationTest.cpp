@@ -4,6 +4,7 @@
 #include "CrossPointState.h"
 #include "activities/ActivityManager.h"
 #include "activities/reader/ReaderActivity.h"
+#include "activities/reader/ManualTurnQueue.h"
 
 TEST(ReaderNavigation, ImmediateAndQueuedLaunchPublishOriginBeforeOnEnter) {
   for (auto shell : {ReaderReturn::Home, ReaderReturn::PocketDaily}) {
@@ -137,4 +138,19 @@ TEST(ReaderNavigation, ExitAndFooterLabelsFollowRestoredDestination) {
     manager.readerReturn = ReaderReturn::Articles;
     EXPECT_STREQ(manager.readerReturnLabel(), "Articles");
   }
+}
+
+TEST(ReaderNavigation, RapidManualTurnsKeepOrderAcrossWrapAndClear) {
+  ManualTurnQueue queue;
+  for (int i = 0; i < 8; ++i) ASSERT_TRUE(queue.push(i < 3));
+  EXPECT_FALSE(queue.push(true));
+  for (int i = 0; i < 3; ++i) EXPECT_TRUE(queue.pop());
+  for (int i = 0; i < 3; ++i) ASSERT_TRUE(queue.push(true));
+  for (int i = 0; i < 5; ++i) EXPECT_FALSE(queue.pop());
+  EXPECT_TRUE(queue.pop());
+  queue.clear();
+  EXPECT_TRUE(queue.empty());
+  ASSERT_TRUE(queue.push(false));
+  EXPECT_FALSE(queue.pop());
+  EXPECT_TRUE(queue.empty());
 }

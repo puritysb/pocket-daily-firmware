@@ -65,7 +65,7 @@ class Epub {
   uint8_t* readItemContentsToBytes(const std::string& itemHref, size_t* size = nullptr,
                                    bool trailingNullByte = false) const;
   bool readItemContentsToStream(const std::string& itemHref, Print& out, size_t chunkSize,
-                                bool allowEarlyStop = false) const;
+                                bool allowEarlyStop = false, size_t singlePassLimit = 0) const;
   // Extract an item to a file on SD. On failure the partial file is removed.
   bool extractItemToFile(const std::string& itemHref, const std::string& destPath) const;
   // Streams one spine item's XHTML, preferring the reader's inflated copy

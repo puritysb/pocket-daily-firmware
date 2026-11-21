@@ -62,6 +62,18 @@ TEST_F(LibraryBuilderTest, UnchangedRebuildReusesMetadataAndDoesNotReplaceIndex)
   EXPECT_EQ(fake::files[INDEX]->bytes, old);
 }
 
+TEST_F(LibraryBuilderTest, SavedArticleIsIndexedAlongsideBooks) {
+  constexpr char article[] = "/Articles/pd-article-00000000-1111-2222-3333-444444444444.epub";
+  fake::add(article);
+  ASSERT_TRUE(buildLibraryIndex("/", stats, false));
+  LibraryIndexFile index;
+  ASSERT_TRUE(index.open(INDEX));
+  ASSERT_EQ(index.bookCount(), 3);
+  const auto paths = {pathAt(index, SortOrder::TitleAsc, 0), pathAt(index, SortOrder::TitleAsc, 1),
+                      pathAt(index, SortOrder::TitleAsc, 2)};
+  EXPECT_NE(std::find(paths.begin(), paths.end(), article), paths.end());
+}
+
 TEST_F(LibraryBuilderTest, FolderHeavyUnchangedReconciliationIoScalesLinearly) {
   const auto measure = [this](const unsigned count) {
     fake::reset();

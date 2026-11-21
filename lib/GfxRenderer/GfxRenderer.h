@@ -138,6 +138,7 @@ class GfxRenderer {
   // Optional glyph-fallback font supplied by the SD font system (see
   // setFallbackFontProvider). Called, not cached, so the owner may unload it.
   FallbackFontProviderFn fallbackProvider_ = nullptr;
+  FallbackFontProviderFn worldFallbackProvider_ = nullptr;
   void* fallbackContext_ = nullptr;
   uint32_t glyphLayoutKey_ = 0;
 
@@ -265,8 +266,10 @@ class GfxRenderer {
   // measuring borrow it from the provider's fallback font (e.g. a symbol and
   // emoji .cpfont); if that lacks it too, one small dotted mark is drawn per
   // grapheme cluster. Never used for BoundedUI SD fonts.
-  void setFallbackFontProvider(FallbackFontProviderFn provider, void* context) {
+  void setFallbackFontProvider(FallbackFontProviderFn provider, void* context,
+                               FallbackFontProviderFn worldProvider = nullptr) {
     fallbackProvider_ = provider;
+    worldFallbackProvider_ = worldProvider;
     fallbackContext_ = context;
   }
   // Identity of the installed fallback font (0 when none). Layout caches mix it
@@ -276,6 +279,10 @@ class GfxRenderer {
   SdCardFont* fallbackFont(bool load) const {
     return fallbackProvider_ ? fallbackProvider_(fallbackContext_, load) : nullptr;
   }
+  SdCardFont* worldFallbackFont(bool load) const {
+    return worldFallbackProvider_ ? worldFallbackProvider_(fallbackContext_, load) : nullptr;
+  }
+  SdCardFont* fallbackForCodepoint(uint32_t cp, uint8_t style = 0) const;
   // Appends (UTF-8, unique) the visible cluster-base codepoints of `text` that
   // fontId lacks. Used to prewarm the fallback font with a page's misses.
   void appendFallbackCodepoints(int fontId, const char* text, std::string& out) const;

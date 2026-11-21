@@ -4,6 +4,35 @@ Current 1.0.0 preparation and exact-image results are in
 [the candidate record](release-1.0.0-candidate.md). Historical 0.1.0 results below
 keep their original image scope.
 
+## X3 and X4 wake-clock hardware results — 2026-11-21
+
+On X3, a cold wake reset the system clock to zero. The external real-time
+clock (RTC) returned 2000-01-01, and the reader restored its last saved time.
+The home screen showed 13:07 when the phone showed 13:13. The production
+clock code now retries network time sync on a Wi-Fi join when the RTC
+reading is invalid, even if the saved settings say it synced previously.
+It reads the RTC back to verify the write.
+
+Both readers ran diagnostic build `1.2.0-dev-main-3811de1e-w2f00f106`.
+With automatic sleep set to 10 minutes, the readers recorded the following
+times offline. The tester checked the first home screen before opening Same
+Wi-Fi. All times are local (KST).
+
+| Reader | Entered automatic sleep | Internal time at wake | First home screen |
+|---|---|---|---|
+| X3 | 13:36:35 | Restored 14:11:06 from the RTC after 34 min 31 s asleep | Displayed 14:11 at 14:11:08 |
+| X4 | 13:36:37 | Retained 14:11:15 after 34 min 38 s asleep | Displayed 14:11 at 14:11:18 |
+
+Both displays matched the phone to the minute in this trial and in the
+shorter trial at 13:24. The previously observed two-minute offset on X4
+did not recur in either trial. Its cause remains open. Local device
+records are in `build/offline-wake-clock/` and
+`build/offline-wake-clock-long-132632/`.
+
+The local `gh_release` build compiled the same RTC repair. The production
+image is 6,352,048 bytes (SHA-256 `c631b12abb0e283ec8b5dfbed2ca975c3d27b06369f94bcc46b8d9ee9e009f5a`).
+The physical observations above were collected on the diagnostic image.
+
 ## Current local reading repair — 2026-10-29
 
 Production0.1.0 gh_release, 6,372,784B, SHA

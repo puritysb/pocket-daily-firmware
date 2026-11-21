@@ -132,7 +132,7 @@ struct Env {
   HomeDraw::FontResolver labels;  // short control labels (device: partial allowed)
   void* context = nullptr;
   void (*drawHeader)(void* context, const GfxRenderer& renderer, int x, int y, int width, int height, const char* title,
-                     const char* subtitle) = nullptr;
+                     const char* subtitle, bool branded) = nullptr;
   bool (*drawCover)(void* context, GfxRenderer& renderer, int x, int y, int width, int height) = nullptr;
   bool (*drawFullCover)(void* context, GfxRenderer& renderer, int width, int height) = nullptr;
   int batteryPercent = -1;

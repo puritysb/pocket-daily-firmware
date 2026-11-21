@@ -45,7 +45,8 @@ void disable() { enabled = false; }
 
 void* allocate(size_t size, const char* function) {
   if (!enabled) return std::malloc(size);
-  if (size == 32768) ++counters.windowAttempts;
+  const bool ring = size == 32768 && std::strcmp(function, "init") == 0;
+  if (ring) ++counters.windowAttempts;
   const bool streamBuffer = std::strcmp(function, "readFileToStream") == 0;
   if (streamBuffer && size == 8192) ++counters.largeChunks;
   if (streamBuffer && size == 1024) ++counters.smallChunks;
@@ -53,8 +54,8 @@ void* allocate(size_t size, const char* function) {
     rejectRead = false;
     return nullptr;
   }
-  if (size > limit - counters.live || (size == 32768 && rejectWindow)) {
-    if (size == 32768) {
+  if (size > limit - counters.live || (ring && rejectWindow)) {
+    if (ring) {
       ++counters.windowRejects;
       if (windowRejected) windowRejected(counters.windowRejects);
     }

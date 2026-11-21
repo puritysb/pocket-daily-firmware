@@ -12,6 +12,7 @@
 #include "BookmarkEntry.h"
 #include "ChapterPosition.h"
 #include "EpubReaderMenuActivity.h"
+#include "ManualTurnQueue.h"
 #include "ProgressMapper.h"
 #include "ReaderActivity.h"
 #include "ReaderLayoutAhead.h"
@@ -27,6 +28,7 @@ class EpubReaderActivity final : public ReaderActivity {
   int nextPageNumber = 0;
   int activeReaderFontId = 0;
   std::optional<uint16_t> pendingPageJump;
+  int pendingForwardBoundarySpine = -1;
   std::string pendingAnchor;
   int cachedSpineIndex = 0;
   int cachedChapterTotalPageCount = 0;
@@ -35,7 +37,10 @@ class EpubReaderActivity final : public ReaderActivity {
   std::optional<uint32_t> pendingOffsetJump;
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
-  int8_t pendingManualTurn = 0;
+  ManualTurnQueue manualTurns;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  std::atomic<bool> tracePagePainted{false};
+#endif
   Pocket::KeyboardRemote::Failure remoteFailure = Pocket::KeyboardRemote::Failure::None;
   uint32_t remoteMessageAt = 0;
   bool pendingPercentJump = false;

@@ -43,6 +43,8 @@ class HalGPIO {
   InputManager inputMgr;
 #endif
 
+  unsigned long lastX3UsbPollMs = 0;
+  bool x3UsbPolled = false;
   bool lastUsbConnected = false;
   bool usbStateChanged = false;
   uint8_t previousCapacitivePageButtons = 0;

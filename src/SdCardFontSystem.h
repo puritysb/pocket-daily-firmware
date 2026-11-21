@@ -147,6 +147,9 @@ class SdCardFontSystem {
   // cost no SD access.
   GfxRenderer* renderer_ = nullptr;  // set by begin(); receives the fallback provider and layout key
   SdCardFont* fallback_ = nullptr;   // owned
+  std::unique_ptr<SdCardFont> worldFallback_;
+  bool worldFallbackUnavailable_ = false;
+  bool worldReaderFallbackEnabled_ = false;
   uint8_t fallbackPointSize_ = 0;
   enum class FallbackMode : uint8_t { Disabled, Symbols, UiFamily, ReaderOverlay };
   FallbackMode fallbackMode_ = FallbackMode::Disabled;
@@ -154,6 +157,8 @@ class SdCardFontSystem {
   uint8_t readerOverlayOwners_ = 0;
   uint32_t readerOverlayGeneration_ = 0;
   static SdCardFont* provideFallback(void* context, bool load);
+  static SdCardFont* provideWorldFallback(void* context, bool load);
+  SdCardFont* worldFallbackFont(bool load);
   SdCardFont* fallbackFont(bool load);
   void setFallbackEnabled(bool enabled);
   void dropFallback();

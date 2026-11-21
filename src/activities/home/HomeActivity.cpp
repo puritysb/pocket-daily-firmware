@@ -1,6 +1,9 @@
 #include "HomeActivity.h"
 
 #include <Bitmap.h>
+#ifdef ENABLE_DEV_REMOTE_FLASH
+#include <DevButtonTrace.h>
+#endif
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -571,7 +574,12 @@ void HomeActivity::render(RenderLock&&) {
   }
 }
 
-void HomeActivity::onRecentBookSelected(const std::string& path) { activityManager.goToReader(path); }
+void HomeActivity::onRecentBookSelected(const std::string& path) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  DevButtonTrace::action(DevButtonTrace::HomeSelect);
+#endif
+  activityManager.goToReader(path);
+}
 
 void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 

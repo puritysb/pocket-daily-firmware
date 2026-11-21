@@ -1,3 +1,6 @@
+#include "pocket_daily/dev/WakeClockTrace.h"
+#include <DevButtonTrace.h>
+
 #include "EmptyArticles.h"
 #include "pocket_daily/PocketAgendaStore.h"
 #include "pocket_daily/PocketReadingShelf.h"
@@ -10,6 +13,7 @@ extern uint8_t _rtc_probe_start[], _rtc_probe_end[], _rtc_force_slow_end[];
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <HalClock.h>
+#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <LibraryBuilder.h>
@@ -68,7 +72,6 @@ extern uint8_t _rtc_probe_start[], _rtc_probe_end[], _rtc_force_slow_end[];
 #include "util/BookmarkUtil.h"
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include <HalDisplay.h>
-#include <HalPowerManager.h>
 #include <nvs.h>
 
 #include "activities/RenderLock.h"
@@ -2036,7 +2039,7 @@ void handleDevBleCycle(WebServer& server, const RouteDeps& d) {
   using Pocket::NearbySync::DevSleepCycle::ReturnMode;
   const String sleep = server.arg("sleep");
   bool standbySupported = false;
-#ifdef ENABLE_BLE_STANDBY
+#ifdef ENABLE_TERMINAL_BLE_STANDBY
   standbySupported = powerManager.bleStandbySupported();
 #endif
   if ((sleep == "timer-home" && gpio.deviceIsX3()) ||
@@ -2662,6 +2665,62 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
   // Developer builds only: flash the staged /update.bin over the LAN so
   // iteration does not walk the on-device Settings menus. Absent from
   // gh_release builds by build flag, not by request filtering.
+  routes.on("/api/pocket/v1/dev/wake-clock", HTTP_POST, [server = &server, deps = &d] {
+    char identity[9];
+    if (!admitContentOperation(*server, *deps, identity)) return;
+    server->send(PocketDaily::WakeClockTrace::arm() ? 204 : 500);
+  });
+  routes.on("/api/pocket/v1/dev/wake-clock", HTTP_GET, [server = &server, deps = &d] {
+    char identity[9];
+    if (!admitContentOperation(*server, *deps, identity)) return;
+    if (server->hasArg("rtc")) {
+      tm local{};
+      const time_t epoch = halClock.localTime(local) ? mktime(&local) : 0;
+      server->send(200, "text/plain", String(static_cast<unsigned long>(epoch)));
+      return;
+    }
+    server->send(200, "text/plain", PocketDaily::WakeClockTrace::report());
+  });
+  routes.on("/api/pocket/v1/dev/button-trace", HTTP_POST, [server = &server, deps = &d] {
+    char identity[9];
+    if (!admitContentOperation(*server, *deps, identity)) return;
+    if (!gpio.deviceIsX3()) {
+      server->send(409, "text/plain", "Requires X3");
+      return;
+    }
+    const auto op = server->arg("op");
+    if (op == "start" || op == "start-boot")
+      DevButtonTrace::start(op == "start-boot");
+    else if (op == "stop")
+      DevButtonTrace::stop();
+    else if (op == "clear")
+      DevButtonTrace::clear();
+    else {
+      server->send(400, "text/plain", "Unknown operation");
+      return;
+    }
+    server->send(204);
+  });
+  routes.on("/api/pocket/v1/dev/button-trace", HTTP_GET, [server = &server, deps = &d] {
+    char identity[9];
+    if (!admitContentOperation(*server, *deps, identity)) return;
+    char line[120];
+    snprintf(line, sizeof(line),
+             "active count full homeGapMs readerGapMs\n%u %u %u %lu %lu\nms surface action raw held\n",
+             DevButtonTrace::active(), DevButtonTrace::count(), DevButtonTrace::full(),
+             static_cast<unsigned long>(DevButtonTrace::maxGap(DevButtonTrace::Home)),
+             static_cast<unsigned long>(DevButtonTrace::maxGap(DevButtonTrace::Reader)));
+    server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server->send(200, "text/plain", "");
+    server->sendContent(line);
+    for (unsigned i = 0; i < DevButtonTrace::count(); ++i) {
+      const auto e = DevButtonTrace::event(i);
+      snprintf(line, sizeof(line), "%lu %u %u %u %u\n", static_cast<unsigned long>(e.ms), e.surface, e.action, e.raw,
+               e.held);
+      server->sendContent(line);
+    }
+    server->sendContent("");
+  });
   routes.on("/api/pocket/v1/dev/transfer-stats", HTTP_GET, [server = &server, deps = &d] {
     note(*deps);
     if (!deps->stream || deps->stream->receiving()) {

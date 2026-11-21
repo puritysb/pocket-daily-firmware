@@ -227,14 +227,15 @@ bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* conte
     case Surface::None:
       return false;
     case Surface::Home: {
-      if (!visitStrings(context, visit, {s.home, s.select, s.articles, s.sync})) return false;
+      if (!visitStrings(context, visit, {s.home, s.select, s.library, s.views, s.sync})) return false;
       if (frame.rowCount > 0 && frame.rows[0].clockPage) {
         const auto detail = Home::clockDetail(profile, frame.clock, g, s);
-        return visitStrings(context, visit, {s.library, detail.label, detail.text});
+        return visitStrings(context, visit, {detail.label, detail.text});
       }
       const Home::Row* first = frame.rowCount ? &frame.rows[0] : nullptr;
       if (first && first->shelfIndex >= 0) {
-        if (!visitStrings(context, visit, {s.recentBooks, s.startReading})) return false;
+        if (!visitStrings(context, visit, {s.recentBooks, s.continueReading, s.noOpenBook, s.startReading}))
+          return false;
         for (uint8_t i = 0; i < frame.recentCount; ++i)
           if (!visitStrings(context, visit, {frame.recentBooks[i].title, frame.recentBooks[i].author})) return false;
       } else if (first && first->calendarPage) {
@@ -309,7 +310,7 @@ bool drawFrame(GfxRenderer& renderer, const Frame& frame, const int cjkFont, Hea
   env.labels = env.text;
   env.context = &context;
   env.drawHeader = [](void* self, const GfxRenderer& r, int x, int y, int width, int height, const char* title,
-                      const char* subtitle) {
+                      const char* subtitle, bool branded) {
     auto& d = *static_cast<DrawContext*>(self);
     // GUI.drawHeader resolves CJK through UiCjkFont, whose first step reuses
     // the resident font when it covers the text. The presenter checked these
@@ -324,10 +325,15 @@ bool drawFrame(GfxRenderer& renderer, const Frame& frame, const int cjkFont, Hea
         return;
       }
     }
-    if (d.header)
-      GUI.drawHeaderAndDescribe(r, Rect{x, y, width, height}, title, subtitle, true, *d.header);
-    else
-      GUI.drawHeader(r, Rect{x, y, width, height}, title, subtitle);
+    const Rect rect{x, y, width, height};
+    if (d.header) {
+      GUI.drawHeaderAndDescribe(r, rect, title, subtitle, !branded, *d.header, branded);
+    } else if (branded) {
+      HeaderPainter::Inputs inputs;
+      GUI.drawHeaderAndDescribe(r, rect, title, subtitle, false, inputs, true);
+    } else {
+      GUI.drawHeader(r, rect, title, subtitle);
+    }
     if (d.headerDrawn) *d.headerDrawn = true;
   };
   // Covers are never decoded here: the shared renderer draws the title card.

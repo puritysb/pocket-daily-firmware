@@ -69,8 +69,12 @@ to that patch.
   (`goToReader()` resets origin to Home, `resumeReader()` keeps it); stock
   Home/Library/File Browser host no BLE window; sleep default/Blank screens are
   stock; themes are stock except per-label `UiCjkFont`, `StatusBarTitle` and
-  Home paging. Home menu is stock plus one entry; Articles opens from Pocket
-  Daily Home's Left button.
+  Home paging. Home menu is stock plus one entry.
+- 2026-11-20 Home follow-up: Views lists only configured Home sections. With
+  zero or one section, Left opens Library, which indexes saved article EPUBs
+  under `/Articles`. The awake default dashboard uses the standard battery
+  indicator and a Pocket Daily title and mark. The sleep cover keeps its
+  battery-at-sleep-entry badge.
 - Owner decision 2026-10-31: stock defaults for new installs — power-on opens
   Home (Pocket Daily via `startupApp`) and Long-press Menu is Disabled. Saved
   settings keep their values. The bilingual view mode was removed the same day:
@@ -102,6 +106,11 @@ to that patch.
   compatible before either side is presented as production-ready.
 
 ## Hardware constraints
+
+- On 2026-11-21, X3 restored offline wake time from its external RTC after the
+  Wi-Fi join code repaired an invalid clock. X4's reported two-minute offset
+  did not recur in the short or 35-minute sleep trial. See the
+  [wake-clock hardware results](release-checklist.md#x3-and-x4-wake-clock-hardware-results--2026-11-21).
 
 - X3 and X4 are no-PSRAM ESP32-C3 readers. X3 panel 528x792. Host builds and
   tests never satisfy hardware sign-off.
@@ -201,12 +210,16 @@ to that patch.
 
 - `scripts/pio_ble_standby.sh` builds env `ble_standby` (extends `default`, adds
   PM/tickless/BT modem sleep in an isolated SDK copy). It is SDK automatic light
-  sleep, not BLE wake from deep sleep. `default`/`gh_release` keep bounded BLE
-  windows. The 2026-11-02 opt-in extension admits original C3 X3/X4 via HAL;
+  sleep. `default`/`gh_release` keep bounded BLE windows before terminal sleep. The 2026-11-02 opt-in extension admits original C3 X3/X4 via HAL;
   w02b1fbaf passed Mac/X3 and Mac/X4 bonded BLE→Same Wi-Fi plus settings restoration;
   short light-sleep samples only, no energy/overnight claim. Review: `docs/ble-standby-review.md`.
-- After the sleep frame is saved and the framebuffer released, a bonded X3
-  advertises `WAKE1` and accepts authenticated `START_WIFI <id>`, then restarts
+- 2026-11-21 Home BLE policy: default on for new preferences, idle Home only
+  for production app connection. Auto-sleep ends Home BLE. Never sleep caps
+  it at 30 minutes per local input period. A visible Home clock refreshes
+  once per minute without extending the deadline. Terminal BLE standby
+  remains an experimental build path. Battery impact needs measurement.
+- In the terminal standby experiment, after the sleep frame is saved and the
+  framebuffer released, a bonded X3 advertises `WAKE1` and accepts authenticated `START_WIFI <id>`, then restarts
   once into saved Wi-Fi. Buttons route to reading. Falls back to deep sleep for
   disabled sync, no bond, failed memory admission or low battery (>5% with
   confirmed charging, otherwise >10%); exit reason `low-battery` is distinct.
@@ -224,15 +237,26 @@ to that patch.
 
 ## Reader engine facts
 
-- Section cache v138 (`lib/Epub/Epub/Section.cpp`; bold-italic faces removed); cache formats, version
+- Section cache v139 (`lib/Epub/Epub/Section.cpp`; rebuild layouts after reader-font eviction); cache formats, version
   bytes and invalidation rules are in `lib/Epub/AGENTS.md`. Partials carry a
   format tag.
-- `ReaderLayoutAhead` lays out ahead on the render task after each page and
-  yields to buttons; next chapter pre-builds while idle on the last page.
-- Advance cache is a bounded LRU with batched reads; the page glyph set is
-  pinned while drawing. Uncovered glyphs fall back to
-  `/.fonts/PocketSymbols/PocketSymbols_12.cpfont` (`docs/sd-card-fonts.md`).
-- `SdCardFont::BoundedUI` (`docs/bounded-ui-fonts.md`) is opt-in for UI text.
+- `ReaderLayoutAhead` yields to input. EPUB manual turns keep up to eight pending
+  directions in tap order across renders. Page changes hold the render lock (2026-11-21).
+- On X3, chapter extraction below 32 KiB can use the full destination as the
+  DEFLATE dictionary. On 2026-11-21 two fresh device walks crossed the 15,543-byte
+  chapter that had failed at window initialization.
+- The EPUB footer keeps the reader font resident while incremental layout runs.
+  Forward turns at a partial chapter boundary carry into the next chapter if
+  layout finds EOF. On 2026-11-21 X3 build `w3ea7480f` completed two cold
+  115-page walks of the unchanged Korean EPUB (previously stalled at 35).
+  Both reached spine 8, page 5, with identical final body pixels
+  (`build/x3-whole115/{one,two}/original/report.json`). On X4 the same binary and
+  EPUB completed both 115-page walks at 14 pt, reaching spine 7, page 9 with
+  identical final body pixels (`build/x4-whole115/{first,second}/original/report.json`).
+- The advance cache batches reads and pins page glyphs while drawing. For a
+  selected SD reader face, missing CJK glyphs try PocketSansWorld first.
+  As of 2026-11-21 World retries with bounded SD reads if cached loading fails.
+  An unavailable World face can be reopened on the next EPUB render.
 - Directory iteration must check the still-open parent's error state at EOF
   (SdFat clears the child); fixed 2026-10-09 with host regressions.
 - OPDS streams ≤1 MiB to a temp file then parses with bounded fields/entries.

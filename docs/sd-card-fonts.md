@@ -93,8 +93,14 @@ Chinese) and Hangul. It does not cover Arabic/Persian, Thai, Indic scripts,
 Georgian, Armenian, Bopomofo or CJK Extension A/B. For those, choose an SD
 family that covers them (for example Amiri or NotoNaskhArabicUI, and
 NotoSansExtended for Georgian/Armenian, from **Manage Fonts**); a chosen SD
-family always wins over the automatic font. The Manage Fonts catalog has no
-Thai or Indic family, and Indic scripts need shaping the renderer does not do.
+family remains the primary font. With PocketSansWorld installed, the reader
+keeps the selected face for glyphs it covers. Missing CJK characters use
+PocketSansWorld first. For other missing characters the reader tries PocketSymbols
+then PocketSansWorld, including punctuation absent from the symbol pack. To add the world font after
+a firmware-only update, copy the staged `sd-card/.fonts/PocketSansWorld/`
+folder to `/.fonts/PocketSansWorld/` on the reader's SD card. The Manage Fonts
+catalog has no Thai or Indic family, and Indic scripts need shaping the
+renderer does not do.
 
 ## Non-Latin Scripts Fallback in the User Interface
 

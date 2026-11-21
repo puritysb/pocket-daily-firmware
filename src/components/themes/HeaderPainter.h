@@ -5,6 +5,7 @@
 
 class GfxRenderer;
 namespace HeaderPainter {
+inline constexpr int BRAND_LOGO_HEIGHT = 28;
 // Everything the passive BaseTheme header consumes. No pointers, frame pixels,
 // settings reads or guessed coordinates cross the host/device boundary.
 struct Inputs {
@@ -32,5 +33,5 @@ struct Inputs {
 // Same painter called by BaseTheme and the native connected-reader preview.
 // The SDK owns title reserves, typography, battery and clock geometry.
 void paintHeader(const GfxRenderer& renderer, const Inputs& inputs, int x, int y, int width, int height,
-                 const char* title, const char* subtitle);
+                 const char* title, const char* subtitle, bool branded = false);
 }  // namespace HeaderPainter

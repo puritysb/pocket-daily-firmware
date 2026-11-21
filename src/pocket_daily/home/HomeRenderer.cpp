@@ -9,6 +9,7 @@
 #include <cstring>
 #include <string_view>
 
+#include "components/themes/HeaderPainter.h"
 #include "fontIds.h"
 #include "pocket_daily/home/GlanceFormat.h"
 
@@ -234,7 +235,8 @@ int drawFlipClock(const GfxRenderer& r, const DeskClock& clock, int x, int top, 
   return 11 * unit;
 }
 
-void drawDeskClock(GfxRenderer& r, const HomeView& view, const Env& env, const int headerHeight) {
+void drawDeskClock(GfxRenderer& r, const HomeView& view, const Env& env, const int headerHeight,
+                   const char* leftAction) {
   const int w = r.getScreenWidth();
   const int h = r.getScreenHeight();
   const int pad = env.metrics.contentSidePadding;
@@ -243,7 +245,8 @@ void drawDeskClock(GfxRenderer& r, const HomeView& view, const Env& env, const i
 
   r.clearScreen();
   if (env.drawHeader)
-    env.drawHeader(env.context, r, 0, env.metrics.topPadding, w, headerHeight, view.strings.pocketDaily, nullptr);
+    env.drawHeader(env.context, r, 0, env.metrics.topPadding, w, headerHeight, view.strings.pocketDaily, nullptr,
+                   false);
   const int tileHeight = drawFlipClock(r, view.clock, pad, top, w - 2 * pad, 11 * (h / (w > h ? 31 : 25)));
   const int unit = tileHeight / 11;
 
@@ -267,8 +270,8 @@ void drawDeskClock(GfxRenderer& r, const HomeView& view, const Env& env, const i
   r.drawCenteredText(body, labelY + r.getLineHeight(SMALL_FONT_ID) + unit / 2, fitted.c_str());
   const auto& s = view.strings;
 
-  HomeDraw::drawPocketActionStrip(r, view.isX3, env.labels, s.home, view.reading.valid ? s.select : s.library, s.views,
-                                  s.sync);
+  HomeDraw::drawPocketActionStrip(r, view.isX3, env.labels, s.home, view.reading.valid ? s.select : s.library,
+                                  leftAction, s.sync);
 }
 }  // namespace
 
@@ -501,6 +504,9 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
       if (i <= cursor) ++groupPosition;
     }
   }
+  uint8_t starts[4]{};
+  const int sections = homeSectionStarts(groups, boundedCount, starts, 4);
+  const char* leftAction = sections > 1 ? s.views : s.library;
   const bool sidePaging = groupCount > 1 || view.calendarBrowsing || view.choosingView;
   const bool rotatedNew = newInterface && renderer.getOrientation() != GfxRenderer::Orientation::Portrait;
   const int hardwareMargin = rotatedNew ? renderer.getLineHeight(SMALL_FONT_ID) + 20 : 0;
@@ -539,17 +545,14 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   using HomeDraw::drawWrappedFixed;
   using HomeDraw::formatWeatherSnapshotDate;
 
-  if (view.choosingView) {
+  if (view.choosingView && sections > 1) {
     renderer.clearScreen();
-    uint8_t starts[4]{};
-    const int sections = homeSectionStarts(groups, boundedCount, starts, 4);
     int y = headerY + 12;
     renderer.drawText(UI_12_FONT_ID, pad, y, s.views, true, EpdFontFamily::BOLD);
     y += line12 + 20;
-    for (int i = 0; i <= sections; ++i) {
-      const Section section = i < sections ? static_cast<Section>(groups[starts[i]]) : Section::Reading;
-      const char* label = i == sections                  ? s.articles
-                          : section == Section::Reading  ? s.reading
+    for (int i = 0; i < sections; ++i) {
+      const auto section = static_cast<Section>(groups[starts[i]]);
+      const char* label = section == Section::Reading    ? s.reading
                           : section == Section::Calendar ? s.calendar
                           : section == Section::Clock    ? s.clock
                                                          : s.study;
@@ -564,7 +567,8 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     return;
   }
   const bool readingPage = n > 0 && (rows[cursor].reading || selectedShelf >= 0);
-  const int headerHeight = readingPage && (dashboard || view.profile.shows(DailyProfile::HomeItem::ClockCompact))
+  const int headerHeight = dashboard ? std::max(HeaderPainter::BRAND_LOGO_HEIGHT, line12) + 10
+                           : readingPage && view.profile.shows(DailyProfile::HomeItem::ClockCompact)
                                ? 0
                                : std::min(m.headerHeight, line12 + (readingPage ? 4 : m.verticalSpacing * 2));
   const int selectedIndex = view.selected >= 0 && view.selected < n ? view.selected : 0;
@@ -572,14 +576,14 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     const auto orientation = renderer.getOrientation();
     if (view.profile.clockPage() == DailyProfile::HomeItem::ClockLandscape)
       renderer.setOrientation(GfxRenderer::Orientation::LandscapeClockwise);
-    drawDeskClock(renderer, view, env, headerHeight);
+    drawDeskClock(renderer, view, env, headerHeight, leftAction);
     renderer.setOrientation(orientation);
     return;
   }
   renderer.clearScreen();
   if (env.drawHeader && headerHeight > 0)
     env.drawHeader(env.context, renderer, pad - originalPad, headerY, w - 2 * (pad - originalPad), headerHeight,
-                   s.pocketDaily, nullptr);
+                   s.pocketDaily, nullptr, dashboard);
   const int contentTop = headerY + headerHeight + m.verticalSpacing;
   const int hintTop = pageH - std::max(renderer.getLineHeight(SMALL_FONT_ID) + 16, hardwareMargin);
   const bool portrait = pageH > w;
@@ -797,13 +801,12 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     const int width = w - pad * 2;
     const int height = hintTop - contentTop;
     const int spacing = std::max(10, m.verticalSpacing);
-    const int clockY = contentTop + spacing + (env.batteryPercent >= 0 ? renderer.getLineHeight(SMALL_FONT_ID) : 0);
-    drawBatteryBadge(renderer, env.batteryPercent, w - pad, headerY);
-    const int clockHeight = drawFlipClock(renderer, view.clock, pad, clockY, width, height / (portrait ? 4 : 3));
-    const int monthY = clockY + clockHeight + spacing * 2;
+    const int bodyY = contentTop + spacing;
     const int cellH = line12 + 6;
-    const int monthHeight = line12 + renderer.getLineHeight(SMALL_FONT_ID) + 18 + cellH * 6;
     if (portrait) {
+      const int clockHeight = drawFlipClock(renderer, view.clock, pad, bodyY, width, height / 4);
+      const int monthY = bodyY + clockHeight + spacing * 2;
+      const int monthHeight = line12 + renderer.getLineHeight(SMALL_FONT_ID) + 18 + cellH * 6;
       const int monthW = width * 9 / 10;
       drawDashboardMonth(renderer, view, env, pad + (width - monthW) / 2, monthY, monthW, cellH);
       const int bookY = monthY + monthHeight + spacing;
@@ -811,13 +814,16 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
       drawReading(pad, bookY, width, hintTop - bookY);
     } else {
       const int monthW = width / 2 - 20;
-      drawDashboardMonth(renderer, view, env, pad, monthY, monthW, cellH);
+      drawDashboardMonth(renderer, view, env, pad, bodyY, monthW, cellH);
       const int bookX = pad + monthW + 32;
-      drawReading(bookX, monthY, w - pad - bookX, hintTop - monthY);
+      const int bookW = w - pad - bookX;
+      const int clockHeight = drawFlipClock(renderer, view.clock, bookX, bodyY, bookW, height / 3);
+      const int bookY = bodyY + clockHeight + spacing;
+      drawReading(bookX, bookY, bookW, hintTop - bookY);
     }
     if (sidePaging) HomeDraw::drawPocketSideChevrons(renderer, view.isX3);
     HomeDraw::drawPocketActionStrip(renderer, view.isX3, env.labels, s.home,
-                                    renderReadingSnapshot.valid ? s.select : s.library, s.views, s.sync);
+                                    renderReadingSnapshot.valid ? s.select : s.library, leftAction, s.sync);
     return;
   }
 
@@ -892,11 +898,12 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   }
   if (sidePaging) HomeDraw::drawPocketSideChevrons(renderer, view.isX3);
 
-  // Confirm selects the current carousel item. Left opens the Articles library;
-  // Right opens Pocket's account-free nearby transport, where the companion
-  // sends cards and the glance.
+  // Left switches between configured Home sections or opens Library directly.
   HomeDraw::drawPocketActionStrip(renderer, view.isX3, env.labels, s.home,
-                                  readingPage && !renderReadingSnapshot.valid ? s.library : s.select, s.views, s.sync);
+                                  n == 0                                        ? s.sync
+                                  : readingPage && !renderReadingSnapshot.valid ? s.library
+                                                                                : s.select,
+                                  leftAction, s.sync);
 }
 
 bool drawFullCover(const GfxRenderer& renderer, const Bitmap& bitmap, int width, int height) {
@@ -1020,7 +1027,7 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
     if (env.drawCover && env.drawCover(env.context, renderer, 0, 0, w, pageH)) return;
   }
   if (env.drawHeader)
-    env.drawHeader(env.context, renderer, 0, m.topPadding, w, m.headerHeight, s.pocketDaily, view.headerMeta);
+    env.drawHeader(env.context, renderer, 0, m.topPadding, w, m.headerHeight, s.pocketDaily, view.headerMeta, false);
 
   char buf[96];
 

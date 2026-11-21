@@ -100,19 +100,38 @@ Private local evidence: `build/home-connect-20261102/`. No battery-current or
 overnight claim follows from these functional samples.
 
 
+### Home app connection (2026-11-21)
+
+The Home connection uses the same authenticated `WAKE1` / `START_WIFI`
+handoff on supported X3 and X4 builds. **Allow app connection** defaults on
+for readers without a saved preference. The bonded reader listens after
+three seconds idle on Pocket Daily Home. It stops at the automatic sleep
+deadline, or after 30 minutes of inactivity when automatic sleep is off.
+A local input starts a fresh idle period. Clock repaints preserve the
+original idle deadline and briefly release BLE at each minute boundary
+while a clock is visible. Reading and other activities keep their own
+radio policy.
+
+Opening My Reader in the foreground tries the selected paired reader once.
+The reader joins its saved network and the app verifies its identity over
+HTTP. The established connection can sync the clock and reading positions
+as usual. Continuous standby after sleep remains available only in the
+`ble_standby` test environment. Production sleep retains the existing
+bounded reading-position exchange and then powers down as before.
+
 ### Experimental app-requested wake (2026-10-09)
 
 The opt-in `ble_standby` build replaces the original ESP32-C3 X3/X4 pre-deep-sleep window with
 retained-screen BLE standby when the existing bond, setting, battery and memory
 gates pass. Build it with `scripts/pio_ble_standby.sh`, which isolates the
 PM/tickless/controller-modem-sleep SDK from normal builds. Default and release
-images retain the bounded windows described below. X4 Classic/Pro and other boards
+images retain the bounded windows described below when going to sleep. X4 Classic/Pro and other boards
 are not admitted by this C3 path. X4 uses the conservative >10% battery gate
 even on USB; only X3 confirmed charging permits the lower threshold. The HAL
 retains GPIO levels through light sleep, including X4’s HIGH battery latch. A
 terminal X4 power-off still cuts that latch and cannot be reversed over BLE.
 
-Standby and the opt-in Home listener described below advertise capability `WAKE1`. An already bonded,
+Terminal standby and the Home listener advertise capability `WAKE1`. An already bonded,
 encrypted peer may send `START_WIFI <id>` (exactly eight uppercase hexadecimal
 digits). `OK <id>` accepts a Same-Wi-Fi handoff; ordinary exchange windows reject
 it with `NOT_IN_SYNC`. `START_AP` remains unavailable. Merely connecting or

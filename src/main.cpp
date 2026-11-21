@@ -1,5 +1,8 @@
+#include "pocket_daily/dev/WakeClockTrace.h"
 #include <Arduino.h>
 #include <BoardConfig.h>
+#include <DevButtonTrace.h>
+#include <esp_system.h>
 #include <Epub.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
@@ -414,7 +417,7 @@ void enterDeepSleep(bool fromTimeout = false) {
     Storage.remove(SLEEP_FRAME_FILE);
   }
 
-#ifdef ENABLE_BLE_STANDBY
+#ifdef ENABLE_TERMINAL_BLE_STANDBY
   // The outgoing network activity has stopped its servers in onExit(). Return
   // the Wi-Fi driver heap before admitting BLE, including sleep from Sync.
   if (WiFi.getMode() != WIFI_MODE_NULL && Pocket::NearbySync::Window::standbyEligible()) {
@@ -472,6 +475,9 @@ void enterDeepSleep(bool fromTimeout = false) {
         (void)standbyStarted;
 #endif
         if (outcome != Pocket::NearbySync::Window::StandbyExit::DeepSleep) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        DevButtonTrace::checkpoint(DevButtonTrace::SleepStandbyRestart);
+#endif
           using PocketDaily::Boot::StandbyReturn;
           PocketDaily::Boot::armStandbyReturn(
               standbyTicket, outcome == Pocket::NearbySync::Window::StandbyExit::SameWifi ? StandbyReturn::SameWifi
@@ -578,6 +584,9 @@ void setupDisplayAndFonts(bool seamless = false) {
 
 void setup() {
   BoardConfig::holdPowerRails();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  DevButtonTrace::bootStarted(static_cast<uint8_t>(esp_reset_reason()));
+#endif
 
 #ifdef ENABLE_SERIAL_LOG
 #ifdef CROSSPOINT_WAIT_FOR_USB_SERIAL
@@ -728,6 +737,9 @@ void setup() {
   // only real clock across power-off, and time() is what plugin event
   // timestamps, TLS and file dates read. Placed before trustedtime::init(),
   // whose floor restore vetoes a lagging RTC and restores the floor instead.
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  PocketDaily::WakeClockTrace::beforeClockRestore();
+#endif
   struct tm rtcLocal;
   if (halClock.localTime(rtcLocal)) {
     // localTime() renders the RTC's UTC epoch under the TZ rule applied above,
@@ -739,6 +751,9 @@ void setup() {
   // Restore the monotonic clock floor before anything reads time() (event
   // timestamps, loan-expiry checks).
   trustedtime::init();
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  PocketDaily::WakeClockTrace::afterClockRestore();
+#endif
 
   // Prewarm the static settings metadata before the web server/File Transfer
   // path starts. The first construction allocates many small vectors; doing it
@@ -1067,6 +1082,13 @@ void loop() {
   static unsigned long lastMemPrint = 0;
 
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (DevButtonTrace::active()) {
+    DevButtonTrace::setSurface(activityManager.isForegroundReader()    ? DevButtonTrace::Reader
+                               : (activityManager.isForegroundHome() || activityManager.allowsAppConnection()) ? DevButtonTrace::Home
+                                                                       : DevButtonTrace::Other);
+  }
+#endif
   mappedInputManager.update();
 #ifdef ENABLE_DEV_REMOTE_FLASH
   if (activityManager.isReaderActivity() && mappedInputManager.wasReleased(MappedInputManager::Button::Back)) {
@@ -1168,8 +1190,9 @@ void loop() {
 
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();
-  if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.wasTouchActivity() || halTiltSensor.hadActivity() ||
-      activityManager.preventAutoSleep() || PocketDaily::TrialReader::preparingAutoWake()) {
+  const bool localActivity =
+      gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.wasTouchActivity() || halTiltSensor.hadActivity();
+  if (localActivity || activityManager.preventAutoSleep() || PocketDaily::TrialReader::preparingAutoWake()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
   }
@@ -1251,6 +1274,9 @@ void loop() {
   if (sleepTimeoutMs > 0 && millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
     PocketDaily::TrialReader::observeAutoSleep(sleepTimeoutMs, millis() - lastActivityTime);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    PocketDaily::WakeClockTrace::autoSleep();
+#endif
     enterDeepSleep(true);
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
     return;
@@ -1318,18 +1344,21 @@ void loop() {
   }
 
 #ifdef ENABLE_BLE_STANDBY
-  // Opt-in Home idle: retain the completed e-paper image, lend its framebuffer
-  // to the existing BLE standby service, and restore it BEFORE dispatching any
-  // physical input. The main task blocks here, so no navigation or new paint
-  // can race the framebuffer loan. Books/cards never enter this path.
+  // Home lends its framebuffer to BLE and restores it before input dispatch
+  // or a clock repaint. A repaint does not extend the user's idle deadline.
+  namespace HomeBle = Pocket::NearbySync::Window;
   static bool homeConnectionAttempted = false;
   static bool homeRepaintAfterRelease = false;
-  const bool homeIdle = SETTINGS.pocketAppConnection &&
-                        Pocket::NearbySync::Window::homeIdleAllowed(activityManager.allowsAppConnection(),
-                                                                    gpio.rawInputActive(), millis() - lastActivityTime);
-  if (!homeIdle) homeConnectionAttempted = false;
-  if (homeIdle && !homeConnectionAttempted && Pocket::NearbySync::Window::homeConnectionEligible()) {
-    homeConnectionAttempted = true;  // a failed gate never becomes an allocation/retry loop
+  const uint32_t homeIdleMs = millis() - lastActivityTime;
+  const bool allowsHomeConnection = SETTINGS.pocketAppConnection && activityManager.allowsAppConnection();
+  if (localActivity || !allowsHomeConnection) homeConnectionAttempted = false;
+  const uint32_t homeConnectionMs = HomeBle::homeConnectionRemainingMs(sleepTimeoutMs, homeIdleMs);
+  const bool tryHomeConnection = homeConnectionMs && !homeConnectionAttempted &&
+                                 HomeBle::homeIdleAllowed(allowsHomeConnection, gpio.rawInputActive(), homeIdleMs);
+  // Latch an expired Home window until local input or a screen change. A
+  // millis() wrap on a reader with Never sleep must not restart Bluetooth.
+  if (tryHomeConnection || (allowsHomeConnection && !homeConnectionMs)) homeConnectionAttempted = true;
+  if (tryHomeConnection && HomeBle::homeConnectionEligible()) {
     Pocket::NearbySync::Window::close(Pocket::NearbySync::Window::CloseReason::RADIO_OWNER);
     bool released = false;
     {
@@ -1344,20 +1373,34 @@ void loop() {
       // restoreFrameBufferAfterRemote() reallocates RAM, it does not reset a
       // controller put into terminal deep sleep. Use the same resumable panel
       // lifecycle as KeyboardRemote; terminal sleep owns display.deepSleep().
-      auto outcome = Pocket::NearbySync::Window::StandbyExit::DeepSleep;
-      if (powerManager.beginBleStandby()) {
-        const uint32_t elapsed = millis() - lastActivityTime;
-        const uint32_t remaining = sleepTimeoutMs == 0 ? 0 : (elapsed < sleepTimeoutMs ? sleepTimeoutMs - elapsed : 1);
-        outcome = Pocket::NearbySync::Window::runStandby(renderer, remaining,
-                                                         Pocket::NearbySync::Window::Trigger::HOME_CONNECT);
+      auto outcome = HomeBle::StandbyExit::DeepSleep;
+      bool refreshMinute = false;
+      const uint32_t remaining = HomeBle::homeConnectionRemainingMs(sleepTimeoutMs, millis() - lastActivityTime);
+      if (remaining && powerManager.beginBleStandby()) {
+        uint32_t slice = remaining;
+        if (activityManager.hasLiveHomeClock()) {
+          const auto clock = halClock.companionTime(time(nullptr));
+          if (clock.epoch >= HalClock::COMPANION_MIN_EPOCH) {
+            const uint32_t untilMinute = HomeBle::homeClockRefreshDelayMs(static_cast<uint32_t>(clock.epoch));
+            refreshMinute = untilMinute < remaining;
+            if (refreshMinute) slice = untilMinute;
+          }
+        }
+        outcome = HomeBle::runStandby(renderer, slice, HomeBle::Trigger::HOME_CONNECT);
       }
       if (!powerManager.endBleStandby()) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        DevButtonTrace::checkpoint(DevButtonTrace::HomePowerRestoreFailed);
+#endif
         LOG_ERR("MAIN", "Cannot restore UI power mode after BLE; restarting");
         Storage.prepareForDeepSleep();
         ESP.restart();
         for (;;) delay(1000);
       }
       if (outcome == Pocket::NearbySync::Window::StandbyExit::SameWifi) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        DevButtonTrace::checkpoint(DevButtonTrace::HomeWifiRestart);
+#endif
         PocketDaily::Boot::armStandbyReturn(standbyTicket, PocketDaily::Boot::StandbyReturn::SameWifi);
         Storage.prepareForDeepSleep();
         ESP.restart();
@@ -1369,17 +1412,24 @@ void loop() {
         restored = renderer.restoreFrameBufferAfterRemote();
       }
       if (!restored) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+        DevButtonTrace::checkpoint(DevButtonTrace::HomeFrameRestoreFailed);
+#endif
         LOG_ERR("MAIN", "Cannot restore Home framebuffer after BLE; restarting");
         Storage.prepareForDeepSleep();
         ESP.restart();
         for (;;) delay(1000);
       }
-      if (outcome == Pocket::NearbySync::Window::StandbyExit::Reader) {
+      if (outcome == HomeBle::StandbyExit::Reader) {
         lastActivityTime = millis();
+        homeConnectionAttempted = false;
         // Select acts on RELEASE. Do not block input polling with a redundant
         // Home repaint before that release can reach the activity. The e-paper
         // still shows Home; normal navigation will paint the selected screen.
         homeRepaintAfterRelease = true;
+      } else if (refreshMinute && outcome == HomeBle::StandbyExit::HomeTimeout) {
+        activityManager.requestUpdateAndWait();
+        homeConnectionAttempted = false;
       } else {
         activityManager.requestUpdate();
       }

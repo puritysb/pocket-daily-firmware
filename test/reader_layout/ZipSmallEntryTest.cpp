@@ -160,6 +160,20 @@ TEST_F(ZipSmallEntry, ExactBoundaryAndLargerEntriesRetainRingAndExactBytes) {
   }
 }
 
+TEST_F(ZipSmallEntry, ChapterDestinationReplacesRingOnlyBelowLimit) {
+  for (uint32_t size : {15543U, 32767U, 32768U}) {
+    const auto data = pattern(size, true);
+    archive(compressed(data), size);
+    ZipInflateFaults::reset(static_cast<size_t>(-1), true);
+    Sink sink;
+    const bool fits = size < 32768;
+    EXPECT_EQ(ZipFile(path).readFileToStream("item.bin", sink, 8192, false, 32768), fits);
+    EXPECT_EQ(sink.bytes, fits ? data : Bytes{});
+    EXPECT_EQ(ZipInflateFaults::stats().windowAttempts, fits ? 0U : 1U);
+    EXPECT_EQ(ZipInflateFaults::stats().live, 0U);
+  }
+}
+
 TEST_F(ZipSmallEntry, SmallIncompressibleEntryCanRefillInputWithoutReusingOutput) {
   const auto data = pattern(CHUNK - 1, true);
   const auto packed = compressed(data);

@@ -312,3 +312,21 @@ TEST(ExchangeWindowPolicy, HeldButtonCannotReenterHomeIdleAndLoseItsRelease) {
   EXPECT_FALSE(homeIdleAllowed(true, true, 60000));
   EXPECT_FALSE(homeIdleAllowed(false, false, 60000));
 }
+
+TEST(ExchangeWindowPolicy, HomeConnectionObeysAutoSleepOrTheThirtyMinuteIdleLimit) {
+  constexpr uint32_t autoSleepMs = 5 * 60 * 1000;
+  constexpr uint32_t capMs = 30 * 60 * 1000;
+  EXPECT_EQ(homeConnectionRemainingMs(autoSleepMs, HOME_IDLE_MIN_MS), autoSleepMs - HOME_IDLE_MIN_MS);
+  EXPECT_EQ(homeConnectionRemainingMs(autoSleepMs, autoSleepMs), 0u);
+  EXPECT_EQ(homeConnectionRemainingMs(0, capMs - 1), 1u);
+  EXPECT_EQ(homeConnectionRemainingMs(0, capMs), 0u);
+  EXPECT_EQ(homeConnectionRemainingMs(0, capMs + 1), 0u);
+  // Physical activity advances the caller's last-input timestamp.
+  EXPECT_EQ(homeConnectionRemainingMs(0, HOME_IDLE_MIN_MS), capMs - HOME_IDLE_MIN_MS);
+}
+
+TEST(ExchangeWindowPolicy, HomeClockRefreshUsesTheNextMinuteBoundary) {
+  EXPECT_EQ(homeClockRefreshDelayMs(600), 60'000u);
+  EXPECT_EQ(homeClockRefreshDelayMs(645), 15'000u);
+  EXPECT_EQ(homeClockRefreshDelayMs(659), 1'000u);
+}

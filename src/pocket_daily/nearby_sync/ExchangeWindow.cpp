@@ -1,3 +1,6 @@
+#ifdef ENABLE_DEV_REMOTE_FLASH
+#include <DevButtonTrace.h>
+#endif
 #include "ExchangeWindow.h"
 
 #include <Arduino.h>
@@ -93,6 +96,9 @@ void stopRadio() {
       // Radio ownership cannot be handed off while init is still running.
       // Recover without freeing worker-owned memory or logging on a starved heap.
       HalSystem::setCrashBreadcrumb("readsync:start-timeout");
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  DevButtonTrace::checkpoint(DevButtonTrace::BleStartTimeout);
+#endif
       ESP.restart();
       for (;;) delay(1000);
     }
@@ -365,7 +371,7 @@ void runBeforeDeepSleep(const uint32_t renderCount, const GfxRenderer& renderer)
 }
 
 bool standbyEligible() {
-#ifdef ENABLE_BLE_STANDBY
+#ifdef ENABLE_TERMINAL_BLE_STANDBY
   return standbyAllowed(powerManager.bleStandbySupported(), SETTINGS.pocketReadingSync != 0, hasStoredBond(),
                         powerManager.getBatteryPercentage(), gpio.deviceIsX3() && gpio.isUsbConnected());
 #else
@@ -410,7 +416,7 @@ StandbyExit runStandby(const GfxRenderer& renderer, const uint32_t maxMs, const 
     }
     if (maxMs && millis() - began >= maxMs) {
       close(CloseReason::TIME_UP);
-      break;
+      return trigger == Trigger::HOME_CONNECT ? StandbyExit::HomeTimeout : StandbyExit::DeepSleep;
     }
     if (gpio.wasUsbStateChanged() || millis() - batteryChecked >= 60000) {
       batteryChecked = millis();

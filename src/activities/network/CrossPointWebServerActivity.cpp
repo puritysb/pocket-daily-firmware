@@ -214,7 +214,7 @@ void CrossPointWebServerActivity::onExit() {
   if (launchMode == WebServerLaunchMode::POCKET_NEARBY_SYNC && !updateCheckHandoff) {
     HalSystem::setCrashBreadcrumb("nearby:exit-restart");
     silentRestartToPocketDaily();
-#ifndef ENABLE_BLE_STANDBY
+#ifndef ENABLE_TERMINAL_BLE_STANDBY
     return;  // ESP.restart() does not return.
 #endif
     // The call returns only when sleep supersedes the restart. Standby needs

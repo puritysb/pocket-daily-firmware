@@ -1,5 +1,6 @@
 #include "HostHome.h"
 
+#include <FreeInkUIGfxRenderer.h>
 #include <GfxRenderer.h>
 #include <builtinFonts/notosans_8_regular.h>
 #include <builtinFonts/ubuntu_10_bold.h>
@@ -9,6 +10,7 @@
 
 #include <cstring>
 
+#include "components/themes/HeaderPainter.h"
 #include "fontIds.h"
 #include "pocket_daily/ContentImageRenderer.h"
 
@@ -125,7 +127,20 @@ PocketDaily::Home::Env hostEnv(GfxRenderer& renderer, const UserCards& cards) {
   env.text = fonts;
   env.labels = fonts;
   env.drawHeader = [](void*, const GfxRenderer& r, int x, int y, int width, int height, const char* title,
-                      const char* subtitle) {
+                      const char* subtitle, bool branded) {
+    if (branded) {
+      HeaderPainter::Inputs inputs;
+      inputs.fonts[0] = SMALL_FONT_ID;
+      inputs.fonts[1] = UI_10_FONT_ID;
+      inputs.fonts[2] = UI_12_FONT_ID;
+      inputs.fonts[3] = SMALL_FONT_ID;
+      inputs.titleText.font = freeink::ui::GfxRendererTarget::FONT_TITLE;
+      inputs.titleText.bold = true;
+      inputs.batteryPercent = 67;
+      std::strcpy(inputs.batteryLabel, "67%");
+      HeaderPainter::paintHeader(r, inputs, x, y, width, height, title, subtitle, true);
+      return;
+    }
     const int line = r.getLineHeight(UI_12_FONT_ID);
     const int baseline = y + (height - line) / 2;
     r.drawText(UI_12_FONT_ID, x + 20, baseline, title, true, EpdFontFamily::BOLD);

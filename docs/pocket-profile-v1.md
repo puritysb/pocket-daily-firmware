@@ -32,7 +32,9 @@ colon toggles every two seconds while this Home view is open. The month
 grid uses the same local clock and weekday labels as Calendar and works without
 an agenda download. A separate Calendar view remains available for dated events
 when configured. The compact clock cannot be added to this layout because its
-clock is built in.
+clock is built in. The dashboard header places the Pocket Daily reader mark
+before the title and the standard battery indicator at the other end of the
+same row. It keeps the reader's percentage visibility and charging state.
 
 ## Reading interfaces and explicit views (2026-11-13)
 
@@ -44,14 +46,15 @@ It retains all selected books, up to four. `readingList` (12) uses compact rows;
 these reading layouts is allowed. The current default is `[readingDashboard]`;
 existing saved profiles retain their Home items.
 
-The left front button is labelled **Views**. It opens an explicit chooser for
-configured Reading, Calendar, Study and Clock sections, plus Articles. Side
-keys move within this chooser and Confirm selects the view. Back cancels it
-without changing the current book. Outside the chooser, side keys never cross
-from the last book into Calendar or another content type. Confirm opens the
-selected book; returning from the reader restores that book's position in a
-manually ordered shelf. Home and Sync retain their existing exit routes.
-Selection changes do not write SD settings.
+When Home shows more than one section, the left front button is labelled
+**Views** and lists the available Reading, Calendar, Study and Clock sections.
+Side keys move within the chooser, Confirm selects the view and Back closes it.
+With zero or one section, the left button opens **Library** directly. Saved
+articles appear in Library alongside other EPUBs. Outside the chooser, side
+keys stay within the selected section. Confirm opens the selected book.
+Returning from the reader restores that book's position in a manually ordered
+shelf. Home and Sync retain their existing exit routes. Selection changes do
+not write SD settings.
 
 `clockCompact` adds an inline clock to the reading layout and omits the
 redundant header clock. `nextEvent` also works with weather off: a separate
@@ -85,9 +88,15 @@ draws a small battery-percentage badge. Without cached artwork the same layout
 shows a full-screen typeset title. The artwork uses the existing asset route and
 row-buffered bitmap decoder. The connected preview and physical sleep face are
 separate surfaces. The battery badge represents the charge at sleep entry.
-The default awake dashboard also shows the charge while it refreshes.
 A retained sleep frame does not update as the clock runs or as the battery
 charges. X4 drops CPU power on battery in deep sleep.
+
+Before powering down, Pocket Daily drains the current Home refresh and waits
+for the retained sleep frame. On X4 it uses the stock Sleep Cover's absolute
+clean waveform. To check for optical residue, let the Home clock refresh, put
+the X4 to sleep with a book cover configured, and inspect the panel after the
+waveform stops. Repeat with the power button and the idle timeout. A framebuffer
+capture can verify the bitmap content but cannot detect residue on the panel.
 
 ## Desk Clock Home extension (2026-11-10)
 

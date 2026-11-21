@@ -72,7 +72,9 @@ v138 keeps the bytes unchanged: built-in reader fonts no longer ship a bold-ital
 (bold-italic falls back to bold, freeing flash for the CrossPoint 2.0 base), so bold-italic
 runs measure differently and every section cache is rebuilt.
 
-The next fork-specific finalized format must use `139`, not an upstream version number or
+v139 rebuilds layouts whose reader font was evicted while drawing a chapter title.
+
+The next fork-specific finalized format must use `140`, not an upstream version number or
 the `0xFF` partial sentinel.
 
 ## What else invalidates a cache

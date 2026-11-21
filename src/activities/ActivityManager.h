@@ -68,8 +68,8 @@ class ActivityManager {
   static void renderTaskTrampoline(void* param);
   [[noreturn]] virtual void renderTaskLoop();
 
-  // Set by requestUpdateAndWait(); read and cleared by the render task after render completes.
-  // Note: only one waiting task is supported at a time
+  // One synchronous waiter. The render task samples it before render() and
+  // clears it only after the corresponding render finishes.
   TaskHandle_t waitingTaskHandle = nullptr;
 
   // Mutex to protect rendering operations from race conditions
@@ -151,11 +151,15 @@ class ActivityManager {
   bool requiresExclusiveStorageLoop() const;
   bool isReaderActivity() const;
   bool isForegroundReader() const;
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  bool isForegroundHome() const;
+#endif
   bool handleForcedRefresh();
   // The current screen tolerates a Reading Sync exchange window and no book is
   // open anywhere on the stack.
   bool allowsExchangeWindow() const;
   bool allowsAppConnection() const;
+  bool hasLiveHomeClock() const;
   uint32_t renderCount() const { return completedRenders.load(std::memory_order_acquire); }
   bool skipLoopDelay() const;
   ScreenshotInfo getScreenshotInfo() const;

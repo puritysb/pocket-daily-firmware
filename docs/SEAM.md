@@ -59,6 +59,14 @@ The live content presenter selects this mode. See `docs/bounded-ui-fonts.md` for
 bound, host/fixture verification and remaining integration. Preserve this mode
 when merging font-loader changes from upstream; do not enable it globally for EPUB.
 
+### Reader Hangul fallback (carried rendering patch)
+
+`SdCardFontSystem` exposes the SD-card PocketSansWorld face to
+`GfxRenderer` for Hangul missing from a selected reader font. The renderer
+uses the same choice for measuring, page prewarm and drawing. The font layout
+key includes both PocketSansWorld and PocketSymbols so cached sections can
+be rebuilt when either installed family changes.
+
 Line counts are the Pocket footprint inside each inherited file. Sites are
 named by function, not line number — line numbers drift.
 
@@ -192,8 +200,11 @@ acceptance without a menu press; absent from production builds.
 
 ### Already-clean registrations
 
-`ActivityManager`, `Home`, `OtaUpdater` carry only registration-level
-Pocket lines (member + one-line dispatch). `UITheme` is upstream's again
+`Home` and `OtaUpdater` carry only registration-level Pocket lines
+(member + one-line dispatch). In `ActivityManager`, the render task samples
+a synchronous waiter before drawing so an in-flight Home repaint cannot
+acknowledge the sleep-frame request. The `ReplaceForSleep` transition skips
+input dispatch and enters the stock Sleep activity directly. `UITheme` is upstream's again
 (2026-10-01): the pack metric layering and the render-task frame capture
 hook in `ActivityManager` are gone.
 
@@ -411,6 +422,15 @@ in the same commit:
 The product boot cue also uses `util/PowerWakeCue.h` to open the same book tab
 that the inherited sleep activity retains. This is a shared, allocation-free
 rendering primitive; it does not give the base display layer a product dependency.
+
+### Home BLE deadline and repaint
+
+`main.cpp` uses `ExchangeWindowPolicy` to bound Home BLE by the current
+inactivity deadline. `ActivityManager::hasLiveHomeClock()` passes the
+current Pocket Daily render state to that policy. A Home slice that reaches
+a minute boundary releases the radio before restoring and painting the only
+framebuffer. `ENABLE_TERMINAL_BLE_STANDBY` keeps the post-sleep developer
+experiment separate from the default and release Home listener.
 
 ### Home BLE input and Back profiling (2026-11-03)
 

@@ -3,9 +3,9 @@ from pathlib import Path
 import subprocess
 
 
-def apply_storage_patch(project: Path) -> str:
+def apply_sdk_patch(project: Path, filename: str) -> str:
     sdk = project / "freeink-sdk"
-    patch = project / "scripts" / "storage_sdk.patch"
+    patch = project / "scripts" / filename
     if not patch.is_file() or not (sdk / "libs/hardware/SDCardManager/include/SDCardManager.h").is_file():
         raise RuntimeError("Storage SDK or reviewed patch is missing")
     command = ["git", "apply", "--check"]
@@ -15,13 +15,18 @@ def apply_storage_patch(project: Path) -> str:
     checked = subprocess.run(command + [str(patch.resolve())], cwd=sdk,
                              capture_output=True, text=True)
     if checked.returncode:
-        raise RuntimeError("Storage SDK patch needs review; source was not changed: " + checked.stderr)
+        raise RuntimeError("SDK patch needs review; source was not changed: " + checked.stderr)
     subprocess.run(["git", "apply", str(patch.resolve())], cwd=sdk, check=True)
     return "applied"
 
 
+def apply_storage_patch(project: Path) -> str:
+    return apply_sdk_patch(project, "storage_sdk.patch")
+
+
 if "Import" in globals():
     Import("env")  # noqa: F821 - PlatformIO/SCons
+    print("Input trace SDK patch: " + apply_sdk_patch(Path(env["PROJECT_DIR"]), "input_trace_sdk.patch"))  # noqa: F821
     print("Storage SDK patch: " + apply_storage_patch(Path(env["PROJECT_DIR"])))  # noqa: F821
 
 elif __name__ == "__main__":

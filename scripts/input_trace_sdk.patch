@@ -1,0 +1,9 @@
+diff --git a/libs/hardware/InputManager/include/InputManager.h b/libs/hardware/InputManager/include/InputManager.h
+index 324c238..b4f61a2 100644
+--- a/libs/hardware/InputManager/include/InputManager.h
++++ b/libs/hardware/InputManager/include/InputManager.h
+@@ -54,2 +54,4 @@ class InputManager {
+   // is dropped.
++  uint8_t sampledButtonMask() const { return lastState; }
++  uint8_t debouncedButtonMask() const { return currentState; }
+   bool isDebouncePending() const { return lastState != currentState; }

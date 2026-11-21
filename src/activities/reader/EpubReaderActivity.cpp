@@ -1,5 +1,6 @@
 #include "EpubReaderActivity.h"
 
+#include <DevButtonTrace.h>
 #include <Epub/Page.h>
 #include <Epub/blocks/TextBlock.h>
 #include <FontCacheManager.h>
@@ -288,7 +289,7 @@ int EpubReaderActivity::bookPercentFor(const ChapterPosition& position) const {
 
 void EpubReaderActivity::openReaderMenu() {
   Pocket::KeyboardRemote::stop();
-  pendingManualTurn = 0;
+  manualTurns.clear();
   if (usesToolbarMenu()) {
     // Reached from a child activity's result handler (footnotes, bookmarks,
     // go-to-percent... cancelled back to the menu), so the framebuffer holds
@@ -402,6 +403,9 @@ void EpubReaderActivity::openFootnoteSelect(const bool reopenMenuOnCancel) {
 }
 
 void EpubReaderActivity::loop() {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  if (tracePagePainted.exchange(false)) DevButtonTrace::action(DevButtonTrace::PagePainted);
+#endif
   if (!epub) {
     finish();
     return;
@@ -443,7 +447,7 @@ void EpubReaderActivity::loop() {
   }
 
   // Any button makes layout running on the render task after a page (layOutAhead) yield.
-  const bool inputHasPriority = mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased() ||
+  const bool inputHasPriority = !manualTurns.empty() || mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased() ||
                                 mappedInput.isPressed(MappedInputManager::Button::Back);
   if (inputHasPriority) inputQueued.store(true);
 
@@ -526,7 +530,7 @@ void EpubReaderActivity::loop() {
 
   // Idle work, in order of importance: the reading position, then the next chapter. Never
   // in a frame that carries button input, so it cannot delay the turn that input triggers.
-  if (!mappedInput.wasAnyPressed() && !mappedInput.wasAnyReleased()) {
+  if (!inputHasPriority) {
     if (progressSavePending && millis() - lastRenderDoneMs >= PROGRESS_SAVE_IDLE_MS && !RenderLock::peek()) {
       flushPendingProgress(/*fromLoop=*/true);
     }
@@ -556,6 +560,7 @@ void EpubReaderActivity::loop() {
   // End-of-Book screen reached (currentSpineIndex == spine count) means the book is
   // finished. Two independent finished-book features key off this same condition.
   const bool atEndOfBook = currentSpineIndex > 0 && currentSpineIndex >= epub->getSpineItemsCount();
+  if (atEndOfBook) manualTurns.clear();
   clearEndOfBookOptionsIfNeeded();
 
   // Drop this book from the Recent Books list; if the reader then pages back into the book,
@@ -757,12 +762,13 @@ void EpubReaderActivity::loop() {
   if (confirmReleased || ReaderUtils::isTouchMenuGesture(renderer, mappedInput)) {
     // Toolbar style: the page is on screen and in the framebuffer, so paint the
     // toolbar over it (one refresh) instead of pushing a full-screen menu.
+    manualTurns.clear();
     if (usesToolbarMenu() && section) {
-      pendingManualTurn = 0;
       openOverlay(Overlay::Toolbar);
     } else {
       openReaderMenu();
     }
+    return;
   }
 
   if (footnoteDepth > 0 && mappedInput.wasReleased(MappedInputManager::Button::Back) &&
@@ -789,19 +795,7 @@ void EpubReaderActivity::loop() {
 
   constexpr unsigned long kMinManualTurnGapMs = 200;
   const bool turnGuardActive = RenderLock::peek() || (millis() - lastPageTurnTime) < kMinManualTurnGapMs;
-  if (pendingManualTurn != 0 && !turnGuardActive) {
-    if (!section) {
-      pendingManualTurn = 0;
-      return;
-    }
-    const bool forward = pendingManualTurn > 0;
-    pendingManualTurn = 0;
-    pageTurn(forward);
-    requestUpdate();
-    return;
-  }
-
-  if (!turnGuardActive) {
+  if (manualTurns.empty() && !turnGuardActive) {
     const int8_t remote = Pocket::KeyboardRemote::takeTurn();
     if (remote != 0) {
       const bool atFirstPage = remote < 0 && section && section->currentPage == 0 && currentSpineIndex == 0;
@@ -836,6 +830,10 @@ void EpubReaderActivity::loop() {
   prevTriggered = prevTriggered || touch.prev;
   nextTriggered = nextTriggered || touch.next;
   if (!prevTriggered && !nextTriggered) {
+    if (!manualTurns.empty() && !turnGuardActive && section) {
+      pageTurn(manualTurns.pop());
+      requestUpdate();
+    }
     return;
   }
 
@@ -865,16 +863,23 @@ void EpubReaderActivity::loop() {
     return;
   }
 
-  if (!section) {
-    requestUpdate();
+  if (turnGuardActive || !section || !manualTurns.empty()) {
+    const bool queued = manualTurns.push(!prevTriggered);
+#ifdef ENABLE_DEV_REMOTE_FLASH
+    if (queued) DevButtonTrace::action(prevTriggered ? DevButtonTrace::QueuedPrev : DevButtonTrace::QueuedNext);
+#else
+    (void)queued;
+#endif
+    if (!turnGuardActive && section) {
+      pageTurn(manualTurns.pop());
+      requestUpdate();
+    }
     return;
   }
 
-  if (turnGuardActive) {
-    pendingManualTurn = prevTriggered ? -1 : 1;
-    return;
-  }
-
+#ifdef ENABLE_DEV_REMOTE_FLASH
+  DevButtonTrace::action(prevTriggered ? DevButtonTrace::ReaderPrev : DevButtonTrace::ReaderNext);
+#endif
   if (prevTriggered) {
     pageTurn(false);
   } else {
@@ -1369,19 +1374,18 @@ void EpubReaderActivity::recordBuildFailure() const {
 }
 
 bool EpubReaderActivity::pageTurn(bool isForwardTurn) {
+  RenderLock lock;
   if (!section) return false;
-  {
-    RenderLock lock;
-    clearDeferredReposition();
-  }
+  clearDeferredReposition();
+  pendingForwardBoundarySpine = -1;
   if (isForwardTurn) {
     if (section->currentPage < section->pageCount - 1 || section->mayHaveMorePages()) {
+      if (section->currentPage + 1 >= section->pageCount) pendingForwardBoundarySpine = currentSpineIndex;
       section->currentPage++;
       lastPageTurnTime = millis();
       return true;
     } else if (currentSpineIndex + 1 < epub->getSpineItemsCount()) {
       if (Pocket::KeyboardRemote::active()) Pocket::KeyboardRemote::pauseForLayout();
-      RenderLock lock;
       nextPageNumber = 0;
       currentSpineIndex++;
       section.reset();
@@ -1399,14 +1403,11 @@ bool EpubReaderActivity::pageTurn(bool isForwardTurn) {
       lastPageTurnTime = millis();
       return true;
     } else if (currentSpineIndex > 0) {
-      // We don't want to delete the section mid-render, so grab the semaphore
-      {
-        RenderLock lock(*this);
-        nextPageNumber = 0;
-        pendingPageJump = LANDING_LAST_PAGE;
-        currentSpineIndex--;
-        section.reset();
-      }
+      nextPageNumber = 0;
+      pendingPageJump = LANDING_LAST_PAGE;
+      currentSpineIndex--;
+      section.reset();
+      lastPageTurnTime = millis();
       // Changing chapter is an accepted turn, even though its page is built
       // asynchronously. REMOTE1 must retain this pending ID through reconnect.
       return true;
@@ -1799,6 +1800,19 @@ void EpubReaderActivity::renderBook() {
     return;
   }
 
+  // A forward turn can reach the build watermark before EOF is known.
+  // If layout just proved there is no next page, carry that same turn across
+  // the chapter boundary instead of repainting the page it started on.
+  if (std::exchange(pendingForwardBoundarySpine, -1) == currentSpineIndex && section->isBuildComplete() &&
+      section->currentPage >= static_cast<int>(section->pageCount)) {
+    if (Pocket::KeyboardRemote::active()) Pocket::KeyboardRemote::pauseForLayout();
+    nextPageNumber = 0;
+    ++currentSpineIndex;
+    section.reset();
+    requestUpdate();
+    return;
+  }
+
   // The requested page is now as built as it will get. If it still lands past the end,
   // clamp to the last real page: the UINT16_MAX "last page" sentinel from backward chapter
   // navigation, an explicit jump beyond a finished chapter, or a stale saved position.
@@ -1907,6 +1921,7 @@ void EpubReaderActivity::renderBook() {
     lastRenderCompleteMs = millis();
     markPageRendered();
 #ifdef ENABLE_DEV_REMOTE_FLASH
+    tracePagePainted.store(true);
     const int total = section->estimatedTotalPages();
     const float fraction = total > 0 ? static_cast<float>(section->currentPage) / total : 0.0f;
     PocketDaily::DevCapture::readerPageRendered(
@@ -2235,8 +2250,12 @@ void EpubReaderActivity::renderStatusBar() {
     title = epub ? epub->getTitle() : "";
   }
 
+  // The parser can continue laying out pages after the footer is drawn. UI
+  // font discovery may evict its SD face from the single reader-font slot.
+  const int titleFont =
+      CjkScript::classify(title.c_str()) == CjkScript::Script::None ? SMALL_FONT_ID : activeReaderFontId;
   GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, textYOffset, true, currentPageBookmarked,
-                    section ? section->isBuilding() : false);
+                    section ? section->isBuilding() : false, titleFont);
 }
 
 // ---------------------------------------------------------------------------

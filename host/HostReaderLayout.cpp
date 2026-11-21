@@ -47,9 +47,9 @@ bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::Layou
               }};
   env.labels = env.text;
   env.drawHeader = [](void* value, const GfxRenderer& r, int x, int y, int w, int h, const char* title,
-                      const char* subtitle) {
+                      const char* subtitle, bool branded) {
     const auto& d = *static_cast<const DrawContext*>(value);
-    HeaderPainter::paintHeader(r, d.inputs.header, x, y, w, h, title, subtitle);
+    HeaderPainter::paintHeader(r, d.inputs.header, x, y, w, h, title, subtitle, branded);
   };
   env.drawCover = [](void* value, GfxRenderer& r, int x, int y, int w, int h) {
     if (w <= 12 || h <= 18) return false;

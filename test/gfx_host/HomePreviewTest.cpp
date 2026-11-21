@@ -467,7 +467,7 @@ TEST(HomeCoverLayout, PortraitCoverUsesSpaceReleasedByShortMetadataAndCompactHea
   PocketDaily::Home::Env env{};
   env.metrics = {5, 84, 10, 20, 30};
   env.context = &layout;
-  env.drawHeader = [](void* context, const GfxRenderer&, int, int, int, int height, const char*, const char*) {
+  env.drawHeader = [](void* context, const GfxRenderer&, int, int, int, int height, const char*, const char*, bool) {
     static_cast<Layout*>(context)->header = height;
   };
   env.drawCover = [](void* context, GfxRenderer&, int x, int y, int width, int height) {
@@ -866,6 +866,96 @@ TEST_P(HomePreview, ReadingDashboardRendersSelectedBookInEveryOrientation) {
     EXPECT_NE(first, home(p, PDUI_SAMPLE_BOOK, 3));
     EXPECT_EQ(first, home(p, PDUI_SAMPLE_BOOK, 0));
   }
+}
+
+TEST(SleepCover, X4ReplacesTheDashboardFrame) {
+  using namespace PocketDaily;
+  HalDisplay panel(800, 480);
+  GfxRenderer renderer(panel);
+  renderer.begin();
+  PocketUIHost::registerUiFonts(renderer);
+  renderer.setOrientation(GfxRenderer::Portrait);
+  Glance glance{};
+  const Card card{};
+  const Home::Row row{.shelfIndex = 0};
+  Home::HomeView home{};
+  home.isX3 = false;
+  home.rows = &row;
+  home.count = 1;
+  home.glance = &glance;
+  home.profile = DailyProfile::defaults();
+  home.clock.date = 20261120;
+  home.clock.minute = 581;
+
+  Home::BriefView sleep{};
+  sleep.glance = &glance;
+  sleep.pocketCard = &card;
+  sleep.profile = home.profile;
+  sleep.isSleep = true;
+  sleep.fullScreenCover = true;
+  sleep.sleepCover = true;
+  sleep.reading = {true, "A book", "An author", 25};
+  Home::Env env{};
+  env.metrics = {5, 84, 10, 20, 30};
+  env.drawFullCover = [](void*, GfxRenderer& r, int w, int h) {
+    // The BMP painter writes dark pixels and leaves the background alone.
+    r.drawLine(0, h / 3, w - 1, h / 3, 8, true);
+    return true;
+  };
+  auto snapshot = [&] {
+    return std::vector<uint8_t>(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize());
+  };
+
+  renderer.clearScreen();
+  Home::renderBrief(renderer, sleep, env);
+  const auto cleanCover = snapshot();
+  Home::renderHome(renderer, home, env);
+  ASSERT_NE(snapshot(), cleanCover);
+  Home::renderBrief(renderer, sleep, env);
+  EXPECT_EQ(snapshot(), cleanCover);
+  EXPECT_TRUE(panel.guardsIntact());
+}
+
+TEST(HomeDashboard, UsesCompactBrandedHeaderWithoutASecondBatteryBadge) {
+  using namespace PocketDaily;
+  HalDisplay panel(792, 528);
+  GfxRenderer renderer(panel);
+  renderer.begin();
+  PocketUIHost::registerUiFonts(renderer);
+  renderer.setOrientation(GfxRenderer::Portrait);
+  Glance glance{};
+  const Home::Row row{.shelfIndex = 0};
+  Home::HomeView view{};
+  view.rows = &row;
+  view.count = 1;
+  view.glance = &glance;
+  view.profile = DailyProfile::defaults();
+  view.clock.date = 20261120;
+  view.clock.minute = 581;
+  Home::Env env{};
+  env.metrics = {5, 84, 10, 20, 30};
+  int headerCalls = 0;
+  env.context = &headerCalls;
+  env.drawHeader = [](void* calls, const GfxRenderer&, int x, int y, int w, int h, const char* title, const char*,
+                      bool branded) {
+    ++*static_cast<int*>(calls);
+    EXPECT_EQ(x, 0);
+    EXPECT_EQ(y, 5);
+    EXPECT_EQ(w, 528);
+    EXPECT_GE(h, 38);
+    EXPECT_LT(h, 84);
+    EXPECT_TRUE(branded);
+    EXPECT_STREQ(title, "Pocket Daily");
+  };
+
+  env.batteryPercent = 62;
+  Home::renderHome(renderer, view, env);
+  const std::vector<uint8_t> first(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize());
+  env.batteryPercent = 17;
+  Home::renderHome(renderer, view, env);
+  EXPECT_EQ(headerCalls, 2);
+  EXPECT_TRUE(std::equal(first.begin(), first.end(), panel.getFrameBuffer()));
+  EXPECT_TRUE(panel.guardsIntact());
 }
 
 TEST(HomeDashboard, BlinkOnlyChangesTheTwoSeparatorDots) {

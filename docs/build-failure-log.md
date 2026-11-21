@@ -75,13 +75,16 @@ by 14 KiB. The initial attempt and retries after other errors retain 8 KiB
 buffers. Every attempt starts a fresh inflater and truncates its temporary HTML;
 only a complete successful inflate may be renamed into the HTML cache. A temp
 file open failure reports `write`, even if an earlier attempt failed at `window`.
-Large-entry decoding and its 32 KiB window are unchanged. The later semantic
-section-cache invalidation is described below.
+For chapters under 32 KiB, extraction can use the output itself as the DEFLATE
+dictionary. The output needs room for the declared chapter size and one spare
+byte so the inflater can consume the end marker. Compressed input still uses the
+chosen chunk size. If the larger output allocation fails, extraction retries
+with the ordinary streaming buffer. Chapters of 32 KiB or larger still stream.
 
 Host fault tests exercise the actual Section/ZIP/miniz pipeline, including
 bounded repeated failure, allocation cleanup and byte-identical HTML/section
 output after recovery. They are not an ESP32 allocator or SD-card simulation:
-the device still needs a contiguous window and physical validation is required.
+the streaming path still needs a contiguous window.
 
 
 ## Small ZIP entries and image header probes
@@ -99,7 +102,8 @@ smaller** than that chunk. No new allocation is added; the transient miniz state
 remains, while the separate 32 KiB ring is unnecessary. This covers any small
 entry, including a PNG probed with 1024-byte chunks, extracted with 4096-byte
 chunks or lazily extracted with 8192-byte chunks. Exact-boundary and larger
-entries keep the existing streaming path.
+entries keep the existing streaming path unless chapter extraction opts into
+the larger destination described above.
 
 The strict inequality leaves space to observe the deflate end marker in a
 single call. A small entry must return `Done` with exactly its declared size
