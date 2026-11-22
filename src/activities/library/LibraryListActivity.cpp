@@ -1221,7 +1221,8 @@ void LibraryListActivity::buildCoverGrid(UiScreen& screen) {
   grid.coverPainterUserData = this;
   grid.coverPainter = [](fui::DrawTarget& target, const fui::Rect rect, const fui::CoverGridItem&, const uint16_t slot,
                          void* user) {
-    return static_cast<LibraryListActivity*>(user)->paintCover(target, rect, slot);
+    static_cast<LibraryListActivity*>(user)->paintCover(target, rect, slot);
+    return true;
   };
   fui::coverGrid(screen.frame(), body, grid);
 
@@ -1236,9 +1237,9 @@ void LibraryListActivity::buildCoverGrid(UiScreen& screen) {
                static_cast<int16_t>(titleLine * 2)},
               book.title.c_str(), title);
   auto author = theme.smallText;
-  char progress[8] = {};
   int16_t progressWidth = 0;
   if (shelf.progressEntry == entry && shelf.progress >= 0) {
+    char progress[8] = {};
     snprintf(progress, sizeof(progress), "%d%%", shelf.progress);
     progressWidth = target.measureText(author.font, progress, author).width + gap;
     author.align = fui::TextAlign::Right;

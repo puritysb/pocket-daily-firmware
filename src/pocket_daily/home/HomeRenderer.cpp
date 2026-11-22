@@ -606,10 +606,10 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     return;
   }
   const bool readingPage = n > 0 && (rows[cursor].reading || selectedShelf >= 0);
-  const bool branded = dashboard || env.templateHeaders ||
-                       (readingPage && view.profile.shows(DailyProfile::HomeItem::ClockCompact));
+  const bool branded =
+      dashboard || env.templateHeaders || (readingPage && view.profile.shows(DailyProfile::HomeItem::ClockCompact));
   const int headerHeight = branded ? std::max(HeaderPainter::BRAND_LOGO_HEIGHT, line12) + 10
-                           : std::min(m.headerHeight, line12 + (readingPage ? 4 : m.verticalSpacing * 2));
+                                   : std::min(m.headerHeight, line12 + (readingPage ? 4 : m.verticalSpacing * 2));
   const int selectedIndex = view.selected >= 0 && view.selected < n ? view.selected : 0;
   if (view.profile.deskClock() || (n > 0 && rows[selectedIndex].clockPage)) {
     const auto orientation = renderer.getOrientation();

@@ -472,7 +472,8 @@ TEST(LayoutInputs, CompactBoldBookTitleKeepsTheProgressGapClear) {
   strcpy(in.book.title, "Menschliches, Allzumenschliches: Ein Buch Fuer Freie Geister (Erster Band)");
   auto p = profile();
   p.sleep_sections[0] = 1;
-  p.sleep_count = 1;
+  p.sleep_sections[1] = 2;
+  p.sleep_count = 2;
   auto bytes = encode(in);
   ASSERT_EQ(pdui_render_reader_device(c.value, &p, bytes.data(), bytes.size(), "", 1, 0, nullptr, 0), PDUI_OK);
   const auto title = c.pixels();
