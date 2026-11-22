@@ -75,6 +75,10 @@ to that patch.
   under `/Articles`. The awake default dashboard uses the standard battery
   indicator and a Pocket Daily title and mark. The sleep cover keeps its
   battery-at-sleep-entry badge.
+- 2026-11-22: `homeInterfaces: 5` selects shared left-aligned template
+  headers for Home and Pocket Daily sleep frames. Revision 6 adds solid weather
+  icons and adaptive forecasts. Earlier revisions keep
+  their original connected preview path. See `docs/pocket-profile-v1.md`.
 - Owner decision 2026-10-31: stock defaults for new installs — power-on opens
   Home (Pocket Daily via `startupApp`) and Long-press Menu is Disabled. Saved
   settings keep their values. The bilingual view mode was removed the same day:

@@ -12,6 +12,7 @@
 #include "components/themes/HeaderPainter.h"
 #include "fontIds.h"
 #include "pocket_daily/home/GlanceFormat.h"
+#include "util/PowerWakeCue.h"
 
 namespace PocketDaily::Home::SleepArtwork {
 struct Panel {
@@ -256,7 +257,7 @@ void drawDeskClock(GfxRenderer& r, const HomeView& view, const Env& env, const i
   r.clearScreen();
   if (env.drawHeader)
     env.drawHeader(env.context, r, 0, env.metrics.topPadding, w, headerHeight, view.strings.pocketDaily, nullptr,
-                   false);
+                   env.templateHeaders);
   const int tileHeight = drawFlipClock(r, view, env, pad, top, w - 2 * pad, 11 * (h / (w > h ? 31 : 25)));
   const int unit = tileHeight / 11;
 
@@ -272,12 +273,22 @@ void drawDeskClock(GfxRenderer& r, const HomeView& view, const Env& env, const i
   r.drawCenteredText(UI_12_FONT_ID, dateY, calendar, true, EpdFontFamily::BOLD);
   const int dividerY = dateY + r.getLineHeight(UI_12_FONT_ID) + 2 * unit;
   r.drawLine(pad, dividerY, w - pad, dividerY);
-  const auto detail = clockDetail(view.profile, view.clock, *view.glance, view.strings);
   const int labelY = dividerY + unit;
-  r.drawCenteredText(env.text.resolve(detail.label, SMALL_FONT_ID), labelY, detail.label);
-  const int body = env.text.resolve(detail.text, UI_12_FONT_ID);
-  const auto fitted = r.truncatedText(body, detail.text, w - 2 * pad);
-  r.drawCenteredText(body, labelY + r.getLineHeight(SMALL_FONT_ID) + unit / 2, fitted.c_str());
+  const auto& weather = view.glance->weather;
+  if (env.weatherPanelV2 && view.profile.clockPage() == DailyProfile::HomeItem::ClockWeather && weather.valid) {
+    const char* place = weather.place[0] ? weather.place : view.strings.weather;
+    const int font = env.text.resolve(place, SMALL_FONT_ID);
+    r.drawCenteredText(font, labelY, place);
+    const int weatherY = labelY + r.getLineHeight(font) + 4;
+    HomeDraw::drawWeatherPanel(r, weather, pad, weatherY, w - 2 * pad,
+                               std::min(120, h - weatherY - r.getLineHeight(SMALL_FONT_ID) - 18), env.text);
+  } else {
+    const auto detail = clockDetail(view.profile, view.clock, *view.glance, view.strings);
+    r.drawCenteredText(env.text.resolve(detail.label, SMALL_FONT_ID), labelY, detail.label);
+    const int body = env.text.resolve(detail.text, UI_12_FONT_ID);
+    const auto fitted = r.truncatedText(body, detail.text, w - 2 * pad);
+    r.drawCenteredText(body, labelY + r.getLineHeight(SMALL_FONT_ID) + unit / 2, fitted.c_str());
+  }
   const auto& s = view.strings;
 
   HomeDraw::drawPocketActionStrip(r, view.isX3, env.labels, s.home, view.reading.valid ? s.select : s.library,
@@ -577,7 +588,8 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     return;
   }
   const bool readingPage = n > 0 && (rows[cursor].reading || selectedShelf >= 0);
-  const int headerHeight = dashboard ? std::max(HeaderPainter::BRAND_LOGO_HEIGHT, line12) + 10
+  const bool branded = dashboard || env.templateHeaders;
+  const int headerHeight = branded ? std::max(HeaderPainter::BRAND_LOGO_HEIGHT, line12) + 10
                            : readingPage && view.profile.shows(DailyProfile::HomeItem::ClockCompact)
                                ? 0
                                : std::min(m.headerHeight, line12 + (readingPage ? 4 : m.verticalSpacing * 2));
@@ -593,7 +605,7 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   renderer.clearScreen();
   if (env.drawHeader && headerHeight > 0)
     env.drawHeader(env.context, renderer, pad - originalPad, headerY, w - 2 * (pad - originalPad), headerHeight,
-                   s.pocketDaily, nullptr, dashboard);
+                   s.pocketDaily, nullptr, branded);
   int contentTop = headerY + headerHeight + m.verticalSpacing;
   const bool inlineClock = dashboard || (readingPage && view.profile.shows(DailyProfile::HomeItem::ClockCompact));
   if (view.clockWarning && !inlineClock) {
@@ -787,15 +799,16 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
         renderer.drawText(SMALL_FONT_ID, x + cw - stampW, y, weatherStamp, true, EpdFontFamily::BOLD);
       }
 
-      // Hero across the full width, grid beneath. The wrapped rain sentence and
-      // its divider are gone: they stole a third of the row to say what the
-      // grid's inverted chip now says at a glance.
       const int nowY = y + renderer.getLineHeight(placeFont) + 6;
-      const int gridRoom = weatherBottom - nowY - 58;
-      const int gridH = renderGlanceSnapshot.weather.dayCount >= 2 && gridRoom >= 74 ? std::min(116, gridRoom) : 0;
-      const int gridY = weatherBottom - gridH;
-      drawWeatherPoster(renderer, renderGlanceSnapshot.weather, x, nowY, cw, std::max(52, gridY - nowY - 6));
-      if (gridH > 0) drawForecastGrid(renderer, renderGlanceSnapshot.weather, x, gridY, cw, gridH);
+      if (env.weatherPanelV2) {
+        HomeDraw::drawWeatherPanel(renderer, renderGlanceSnapshot.weather, x, nowY, cw, weatherBottom - nowY, env.text);
+      } else {
+        const int gridRoom = weatherBottom - nowY - 58;
+        const int gridH = renderGlanceSnapshot.weather.dayCount >= 2 && gridRoom >= 74 ? std::min(116, gridRoom) : 0;
+        const int gridY = weatherBottom - gridH;
+        drawWeatherPoster(renderer, renderGlanceSnapshot.weather, x, nowY, cw, std::max(52, gridY - nowY - 6));
+        if (gridH > 0) drawForecastGrid(renderer, renderGlanceSnapshot.weather, x, gridY, cw, gridH);
+      }
     } else {
       drawWeatherPlaceholder(renderer, x, y, cw, weatherBottom - y, s.noWeather, s.weatherHint, env.text);
     }
@@ -1018,6 +1031,26 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   using HomeDraw::drawWrappedFixed;
   using HomeDraw::formatWeatherSnapshotDate;
 
+  const int headerHeight =
+      env.templateHeaders ? std::max(HeaderPainter::BRAND_LOGO_HEIGHT, line12) + 10 : m.headerHeight;
+  // A wake tab occupies the upper-right edge on a retained portrait frame.
+  const int cueWidth = view.contentTopInset == PowerWakeCue::portraitContentTop(true) ? PowerWakeCue::topTabWidth
+                                                                                      : PowerWakeCue::sideTabWidth;
+  const int headerWidth = w - (env.templateHeaders && view.contentTopInset ? cueWidth : 0);
+  auto drawHeader = [&] {
+    if (env.drawHeader)
+      env.drawHeader(env.context, renderer, 0, m.topPadding, headerWidth, headerHeight, s.pocketDaily, view.headerMeta,
+                     env.templateHeaders);
+  };
+  auto finishCover = [&] {
+    if (env.templateHeaders && env.drawHeader) {
+      renderer.fillRect(0, m.topPadding, headerWidth, headerHeight, false);
+      drawHeader();
+    } else {
+      drawBatteryBadge(renderer, env.batteryPercent, w - pad, pageH - lineS - 16);
+    }
+  };
+
   renderer.clearScreen();
   // A reading-only sleep layout uses the whole panel for the cover. Keep the
   // ordinary Brief for layouts with additional sections.
@@ -1026,7 +1059,7 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   if (isSleep && profile.usesSleepArtwork()) {
     const auto id = profile.sleepArtworkAt(view.sleepArtworkIndex);
     if (drawSleepArtwork(renderer, id)) {
-      drawBatteryBadge(renderer, env.batteryPercent, w - pad, pageH - lineS - 16);
+      finishCover();
       return;
     }
     renderer.clearScreen();
@@ -1038,13 +1071,15 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
         renderer.clearScreen();
         drawTitleCover(renderer, env, renderReadingSnapshot, 0, 0, w, pageH);
       }
-      drawBatteryBadge(renderer, env.batteryPercent, w - pad, pageH - lineS - 16);
+      finishCover();
       return;
     }
-    if (env.drawCover && env.drawCover(env.context, renderer, 0, 0, w, pageH)) return;
+    if (env.drawCover && env.drawCover(env.context, renderer, 0, 0, w, pageH)) {
+      if (env.templateHeaders) finishCover();
+      return;
+    }
   }
-  if (env.drawHeader)
-    env.drawHeader(env.context, renderer, 0, m.topPadding, w, m.headerHeight, s.pocketDaily, view.headerMeta, false);
+  drawHeader();
 
   char buf[96];
 
@@ -1054,7 +1089,8 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   // Landscape panels (X4, 800×480) split into two columns — left: reading and
   // cards, right: weather and TODAY. Portrait (X3) keeps a single column in the
   // profile's order. Every section leads with a small labeled overline rule.
-  const int topY = std::max(m.topPadding + m.headerHeight + m.verticalSpacing, view.contentTopInset);
+  const int topY =
+      std::max(m.topPadding + std::max<int>(m.headerHeight, headerHeight) + m.verticalSpacing, view.contentTopInset);
   const int statusY = pageH - lineS - 12;
 
   // "LABEL ────" overline. CJK-capable: the weather section uses the
@@ -1224,6 +1260,8 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
     char weatherLabel[BRIEF_WEATHER_LABEL_BYTES] = {0};
     briefWeatherLabel(weatherLabel, sizeof(weatherLabel), g.weather, s.weather, view.snapshotStale);
     y = sectionHeader(x, y, cw, weatherLabel);
+    if (env.weatherPanelV2)
+      return std::min(maxY, y + HomeDraw::drawWeatherPanel(renderer, g.weather, x, y, cw, maxY - y, env.text) + 10);
     // The retained frame uses the same poster + grid so a woken device and a
     // powered-off one do not look like two different products.
     const int gridRoom = maxY - y - 58;

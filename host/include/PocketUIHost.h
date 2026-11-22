@@ -159,6 +159,10 @@ int32_t pdui_get_layout_asset_info(const uint8_t* snapshot, size_t size, pdui_la
 int32_t pdui_get_recent_cover_info(const uint8_t* snapshot, size_t size, uint32_t index,
                                    pdui_layout_asset_info* output) PDUI_NOEXCEPT;
 int32_t pdui_set_recent_cover(pdui_context* context, uint32_t index, const uint8_t* bytes, size_t size) PDUI_NOEXCEPT;
+// Connected snapshot header layout advertised by homeInterfaces >= 5.
+int32_t pdui_set_template_headers(pdui_context* context, uint32_t enabled) PDUI_NOEXCEPT;
+// Select the presentation advertised by a connected reader. Offline samples use the current layout.
+int32_t pdui_set_interface_revision(pdui_context* context, uint32_t revision) PDUI_NOEXCEPT;
 // Row in the expanded Home carousel, and YYYYMMDD (0 uses today). Local preview only.
 int32_t pdui_set_home_selection(pdui_context* context, uint32_t row, uint32_t date) PDUI_NOEXCEPT;
 // Actual Home (surface0) or powered-off Brief (surface1), includes real cover,

@@ -133,6 +133,28 @@ TEST_P(HomePreview, DefaultHomeAndBriefDrawDeterministically) {
   EXPECT_EQ(brief(defaults()), sleep);
 }
 
+TEST(WeatherPanel, ConditionShapesRemainDistinctAtCompactSize) {
+  HalDisplay panel(792, 528);
+  GfxRenderer renderer(panel);
+  renderer.begin();
+  renderer.setOrientation(GfxRenderer::Portrait);
+  PocketUIHost::registerUiFonts(renderer);
+  PocketDaily::Weather weather{};
+  weather.clear();
+  weather.valid = true;
+  weather.tempC = -12;
+  std::vector<std::vector<uint8_t>> shapes;
+  for (int code : {-1, 0, 2, 3, 45, 61, 73, 95}) {
+    renderer.clearScreen();
+    weather.code = code;
+    ASSERT_EQ(PocketDaily::HomeDraw::drawWeatherPanel(renderer, weather, 12, 20, 230, 56, {}), 56);
+    std::vector<uint8_t> pixels(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize());
+    EXPECT_EQ(std::find(shapes.begin(), shapes.end(), pixels), shapes.end()) << code;
+    shapes.push_back(std::move(pixels));
+    EXPECT_TRUE(panel.guardsIntact());
+  }
+}
+
 TEST_P(HomePreview, WeatherPlacementAndNextEventChangeTheFace) {
   auto p = defaults();
   const auto bottom = home(p);

@@ -70,6 +70,18 @@ Downloaded empty dates and unavailable dates remain distinct. Book order is
 stored separately under [pocket-reading-shelf-v1.md](pocket-reading-shelf-v1.md).
 Actual cached covers resolve either the full cover or the theme-sized thumbnail.
 
+Revision 5 of `homeInterfaces` displays the reader mark and Pocket Daily title
+on the left and battery on the right across Home and Pocket Daily sleep
+templates. A sleep wake cue reserves its own space. Reader-managed sleep
+screens use the reader’s selected presentation. The app uses the advertised
+revision for connected snapshots and the current layout for offline samples.
+
+Revision 6 uses filled condition icons and measured forecast rows on Home,
+the weather desk clock and Pocket Daily sleep frames. The compact panel shows
+upcoming days in columns. A taller panel shows one row per day. The companion
+selects this drawing path using the reported revision. The existing weather
+codes, Celsius values, forecast dates and probabilities use the same payload.
+
 Connected previews use unchanged PDLI schema 5; `homeInterfaces: 4` signals this
 Home layout revision. `homeInterfaces: 3` signals the prior dashboard artwork
 and the same underlying layout inputs. The app can use the unchanged inputs

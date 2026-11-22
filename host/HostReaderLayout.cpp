@@ -27,12 +27,15 @@ bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::Layou
                         const PocketDaily::DailyProfile::Profile& profile, const UserCards& cards, const bool brief,
                         const bool sleepCover, const bool actual, const bool wakeIndicator, const uint8_t* cover,
                         const size_t coverSize, const bool fullScreenCover, const bool coverFillAndBattery,
-                        const RecentCovers* recent, const uint32_t selected, const uint32_t date) {
+                        const RecentCovers* recent, const uint32_t selected, const uint32_t date,
+                        const uint32_t interfaceRevision) {
   using namespace PocketDaily;
   DrawContext context{in, hostEnv(renderer, cards), false, cover, coverSize, recent};
   Home::Env env;
   env.context = &context;
   env.metrics = in.metrics;
+  env.templateHeaders = interfaceRevision >= 5;
+  env.weatherPanelV2 = interfaceRevision >= 6;
   env.text = {&context, [](void* value, const char* text, int fallback, EpdFontFamily::Style) {
                 auto& d = *static_cast<DrawContext*>(value);
                 if (!CjkScript::needsCjkFont(text)) return fallback;

@@ -229,6 +229,8 @@ bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* conte
     case Surface::Home: {
       if (!visitStrings(context, visit, {s.home, s.select, s.library, s.views, s.sync})) return false;
       if (frame.rowCount > 0 && frame.rows[0].clockPage) {
+        if (profile.clockPage() == DailyProfile::HomeItem::ClockWeather && g.weather.valid)
+          return visitStrings(context, visit, {g.weather.place[0] ? g.weather.place : s.weather, g.weather.summary});
         const auto detail = Home::clockDetail(profile, frame.clock, g, s);
         return visitStrings(context, visit, {detail.label, detail.text});
       }
@@ -254,7 +256,8 @@ bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* conte
         return false;
       }
       if (profile.weather == DailyProfile::WeatherPanel::Off) return true;
-      if (g.weather.valid && !visitStrings(context, visit, {g.weather.place[0] ? g.weather.place : s.weather}))
+      if (g.weather.valid &&
+          !visitStrings(context, visit, {g.weather.place[0] ? g.weather.place : s.weather, g.weather.summary}))
         return false;
       if (!g.weather.valid && !visitStrings(context, visit, {s.noWeather, s.weatherHint})) return false;
       if (profile.nextEvent && g.eventCount > 0) {
@@ -278,7 +281,7 @@ bool visitFrameText(const Frame& frame, void* context, bool (*visit)(void* conte
       if (profile.sleeps(SleepSection::Weather) && g.weather.valid) {
         char label[Home::BRIEF_WEATHER_LABEL_BYTES];
         Home::briefWeatherLabel(label, sizeof(label), g.weather, s.weather, frame.glanceStale);
-        if (!visitStrings(context, visit, {label})) return false;
+        if (!visitStrings(context, visit, {label, g.weather.summary})) return false;
       }
       if (profile.sleeps(SleepSection::Today) && (g.eventCount > 0 || profile.sleepCount == 1)) {
         if (g.eventCount == 0 && !visitStrings(context, visit, {s.noEvents})) return false;

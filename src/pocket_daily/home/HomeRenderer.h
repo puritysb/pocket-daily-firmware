@@ -128,6 +128,8 @@ struct Metrics {
 
 struct Env {
   Metrics metrics;
+  bool weatherPanelV2 = true;
+  bool templateHeaders = true;    // False for snapshots from earlier firmware.
   HomeDraw::FontResolver text;    // body text (device: full CJK coverage required)
   HomeDraw::FontResolver labels;  // short control labels (device: partial allowed)
   void* context = nullptr;

@@ -11,6 +11,8 @@ namespace PowerWakeCue {
 
 // Pocket Daily draws its sleep sections in portrait. Keep content below the
 // tab so cover-free reading progress and custom section orders stay visible.
+inline constexpr int topTabWidth = 104;
+inline constexpr int sideTabWidth = 64;
 inline int portraitContentTop(const bool isX3) { return isX3 ? 58 : 124; }
 
 // A retained e-ink frame has no animation to suggest that the device is still
@@ -32,7 +34,7 @@ inline void draw(GfxRenderer& renderer, const bool isX3, const char* label, cons
 
   if (isX3) {
     constexpr int powerX = 473;
-    tabW = 104;
+    tabW = topTabWidth;
     tabH = 52;
     x = std::max(0, std::min(w - tabW, powerX - tabW / 2));
     y = 0;
@@ -42,7 +44,7 @@ inline void draw(GfxRenderer& renderer, const bool isX3, const char* label, cons
     labelY = 17;
   } else {
     constexpr int powerY = 74;
-    tabW = 64;
+    tabW = sideTabWidth;
     tabH = 88;
     x = w - tabW;
     y = std::max(0, powerY - tabH / 2);

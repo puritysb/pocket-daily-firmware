@@ -128,27 +128,18 @@ PocketDaily::Home::Env hostEnv(GfxRenderer& renderer, const UserCards& cards) {
   env.labels = fonts;
   env.drawHeader = [](void*, const GfxRenderer& r, int x, int y, int width, int height, const char* title,
                       const char* subtitle, bool branded) {
-    if (branded) {
-      HeaderPainter::Inputs inputs;
-      inputs.fonts[0] = SMALL_FONT_ID;
-      inputs.fonts[1] = UI_10_FONT_ID;
-      inputs.fonts[2] = UI_12_FONT_ID;
-      inputs.fonts[3] = SMALL_FONT_ID;
-      inputs.titleText.font = freeink::ui::GfxRendererTarget::FONT_TITLE;
-      inputs.titleText.bold = true;
-      inputs.batteryPercent = 67;
-      std::strcpy(inputs.batteryLabel, "67%");
-      HeaderPainter::paintHeader(r, inputs, x, y, width, height, title, subtitle, true);
-      return;
-    }
-    const int line = r.getLineHeight(UI_12_FONT_ID);
-    const int baseline = y + (height - line) / 2;
-    r.drawText(UI_12_FONT_ID, x + 20, baseline, title, true, EpdFontFamily::BOLD);
-    if (subtitle && subtitle[0]) {
-      const int sw = r.getTextWidth(SMALL_FONT_ID, subtitle);
-      r.drawText(SMALL_FONT_ID, x + width - 20 - sw, baseline + 4, subtitle, true);
-    }
-    r.drawLine(x + 20, y + height - 2, x + width - 20, y + height - 2, 2, true);
+    HeaderPainter::Inputs inputs;
+    inputs.fonts[0] = SMALL_FONT_ID;
+    inputs.fonts[1] = UI_10_FONT_ID;
+    inputs.fonts[2] = UI_12_FONT_ID;
+    inputs.fonts[3] = SMALL_FONT_ID;
+    inputs.titleText.font = freeink::ui::GfxRendererTarget::FONT_TITLE;
+    inputs.titleText.align = freeink::ui::TextAlign::Center;
+    inputs.titleText.bold = true;
+    inputs.subtitleText.font = freeink::ui::GfxRendererTarget::FONT_SMALL;
+    inputs.batteryPercent = 67;
+    std::strcpy(inputs.batteryLabel, "67%");
+    HeaderPainter::paintHeader(r, inputs, x, y, width, height, title, subtitle, branded);
   };
   // A sample has no decoded cover: the shared renderer draws its title card,
   // as the device does for a book without cover art.

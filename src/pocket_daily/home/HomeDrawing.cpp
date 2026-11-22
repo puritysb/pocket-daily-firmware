@@ -13,7 +13,7 @@
 // so the device and the host preview draw Home and the Daily Brief with the same
 // code. Hardware and font choice arrive as arguments instead of globals.
 namespace PocketDaily::HomeDraw {
-enum class WeatherGlyph : uint8_t { Clear, PartlyCloudy, Cloud, Fog, Rain, Snow, Storm };
+enum class WeatherGlyph : uint8_t { Clear, PartlyCloudy, Cloud, Fog, Rain, Snow, Storm, Unknown };
 
 WeatherGlyph weatherGlyphFor(int16_t code, const char* summary) {
   if (code == 0) return WeatherGlyph::Clear;
@@ -33,7 +33,7 @@ WeatherGlyph weatherGlyphFor(int16_t code, const char* summary) {
     if (strstr(summary, "Cloud") || strstr(summary, "Overcast")) return WeatherGlyph::Cloud;
     if (strstr(summary, "Clear") || strstr(summary, "Fair") || strstr(summary, "Sunny")) return WeatherGlyph::Clear;
   }
-  return WeatherGlyph::PartlyCloudy;
+  return WeatherGlyph::Unknown;
 }
 
 void drawCircleOutline(const GfxRenderer& renderer, int cx, int cy, int radius, int stroke) {
@@ -90,7 +90,7 @@ void drawWeatherGlyph(const GfxRenderer& renderer, int x, int y, int w, int h, i
     return;
   }
 
-  if (glyph == WeatherGlyph::PartlyCloudy) {
+  if (glyph == WeatherGlyph::PartlyCloudy || glyph == WeatherGlyph::Unknown) {
     drawSunGlyph(renderer, x + w * 68 / 100, y + h * 29 / 100, std::max(4, minDimension / 6), stroke);
   }
   const int baseY = drawCloudGlyph(renderer, x, y + h / 12, w, h * 3 / 4, stroke);
@@ -395,6 +395,196 @@ int drawForecastGrid(const GfxRenderer& renderer, const PocketDaily::Weather& we
     }
   }
   return height;
+}
+
+// Solid shapes keep their identity on a one-bit panel. All geometry is
+// expressed on the same 32-unit square for both current and forecast icons.
+static void drawCondition(const GfxRenderer& r, int x, int y, int size, int16_t code, const char* summary) {
+  auto unit = [size](int v) { return (v * size + 16) / 32; };
+  auto pill = [&](int left, int top, int width, int height, int radius, Color color) {
+    r.fillRoundedRect(x + unit(left), y + unit(top), unit(width), unit(height), unit(radius), color);
+  };
+  auto stroke = [&](int x1, int y1, int x2, int y2, int weight) {
+    const bool steep = std::abs(y2 - y1) > std::abs(x2 - x1);
+    const int thickness = std::max(1, unit(weight));
+    for (int i = 0; i < thickness; ++i) {
+      const int offset = i - thickness / 2;
+      const int dx = steep ? offset : 0, dy = steep ? 0 : offset;
+      r.drawLine(x + unit(x1) + dx, y + unit(y1) + dy, x + unit(x2) + dx, y + unit(y2) + dy);
+    }
+  };
+  const auto glyph = weatherGlyphFor(code, summary);
+  if (glyph == WeatherGlyph::Unknown) {
+    stroke(10, 16, 22, 16, 3);
+    return;
+  }
+  if (glyph == WeatherGlyph::Clear) {
+    pill(9, 9, 14, 14, 7, Color::Black);
+    stroke(16, 1, 16, 6, 3);
+    stroke(16, 26, 16, 31, 3);
+    stroke(1, 16, 6, 16, 3);
+    stroke(26, 16, 31, 16, 3);
+    stroke(5, 5, 9, 9, 3);
+    stroke(23, 23, 27, 27, 3);
+    stroke(5, 27, 9, 23, 3);
+    stroke(23, 9, 27, 5, 3);
+    return;
+  }
+  const int top = glyph == WeatherGlyph::Cloud ? 7 : glyph == WeatherGlyph::PartlyCloudy ? 12 : 2;
+  if (glyph == WeatherGlyph::PartlyCloudy) {
+    pill(16, 5, 12, 12, 6, Color::Black);
+    stroke(22, 0, 22, 3, 2);
+    stroke(28, 5, 30, 3, 2);
+    stroke(29, 11, 31, 11, 2);
+    pill(5, top - 2, 19, 16, 8, Color::White);
+  }
+  pill(1, top + 6, 30, 11, 5, Color::Black);
+  pill(7, top, 16, 16, 8, Color::Black);
+  switch (glyph) {
+    case WeatherGlyph::Rain:
+      for (int left : {8, 16, 24}) stroke(left + 2, 22, left - 2, 29, 3);
+      break;
+    case WeatherGlyph::Snow:
+      for (int left : {8, 22}) {
+        stroke(left, 21, left, 30, 2);
+        stroke(left - 4, 23, left + 4, 28, 2);
+        stroke(left - 4, 28, left + 4, 23, 2);
+      }
+      break;
+    case WeatherGlyph::Fog:
+      stroke(3, 23, 25, 23, 3);
+      stroke(8, 29, 29, 29, 3);
+      break;
+    case WeatherGlyph::Storm:
+      stroke(19, 19, 12, 25, 4);
+      stroke(12, 25, 20, 25, 3);
+      stroke(20, 25, 13, 31, 3);
+      break;
+    default:
+      break;
+  }
+}
+
+static void temperatureRange(char* out, size_t capacity, int high, int low) {
+  if (high != GLANCE_TEMP_NONE && low != GLANCE_TEMP_NONE)
+    snprintf(out, capacity, "%d°/%d°", high, low);
+  else if (high != GLANCE_TEMP_NONE)
+    snprintf(out, capacity, "H %d°", high);
+  else if (low != GLANCE_TEMP_NONE)
+    snprintf(out, capacity, "L %d°", low);
+  else
+    out[0] = '\0';
+}
+
+static void weatherText(const GfxRenderer& r, const char* text, int font, int x, int y, int width,
+                        EpdFontFamily::Style style, bool centered) {
+  if (width <= 0 || !text[0]) return;
+  char clipped[48];
+  snprintf(clipped, sizeof(clipped), "%s", text);
+  int length = r.getTextWidth(font, clipped, style);
+  while (clipped[0] && length > width) {
+    removeLastUtf8(clipped);
+    length = r.getTextWidth(font, clipped, style);
+  }
+  r.drawText(font, centered ? x - length / 2 : x, y, clipped, true, style);
+}
+
+int drawWeatherPanel(const GfxRenderer& r, const Weather& weather, int x, int y, int width, int height,
+                     const FontResolver& fonts) {
+  if (height < 36 || width < 120) return 0;
+  const int days = std::min<int>(weather.dayCount, WEATHER_DAY_CAP);
+  const int line = r.getLineHeight(UI_12_FONT_ID);
+  const int small = r.getLineHeight(UI_10_FONT_ID);
+  const bool list = days > 0 && height >= 135 + days * std::max(44, line + 8);
+  const int count = list ? days : std::min(days, width / 66);
+  const int minGrid = small * 2 + 33;
+  const bool grid = !list && count > 0 && height >= 68 + minGrid;
+  const int hero = list   ? std::min(160, height - days * std::max(44, line + 8))
+                   : grid ? std::min(128, std::max(68, height - (minGrid + 48)))
+                          : std::min(146, height);
+  const int icon = std::min({hero - 6, width / 4, 128});
+  drawCondition(r, x, y + (hero - icon) / 2, icon, weather.code, weather.summary);
+  char digits[6];
+  if (weather.tempC == GLANCE_TEMP_NONE)
+    snprintf(digits, sizeof(digits), "--");
+  else
+    snprintf(digits, sizeof(digits), "%d", weather.tempC);
+  int cap = std::clamp(std::min(hero - 12, width / 5), 16, 94);
+  while (cap > 16 && icon + 22 + posterNumberWidth(cap, digits) + cap / 5 + width / 3 > width) cap -= 2;
+  const int numberX = x + icon + 10;
+  const int numberY = y + (hero - cap) / 2;
+  const int numberW = drawPosterNumber(r, numberX, numberY, cap, digits);
+  const int degree = std::max(5, cap / 5);
+  if (weather.tempC != GLANCE_TEMP_NONE)
+    r.drawRoundedRect(numberX + numberW + 2, numberY, degree, degree, std::max(2, degree / 4), degree / 2, true);
+
+  const int infoX = numberX + numberW + degree + 12;
+  const int infoW = x + width - infoX;
+  char range[24], rain[40];
+  temperatureRange(range, sizeof(range), weather.todayMaxC, weather.todayMinC);
+  GlanceFormat::formatRainLine(rain, sizeof(rain), weather);
+  char window[16]{};
+  if ((!rain[0] || r.getTextWidth(UI_10_FONT_ID, rain) > infoW) && weather.rainProbability >= 0) {
+    snprintf(rain, sizeof(rain), "Rain %d%%", weather.rainProbability);
+    if (weather.rainStartHm[0])
+      snprintf(window, sizeof(window), "%s%s%s", weather.rainStartHm, weather.rainEndHm[0] ? "–" : "",
+               weather.rainEndHm);
+  }
+  const int summaryFont = fonts.resolve(weather.summary, UI_12_FONT_ID, EpdFontFamily::BOLD);
+  const int summaryH = weather.summary[0] ? r.getLineHeight(summaryFont) + 2 : 0;
+  int used = summaryH;
+  auto fits = [&](const char* value) {
+    if (!value[0] || used + small + 2 > hero || r.getTextWidth(UI_10_FONT_ID, value) > infoW) return false;
+    used += small + 2;
+    return true;
+  };
+  const bool showRange = fits(range);
+  const bool showRain = fits(rain);
+  const bool showWindow = fits(window);
+  int textY = y + std::max(0, (hero - used) / 2);
+  auto textLine = [&](int font, const char* value, EpdFontFamily::Style style) {
+    weatherText(r, value, font, infoX, textY, infoW, style, false);
+    textY += r.getLineHeight(font) + 2;
+  };
+  if (summaryH) textLine(summaryFont, weather.summary, EpdFontFamily::BOLD);
+  if (showRange) textLine(UI_10_FONT_ID, range, EpdFontFamily::REGULAR);
+  if (showRain) textLine(UI_10_FONT_ID, rain, EpdFontFamily::REGULAR);
+  if (showWindow) textLine(UI_10_FONT_ID, window, EpdFontFamily::REGULAR);
+  if (!grid && !list) return hero;
+
+  const int row = list ? std::min(88, (height - hero) / count) : std::min(144, height - hero);
+  const bool rainRow = list || row >= minGrid + small + 4;
+  const int symbol =
+      list ? std::min(64, row - 8) : std::min({68, width / count - 8, row - 12 - small * (rainRow ? 3 : 2)});
+  for (int i = 0; i < count; ++i) {
+    const auto& day = weather.days[i];
+    const int top = y + hero + (list ? i * row : 0);
+    const int left = x + (list ? 0 : i * width / count);
+    const int cell = list ? width : (i + 1) * width / count - i * width / count;
+    auto center = [&](const char* value, int font, int cx, int ty, int maxWidth, EpdFontFamily::Style style) {
+      weatherText(r, value, font, cx, ty, maxWidth, style, true);
+    };
+    if (list || i == 0) r.drawLine(x, top, x + width - 1, top);
+    const int mid = left + cell / 2;
+    const int baseline = top + (row - line) / 2;
+    char weekday[5] = "--";
+    if (!GlanceFormat::formatWeekday(weekday, sizeof(weekday), day.date))
+      snprintf(weekday, sizeof(weekday), "D%d", i + 1);
+    center(weekday, list ? UI_12_FONT_ID : UI_10_FONT_ID, list ? x + width / 10 : mid, list ? baseline : top + 4, cell,
+           EpdFontFamily::BOLD);
+    const int iconY = list ? top + (row - symbol) / 2 : top + 6 + small;
+    drawCondition(r, (list ? x + width / 3 : mid) - symbol / 2, iconY, symbol, day.code, day.summary);
+    temperatureRange(range, sizeof(range), day.maxC, day.minC);
+    center(range, list ? UI_12_FONT_ID : UI_10_FONT_ID, list ? x + width * 3 / 5 : mid,
+           list ? baseline : iconY + symbol + 2, list ? width / 3 : cell - 2, EpdFontFamily::BOLD);
+    if (rainRow && day.rainProbability >= 0) {
+      snprintf(rain, sizeof(rain), "%d%%", day.rainProbability);
+      center(rain, UI_10_FONT_ID, list ? x + width * 9 / 10 : mid,
+             list ? top + (row - small) / 2 : iconY + symbol + small + 4, list ? width / 5 : cell,
+             EpdFontFamily::REGULAR);
+    }
+  }
+  return hero + (list ? row * count : row);
 }
 
 struct PocketHardwareGeometry {

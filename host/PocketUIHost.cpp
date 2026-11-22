@@ -94,6 +94,7 @@ struct pdui_context {
   GfxRenderer renderer;
   PocketUIHost::UserCards cards;
   std::vector<uint8_t> recentCovers[4];
+  uint32_t interfaceRevision = 0;
   uint32_t selectedHomeRow = 0, selectedCalendarDate = 0;
   bool frameValid = false;
   SdCardFont* boundFont = nullptr;
@@ -508,7 +509,7 @@ int32_t renderReaderLayout(pdui_context* context, const pdui_profile* profile, c
           context->renderer, in, parsed, context->cards, brief, (options & PDUI_SLEEP_BOOK_COVER) != 0, actual,
           (options & PDUI_SLEEP_WAKE_INDICATOR) != 0, cover, coverSize, (options & PDUI_SLEEP_FULL_SCREEN_COVER) != 0,
           (options & PDUI_COVER_FILL_AND_BATTERY) != 0, &recent, context->selectedHomeRow,
-          context->selectedCalendarDate) ||
+          context->selectedCalendarDate, context->interfaceRevision) ||
       context->font.boundedReadFailed() || !context->panel.guardsIntact())
     return PDUI_RENDER_FAILED;
   context->frameValid = true;
@@ -589,6 +590,19 @@ int32_t pdui_set_recent_cover(pdui_context* context, uint32_t index, const uint8
   } catch (...) {
     return PDUI_INTERNAL_ERROR;
   }
+}
+
+int32_t pdui_set_template_headers(pdui_context* context, uint32_t enabled) noexcept {
+  if (enabled > 1) return PDUI_INVALID_ARGUMENT;
+  return pdui_set_interface_revision(context, enabled ? 5u : 0u);
+}
+
+int32_t pdui_set_interface_revision(pdui_context* context, uint32_t revision) noexcept {
+  if (!context) return PDUI_INVALID_ARGUMENT;
+  const std::lock_guard<std::mutex> lock(renderMutex);
+  context->frameValid = false;
+  context->interfaceRevision = revision;
+  return PDUI_OK;
 }
 
 int32_t pdui_set_home_selection(pdui_context* context, uint32_t row, uint32_t date) noexcept {

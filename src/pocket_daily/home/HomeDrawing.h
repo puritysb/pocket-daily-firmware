@@ -26,6 +26,8 @@ struct FontResolver {
 
 inline constexpr size_t kWrapLineBytes = 192;
 
+int drawWeatherPanel(const GfxRenderer& renderer, const Weather& weather, int x, int y, int width, int height,
+                     const FontResolver& fonts);
 int drawWeatherPoster(const GfxRenderer& renderer, const PocketDaily::Weather& weather, int x, int y, int width,
                       int maxHeight);
 int drawForecastGrid(const GfxRenderer& renderer, const PocketDaily::Weather& weather, int x, int y, int width,
