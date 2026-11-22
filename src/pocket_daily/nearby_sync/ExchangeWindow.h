@@ -41,9 +41,10 @@ Stats::HomePaintRecord homePaintStatistics();
 // (time up, a button press, or a gate refused it). Extends an open window.
 void runBeforeDeepSleep(uint32_t renderCount, const GfxRenderer& renderer);
 
-enum class StandbyExit : uint8_t { DeepSleep, Reader, SameWifi, HomeTimeout };
+enum class StandbyExit : uint8_t { DeepSleep, Reader, SameWifi, HomeTimeout, ClockWindowEnded };
 bool standbyEligible();
 bool homeConnectionEligible();
+void finishHomeClockAttempt();
 // Framebuffer must already be released. HOME_CONNECT keeps the panel resumable;
 // terminal STANDBY sleeps it. maxMs bounds the window (zero means no deadline).
 StandbyExit runStandby(const GfxRenderer& renderer, uint32_t maxMs = 0, Trigger trigger = Trigger::STANDBY);

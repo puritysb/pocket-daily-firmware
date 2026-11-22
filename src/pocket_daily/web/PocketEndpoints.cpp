@@ -2679,7 +2679,7 @@ void configurePocketRoutes(Routes& routes, WebServer& server, const RouteDeps& d
       server->send(200, "text/plain", String(static_cast<unsigned long>(epoch)));
       return;
     }
-    server->send(200, "text/plain", PocketDaily::WakeClockTrace::report());
+    server->send(200, "text/plain", PocketDaily::WakeClockTrace::report(server->hasArg("autoWifi")));
   });
   routes.on("/api/pocket/v1/dev/button-trace", HTTP_POST, [server = &server, deps = &d] {
     char identity[9];

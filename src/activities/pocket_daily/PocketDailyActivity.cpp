@@ -1,4 +1,3 @@
-#include "pocket_daily/dev/WakeClockTrace.h"
 #include "PocketDailyActivity.h"
 
 #include <Arduino.h>
@@ -33,6 +32,7 @@
 #include "pocket_daily/PocketAgendaStore.h"
 #include "pocket_daily/PocketGlanceStore.h"
 #include "pocket_daily/PocketProfileStore.h"
+#include "pocket_daily/dev/WakeClockTrace.h"
 #include "pocket_daily/home/DailyWord.h"
 #include "pocket_daily/home/HomeCover.h"
 #include "pocket_daily/home/HomeDrawing.h"
@@ -198,6 +198,11 @@ constexpr time_t kDeskClockInterval = 2;
 }  // namespace
 
 void PocketDailyActivity::loop() {
+  const bool needsTime = halClock.needsTimeCheck();
+  if (needsTime != lastNeedsTime) {
+    lastNeedsTime = needsTime;
+    requestUpdate();
+  }
   const auto refresh = clockRefresh.load();
   if (refresh != ClockRefresh::Off) {
     const time_t interval = refresh == ClockRefresh::Minute      ? 60
@@ -427,6 +432,10 @@ void PocketDailyActivity::handleButtons() {
   }
 
   // ── OVERVIEW: one Reading/Study carousel + explicit Library/Sync ──
+  if (halClock.needsTimeCheck() && !choosingView && gpio.wasReleased(HalGPIO::BTN_RIGHT)) {
+    silentRestartToClockWifi();
+    return;
+  }
   OverviewRow* const rows = inputRows;
   const int n = collectOverview(rows, kOverviewCap);
   const int selected = overviewCursor >= 0 && overviewCursor < n ? overviewCursor : 0;
@@ -768,7 +777,12 @@ void PocketDailyActivity::renderOverview(const OverviewRow* rows, int n) {
   view.snapshotStale = PocketDaily::HomeDraw::snapshotIsStale(glanceSnapshot.savedEpoch, now);
   view.profile = profile;
   view.strings = homeStrings();
-  if (fullClock || compactClock || calendarPage)
+  const bool needsTime = halClock.needsTimeCheck();
+  if (needsTime) {
+    view.clockWarning = tr(STR_CLOCK_CHECK_REQUIRED);
+    if (!choosingView) view.strings.sync = tr(STR_CLOCK_FIX_NOW);
+  }
+  if (!needsTime && (fullClock || compactClock || calendarPage))
     view.clock = PocketDaily::Home::readDeskClock(glanceSnapshot, now, clock.offsetMinutes);
   if (dashboard && view.clock.minute < 1440) view.clock.hideColon = (now / kDashboardClockInterval) % 2 != 0;
   if (fullClock) {
@@ -1002,7 +1016,7 @@ void PocketDailyActivity::render(RenderLock&&) {
   // With neither a book nor a card row, the personal glance remains useful as
   // an offline face (weather/today). It never outranks items that can be
   // opened.
-  if (n == 0 && (glanceSnapshot.glance.valid || !continuePath.empty())) {
+  if (!halClock.needsTimeCheck() && n == 0 && (glanceSnapshot.glance.valid || !continuePath.empty())) {
     clockRefresh.store(ClockRefresh::Off);
     renderGlance(GlanceReason::Ambient);
     ambientGlanceShown = true;

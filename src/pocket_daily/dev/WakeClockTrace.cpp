@@ -41,23 +41,25 @@ bool arm() {
   stage = 0;
   return true;
 }
-void beforeClockRestore() {
+void beforeClockRestore(bool returningToHome) {
   auto file = Storage.open(path);
   if (!file) return;
   auto size = file.size();
   file.close();
   if (size == 0) stage = 0;
   if (size == sizeof(Sample)) stage = 1;
+  if (returningToHome && size == 5 * sizeof(Sample)) stage = 5;
   capture(1);
 }
 void afterClockRestore() { capture(2); }
-void autoSleep() { capture(0); }
-void firstHome(uint32_t date, uint16_t minute) { capture(3, date, minute); }
-String report() {
+void autoSleep() { capture(stage == 6 ? 6 : 0); }
+void firstHome(uint32_t date, uint16_t minute) { capture(stage == 5 ? 5 : 3, date, minute); }
+void afterAutoWifi() { capture(4); }
+String report(bool includeAutoWifi) {
   auto file = Storage.open(path);
   String result = "system desk rtc uptime date offset minute reset wake\n";
   if (!file) return result;
-  for (unsigned i = 0; i < 4; ++i) {
+  for (unsigned i = 0; i < (includeAutoWifi ? 7u : 4u); ++i) {
     Sample s{};
     if (file.read(reinterpret_cast<uint8_t*>(&s), sizeof(s)) != sizeof(s)) break;
     char line[134];

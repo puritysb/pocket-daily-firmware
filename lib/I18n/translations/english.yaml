@@ -816,3 +816,6 @@ STR_POCKET_WEEKDAYS: "Mon|Tue|Wed|Thu|Fri|Sat|Sun"
 
 STR_POCKET_VIEWS: "Views"
 STR_POCKET_READING_LABEL: "Reading"
+
+STR_CLOCK_CHECK_REQUIRED: "Time needs checking"
+STR_CLOCK_FIX_NOW: "Sync now"

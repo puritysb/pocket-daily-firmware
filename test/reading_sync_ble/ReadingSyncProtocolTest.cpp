@@ -286,3 +286,19 @@ TEST(KeyboardRemote, ANewControllerCannotReplayAPreviousControllersTurn) {
   EXPECT_FALSE(readyAllowed(7, 8, true));
   EXPECT_FALSE(readyAllowed(8, 8, false));
 }
+
+TEST(ReadingSyncProtocol, ClockRepairChecksEpochOffsetAndTrailingFields) {
+  ParsedCommand command;
+  ASSERT_EQ(parse("CLOCK C0FFEE00 70000000 -720", command), ParseResult::OK);
+  EXPECT_EQ(command.verb, Verb::CLOCK);
+  EXPECT_EQ(command.clockEpoch, 0x70000000U);
+  EXPECT_EQ(command.clockOffset, -720);
+  EXPECT_EQ(parse("CLOCK C0FFEE00 70000000 840", command), ParseResult::OK);
+  for (const auto* bad :
+       {"00000000 0", "FFFFFFFF 0", "70000000 -721", "70000000 841", "70000000 -", "70000000 0 extra", "7000000 0"}) {
+    EXPECT_EQ(parse(std::string("CLOCK C0FFEE00 ") + bad, command), ParseResult::BAD_FIELDS);
+  }
+  char out[RECORD_LIMIT + 1]{};
+  ASSERT_GT(formatStatus("X4", "ABCD1234", "dev", true, out, sizeof(out), true, true), 0U);
+  EXPECT_NE(strstr(out, ",CLOCK1;"), nullptr);
+}

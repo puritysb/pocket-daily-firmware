@@ -113,6 +113,22 @@ ParseResult parseCommand(const char* record, const size_t length, ParsedCommand&
     out.chunkLength = static_cast<size_t>(end - cursor);
     return ParseResult::OK;
   }
+  if (fieldIs(verb, "CLOCK")) {
+    out.verb = Verb::CLOCK;
+    Field epoch, zone;
+    uint32_t minutes;
+    if (!nextField(cursor, end, epoch) || !nextField(cursor, end, zone) || cursor != end ||
+        !parseHex8(epoch, out.clockEpoch) || out.clockEpoch < 1735689600U || out.clockEpoch >= 4102444800U)
+      return ParseResult::BAD_FIELDS;
+    const bool negative = zone.text[0] == '-';
+    if (negative) {
+      ++zone.text;
+      --zone.length;
+    }
+    if (!parseDecimal(zone, minutes) || minutes > (negative ? 720U : 840U)) return ParseResult::BAD_FIELDS;
+    out.clockOffset = negative ? -static_cast<int16_t>(minutes) : static_cast<int16_t>(minutes);
+    return ParseResult::OK;
+  }
   if (fieldIs(verb, "START_WIFI")) {
     out.verb = Verb::START_WIFI;
     return cursor == end ? ParseResult::OK : ParseResult::BAD_FIELDS;
@@ -198,14 +214,14 @@ size_t formatEnd(const char* requestId, const uint32_t totalBytes, const uint32_
 }
 
 size_t formatStatus(const char* model, const char* deviceId, const char* firmware, const bool inWindow, char* out,
-                    const size_t capacity, const bool appWake) {
+                    const size_t capacity, const bool appWake, const bool clockRequested) {
   if (!out || capacity == 0) return 0;
-  return finishRecord(snprintf(out, capacity, "V=1;MODEL=%s;ID=%s;FW=%s;CAP=AP,HTTP,SD,COMMIT1,READ1%s;WIN=%d",
+  return finishRecord(snprintf(out, capacity, "V=1;MODEL=%s;ID=%s;FW=%s;CAP=AP,HTTP,SD,COMMIT1,READ1%s%s;WIN=%d",
                                model ? model : "X4", deviceId ? deviceId : "", firmware ? firmware : "unknown",
                                appWake    ? ",WAKE1,WIFI1"
                                : inWindow ? ""
                                           : ",WIFI1",
-                               inWindow ? 1 : 0),
+                               clockRequested ? ",CLOCK1" : "", inWindow ? 1 : 0),
                       out, capacity);
 }
 

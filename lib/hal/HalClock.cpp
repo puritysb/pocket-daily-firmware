@@ -27,6 +27,9 @@ struct ClockAnchor {
   uint32_t magic;
 };
 RTC_NOINIT_ATTR ClockAnchor companionAnchor;
+// A software restart into/out of Sync and a deep sleep both retain a stale floor.
+constexpr uint32_t kUnverifiedClock = 0x55434C4B;
+RTC_NOINIT_ATTR uint32_t unverifiedClock;
 int16_t companionOffset = HalClock::UNSPECIFIED_OFFSET;
 portMUX_TYPE companionTimeLock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -39,7 +42,12 @@ void HalClock::begin() {
   // Software return from Sync and deep sleep keep the hardware counter.
   // Power loss and other reset causes must not reuse a stale anchor.
   const auto reset = esp_reset_reason();
-  if (reset != ESP_RST_SW && reset != ESP_RST_DEEPSLEEP) companionAnchor.magic = 0;
+  if (reset != ESP_RST_SW && reset != ESP_RST_DEEPSLEEP) {
+    companionAnchor.magic = 0;
+    unverifiedClock = kUnverifiedClock;
+  }
+  if (time(nullptr) < COMPANION_MIN_EPOCH && companionAnchor.magic != kDeskClockMagic)
+    unverifiedClock = kUnverifiedClock;
   Preferences prefs;
   if (prefs.begin(kClockNamespace, true)) {
     const int16_t saved = prefs.getShort(kOffsetKey, UNSPECIFIED_OFFSET);
@@ -48,6 +56,25 @@ void HalClock::begin() {
 #endif
   _available = _sdkRtc.begin();
   LOG_INF("CLK", _available ? "SDK RTC found" : "RTC not found");
+}
+
+bool HalClock::needsTimeCheck() const {
+#if CONFIG_IDF_TARGET_ESP32C3
+  portENTER_CRITICAL(&companionTimeLock);
+  const bool missing = unverifiedClock == kUnverifiedClock;
+  portEXIT_CRITICAL(&companionTimeLock);
+  return missing && companionTime(0).epoch == 0;
+#else
+  return false;
+#endif
+}
+
+void HalClock::confirmSystemTime() {
+#if CONFIG_IDF_TARGET_ESP32C3
+  portENTER_CRITICAL(&companionTimeLock);
+  unverifiedClock = 0;
+  portEXIT_CRITICAL(&companionTimeLock);
+#endif
 }
 
 bool HalClock::setCompanionTime(const uint32_t epoch, const int16_t offsetMinutes) {
@@ -79,6 +106,7 @@ HalClock::CompanionTime HalClock::companionTime(const time_t systemTime) const {
   portENTER_CRITICAL(&companionTimeLock);
   const auto anchor = companionAnchor;
   const auto offset = companionOffset;
+  const bool verifiedSystem = unverifiedClock != kUnverifiedClock;
   portEXIT_CRITICAL(&companionTimeLock);
   if (anchor.magic == kDeskClockMagic && anchor.calibration && anchor.epoch >= COMPANION_MIN_EPOCH &&
       anchor.epoch < COMPANION_MAX_EPOCH && validOffset(offset)) {
@@ -89,7 +117,7 @@ HalClock::CompanionTime HalClock::companionTime(const time_t systemTime) const {
         return {static_cast<time_t>(anchor.epoch + seconds), offset};
     }
   }
-  return {systemTime, offset};
+  return {verifiedSystem ? systemTime : 0, offset};
 #else
   return {systemTime, UNSPECIFIED_OFFSET};
 #endif

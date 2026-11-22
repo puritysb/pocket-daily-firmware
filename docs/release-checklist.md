@@ -33,6 +33,55 @@ The local `gh_release` build compiled the same RTC repair. The production
 image is 6,352,048 bytes (SHA-256 `c631b12abb0e283ec8b5dfbed2ca975c3d27b06369f94bcc46b8d9ee9e009f5a`).
 The physical observations above were collected on the diagnostic image.
 
+### X4 battery-only wake — 2026-11-22
+
+The tester disconnected USB and observed the X4 enter automatic sleep. On
+the same diagnostic build, the SD trace recorded sleep at 11:07:46 KST.
+At button wake, before clock restoration or Wi-Fi, the system and desk epochs
+were both zero. The ESP32-C3 reported power-on reset (1) and no deep-sleep
+wake cause (0). Firmware restored 11:07:50. At 3.222 seconds after boot,
+the first Home record showed November 22 at 11:07 (internal time 11:07:52).
+The tester saw 11:07 advance to 11:08 while the reference clock read 11:49.
+
+The X4 lost elapsed time across this battery power-off. In the November 21
+trial, the X4 reported deep-sleep reset (8) and already had the correct
+system time before restoration. USB status was unrecorded in that trial.
+The earlier two-minute offset remains unexplained. The raw November 22 trace
+is in the companion checkout at `.build/x4-wake-20261122/wake-report.txt`.
+
+With `1.2.0-dev-main-8cddbb88-w6dd14606`, the battery-only X4 again
+recorded zero system time, reset 1 and wake 0. On first Home paint, 3.223 s
+after boot, the display date and minute were unset. The tester saw
+“Time needs checking” in the clock area, then the correct time without
+opening Wi-Fi. At 13:39:57 KST the signed Mac companion test received the
+authenticated clock acknowledgement with reading exchange disabled. The
+companion checkout holds `final-ble-trace.txt` and `mac-x4.log` under
+`.build/wake-clock-sync-20261122/`.
+
+On the next battery wake with the Mac app closed, the clock warning persisted.
+The tester pressed “Sync now”. In Same Wi-Fi the reader reported 2026-11-22
+13:43 while the Mac read 13:43:38 KST. The original 10-minute sleep timeout
+and enabled Pocket app connection were restored and read back. The same
+receipt directory holds `final-offline-trace.txt`, `wifi-readback.txt` and
+`final-settings.txt`.
+
+The first automatic Wi-Fi build (`w0cb8f416`) checked the S3 X4 Classic
+board ID. The C3 X4 never entered that branch. With the C3 board ID fixed
+in `wbb81384e`, the reader obtained 14:02:45 KST from network time at
+34.655 s uptime after a battery power-on. The Mac app was closed. The tester
+saw the correct Home time without pressing Sync, then a CrossPoint splash
+and launcher. The clock trace is `x4-board-auto-trace.txt` in the same
+directory. No crash report was available for that screen transition.
+
+On installed build `1.2.0-dev-main-8cddbb88-wb07a79ab`, the battery-only
+X4 cold booted with zero system time. Without the Mac app or a button press,
+Wi-Fi supplied 15:38:51 KST at 34.792 s uptime. The first Pocket Daily Home
+after the silent return displayed November 22 at 15:38. The tester observed
+Home until automatic sleep, recorded at 15:39:20. After the next wake and
+manual Sync action, the original 10-minute timeout and enabled app connection
+were restored and verified. Receipts are `home-return-trace.txt` and
+`home-return-settings.txt` in the same directory.
+
 ## Current local reading repair — 2026-10-29
 
 Production0.1.0 gh_release, 6,372,784B, SHA

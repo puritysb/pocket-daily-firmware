@@ -4,11 +4,13 @@
 #include <ESPmDNS.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
+#include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <I18n.h>
 #include <Memory.h>
+#include <TrustedTime.h>
 #include <WiFi.h>
 
 #include <cstddef>
@@ -605,6 +607,7 @@ void CrossPointWebServerActivity::startAccessPoint() {
 void CrossPointWebServerActivity::startWebServer() {
   LOG_DBG("WEBACT", "Starting web server...");
 
+  if (!privateApMode && WiFi.status() == WL_CONNECTED && halClock.needsTimeCheck()) trustedtime::startSync();
   state = WebServerActivityState::SERVER_STARTING;
   requestUpdateAndWait();
 

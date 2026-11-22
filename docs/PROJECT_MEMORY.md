@@ -109,7 +109,9 @@ to that patch.
 
 - On 2026-11-21, X3 restored offline wake time from its external RTC after the
   Wi-Fi join code repaired an invalid clock. X4's reported two-minute offset
-  did not recur in the short or 35-minute sleep trial. See the
+  did not recur in the short or 35-minute sleep trial. On 2026-11-22 a
+  battery-only X4 woke with a power-on reset and zero system time, then
+  restored its saved time. Home omitted roughly 42 minutes asleep. See the
   [wake-clock hardware results](release-checklist.md#x3-and-x4-wake-clock-hardware-results--2026-11-21).
 
 - X3 and X4 are no-PSRAM ESP32-C3 readers. X3 panel 528x792. Host builds and

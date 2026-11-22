@@ -1,9 +1,8 @@
 #ifdef ENABLE_DEV_REMOTE_FLASH
 #include <DevButtonTrace.h>
 #endif
-#include "ExchangeWindow.h"
-
 #include <Arduino.h>
+#include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <HalSystem.h>
@@ -19,6 +18,7 @@
 
 #include "CrossPointSettings.h"
 #include "DevSleepCycle.h"
+#include "ExchangeWindow.h"
 #include "ExchangeWindowMemory.h"
 #include "NearbySyncService.h"
 #include "ReadSyncStats.h"
@@ -49,6 +49,8 @@ struct Runtime {
 RTC_NOINIT_ATTR Stats::Record stats;
 
 Controller controller;
+bool clockWindowAttempted = false;
+constexpr uint32_t CLOCK_WINDOW_MS = 20000;
 std::unique_ptr<Runtime> runtime;
 std::atomic<StartState> startState{StartState::IDLE};
 
@@ -97,7 +99,7 @@ void stopRadio() {
       // Recover without freeing worker-owned memory or logging on a starved heap.
       HalSystem::setCrashBreadcrumb("readsync:start-timeout");
 #ifdef ENABLE_DEV_REMOTE_FLASH
-  DevButtonTrace::checkpoint(DevButtonTrace::BleStartTimeout);
+      DevButtonTrace::checkpoint(DevButtonTrace::BleStartTimeout);
 #endif
       ESP.restart();
       for (;;) delay(1000);
@@ -151,6 +153,12 @@ void start(const GfxRenderer& renderer) {
     return;
   }
   runtime->model = gpio.deviceIsX3() ? "X3" : "X4";
+  // The generic wake window can be preempted by Home before advertising starts.
+  // Give the single clock offer to the Home listener that owns the full deadline.
+  if (controller.trigger() == Trigger::HOME_CONNECT && !clockWindowAttempted && halClock.needsTimeCheck()) {
+    clockWindowAttempted = true;
+    runtime->service.requestClock = true;
+  }
   runtime->appWake = persistentWindow(controller.trigger());
   HalSystem::setCrashBreadcrumb("readsync:window-start");
   LOG_INF("RSYNC", "window %s starting (heap %lu, block %lu, battery %u%%)", triggerName(controller.trigger()),
@@ -220,6 +228,15 @@ void serve() {
   ParsedCommand command;
   while (service.takeCommand(command)) {
     switch (command.verb) {
+      case Verb::CLOCK:
+        if (service.isAuthenticated() && service.requestClock && halClock.needsTimeCheck() &&
+            halClock.setCompanionTime(command.clockEpoch, command.clockOffset)) {
+          service.requestClock = false;
+          service.notifyOk(command.requestId);
+        } else {
+          service.notifyError(command.requestId, NOT_IN_SYNC);
+        }
+        break;
       case Verb::WIFI_JOIN:
         if (!acceptsWifiWake(runtime->appWake, service.isAuthenticated())) {
           service.notifyError(command.requestId, NOT_IN_SYNC);
@@ -379,6 +396,8 @@ bool standbyEligible() {
 #endif
 }
 
+void finishHomeClockAttempt() { clockWindowAttempted = true; }
+
 bool homeConnectionEligible() {
   return standbyAllowed(powerManager.bleStandbySupported(), SETTINGS.pocketAppConnection != 0, hasStoredBond(),
                         powerManager.getBatteryPercentage(), gpio.deviceIsX3() && gpio.isUsbConnected());
@@ -390,6 +409,7 @@ StandbyExit runStandby(const GfxRenderer& renderer, const uint32_t maxMs, const 
 #ifdef ENABLE_DEV_REMOTE_FLASH
   uint32_t evidenceAt = began;
 #endif
+  const bool checkingClock = trigger == Trigger::HOME_CONNECT && !clockWindowAttempted && halClock.needsTimeCheck();
   arm(trigger, 0);
   while (controller.state() != Controller::State::IDLE) {
     HalSystem::feedWatchdogIfRegistered();
@@ -413,6 +433,11 @@ StandbyExit runStandby(const GfxRenderer& renderer, const uint32_t maxMs, const 
       delay(300);  // let the accepted notification leave before stopping BLE
       close(CloseReason::APP_WIFI);
       return StandbyExit::SameWifi;
+    }
+    if (checkingClock && (millis() - began >= CLOCK_WINDOW_MS ||
+                          (!halClock.needsTimeCheck() && runtime && !runtime->service.isConnected()))) {
+      close(CloseReason::TIME_UP);
+      return StandbyExit::ClockWindowEnded;
     }
     if (maxMs && millis() - began >= maxMs) {
       close(CloseReason::TIME_UP);

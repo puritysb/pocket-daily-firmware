@@ -4,10 +4,11 @@
 #include <Arduino.h>
 namespace PocketDaily::WakeClockTrace {
 bool arm();
-void beforeClockRestore();
+void beforeClockRestore(bool returningToHome);
 void afterClockRestore();
 void autoSleep();
 void firstHome(uint32_t date, uint16_t minute);
-String report();
+void afterAutoWifi();
+String report(bool includeAutoWifi);
 }  // namespace PocketDaily::WakeClockTrace
 #endif

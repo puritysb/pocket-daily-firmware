@@ -449,3 +449,35 @@ Reader render/background budgets remain24/32KiB; Wi-Fi has a separate budget.
 No leak, battery-life or all-orientation conclusion follows from this sample.
 X3 owner passed the earlier panel-restoration version w3cc1371e; this final
 prefix optimization has not been installed/physically accepted on X3.
+
+### Recovering Home time after battery power-off
+
+A valid external RTC or retained system clock supplies Home time without a
+companion. An epoch restored only from the saved floor cannot account for
+time spent powered off. Home hides its date and time and offers a Same Wi-Fi
+action until it has verified system time or a valid companion clock anchor.
+On the ESP32-C3 X4, if Home still needs time after the bonded BLE attempt,
+it tries a saved Wi-Fi network once per boot. With no eligible BLE link
+it goes directly to Wi-Fi. The 20-second Wi-Fi budget includes scanning,
+association and SNTP, and is capped by the remaining Home idle time.
+After using the station, the reader closes it and takes a splashless
+software restart directly into Pocket Daily Home. It carries the elapsed
+idle time and the completed attempt across this return. Home keeps the
+manual action available if no time source answered. Automatic radio use
+requires more than 10% battery. A station connection starts SNTP. The existing HTTP clock route also accepts
+a companion anchor in Sync.
+
+The first eligible bonded Home BLE window in a boot may add
+`CLOCK1` to its encrypted status when Home needs the time. The Home clock
+attempt has a 20-second budget. Ordinary app-connection windows keep their
+existing policy after that attempt. A paired client checks the full identity
+and sends `CLOCK <requestID> <epochHex8> <offsetMinutes>`. The epoch is UTC
+in [2025-01-01, 2100-01-01), and the decimal UTC offset is -720 through +840
+minutes. The reader accepts one correction in that window and replies with
+the matching `OK` or `ERR`. Invalid records, stale offers and unauthenticated
+connections cannot set time. This sets the Home display anchor and preserves
+the separate trusted-time floor used for loans.
+
+Older clients ignore the capability. New clients send the command only when
+requested. The Apple app can wait for a remembered X4 even with reading
+exchange disabled. A clock-only session ends before any reading list request.

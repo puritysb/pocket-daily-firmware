@@ -165,7 +165,7 @@ bool Service::begin(const char* model, const char* firmware, const Mode requeste
       requestedMode == Mode::REMOTE
           ? snprintf(statusRecord, sizeof(statusRecord), "V=1;MODEL=%s;ID=%s;FW=%s;CAP=REMOTE1;WIN=1;RS=%08lX", model,
                      deviceId_, firmware, static_cast<unsigned long>(remoteSession))
-          : formatStatus(model, deviceId_, firmware, window, statusRecord, sizeof(statusRecord), appWake);
+          : formatStatus(model, deviceId_, firmware, window, statusRecord, sizeof(statusRecord), appWake, requestClock);
   if (statusLength == 0 || statusLength >= sizeof(statusRecord)) {
     end();
     return false;

@@ -1,8 +1,6 @@
-#include "pocket_daily/dev/WakeClockTrace.h"
 #include <Arduino.h>
 #include <BoardConfig.h>
 #include <DevButtonTrace.h>
-#include <esp_system.h>
 #include <Epub.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
@@ -26,6 +24,7 @@
 #include <XteinkDetect.h>
 #include <builtinFonts/all.h>
 #include <esp_ota_ops.h>
+#include <esp_system.h>
 #include <esp_wifi.h>
 #include <time.h>
 
@@ -53,6 +52,7 @@
 #include "pocket_daily/boot/TrialLease.h"
 #include "pocket_daily/boot/TrialReader.h"
 #include "pocket_daily/dev/ScreenCapture.h"
+#include "pocket_daily/dev/WakeClockTrace.h"
 #include "pocket_daily/nearby_sync/DevSleepCycle.h"
 #include "pocket_daily/nearby_sync/ExchangeWindow.h"
 #include "pocket_daily/nearby_sync/ExchangeWindowMemory.h"
@@ -183,7 +183,11 @@ constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
 constexpr uint32_t SILENT_REBOOT_TARGET_SETTINGS = 4;
-constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_SETTINGS;
+constexpr uint32_t SILENT_REBOOT_TARGET_CLOCK_WIFI = 5;
+constexpr uint32_t SILENT_REBOOT_TARGET_AFTER_HOME_WIFI = 6;
+constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_AFTER_HOME_WIFI;
+static bool resumedHomeWifiClock = false;
+static uint32_t elapsedHomeIdleMs = 0;
 constexpr uint32_t SILENT_REBOOT_LIGHT_ON = 1U << 0;
 
 // How the device is coming back to life, resolved once at boot. Both resume
@@ -242,6 +246,7 @@ void silentRestart() { silentRestartTo(SILENT_REBOOT_TARGET_HOME, "home"); }
 
 void silentRestartToReader() { silentRestartTo(SILENT_REBOOT_TARGET_READER, "reader"); }
 
+void silentRestartToClockWifi() { silentRestartTo(SILENT_REBOOT_TARGET_CLOCK_WIFI, "clock-wifi"); }
 void silentRestartToSettings() { silentRestartTo(SILENT_REBOOT_TARGET_SETTINGS, "settings"); }
 
 void restartToHomeAfterStorageHandoff() {
@@ -476,7 +481,7 @@ void enterDeepSleep(bool fromTimeout = false) {
 #endif
         if (outcome != Pocket::NearbySync::Window::StandbyExit::DeepSleep) {
 #ifdef ENABLE_DEV_REMOTE_FLASH
-        DevButtonTrace::checkpoint(DevButtonTrace::SleepStandbyRestart);
+          DevButtonTrace::checkpoint(DevButtonTrace::SleepStandbyRestart);
 #endif
           using PocketDaily::Boot::StandbyReturn;
           PocketDaily::Boot::armStandbyReturn(
@@ -613,6 +618,11 @@ void setup() {
   const uint32_t snapshotTarget =
       (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_MAX) ? silentRebootTarget : 0;
   const bool silentRebootLightOn = isSilentReboot && (silentRebootPayload & SILENT_REBOOT_LIGHT_ON) != 0;
+  resumedHomeWifiClock = snapshotTarget == SILENT_REBOOT_TARGET_AFTER_HOME_WIFI && HalSystem::isSoftwareRestart();
+  if (resumedHomeWifiClock) {
+    elapsedHomeIdleMs = silentRebootPayload >> 1;
+    Pocket::NearbySync::Window::finishHomeClockAttempt();
+  }
   silentRebootMagic = 0;
   silentRebootTarget = 0;
   silentRebootPayload = 0;
@@ -738,19 +748,19 @@ void setup() {
   // timestamps, TLS and file dates read. Placed before trustedtime::init(),
   // whose floor restore vetoes a lagging RTC and restores the floor instead.
 #ifdef ENABLE_DEV_REMOTE_FLASH
-  PocketDaily::WakeClockTrace::beforeClockRestore();
+  PocketDaily::WakeClockTrace::beforeClockRestore(resumedHomeWifiClock);
 #endif
   struct tm rtcLocal;
   if (halClock.localTime(rtcLocal)) {
     // localTime() renders the RTC's UTC epoch under the TZ rule applied above,
     // so mktime() inverts it exactly (tm_isdst included).
-    trustedtime::adopt(static_cast<int64_t>(mktime(&rtcLocal)));
+    if (trustedtime::adopt(static_cast<int64_t>(mktime(&rtcLocal)))) halClock.confirmSystemTime();
     LOG_INF("CLK", "RTC clock read: %04d-%02d-%02d %02d:%02d", rtcLocal.tm_year + 1900, rtcLocal.tm_mon + 1,
             rtcLocal.tm_mday, rtcLocal.tm_hour, rtcLocal.tm_min);
   }
   // Restore the monotonic clock floor before anything reads time() (event
   // timestamps, loan-expiry checks).
-  trustedtime::init();
+  trustedtime::init([] { halClock.confirmSystemTime(); });
 #ifdef ENABLE_DEV_REMOTE_FLASH
   PocketDaily::WakeClockTrace::afterClockRestore();
 #endif
@@ -975,11 +985,14 @@ void setup() {
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
              !APP_STATE.openEpubPath.empty()) {
     activityManager.goToReaderFrom(restoredNavigation.reader, APP_STATE.openEpubPath);
-  } else if (resume == BootResume::Silent && snapshotTarget == PocketDaily::Boot::kRebootTargetPocketDaily) {
+  } else if (resume == BootResume::Silent &&
+             (snapshotTarget == PocketDaily::Boot::kRebootTargetPocketDaily || resumedHomeWifiClock)) {
     activityManager.goToPocketDaily();
     landsOnShell = true;
   } else if (resume == BootResume::Silent && snapshotTarget == PocketDaily::Boot::kRebootTargetPocketNearbySync) {
     activityManager.goToPocketNearbySync();
+  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_CLOCK_WIFI) {
+    activityManager.goToPocketNearbySync(true);
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_SETTINGS) {
     // Back out of the WiFi rows and the user is where they left off, not on Home.
     activityManager.goToSettings();
@@ -1076,6 +1089,52 @@ void setup() {
   gpio.attachPowerButtonLatch();
 }
 
+#ifdef ENABLE_BLE_STANDBY
+// Home has lent its framebuffer and released BLE. Join only a saved network,
+// and release STA before returning to the ordinary Home listener.
+static bool tryHomeWifiClock(uint32_t budgetMs) {
+  if (!WIFI_STORE.loadFromFile() || !WIFI_STORE.getCredentialCount()) return false;
+  const uint32_t started = millis();
+  const auto canContinue = [&]() {
+    HalSystem::feedWatchdogIfRegistered();
+    gpio.update();
+    return !gpio.rawInputActive() && millis() - started < budgetMs && halClock.needsTimeCheck();
+  };
+  WiFi.persistent(false);
+  if (!WiFi.mode(WIFI_STA)) return false;
+  auto credential = WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid());
+  // A visible saved network takes precedence over an out-of-range last SSID.
+  // Keep the last credential as a fallback for a hidden network.
+  int count = WiFi.scanNetworks(true);
+  while (count == WIFI_SCAN_RUNNING && canContinue()) {
+    delay(20);
+    count = WiFi.scanComplete();
+  }
+  for (int i = 0; i < count; ++i) {
+    const auto visible = WIFI_STORE.findCredential(WiFi.SSID(i).c_str());
+    if (visible) {
+      credential = visible;
+      break;
+    }
+  }
+  WiFi.scanDelete();
+  if (credential && canContinue()) {
+    WiFi.begin(credential->ssid.c_str(), credential->password.c_str());
+    bool requestedTime = false;
+    while (canContinue()) {
+      if (!requestedTime && WiFi.status() == WL_CONNECTED) {
+        trustedtime::startSync();
+        requestedTime = true;
+      }
+      delay(20);
+    }
+  }
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  return true;
+}
+#endif
+
 void loop() {
   static unsigned long maxLoopDuration = 0;
   const unsigned long loopStartTime = millis();
@@ -1084,9 +1143,10 @@ void loop() {
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
 #ifdef ENABLE_DEV_REMOTE_FLASH
   if (DevButtonTrace::active()) {
-    DevButtonTrace::setSurface(activityManager.isForegroundReader()    ? DevButtonTrace::Reader
-                               : (activityManager.isForegroundHome() || activityManager.allowsAppConnection()) ? DevButtonTrace::Home
-                                                                       : DevButtonTrace::Other);
+    DevButtonTrace::setSurface(activityManager.isForegroundReader() ? DevButtonTrace::Reader
+                               : (activityManager.isForegroundHome() || activityManager.allowsAppConnection())
+                                   ? DevButtonTrace::Home
+                                   : DevButtonTrace::Other);
   }
 #endif
   mappedInputManager.update();
@@ -1189,7 +1249,7 @@ void loop() {
   }
 
   // Check for any user activity (button press or release) or active background work
-  static unsigned long lastActivityTime = millis();
+  static unsigned long lastActivityTime = resumedHomeWifiClock ? 0UL - elapsedHomeIdleMs : millis();
   const bool localActivity =
       gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.wasTouchActivity() || halTiltSensor.hadActivity();
   if (localActivity || activityManager.preventAutoSleep() || PocketDaily::TrialReader::preparingAutoWake()) {
@@ -1358,7 +1418,13 @@ void loop() {
   // Latch an expired Home window until local input or a screen change. A
   // millis() wrap on a reader with Never sleep must not restart Bluetooth.
   if (tryHomeConnection || (allowsHomeConnection && !homeConnectionMs)) homeConnectionAttempted = true;
-  if (tryHomeConnection && HomeBle::homeConnectionEligible()) {
+  const bool useHomeBle = tryHomeConnection && HomeBle::homeConnectionEligible();
+  static bool wifiClockAttempted = resumedHomeWifiClock;
+  const bool needsWifiClock =
+      !wifiClockAttempted && BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4 && halClock.needsTimeCheck() &&
+      HomeBle::homeIdleAllowed(activityManager.allowsAppConnection(), gpio.rawInputActive(), homeIdleMs) &&
+      HomeBle::batteryAllowed(powerManager.getBatteryPercentage(), false);
+  if (useHomeBle || needsWifiClock) {
     Pocket::NearbySync::Window::close(Pocket::NearbySync::Window::CloseReason::RADIO_OWNER);
     bool released = false;
     {
@@ -1376,7 +1442,7 @@ void loop() {
       auto outcome = HomeBle::StandbyExit::DeepSleep;
       bool refreshMinute = false;
       const uint32_t remaining = HomeBle::homeConnectionRemainingMs(sleepTimeoutMs, millis() - lastActivityTime);
-      if (remaining && powerManager.beginBleStandby()) {
+      if (useHomeBle && remaining && powerManager.beginBleStandby()) {
         uint32_t slice = remaining;
         if (activityManager.hasLiveHomeClock()) {
           const auto clock = halClock.companionTime(time(nullptr));
@@ -1388,7 +1454,7 @@ void loop() {
         }
         outcome = HomeBle::runStandby(renderer, slice, HomeBle::Trigger::HOME_CONNECT);
       }
-      if (!powerManager.endBleStandby()) {
+      if (useHomeBle && !powerManager.endBleStandby()) {
 #ifdef ENABLE_DEV_REMOTE_FLASH
         DevButtonTrace::checkpoint(DevButtonTrace::HomePowerRestoreFailed);
 #endif
@@ -1405,6 +1471,22 @@ void loop() {
         Storage.prepareForDeepSleep();
         ESP.restart();
         for (;;) delay(1000);
+      }
+      if (needsWifiClock && halClock.needsTimeCheck() && outcome != HomeBle::StandbyExit::Reader) {
+        wifiClockAttempted = true;
+        const uint32_t budget = HomeBle::homeConnectionRemainingMs(sleepTimeoutMs, millis() - lastActivityTime);
+        if (budget && tryHomeWifiClock(std::min<uint32_t>(budget, 20000))) {
+#ifdef ENABLE_DEV_REMOTE_FLASH
+          PocketDaily::WakeClockTrace::afterAutoWifi();
+#endif
+          // As on leaving Sync, start the display and Home BLE with a clean heap.
+          // The panel holds Home through the silent return; no popup or launcher.
+          armSilentReboot(SILENT_REBOOT_TARGET_AFTER_HOME_WIFI);
+          silentRebootPayload |= (millis() - lastActivityTime) << 1;
+          Storage.prepareForDeepSleep();
+          ESP.restart();
+          for (;;) delay(1000);
+        }
       }
       bool restored = false;
       {
@@ -1427,7 +1509,8 @@ void loop() {
         // Home repaint before that release can reach the activity. The e-paper
         // still shows Home; normal navigation will paint the selected screen.
         homeRepaintAfterRelease = true;
-      } else if (refreshMinute && outcome == HomeBle::StandbyExit::HomeTimeout) {
+      } else if ((refreshMinute && outcome == HomeBle::StandbyExit::HomeTimeout) ||
+                 outcome == HomeBle::StandbyExit::ClockWindowEnded) {
         activityManager.requestUpdateAndWait();
         homeConnectionAttempted = false;
       } else {

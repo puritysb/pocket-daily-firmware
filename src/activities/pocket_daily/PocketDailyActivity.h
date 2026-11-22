@@ -151,6 +151,7 @@ class PocketDailyActivity final : public Activity {
   ViewMode viewMode = ViewMode::Overview;
   enum class ClockRefresh : uint8_t { Off, Minute, Animated, Dashboard };
   std::atomic<ClockRefresh> clockRefresh{ClockRefresh::Off};
+  bool lastNeedsTime = false;
   ClockRefresh lastClockRefresh = ClockRefresh::Off;  // loop task only
   time_t deskClockTick = 0;
   uint16_t lastDeskMinute = 1440;  // render task only

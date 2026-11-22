@@ -71,8 +71,8 @@ int main() {
   storedFloor = 0;
   // A device with no RTC contributes no epoch, and an unset chip answers
   // 2000-01-01; neither may install a clock.
-  trustedtime::adopt(0);
-  trustedtime::adopt(946684800);
+  assert(!trustedtime::adopt(0));
+  assert(!trustedtime::adopt(946684800));
   assert(storedFloor == 0);
 
   // Deep-sleep wake: the system clock is live while the floor is still empty,
@@ -95,23 +95,23 @@ int main() {
   // clock is not a plausible date.
   const int64_t base = live > 1735689600LL ? live : 1735689600LL;
   const int64_t rtcNow = base + 3600;
-  trustedtime::adopt(rtcNow);
+  assert(trustedtime::adopt(rtcNow));
   assert(storedFloor == rtcNow);
 
   // A lagging RTC must not move the floor: adopt() writes it only when the
   // epoch moves forward.
-  trustedtime::adopt(rtcNow - 86400);
+  assert(!trustedtime::adopt(rtcNow - 86400));
   assert(storedFloor == rtcNow);
 
   // A chip whose calendar runs a year past the floor we already trust is
   // faulty, not right. Still inside the 2100 window, so this is the lead check
   // and not the range check.
-  trustedtime::adopt(rtcNow + 400 * 86400);
+  assert(!trustedtime::adopt(rtcNow + 400 * 86400));
   assert(storedFloor == rtcNow);
 
   // Past the supported window (2100) a value is a fault, not a date, and the
   // floor never lowers again -- adopting it would lock out every real clock.
-  trustedtime::adopt(4102444801);
+  assert(!trustedtime::adopt(4102444801));
   assert(storedFloor == rtcNow);
 
   trustedtime::adopt(rtcNow + 3600);

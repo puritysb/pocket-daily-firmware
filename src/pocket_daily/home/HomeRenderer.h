@@ -181,6 +181,7 @@ struct HomeView {
   DailyProfile::Profile profile = DailyProfile::defaults();
   Strings strings;
   DeskClock clock;
+  const char* clockWarning = nullptr;
 };
 
 // Clears the framebuffer and draws the whole Home face.

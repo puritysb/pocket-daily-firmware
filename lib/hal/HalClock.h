@@ -21,6 +21,8 @@ class HalClock {
  public:
   // Call after BoardConfig has selected the active device.
   void begin();
+  bool needsTimeCheck() const;
+  void confirmSystemTime();
 
   struct CompanionTime {
     time_t epoch;

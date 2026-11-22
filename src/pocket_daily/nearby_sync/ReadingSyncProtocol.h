@@ -30,7 +30,8 @@ enum class Verb : uint8_t {
   WIFI_JOIN,
   PAGE_NEXT,
   PAGE_PREV,
-  REMOTE_READY
+  REMOTE_READY,
+  CLOCK
 };
 
 enum class ParseResult : uint8_t {
@@ -43,6 +44,8 @@ enum class ParseResult : uint8_t {
 struct ParsedCommand {
   Verb verb = Verb::NONE;
   char requestId[REQUEST_ID_LENGTH + 1] = {};
+  uint32_t clockEpoch = 0;
+  int16_t clockOffset = 0;
   uint32_t seq = 0;    // W
   uint32_t total = 0;  // OFFER
   uint32_t crc = 0;    // OFFER
@@ -73,7 +76,7 @@ size_t formatData(const char* requestId, uint32_t seq, const char* chunk, size_t
 size_t formatEnd(const char* requestId, uint32_t totalBytes, uint32_t crc, char* out, size_t capacity);
 // Status characteristic value: v1 status plus READ1 and WIN=1|0.
 size_t formatStatus(const char* model, const char* deviceId, const char* firmware, bool inWindow, char* out,
-                    size_t capacity, bool appWake = false);
+                    size_t capacity, bool appWake = false, bool clockRequested = false);
 
 // CRC-32 (IEEE 802.3, reflected 0xEDB88320; zlib crc32 and Swift's matching
 // implementation). Start with CRC_START, finish with crcFinish.

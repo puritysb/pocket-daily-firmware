@@ -32,6 +32,7 @@ class Service final {
              bool appWake = false, uint32_t remoteSession = 0);
   void end();
 
+  bool requestClock = false;
   bool isRunning() const { return running_; }
   Mode mode() const { return mode_; }
   bool isConnected() const { return connected_.load(std::memory_order_acquire); }

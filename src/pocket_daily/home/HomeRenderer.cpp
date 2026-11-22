@@ -181,10 +181,20 @@ constexpr uint8_t kDigits[10][7] = {
     {14, 17, 17, 14, 17, 17, 14}, {14, 17, 17, 15, 1, 1, 14}};
 
 // Draws the same split-flap numerals on the standalone clock and Home.
-int drawFlipClock(const GfxRenderer& r, const DeskClock& clock, int x, int top, int width, int height) {
+int drawFlipClock(const GfxRenderer& r, const HomeView& view, const Env& env, int x, int top, int width, int height) {
+  const auto& clock = view.clock;
   const int digitCount = clock.second < 60 ? 6 : 4;
   const int widthInUnits = digitCount * 10 - 3;
   const int unit = std::max(1, std::min(width / widthInUnits, height / 11));
+  if (view.clockWarning) {
+    const int font = env.labels.resolve(view.clockWarning, UI_12_FONT_ID);
+    const auto label = r.truncatedText(font, view.clockWarning, width, EpdFontFamily::BOLD);
+    const int labelWidth = r.getTextWidth(font, label.c_str(), EpdFontFamily::BOLD);
+    const int clockHeight = 11 * unit;
+    r.drawText(font, x + (width - labelWidth) / 2, top + (clockHeight - r.getLineHeight(font)) / 2, label.c_str(), true,
+               EpdFontFamily::BOLD);
+    return clockHeight;
+  }
   const int tile = 8 * unit;
   const int left = x + (width - widthInUnits * unit) / 2;
   const bool valid = clock.minute < 1440;
@@ -247,7 +257,7 @@ void drawDeskClock(GfxRenderer& r, const HomeView& view, const Env& env, const i
   if (env.drawHeader)
     env.drawHeader(env.context, r, 0, env.metrics.topPadding, w, headerHeight, view.strings.pocketDaily, nullptr,
                    false);
-  const int tileHeight = drawFlipClock(r, view.clock, pad, top, w - 2 * pad, 11 * (h / (w > h ? 31 : 25)));
+  const int tileHeight = drawFlipClock(r, view, env, pad, top, w - 2 * pad, 11 * (h / (w > h ? 31 : 25)));
   const int unit = tileHeight / 11;
 
   char calendar[18]{};
@@ -584,7 +594,13 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   if (env.drawHeader && headerHeight > 0)
     env.drawHeader(env.context, renderer, pad - originalPad, headerY, w - 2 * (pad - originalPad), headerHeight,
                    s.pocketDaily, nullptr, dashboard);
-  const int contentTop = headerY + headerHeight + m.verticalSpacing;
+  int contentTop = headerY + headerHeight + m.verticalSpacing;
+  const bool inlineClock = dashboard || (readingPage && view.profile.shows(DailyProfile::HomeItem::ClockCompact));
+  if (view.clockWarning && !inlineClock) {
+    const int font = env.labels.resolve(view.clockWarning, UI_12_FONT_ID);
+    renderer.drawCenteredText(font, contentTop, view.clockWarning, true, EpdFontFamily::BOLD);
+    contentTop += renderer.getLineHeight(font) + m.verticalSpacing;
+  }
   const int hintTop = pageH - std::max(renderer.getLineHeight(SMALL_FONT_ID) + 16, hardwareMargin);
   const bool portrait = pageH > w;
 
@@ -804,7 +820,7 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     const int bodyY = contentTop + spacing;
     const int cellH = line12 + 6;
     if (portrait) {
-      const int clockHeight = drawFlipClock(renderer, view.clock, pad, bodyY, width, height / 4);
+      const int clockHeight = drawFlipClock(renderer, view, env, pad, bodyY, width, height / 4);
       const int monthY = bodyY + clockHeight + spacing * 2;
       const int monthHeight = line12 + renderer.getLineHeight(SMALL_FONT_ID) + 18 + cellH * 6;
       const int monthW = width * 9 / 10;
@@ -817,7 +833,7 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
       drawDashboardMonth(renderer, view, env, pad, bodyY, monthW, cellH);
       const int bookX = pad + monthW + 32;
       const int bookW = w - pad - bookX;
-      const int clockHeight = drawFlipClock(renderer, view.clock, bookX, bodyY, bookW, height / 3);
+      const int clockHeight = drawFlipClock(renderer, view, env, bookX, bodyY, bookW, height / 3);
       const int bookY = bodyY + clockHeight + spacing;
       drawReading(bookX, bookY, bookW, hintTop - bookY);
     }
@@ -843,7 +859,8 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
         if (view.clock.minute < 1440)
           snprintf(time, sizeof(time), "%02u:%02u", view.clock.minute / 60u, view.clock.minute % 60u);
         const int height = line12 + 12;
-        centeredIn(UI_12_FONT_ID, x, cw, y + 4, time, EpdFontFamily::BOLD);
+        const char* label = view.clockWarning ? view.clockWarning : time;
+        centeredIn(env.labels.resolve(label, UI_12_FONT_ID), x, cw, y + 4, label, EpdFontFamily::BOLD);
         y += height;
         ch -= height;
       }

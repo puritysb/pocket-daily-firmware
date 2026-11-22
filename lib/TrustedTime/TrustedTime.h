@@ -21,7 +21,7 @@ namespace trustedtime {
 
 // Restore the persisted floor into the system clock. Call once at boot,
 // before anything reads time().
-void init();
+void init(void (*onSync)() = nullptr);
 
 // Seed the system clock from a battery-backed RTC epoch. Call at boot, before
 // init(), so init()'s floor restore can veto a lagging RTC. Deep sleep keeps
@@ -30,7 +30,8 @@ void init();
 // 2025-2100 window, runs more than a year ahead of the persisted floor (a chip
 // reading that far ahead is faulty, and the floor never lowers again), or
 // predates the trusted floor.
-void adopt(int64_t epoch);
+// Returns whether the RTC epoch passed the persisted floor and range checks.
+bool adopt(int64_t epoch);
 
 // Persist the floor when the clock advanced past it. Cheap (one NVS read,
 // a write only when it moved). Call at sleep entry and after a time sync.
