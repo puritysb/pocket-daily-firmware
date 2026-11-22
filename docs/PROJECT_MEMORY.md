@@ -75,6 +75,11 @@ to that patch.
   under `/Articles`. The awake default dashboard uses the standard battery
   indicator and a Pocket Daily title and mark. The sleep cover keeps its
   battery-at-sleep-entry badge.
+- 2026-11-22: Library opens to a three-column, two-row cover shelf. Hold
+  Confirm on the sort strip to switch to the text list, refresh, or reverse
+  sort. Search uses the text list and returns to the chosen view when cleared.
+  The shelf uses the existing SD index and thumbnail caches, prepares visible
+  books one at a time, and renders a title cover when artwork is unavailable.
 - 2026-11-22: `homeInterfaces: 5` selects shared left-aligned template
   headers for Home and Pocket Daily sleep frames. Revision 6 adds solid weather
   icons and adaptive forecasts. Earlier revisions keep

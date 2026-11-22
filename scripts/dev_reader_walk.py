@@ -245,8 +245,11 @@ def verify_status(status, plan):
     require(status.get('version') == plan['expectedVersion'] and '-dev-' in status.get('version', ''),
             'Exact developer build required; production or different build refused')
     require(status.get('device') == plan['model'] and status.get('mode') == 'STA', 'Exact model and Same Wi-Fi required')
-    require(all(type(status.get(key)) is int and status[key] == expected for key, expected in
-                (('firmwareLineage', 2), ('readerFiles', 2), ('readingProgress', 1))),
+    # Versions 3 and 4 retain the bounded file and download routes from v2.
+    files_version = status.get('readerFiles')
+    require(type(files_version) is int and files_version in (2, 3, 4)
+            and all(type(status.get(key)) is int and status[key] == expected for key, expected in
+                    (('firmwareLineage', 2), ('readingProgress', 1))),
             'Current reader file/reading contract required')
     require(type(status.get('uploadStreamPort')) is int and 1 <= status['uploadStreamPort'] <= 65535,
             'Upload stream unavailable')

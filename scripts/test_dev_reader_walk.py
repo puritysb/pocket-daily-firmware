@@ -422,6 +422,15 @@ class WalkTests(unittest.TestCase):
             with self.assertRaises(walk.WalkError):
                 walk.readiness(self.client, 123)
 
+    def test_additive_reader_file_versions_support_the_same_walk(self):
+        for version in (2, 3, 4):
+            with self.subTest(version=version):
+                status = dict(self.client.status, readerFiles=version)
+                self.assertEqual(walk.verify_status(status, self.plan), status)
+        for version in (True, 1, 5, '4', None):
+            with self.subTest(version=version), self.assertRaises(walk.WalkError):
+                walk.verify_status(dict(self.client.status, readerFiles=version), self.plan)
+
     def test_existing_fixture_never_overwritten(self):
         self.client.book = True
         self.assert_preserved_failure()

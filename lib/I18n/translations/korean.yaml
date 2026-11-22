@@ -4,6 +4,10 @@ _bcp47: "ko"
 _order: "36"
 
 STR_INDEX_FAILED: "인덱싱 실패 - 책 또는 SD 카드 오류"
+STR_LIBRARY_OPTIONS: "서재 옵션"
+STR_LIBRARY_SHOW_COVERS: "표지 보기"
+STR_LIBRARY_SHOW_LIST: "목록 보기"
+STR_LIBRARY_REVERSE_SORT: "정렬 순서 뒤집기"
 
 
 STR_NEARBY_SYNC: "근거리 동기화"

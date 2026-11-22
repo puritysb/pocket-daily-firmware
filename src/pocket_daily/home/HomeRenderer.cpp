@@ -358,13 +358,31 @@ void drawRecentBooks(GfxRenderer& r, const HomeView& view, const Env& env, const
   const int columns = tiles ? (wide ? count : 2) : 1;
   const int rows = (count + columns - 1) / columns;
   const int cellW = (width - (columns - 1) * gap) / columns;
-  const int cellH = std::min((height - (rows - 1) * gap) / rows, lineH * 2 + smallH * 2 + 24);
+  const int maxRowH = tiles ? (lineH * 2 + smallH * 2 + 24) : std::max(lineH * 2 + smallH * 2 + 24, 128);
+  const int cellH = std::min((height - (rows - 1) * gap) / rows, maxRowH);
   for (int i = 0; i < count; ++i) {
     const auto& book = view.recentBooks[i];
     const int bx = x + (i % columns) * (cellW + gap), by = top + (i / columns) * (cellH + gap);
-    const int textX = bx + 14, textW = cellW - 28;
+    int textX = bx + 14;
+    int textW = cellW - 28;
     r.drawLine(bx + 12, by + cellH, bx + cellW, by + cellH, 1, true);
     if (i == selected) r.fillRect(bx + 1, by + 8, 4, cellH - 16, true);
+    if (!tiles && cellH >= 56 && cellW >= 180) {
+      const int thumbH = std::max(44, cellH - 18);
+      const int thumbW = std::min(cellW / 4, thumbH * 2 / 3);
+      const int thumbX = bx + 12;
+      const int thumbY = by + (cellH - thumbH) / 2;
+      const bool drewThumb =
+          thumbW >= 28 && env.drawRecentCover && env.drawRecentCover(env.context, r, i, thumbX, thumbY, thumbW, thumbH);
+      if (!drewThumb && thumbW >= 28) {
+        r.drawRect(thumbX, thumbY, thumbW, thumbH, 1, true);
+        r.drawLine(thumbX + 5, thumbY + 1, thumbX + 5, thumbY + thumbH - 2, 1, true);
+      }
+      if (thumbW >= 28) {
+        textX = thumbX + thumbW + 12;
+        textW = bx + cellW - textX - 10;
+      }
+    }
     const int font = env.text.resolve(book.title, UI_12_FONT_ID);
     const int advance = r.getLineHeight(font) + 3;
     int ty = by + 12;
@@ -588,11 +606,10 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
     return;
   }
   const bool readingPage = n > 0 && (rows[cursor].reading || selectedShelf >= 0);
-  const bool branded = dashboard || env.templateHeaders;
+  const bool branded = dashboard || env.templateHeaders ||
+                       (readingPage && view.profile.shows(DailyProfile::HomeItem::ClockCompact));
   const int headerHeight = branded ? std::max(HeaderPainter::BRAND_LOGO_HEIGHT, line12) + 10
-                           : readingPage && view.profile.shows(DailyProfile::HomeItem::ClockCompact)
-                               ? 0
-                               : std::min(m.headerHeight, line12 + (readingPage ? 4 : m.verticalSpacing * 2));
+                           : std::min(m.headerHeight, line12 + (readingPage ? 4 : m.verticalSpacing * 2));
   const int selectedIndex = view.selected >= 0 && view.selected < n ? view.selected : 0;
   if (view.profile.deskClock() || (n > 0 && rows[selectedIndex].clockPage)) {
     const auto orientation = renderer.getOrientation();
@@ -868,14 +885,12 @@ void renderHome(GfxRenderer& renderer, const HomeView& view, const Env& env) {
   auto drawPrimary = [&](int x, int y, int cw, int ch) {
     if (n > 0 && (rows[selectedIndex].reading || rows[selectedIndex].shelfIndex >= 0)) {
       if (view.profile.shows(DailyProfile::HomeItem::ClockCompact)) {
-        char time[8] = "--:--";
-        if (view.clock.minute < 1440)
-          snprintf(time, sizeof(time), "%02u:%02u", view.clock.minute / 60u, view.clock.minute % 60u);
-        const int height = line12 + 12;
-        const char* label = view.clockWarning ? view.clockWarning : time;
-        centeredIn(env.labels.resolve(label, UI_12_FONT_ID), x, cw, y + 4, label, EpdFontFamily::BOLD);
-        y += height;
-        ch -= height;
+        const int clockMaxH = std::max(84, std::min(156, ch * 24 / 100));
+        const int clockH = drawFlipClock(renderer, view, env, x, y + 6, cw, clockMaxH);
+        const int advance = clockH + 18;
+        renderer.drawLine(x, y + advance - 6, x + cw, y + advance - 6);
+        y += advance;
+        ch -= advance;
       }
     }
     if (n > 0 && rows[selectedIndex].shelfIndex >= 0) {
@@ -1133,7 +1148,7 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
     int coverW =
         portraitFace ? std::min(286, std::max(184, cw * 56 / 100)) : std::min(160, std::max(108, cw * 43 / 100));
     if (y + coverW * 3 / 2 + 17 > maxY) coverW = std::max(0, (maxY - y - 17) * 2 / 3);
-    if (isSleep && view.sleepCover && coverW >= 108) {
+    if (isSleep && (view.sleepCover || profile.sleepCount == 1) && coverW >= 108) {
       const int coverH = coverW * 3 / 2;
       drawReadingCover(x, y, coverW, coverH);
 

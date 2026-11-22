@@ -2,6 +2,7 @@
 
 #include <LibraryIndexFile.h>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -10,6 +11,7 @@
 #include "RecentBooksStore.h"
 #include "activities/UiTabListActivity.h"
 #include "components/OptionPopup.h"
+#include "components/media/cover-grid.h"
 
 // One Library screen: every indexed book on the card shown by recency, title,
 // or author. The Recent shelf orders by file modification time (when a book
@@ -35,8 +37,8 @@ class LibraryListActivity final : public UiTabListActivity {
 
   void onEnter() override;
   void onExit() override;
-#ifdef ENABLE_DEV_REMOTE_FLASH
   void loop() override;
+#ifdef ENABLE_DEV_REMOTE_FLASH
   bool preventAutoSleep() override;
 #endif
 
@@ -47,7 +49,9 @@ class LibraryListActivity final : public UiTabListActivity {
   void activateIndex(int index) override;
   void onRowLongPress(int index) override;
 #if FREEINK_CAP_TOUCH
-  bool canSwipeDelete(int index) const override { return !groupsCollapsed && index >= 0 && index < listCount(); }
+  bool canSwipeDelete(int index) const override {
+    return !showingCovers() && !groupsCollapsed && index >= 0 && index < listCount();
+  }
   void swipeDelete(int index) override;
 #endif
   int tabCount() const override;
@@ -69,8 +73,33 @@ class LibraryListActivity final : public UiTabListActivity {
  private:
   // The screen's own actions, after the base's ACTION_ROW / ACTION_TAB.
   static constexpr freeink::ui::ActionId ACTION_SEARCH = ACTION_TAB_USER;
-  static constexpr freeink::ui::ActionId ACTION_REBUILD = ACTION_SEARCH + 1;
-  static constexpr freeink::ui::ActionId ACTION_BACK = ACTION_REBUILD + 1;
+  static constexpr freeink::ui::ActionId ACTION_BACK = ACTION_SEARCH + 1;
+  static constexpr freeink::ui::ActionId ACTION_OPTIONS = ACTION_BACK + 1;
+  static constexpr int COVER_COLUMNS = 3;
+  static constexpr int COVER_ROWS = 2;
+  static constexpr int COVERS_PER_PAGE = COVER_COLUMNS * COVER_ROWS;
+
+  enum class Layout { Covers, List };
+  inline static Layout preferredLayout = Layout::Covers;
+  Layout layout = Layout::Covers;
+  struct CoverShelf {
+    struct Book {
+      std::string title;
+      std::string author;
+      std::string thumbnail;
+    };
+    std::array<Book, COVERS_PER_PAGE> books;
+    freeink::ui::CoverGridProps grid;
+    std::string path;
+    int first = -1;
+    int count = 0;
+    int next = 0;
+    int progressEntry = -1;
+    int progress = -1;
+    library::SortOrder order = library::SortOrder::RecentDesc;
+    bool repaint = false;
+  };
+  std::unique_ptr<CoverShelf> coverShelf;
 
   // Walk the card and write a fresh index. Blocking, with a popup: at ~70 books
   // it is well under a second, and it only runs when the index is missing or the
@@ -80,12 +109,15 @@ class LibraryListActivity final : public UiTabListActivity {
   // Input
   void openSelectedBook();
 #ifdef ENABLE_DEV_REMOTE_FLASH
+  void runLibraryTrial();
   bool selectTrialRow();
   bool trialPathAt(int entry, std::string& path);
   bool trialRowSelected = false;
   int trialWindow = -1, trialDrawn = 0, trialOffset = -1, trialItem = -1;
 #endif
   void openSearch();
+  void showLibraryOptions();
+  void toggleLayout();
   // Shared tail of row activation and the options menu's Open entry.
   void openBookByPath(const std::string& path);
   void promptRebuildIndex();
@@ -110,8 +142,8 @@ class LibraryListActivity final : public UiTabListActivity {
   // Staged back-out shared by Button::Back and the header back arrow.
   void handleBackAction();
   static void searchActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
-  static void rebuildActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
   static void backActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
+  static void optionsActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
 
   // Data
   void applyFilter();
@@ -120,6 +152,7 @@ class LibraryListActivity final : public UiTabListActivity {
   // fileName, when asked for, is the on-card name the row's icon derives from
   // (the display title may come from metadata and carry no extension).
   bool rowTextFor(int entry, std::string& title, std::string& author, std::string* fileName = nullptr);
+  bool readBookPath(int entry, std::string& path);
   uint32_t titleInitialFor(int entry);
   bool buildGroupStarts();
   int groupForBook(int bookEntry) const;
@@ -129,6 +162,11 @@ class LibraryListActivity final : public UiTabListActivity {
   void buildHeader(UiScreen& screen);
   // Materializes ListItems and their strings for the visible window only.
   void buildRows(UiScreen& screen);
+  bool showingCovers() const;
+  void invalidateCovers();
+  void buildCoverGrid(UiScreen& screen);
+  void prepareCover();
+  bool paintCover(freeink::ui::DrawTarget& target, freeink::ui::Rect rect, uint16_t slot) const;
   static void formatInitialHeading(uint32_t initial, std::string& out);
   void formatAuthorHeading(const std::string& author, std::string& out) const;
   void drawPositionReadout() const;
