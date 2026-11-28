@@ -82,6 +82,10 @@ upcoming days in columns. A taller panel shows one row per day. The companion
 selects this drawing path using the reported revision. The existing weather
 codes, Celsius values, forecast dates and probabilities use the same payload.
 
+Revision 7 removes the header and its reserved space from Pocket Daily sleep
+templates. Full-screen covers also omit the battery badge. The wake cue still
+follows the Sleep WAKE indicator setting.
+
 Connected previews use unchanged PDLI schema 5; `homeInterfaces: 4` signals this
 Home layout revision. `homeInterfaces: 3` signals the prior dashboard artwork
 and the same underlying layout inputs. The app can use the unchanged inputs
@@ -252,7 +256,7 @@ theme is Lyra (spacing 16), so the "exact" canvas differed on default readers.
   Woodcut (ID 0).
 - The app and Sync previews show the first eligible image. When Pocket Daily Home
   enters sleep, the reader chooses one of the selected images, paints the
-  battery badge and optional wake cue, then retains the frame. The reader's
+  optional wake cue, then retains the frame. The reader's
   own Custom image files are unaffected. The new images share a 400×624
   one-bit master and paint at the panel's resolution without a frame-sized
   allocation. Regenerate the native data with

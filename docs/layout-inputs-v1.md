@@ -85,6 +85,13 @@ header. Headerless compact-clock layouts retain the freshly captured valid
 theme metadata for encoding; default, undrawn header font IDs never replace it.
 This does not loosen schema validation or add a visible header to those layouts.
 
+Readers advertising `homeInterfaces: 7` omit the Pocket Daily header and
+its reserved space from Sleep, including artwork and full-screen book covers.
+The app's host renderer keeps the earlier layout when a reader advertises an
+earlier revision. Actual Sleep frames show the wake cue only when enabled.
+The connected Sync presentation omits the wake cue. The snapshot schema and
+C ABI are unchanged.
+
 ## Opt-in schema 5: multiple cover assets and dated agenda
 
 Readers advertising `homeInterfaces: 2` or `3` accept `schema=5`; the default remains

@@ -1053,11 +1053,12 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
                                                                                       : PowerWakeCue::sideTabWidth;
   const int headerWidth = w - (env.templateHeaders && view.contentTopInset ? cueWidth : 0);
   auto drawHeader = [&] {
-    if (env.drawHeader)
+    if ((!isSleep || env.legacySleepHeader) && env.drawHeader)
       env.drawHeader(env.context, renderer, 0, m.topPadding, headerWidth, headerHeight, s.pocketDaily, view.headerMeta,
                      env.templateHeaders);
   };
   auto finishCover = [&] {
+    if (isSleep && !env.legacySleepHeader) return;
     if (env.templateHeaders && env.drawHeader) {
       renderer.fillRect(0, m.topPadding, headerWidth, headerHeight, false);
       drawHeader();
@@ -1104,8 +1105,8 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
   // Landscape panels (X4, 800×480) split into two columns — left: reading and
   // cards, right: weather and TODAY. Portrait (X3) keeps a single column in the
   // profile's order. Every section leads with a small labeled overline rule.
-  const int topY =
-      std::max(m.topPadding + std::max<int>(m.headerHeight, headerHeight) + m.verticalSpacing, view.contentTopInset);
+  const int headerInset = isSleep && !env.legacySleepHeader ? 0 : std::max<int>(m.headerHeight, headerHeight);
+  const int topY = std::max(m.topPadding + headerInset + m.verticalSpacing, view.contentTopInset);
   const int statusY = pageH - lineS - 12;
 
   // "LABEL ────" overline. CJK-capable: the weather section uses the
@@ -1148,7 +1149,8 @@ void renderBrief(GfxRenderer& renderer, const BriefView& view, const Env& env) {
     int coverW =
         portraitFace ? std::min(286, std::max(184, cw * 56 / 100)) : std::min(160, std::max(108, cw * 43 / 100));
     if (y + coverW * 3 / 2 + 17 > maxY) coverW = std::max(0, (maxY - y - 17) * 2 / 3);
-    if (isSleep && (view.sleepCover || profile.sleepCount == 1) && coverW >= 108) {
+    if (isSleep && (view.sleepCover || (profile.sleepCount == 1 && (view.fullScreenCover || env.legacySleepHeader))) &&
+        coverW >= 108) {
       const int coverH = coverW * 3 / 2;
       drawReadingCover(x, y, coverW, coverH);
 

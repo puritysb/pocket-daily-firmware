@@ -702,8 +702,13 @@ TEST(BriefHeader, ResolvedFontLineBoxSeparatesHeaderAndBody) {
     *static_cast<int*>(context) = y;
     return true;
   };
+  env.legacySleepHeader = true;
   PocketDaily::Home::renderBrief(renderer, view, env);
   EXPECT_GE(coverY, 8 + 48 + 12 + 42 + 6);
+  const auto legacyCoverY = coverY;
+  env.legacySleepHeader = false;
+  PocketDaily::Home::renderBrief(renderer, view, env);
+  EXPECT_EQ(coverY, legacyCoverY - env.metrics.headerHeight);
   EXPECT_TRUE(panel.guardsIntact());
 }
 
@@ -924,6 +929,9 @@ TEST(SleepCover, X4ReplacesTheDashboardFrame) {
     r.drawLine(0, h / 3, w - 1, h / 3, 8, true);
     return true;
   };
+  env.drawHeader = [](void*, const GfxRenderer& r, int x, int y, int w, int h, const char*, const char*, bool) {
+    r.fillRect(x, y, w, h, true);
+  };
   auto snapshot = [&] {
     return std::vector<uint8_t>(panel.getFrameBuffer(), panel.getFrameBuffer() + panel.getBufferSize());
   };
@@ -931,6 +939,10 @@ TEST(SleepCover, X4ReplacesTheDashboardFrame) {
   renderer.clearScreen();
   Home::renderBrief(renderer, sleep, env);
   const auto cleanCover = snapshot();
+  env.legacySleepHeader = true;
+  Home::renderBrief(renderer, sleep, env);
+  EXPECT_NE(snapshot(), cleanCover);
+  env.legacySleepHeader = false;
   Home::renderHome(renderer, home, env);
   ASSERT_NE(snapshot(), cleanCover);
   Home::renderBrief(renderer, sleep, env);

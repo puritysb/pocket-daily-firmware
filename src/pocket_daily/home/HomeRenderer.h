@@ -129,9 +129,10 @@ struct Metrics {
 struct Env {
   Metrics metrics;
   bool weatherPanelV2 = true;
-  bool templateHeaders = true;    // False for snapshots from earlier firmware.
-  HomeDraw::FontResolver text;    // body text (device: full CJK coverage required)
-  HomeDraw::FontResolver labels;  // short control labels (device: partial allowed)
+  bool templateHeaders = true;     // False for snapshots from earlier firmware.
+  bool legacySleepHeader = false;  // Connected snapshots from before homeInterfaces 7.
+  HomeDraw::FontResolver text;     // body text (device: full CJK coverage required)
+  HomeDraw::FontResolver labels;   // short control labels (device: partial allowed)
   void* context = nullptr;
   void (*drawHeader)(void* context, const GfxRenderer& renderer, int x, int y, int width, int height, const char* title,
                      const char* subtitle, bool branded) = nullptr;

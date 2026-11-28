@@ -74,7 +74,7 @@ String buildStatusJson(const StatusInputs& in) {
   if (in.screenPresentation) doc["screenPresentation"] = 1;
   if (in.layoutInputs && isSyncProfile(in.profile)) {
     doc["layoutInputs"] = 2;
-    doc["homeInterfaces"] = 6;
+    doc["homeInterfaces"] = 7;
     doc["agenda"] = 1;
     doc["readingShelf"] = 1;
     doc["fullScreenSleepCover"] = 2;

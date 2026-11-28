@@ -36,6 +36,7 @@ bool renderReaderLayout(GfxRenderer& renderer, const PocketDaily::Preview::Layou
   env.metrics = in.metrics;
   env.templateHeaders = interfaceRevision >= 5;
   env.weatherPanelV2 = interfaceRevision >= 6;
+  env.legacySleepHeader = interfaceRevision < 7;
   env.text = {&context, [](void* value, const char* text, int fallback, EpdFontFamily::Style) {
                 auto& d = *static_cast<DrawContext*>(value);
                 if (!CjkScript::needsCjkFont(text)) return fallback;
